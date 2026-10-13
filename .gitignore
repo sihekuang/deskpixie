@@ -8,3 +8,4 @@ core/bin/
 libdeskpixie.h
 .worktrees/
 .superpowers/
+mac/Configs/DeveloperSettings.xcconfig

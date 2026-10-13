@@ -1,0 +1,80 @@
+name: DeskPixie
+options:
+  bundleIdPrefix: com.sihekuang
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+configFiles:
+  Debug: Configs/SharedSettings.xcconfig
+  Release: Configs/SharedSettings.xcconfig
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    ENABLE_HARDENED_RUNTIME: YES
+    # libdeskpixie.dylib (Go cgo) is built for the host arch only.
+    ARCHS: arm64
+packages:
+  DeskPixieCore:
+    path: Packages/DeskPixieCore
+targets:
+  DeskPixie:
+    type: application
+    platform: macOS
+    sources:
+      - path: DeskPixie
+        excludes:
+          - "Info.plist"
+          - "DeskPixie.entitlements"
+      # Folder reference: copied as Contents/Resources/mascots (first pack root).
+      - path: ../mascots
+        type: folder
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.sihekuang.deskpixie
+        PRODUCT_NAME: DeskPixie
+        INFOPLIST_FILE: DeskPixie/Info.plist
+        CODE_SIGN_ENTITLEMENTS: DeskPixie/DeskPixie.entitlements
+        LD_RUNPATH_SEARCH_PATHS: "@executable_path/../Frameworks"
+        LIBRARY_SEARCH_PATHS: "$(SRCROOT)/../core/build"
+        OTHER_LDFLAGS: "-ldeskpixie"
+    dependencies:
+      - package: DeskPixieCore
+    preBuildScripts:
+      - name: Build Go core
+        # Always run: Go's build cache decides whether there is real work.
+        basedOnDependencyAnalysis: false
+        script: |
+          set -e
+          # Xcode does not inherit the login shell PATH.
+          source ~/.zprofile 2>/dev/null || true
+          export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+          command -v go >/dev/null || { echo "error: go not found (brew install go)" >&2; exit 1; }
+          cd "$SRCROOT/../core"
+          unset GOFLAGS
+          make build-dylib
+        outputFiles:
+          - "$(SRCROOT)/../core/build/libdeskpixie.dylib"
+          - "$(SRCROOT)/../core/build/libdeskpixie.h"
+    postCompileScripts:
+      - name: Copy libdeskpixie.dylib into Frameworks
+        script: |
+          set -e
+          DST="$BUILT_PRODUCTS_DIR/$FRAMEWORKS_FOLDER_PATH"
+          mkdir -p "$DST"
+          # install_name is already @rpath/libdeskpixie.dylib (core/Makefile).
+          cp -pf "$SRCROOT/../core/build/libdeskpixie.dylib" "$DST/"
+          # Ad-hoc sign so the hardened-runtime app can load it.
+          codesign --force --sign "${EXPANDED_CODE_SIGN_IDENTITY:--}" "$DST/libdeskpixie.dylib"
+        inputFiles:
+          - "$(SRCROOT)/../core/build/libdeskpixie.dylib"
+        outputFiles:
+          - "$(BUILT_PRODUCTS_DIR)/$(FRAMEWORKS_FOLDER_PATH)/libdeskpixie.dylib"
+schemes:
+  DeskPixie:
+    build:
+      targets:
+        DeskPixie: all
+    run:
+      config: Debug
