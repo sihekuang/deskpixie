@@ -1,6 +1,7 @@
 import Foundation
 
-/// Configuration passed to `dp_configure` as JSON (snake_case keys).
+/// Configuration passed to `dp_configure` as JSON (camelCase keys: apiKey, model, voice,
+/// personaPath, idleTimeoutSecs, pack, packRoots, noisyRoom).
 public struct EngineConfig: Codable, Sendable, Equatable {
     public var apiKey: String
     public var model: String
@@ -21,15 +22,6 @@ public struct EngineConfig: Codable, Sendable, Equatable {
         self.pack = pack
         self.packRoots = packRoots
         self.noisyRoom = noisyRoom
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case apiKey = "api_key", model, voice
-        case personaPath = "persona_path"
-        case idleTimeoutSecs = "idle_timeout_secs"
-        case pack
-        case packRoots = "pack_roots"
-        case noisyRoom = "noisy_room"
     }
 }
 

@@ -24,11 +24,13 @@ final class EngineEventTests: XCTestCase {
         XCTAssertNil(d("not json"))
     }
 
-    func testConfigEncodesSnakeCaseKeys() throws {
+    func testConfigEncodesCamelCaseKeys() throws {
         let c = EngineConfig(apiKey: "k", model: "gpt-realtime", voice: "marin", personaPath: nil,
                              idleTimeoutSecs: 7, pack: "bit", packRoots: ["/x"], noisyRoom: false)
         let json = String(decoding: try JSONEncoder().encode(c), as: UTF8.self)
-        XCTAssertTrue(json.contains("\"idle_timeout_secs\":7"), json)
-        XCTAssertTrue(json.contains("\"pack_roots\""), json)
+        XCTAssertTrue(json.contains("\"idleTimeoutSecs\":7"), json)
+        XCTAssertTrue(json.contains("\"packRoots\""), json)
+        XCTAssertTrue(json.contains("\"apiKey\""), json)
+        XCTAssertFalse(json.contains("_"), json)
     }
 }
