@@ -30,6 +30,11 @@ targets:
       - path: ../mascots
         type: folder
         buildPhase: resources
+      # Folder reference: Contents/Resources/design-system (canvas /ds/ pages, CANVAS.md,
+      # examples); its path goes to dp_configure as `designSystem`.
+      - path: ../design-system
+        type: folder
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.sihekuang.deskpixie
@@ -71,6 +76,33 @@ targets:
           - "$(SRCROOT)/../core/build/libdeskpixie.dylib"
         outputFiles:
           - "$(BUILT_PRODUCTS_DIR)/$(FRAMEWORKS_FOLDER_PATH)/libdeskpixie.dylib"
+      - name: Bundle libdf + DeepFilterNet3 model when built
+        # core/Makefile build-dylib stages these only when libdf was fetched (make -C core
+        # libdf); otherwise the core is built without the deepfilter tag and the noise
+        # filter passes audio through. libdf is dlopen'ed as @rpath/libdf.dylib (its
+        # install name), which LD_RUNPATH_SEARCH_PATHS covers.
+        basedOnDependencyAnalysis: false
+        script: |
+          set -e
+          FW="$BUILT_PRODUCTS_DIR/$FRAMEWORKS_FOLDER_PATH"
+          RES="$BUILT_PRODUCTS_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH"
+          LIBDF="$SRCROOT/../core/build/libdf.dylib"
+          MODEL="$SRCROOT/../core/build/DeepFilterNet3.tar.gz"
+          mkdir -p "$FW" "$RES"
+          if [ -f "$LIBDF" ]; then
+            # Copy + re-sign only when the source changed (signing every build is slow).
+            if [ ! -f "$FW/libdf.dylib" ] || [ "$LIBDF" -nt "$FW/libdf.dylib" ]; then
+              cp -pf "$LIBDF" "$FW/"
+              codesign --force --sign "${EXPANDED_CODE_SIGN_IDENTITY:--}" "$FW/libdf.dylib"
+            fi
+          else
+            rm -f "$FW/libdf.dylib"
+          fi
+          if [ -f "$MODEL" ]; then
+            cp -pf "$MODEL" "$RES/"
+          else
+            rm -f "$RES/DeepFilterNet3.tar.gz"
+          fi
 schemes:
   DeskPixie:
     build:

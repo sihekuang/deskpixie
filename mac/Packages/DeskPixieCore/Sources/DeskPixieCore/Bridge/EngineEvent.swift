@@ -1,27 +1,43 @@
 import Foundation
 
-/// Configuration passed to `dp_configure` as JSON (camelCase keys: apiKey, model, voice,
-/// personaPath, idleTimeoutSecs, pack, packRoots, noisyRoom).
+/// What `dp_configure` gets: only paths (P14a). Everything else (model, voice, pack, keys…)
+/// the core reads from settings.json and env/.env itself.
 public struct EngineConfig: Codable, Sendable, Equatable {
-    public var apiKey: String
-    public var model: String
-    public var voice: String
-    public var personaPath: String?
-    public var idleTimeoutSecs: Int
-    public var pack: String
-    public var packRoots: [String]
-    public var noisyRoom: Bool
+    /// `~/Library/Application Support/com.sihekuang.deskpixie` (settings.json, mascots/, canvas/…).
+    public var appSupport: String
+    /// The app's bundled packs (`Contents/Resources/mascots`).
+    public var bundledMascots: String
+    /// The bundled canvas design system (`Contents/Resources/design-system`).
+    public var designSystem: String
+    /// `Contents/Resources/DeepFilterNet3.tar.gz`, or "" when the build has no libdf.
+    public var dfn3ModelPath: String
+    public var platform: String
+    /// Transitional: the Phase 3 core resolves packs from this; P14a's core ignores it (Go's
+    /// JSON decoding drops unknown keys). Drop once P14a has landed.
+    public var packRoots: [String]?
 
-    public init(apiKey: String, model: String, voice: String, personaPath: String?,
-                idleTimeoutSecs: Int, pack: String, packRoots: [String], noisyRoom: Bool) {
-        self.apiKey = apiKey
-        self.model = model
-        self.voice = voice
-        self.personaPath = personaPath
-        self.idleTimeoutSecs = idleTimeoutSecs
-        self.pack = pack
+    public init(appSupport: String, bundledMascots: String, designSystem: String, dfn3ModelPath: String,
+                platform: String = "macos", packRoots: [String]? = nil) {
+        self.appSupport = appSupport
+        self.bundledMascots = bundledMascots
+        self.designSystem = designSystem
+        self.dfn3ModelPath = dfn3ModelPath
+        self.platform = platform
         self.packRoots = packRoots
-        self.noisyRoom = noisyRoom
+    }
+
+    /// The payload for an app whose resources are at `resources`. `exists` decides whether the
+    /// optional DFN3 model was bundled.
+    public static func forBundle(resources: URL, appSupport: URL,
+                                 exists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) })
+        -> EngineConfig {
+        let mascots = resources.appendingPathComponent("mascots", isDirectory: true).path
+        let model = resources.appendingPathComponent("DeepFilterNet3.tar.gz").path
+        return EngineConfig(appSupport: appSupport.path,
+                            bundledMascots: mascots,
+                            designSystem: resources.appendingPathComponent("design-system", isDirectory: true).path,
+                            dfn3ModelPath: exists(model) ? model : "",
+                            packRoots: [mascots, appSupport.appendingPathComponent("mascots", isDirectory: true).path])
     }
 }
 

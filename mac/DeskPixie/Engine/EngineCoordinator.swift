@@ -3,14 +3,15 @@ import DeskPixieCore
 import Foundation
 import os
 
-/// Wires the Go engine to the mascot, the tray, the hotkey and the audio I/O, and drains
-/// engine events on the main actor every 30 ms (Howl's poll pattern).
+/// Wires the Go engine to the mascot, the tray, the hotkey, the audio I/O, notifications,
+/// the canvas window and the settings window, and drains engine events on the main actor
+/// every 30 ms (Howl's poll pattern). Every event kind of the plan's shared contract is
+/// handled in `handle(_:)`.
 @MainActor
 final class EngineCoordinator {
     static let pollInterval: UInt64 = 30_000_000
-    static let hotkeyLabel = "⌃⌥Space"
 
-    private static let log = Logger(subsystem: "com.sihekuang.deskpixie", category: "coordinator")
+    nonisolated private static let log = Logger(subsystem: "com.sihekuang.deskpixie", category: "coordinator")
     private static let metricsLog = Logger(subsystem: "com.sihekuang.deskpixie", category: "metrics")
 
     private let appState: AppState
@@ -20,8 +21,16 @@ final class EngineCoordinator {
     private let micRing: SampleRing
     private let pump: AudioPump
     private let hotkey: CarbonHotkey
+    private let notifier = Notifier()
+    private lazy var canvas = CanvasWindowController(engine: engine)
 
     private(set) var mascot: MascotController?
+    /// The combo the Carbon hotkey is bound to right now (nil = none).
+    private(set) var boundCombo: String?
+    /// Settings platform, for formatting combos in status lines.
+    private var platform = SettingsPlatform.macos
+    /// Re-sends the device menus on plug/unplug; kept for the app's lifetime.
+    private var deviceObserver: AudioDeviceListObserver?
     private var pollTask: Task<Void, Never>?
     private var audioTask: Task<Void, Never>?
     private var configured = false
@@ -43,14 +52,8 @@ final class EngineCoordinator {
     // MARK: Lifecycle
 
     func start() {
-        let key = EnvSecrets.openAIKey(env: ProcessInfo.processInfo.environment,
-                                       dotenvURL: EnvSecrets.defaultDotenvURL)
-        Self.log.notice("OPENAI_API_KEY \(key == nil ? "missing" : "present", privacy: .public)")
-
-        let config = EngineConfig(apiKey: key ?? "", model: "gpt-realtime", voice: "marin", personaPath: nil,
-                                  idleTimeoutSecs: 7, pack: "bit", packRoots: Self.packRoots(), noisyRoom: false)
         do {
-            try engine.configure(config)
+            try engine.configure(Self.engineConfig())
             configured = true
         } catch {
             Self.log.error("configure failed: \(String(describing: error), privacy: .public)")
@@ -58,8 +61,14 @@ final class EngineCoordinator {
             appState.mascotState = "error"
         }
 
+        // One read for everything launch needs; defaults when the core does not serve it.
+        let snapshot = readSnapshot()
+        let launch = LaunchSettings.fromSnapshot(snapshot)
+        platform = launch.platform
+
         if configured {
-            if let m = MascotController.load(engine: engine, settings: readMascotSettings()) {
+            let mascotSettings = snapshot.flatMap(MascotSettings.fromSnapshot) ?? .defaults
+            if let m = MascotController.load(engine: engine, settings: mascotSettings) {
                 mascot = m
                 m.onDoubleClick = { [weak self] in self?.talk() }
                 m.show()
@@ -68,12 +77,12 @@ final class EngineCoordinator {
             }
         }
 
-        do {
-            try hotkey.start { [weak self] in self?.talk() }
-        } catch {
-            Self.log.error("hotkey unavailable: \(String(describing: error), privacy: .public)")
-            appState.hotkeyError = "Hotkey unavailable: \(Self.hotkeyLabel)"
+        // The stored combo (Rust binds config.hotkey at startup); a failure is a tray line.
+        if !bindHotkey(launch.hotkey, previous: nil) {
+            appState.hotkeyError = LaunchSettings.hotkeyUnavailable(launch.hotkey, platform: platform)
         }
+
+        wireAudio(pinnedInput: launch.inputDevice, pinnedOutput: launch.outputDevice)
 
         refreshTray()
         startPolling()
@@ -83,11 +92,64 @@ final class EngineCoordinator {
     func shutdown() {
         pollTask?.cancel()
         audioTask?.cancel()
+        deviceObserver?.cancel()
+        deviceObserver = nil
         hotkey.stop()
         pump.stop()
         voiceIO.stop()
         mascot?.stop()
+        // Before the engine goes: the last move/resize must still reach `canvas.geometry`.
+        canvas.flushGeometry()
         engine.shutdown()
+    }
+
+    // MARK: Hotkey
+
+    /// Binds `combo` (a stored combo such as `ctrl+alt+Space`) as the talk hotkey.
+    /// `CarbonHotkey.start` drops the old binding first, so on failure `previous` (default:
+    /// the combo bound now) is bound again. Returns whether `combo` is now bound.
+    /// Used at launch, for the `hotkey` event and by the Settings window's recorder.
+    @discardableResult
+    func bindHotkey(_ combo: String, previous: String?) -> Bool {
+        guard let wanted = HotkeyRecorder.carbon(combo) else {
+            // Nothing was unbound: the old binding (if any) still holds.
+            Self.log.error("hotkey \(combo, privacy: .public) has no key this Mac can bind")
+            return false
+        }
+        let fallback = previous ?? boundCombo
+        do {
+            try hotkey.start(keyCode: wanted.keyCode, modifiers: wanted.modifiers) { [weak self] in self?.talk() }
+            boundCombo = combo
+            appState.hotkeyError = nil
+            return true
+        } catch {
+            Self.log.error("hotkey \(combo, privacy: .public) unavailable: \(String(describing: error), privacy: .public)")
+            boundCombo = nil
+            if let fallback, fallback != combo, let old = HotkeyRecorder.carbon(fallback) {
+                do {
+                    try hotkey.start(keyCode: old.keyCode, modifiers: old.modifiers) { [weak self] in self?.talk() }
+                    boundCombo = fallback
+                } catch {
+                    Self.log.error("could not bind \(fallback, privacy: .public) again")
+                }
+            }
+            return false
+        }
+    }
+
+    /// `hotkey` event: the core reloaded a hand-edited combo. If it cannot be bound the old
+    /// one stays and the core is told (`settings.hotkeyFailed`), so it does not adopt it.
+    private func hotkeyChanged(_ combo: String) {
+        guard combo != boundCombo else { return }
+        if bindHotkey(combo, previous: boundCombo) { return }
+        do {
+            _ = try engine.call("settings.hotkeyFailed", HotkeyFailedArgs(combo: combo))
+        } catch {
+            Self.log.error("settings.hotkeyFailed: \(String(describing: error), privacy: .public)")
+        }
+        if boundCombo == nil {
+            appState.hotkeyError = LaunchSettings.hotkeyUnavailable(combo, platform: platform)
+        }
     }
 
     // MARK: Actions
@@ -113,6 +175,8 @@ final class EngineCoordinator {
             MicModes.show()
         default:
             struct Action: Encodable { let id: String }
+            // A canvas the user asked for comes forward; core-initiated opens never take focus.
+            if id == "canvas:open" || id.hasPrefix("canvas:page:") { canvas.requestFocusOnNextShow() }
             do {
                 _ = try engine.call("app.action", Action(id: id))
             } catch {
@@ -151,6 +215,55 @@ final class EngineCoordinator {
 
     // MARK: Audio
 
+    /// Pins the saved devices, routes the voice unit's failures to the core, and keeps the
+    /// Settings device menus current (S3 wiring).
+    private func wireAudio(pinnedInput: String?, pinnedOutput: String?) {
+        voiceIO.setPinned(input: pinnedInput, output: pinnedOutput)
+        let engine = engine
+        voiceIO.setEventHandler { event in
+            switch event {
+            case .live:
+                break // the core sees the mic as live on the first frame
+            case .failed(.permissionDenied):
+                engine.micFailed("Microphone access denied")
+            case .failed(.deviceChanged):
+                do {
+                    _ = try engine.call("audio.deviceChanged")
+                } catch {
+                    Self.log.error("audio.deviceChanged: \(String(describing: error), privacy: .public)")
+                }
+            case .failed(.other(let reason)):
+                Self.reportAudioFailure(engine, reason)
+            }
+        }
+        sendDeviceChoices()
+        deviceObserver = AudioDeviceListObserver { [weak self] in
+            Task { @MainActor in self?.sendDeviceChoices() }
+        }
+    }
+
+    /// The Microphone and Speaker menus (`settings.choices`); Go adds "System Default".
+    private func sendDeviceChoices() {
+        for args in AudioDevices.settingsChoices(CoreAudioDevices()) {
+            do {
+                _ = try engine.call("settings.choices", args)
+            } catch {
+                Self.log.error("settings.choices \(args.field, privacy: .public): \(String(describing: error), privacy: .public)")
+            }
+        }
+    }
+
+    /// A unit that could not be built is not a permission problem: `audio.failed {reason}`.
+    /// Falls back to `micFailed` while the core lacks that method.
+    nonisolated private static func reportAudioFailure(_ engine: CoreEngine, _ reason: String) {
+        do {
+            _ = try engine.call("audio.failed", AudioFailedArgs(reason: reason))
+        } catch {
+            log.error("audio.failed: \(String(describing: error), privacy: .public)")
+            engine.micFailed(reason)
+        }
+    }
+
     /// Starts VoiceIO (mic gated off) and the pump.
     /// - At launch (`retryForHotkey == false`) a failure only goes to the tray: reporting it to
     ///   the engine would make it fail the next conversation even if a later retry succeeds.
@@ -162,6 +275,7 @@ final class EngineCoordinator {
         let voiceIO = voiceIO, ring = ring, micRing = micRing, pump = pump, engine = engine
         audioTask = Task { @MainActor [weak self] in
             var failure: String?
+            var permission = false
             do {
                 // Runs on the real-time input thread: ring write only.
                 try await voiceIO.start(playback: ring) { samples, unixNanos in
@@ -173,6 +287,7 @@ final class EngineCoordinator {
             } catch VoiceIOError.permissionDenied {
                 Self.log.error("microphone permission denied")
                 failure = "Microphone access denied"
+                permission = true
             } catch {
                 Self.log.error("audio start failed: \(String(describing: error), privacy: .public)")
                 failure = "Audio start failed: \(Self.describe(error))"
@@ -181,7 +296,9 @@ final class EngineCoordinator {
             if failure != nil { self?.audioState = .stopped }
             if retryForHotkey {
                 engine.hotkey()
-                if let failure { engine.micFailed(failure) }
+                if let failure {
+                    if permission { engine.micFailed(failure) } else { Self.reportAudioFailure(engine, failure) }
+                }
             }
         }
     }
@@ -227,42 +344,50 @@ final class EngineCoordinator {
         case .position(let x, let y):
             mascot?.moveTo(x: x, y: y)
         case .settingsChanged:
-            // The mascot follows proximityFade.{enabled,radius}; S4's settings window also listens.
+            // The mascot follows proximityFade.{enabled,radius}; the open Settings window re-reads.
             mascot?.apply(settings: readMascotSettings())
-        case .hotkey, .devices, .notify, .canvasOpen:
-            // Handled by later work packages (S3–S6).
-            Self.log.debug("unhandled event \(String(describing: ev), privacy: .public)")
+            SettingsHub.shared?.refresh()
+        case .hotkey(let combo):
+            hotkeyChanged(combo)
+        case .devices(let input, let output):
+            voiceIO.setPinned(input: input, output: output)
+        case .notify:
+            notifier.handle(ev)
+        case .canvasOpen(let url, let title):
+            canvas.show(url: url, title: title)
         }
     }
 
     // MARK: Helpers
 
-    /// The mascot's settings (`position`, `scale`, `proximityFade`) from `settings.snapshot`;
-    /// config.rs defaults while the core does not serve it.
-    private func readMascotSettings() -> MascotSettings {
+    /// `settings.snapshot`, or nil (logged) while the core does not serve it.
+    private func readSnapshot() -> Data? {
         do {
-            return MascotSettings.fromSnapshot(try engine.call("settings.snapshot")) ?? .defaults
+            return try engine.call("settings.snapshot")
         } catch {
             Self.log.error("settings.snapshot: \(String(describing: error), privacy: .public)")
-            return .defaults
+            return nil
         }
     }
 
-    /// Bundled packs first, then the user's (later roots override earlier ones).
-    static func packRoots() -> [String] {
-        var roots: [String] = []
-        if let res = Bundle.main.resourceURL {
-            roots.append(res.appendingPathComponent("mascots", isDirectory: true).path)
-        }
-        let user = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/com.sihekuang.deskpixie/mascots", isDirectory: true)
+    /// The mascot's settings (`position`, `scale`, `proximityFade`); config.rs defaults
+    /// while the core does not serve them.
+    private func readMascotSettings() -> MascotSettings {
+        readSnapshot().flatMap(MascotSettings.fromSnapshot) ?? .defaults
+    }
+
+    /// The `dp_configure` payload: paths only (P14a). Creates the user's data and pack folders.
+    static func engineConfig() -> EngineConfig {
+        let support = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/com.sihekuang.deskpixie", isDirectory: true)
+        let userPacks = support.appendingPathComponent("mascots", isDirectory: true)
         do {
-            try FileManager.default.createDirectory(at: user, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: userPacks, withIntermediateDirectories: true)
         } catch {
-            log.error("cannot create \(user.path, privacy: .public): \(String(describing: error), privacy: .public)")
+            log.error("cannot create \(userPacks.path, privacy: .public): \(String(describing: error), privacy: .public)")
         }
-        roots.append(user.path)
-        return roots
+        let resources = Bundle.main.resourceURL ?? Bundle.main.bundleURL
+        return EngineConfig.forBundle(resources: resources, appSupport: support)
     }
 
     private static func describe(_ error: Error) -> String {

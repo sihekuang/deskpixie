@@ -67,13 +67,32 @@ final class EngineEventTests: XCTestCase {
         XCTAssertNil(d("not json"))
     }
 
-    func testConfigEncodesCamelCaseKeys() throws {
-        let c = EngineConfig(apiKey: "k", model: "gpt-realtime", voice: "marin", personaPath: nil,
-                             idleTimeoutSecs: 7, pack: "bit", packRoots: ["/x"], noisyRoom: false)
-        let json = String(decoding: try JSONEncoder().encode(c), as: UTF8.self)
-        XCTAssertTrue(json.contains("\"idleTimeoutSecs\":7"), json)
-        XCTAssertTrue(json.contains("\"packRoots\""), json)
-        XCTAssertTrue(json.contains("\"apiKey\""), json)
-        XCTAssertFalse(json.contains("_"), json)
+    func testConfigEncodesThePathsPayload() throws {
+        let c = EngineConfig(appSupport: "/as", bundledMascots: "/res/mascots", designSystem: "/res/design-system",
+                             dfn3ModelPath: "/res/DeepFilterNet3.tar.gz", packRoots: ["/res/mascots", "/as/mascots"])
+        let obj = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(c)) as? [String: Any])
+        XCTAssertEqual(obj["appSupport"] as? String, "/as")
+        XCTAssertEqual(obj["bundledMascots"] as? String, "/res/mascots")
+        XCTAssertEqual(obj["designSystem"] as? String, "/res/design-system")
+        XCTAssertEqual(obj["dfn3ModelPath"] as? String, "/res/DeepFilterNet3.tar.gz")
+        XCTAssertEqual(obj["platform"] as? String, "macos")
+        // Transitional: the pre-P14a core reads packRoots; P14a ignores it.
+        XCTAssertEqual(obj["packRoots"] as? [String], ["/res/mascots", "/as/mascots"])
+        // Keys are Go's env/.env business now, never sent from Swift.
+        XCTAssertNil(obj["apiKey"])
+    }
+
+    func testConfigForBundleUsesResourcesAndAppSupport() {
+        let res = URL(fileURLWithPath: "/App.app/Contents/Resources")
+        let support = URL(fileURLWithPath: "/Users/u/Library/Application Support/com.sihekuang.deskpixie")
+        let c = EngineConfig.forBundle(resources: res, appSupport: support) { $0.hasSuffix("DeepFilterNet3.tar.gz") }
+        XCTAssertEqual(c.appSupport, support.path)
+        XCTAssertEqual(c.bundledMascots, "/App.app/Contents/Resources/mascots")
+        XCTAssertEqual(c.designSystem, "/App.app/Contents/Resources/design-system")
+        XCTAssertEqual(c.dfn3ModelPath, "/App.app/Contents/Resources/DeepFilterNet3.tar.gz")
+        XCTAssertEqual(c.packRoots, [c.bundledMascots, support.path + "/mascots"])
+
+        let noModel = EngineConfig.forBundle(resources: res, appSupport: support) { _ in false }
+        XCTAssertEqual(noModel.dfn3ModelPath, "", "a build without libdf has no model; Go falls back to Hush/pass-through")
     }
 }

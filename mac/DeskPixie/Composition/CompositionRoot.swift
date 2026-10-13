@@ -36,7 +36,9 @@ final class CompositionRoot {
     let coordinator: EngineCoordinator
 
     init() {
-        pump = AudioPump(engine: engine, ring: ring, mic: micRing)
+        // The gate empties the mic ring while the mic is off and pauses the stall clock while
+        // no unit runs (units start on demand).
+        pump = AudioPump(engine: engine, ring: ring, mic: micRing, gate: voiceIO.gate)
         coordinator = EngineCoordinator(appState: appState, engine: engine, voiceIO: voiceIO,
                                         ring: ring, micRing: micRing, pump: pump, hotkey: hotkey)
     }
