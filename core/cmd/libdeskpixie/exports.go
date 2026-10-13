@@ -121,6 +121,21 @@ func dp_last_error() *C.char {
 	return nil
 }
 
+// dp_call runs a registered core method. args_json may be NULL (= {}). It returns
+// {"ok":<json>} or {"error":"<msg>"} (never NULL). Free with dp_free_string.
+//
+//export dp_call
+func dp_call(method *C.char, args_json *C.char) *C.char {
+	if method == nil {
+		return cString([]byte(`{"error":"missing method"}`))
+	}
+	var args []byte
+	if args_json != nil {
+		args = []byte(C.GoString(args_json))
+	}
+	return cString(bridge.Call(C.GoString(method), args))
+}
+
 //export dp_free_string
 func dp_free_string(s *C.char) {
 	if s != nil {

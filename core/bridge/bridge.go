@@ -108,6 +108,9 @@ type Engine struct {
 	errMu   sync.Mutex
 	lastErr string
 
+	calls handlers  // dp_call methods registered on this engine
+	tray  trayModel // what app.state reports until P14
+
 	stop      chan struct{}
 	loopDone  chan struct{}
 	closeOnce sync.Once
@@ -125,6 +128,8 @@ func New(o Options) *Engine {
 		o.NewModel = func() voice.Model { return openai.New("") }
 	}
 	e := &Engine{opts: o, stop: make(chan struct{}), loopDone: make(chan struct{})}
+	e.tray.state = string(voice.StateIdle)
+	e.registerTempHandlers()
 	go e.metricsLoop()
 	return e
 }
@@ -163,6 +168,7 @@ func (e *Engine) configure(jsonCfg []byte) error {
 		e.emit(voice.UIEvent{Kind: "state", State: string(voice.StateIdle)})
 	}
 	e.pack.Store(&pack)
+	e.setPacks(found, pack.ID)
 	rt := voice.NewRuntime(e.opts.NewModel(), nil, voice.RuntimeConfig{
 		Session: voice.SessionConfig{
 			Model:        c.Model,
@@ -289,12 +295,16 @@ func (e *Engine) setErr(err error) {
 }
 
 // emit is the runtime's event sink. It runs on the runtime goroutine and never blocks.
+// A state or status change is followed by a `tray` event so Swift re-reads app.state.
 func (e *Engine) emit(ev voice.UIEvent) {
 	b, err := json.Marshal(ev)
 	if err != nil {
 		return
 	}
 	e.q.push(ev.Kind, b)
+	if e.observe(ev) {
+		e.pushTray()
+	}
 }
 
 func (e *Engine) onMicSent(capturedAt time.Time) {
