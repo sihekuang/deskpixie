@@ -3,7 +3,8 @@
 //
 // Each model works in 10 ms hops at its own rate: Hush (the default) at 16 kHz, DeepFilterNet3
 // at 48 kHz. So each frame is resampled to the model's rate, cleaned hop by hop, and resampled
-// back, through filters whose state carries across frames. The model loads on a goroutine;
+// back, through filters whose state carries across frames. These steps are audio.Stages (the
+// interface shared with Howl) run by an audio.Chain: to16k|to48k -> dither -> denoise -> to24k. The model loads on a goroutine;
 // until it is ready, audio passes through, so the mic is never held up. Whatever goes wrong
 // (the model cannot load, a hop fails, a panic inside the engine), the mic keeps working: audio
 // then passes through unchanged and the problem is logged once.
@@ -15,9 +16,7 @@ package denoise
 
 import (
 	"fmt"
-	"log"
 	"sync"
-	"sync/atomic"
 
 	"github.com/sihekuang/deskpixie/core/audio"
 )
@@ -80,45 +79,24 @@ type Options struct {
 	Enabled bool
 	// Logf receives the one failure line; nil means log.Printf.
 	Logf func(format string, args ...any)
+	// Dither puts the dither stage (dither.go) before the model. libdf needs it, so New sets
+	// it; fake engines in tests leave it off to see exactly what the resampling does.
+	Dither bool
 }
 
-type slotState int
-
-const (
-	unloaded slotState = iota
-	loading
-	ready
-	failed // loading or running failed: pass audio through from now on
-	closed
-)
-
-type loaded struct {
-	engine Engine
-	err    error
-}
-
-// Cleaner is an audio.Cleaner around any Engine, with the resampling to and from its rate.
-// Process, Reset and Close are safe to call from different goroutines; SetEnabled may be
-// called at any time and takes effect on the next frame.
+// Cleaner is the noise filter as an audio.Cleaner: a chain of stages (resample to the model's
+// rate, dither, the model, resample back) behind an audio.ChainCleaner. Frames are cleaned in
+// place. Process, Reset and Close are safe to call from different goroutines; SetEnabled may
+// be called at any time and takes effect on the next frame.
 type Cleaner struct {
-	load    Loader
-	hop     int
-	logf    func(string, ...any)
-	enabled atomic.Bool
-	// restart is set when the switch goes back on: the next frame starts the filters clean.
-	restart atomic.Bool
+	model   *ModelStage
+	toModel *resampleStage
+	toMic   *resampleStage
+	dither  *ditherStage // nil without Options.Dither
+	chain   *audio.Chain
+	adapter *audio.ChainCleaner
 
-	mu     sync.Mutex
-	state  slotState
-	loadCh chan loaded
-	engine Engine
-	why    string
-	rate   *rateConv
-	mic    [HopIn]float32
-	noisy  []float32
-	clean  []float32
-	// out is the cleaned 24 kHz frame, written back only once every hop succeeded.
-	out []float32
+	mu sync.Mutex
 }
 
 var _ audio.Cleaner = (*Cleaner)(nil)
@@ -126,177 +104,90 @@ var _ audio.Cleaner = (*Cleaner)(nil)
 // NewWithLoader makes a Cleaner for engines with hop-sample hops (Hop48k or Hop16k) loaded by
 // load. The model loads on the first enabled frame (or on Prepare).
 func NewWithLoader(hop int, load Loader, opts Options) *Cleaner {
-	logf := opts.Logf
-	if logf == nil {
-		logf = log.Printf
-	}
+	model := NewModelStage(hop, load, opts)
 	c := &Cleaner{
-		load:  load,
-		hop:   hop,
-		logf:  logf,
-		rate:  newRateConv(hop),
-		noisy: make([]float32, hop),
-		clean: make([]float32, hop),
+		model:   model,
+		toModel: newResampleStage(audio.SampleRate, model.InputRate()),
+		toMic:   newResampleStage(model.InputRate(), audio.SampleRate),
 	}
-	c.enabled.Store(opts.Enabled)
+	stages := []audio.Stage{c.toModel}
+	if opts.Dither {
+		c.dither = newDitherStage(hop, model.InputRate())
+		stages = append(stages, c.dither)
+	}
+	stages = append(stages, model, c.toMic)
+	chain, err := audio.NewChain(audio.SampleRate, stages...)
+	if err == nil {
+		c.adapter, err = audio.NewChainCleaner(chain)
+	}
+	if err != nil {
+		panic("denoise: " + err.Error()) // the stages above always line up
+	}
+	c.chain = chain
 	return c
 }
 
 // SetEnabled turns the filter on or off; it is checked on every frame.
-func (c *Cleaner) SetEnabled(on bool) {
-	if was := c.enabled.Swap(on); on && !was {
-		c.restart.Store(true)
-	}
-}
+func (c *Cleaner) SetEnabled(on bool) { c.model.SetEnabled(on) }
 
 // Enabled reports the live switch.
-func (c *Cleaner) Enabled() bool { return c.enabled.Load() }
-
-func (c *Cleaner) fail(why string) {
-	c.logf("deskpixie: noise filter off, passing the mic through: %s", why)
-	c.why = why
-	c.state = failed
-	if c.engine != nil {
-		_ = c.engine.Close()
-		c.engine = nil
-	}
-}
+func (c *Cleaner) Enabled() bool { return c.model.Enabled() }
 
 // Prepare starts loading the model in the background without blocking.
-func (c *Cleaner) Prepare() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.prepare()
-}
-
-func (c *Cleaner) prepare() {
-	if c.state != unloaded {
-		return
-	}
-	ch := make(chan loaded, 1)
-	load := c.load
-	go func() {
-		var r loaded
-		defer func() {
-			if p := recover(); p != nil {
-				r = loaded{err: fmt.Errorf("loading the model panicked: %v", p)}
-			}
-			ch <- r
-		}()
-		e, err := load()
-		r = loaded{engine: e, err: err}
-	}()
-	c.loadCh = ch
-	c.state = loading
-}
+func (c *Cleaner) Prepare() { c.model.Prepare() }
 
 // Ready reports whether the model is ready, picking it up if the loader just finished.
-func (c *Cleaner) Ready() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.ready()
-}
-
-func (c *Cleaner) ready() bool {
-	if c.state == loading {
-		select {
-		case r := <-c.loadCh:
-			c.loadCh = nil
-			switch {
-			case r.err != nil:
-				c.fail("cannot load the model: " + r.err.Error())
-			case r.engine == nil:
-				c.fail("the model loader returned no model")
-			case r.engine.Hop() != c.hop:
-				_ = r.engine.Close()
-				c.fail(fmt.Sprintf("unexpected model format: %d-sample hops, want %d", r.engine.Hop(), c.hop))
-			default:
-				c.engine = r.engine
-				c.state = ready
-				// Start the resamplers clean too, in step with the fresh model.
-				c.rate.clear()
-			}
-		default:
-		}
-	}
-	return c.state == ready
-}
+func (c *Cleaner) Ready() bool { return c.model.Ready() }
 
 // Failed says why the filter gave up and passes audio through, or "" if it has not.
-func (c *Cleaner) Failed() string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.state == failed {
-		return c.why
+func (c *Cleaner) Failed() string { return c.model.Failed() }
+
+// Stages lists the chain's stages and their output rates (names as passed to a tap).
+func (c *Cleaner) Stages() []audio.StageInfo { return c.chain.Stages() }
+
+// SetTap installs (nil removes) a hook that sees each stage's output while the model is
+// cleaning, e.g. for VOICE_DEBUG recordings per stage. Rates differ per stage: see Stages.
+func (c *Cleaner) SetTap(t audio.Tap) { c.chain.SetTap(t) }
+
+// clearFilters forgets the history of the stages around the model, without allocating.
+func (c *Cleaner) clearFilters() {
+	c.toModel.reset()
+	c.toMic.reset()
+	if c.dither != nil {
+		c.dither.reset()
 	}
-	return ""
 }
 
 // Process cleans a 24 kHz mono frame in place and returns it; its length never changes. A
 // frame that is not whole 10 ms hops, or arrives while the filter is off, loading, failed or
-// closed, comes back unchanged.
+// closed, comes back unchanged (the chain does not run, so there is no resampling delay).
 func (c *Cleaner) Process(in []int16) []int16 {
-	on := c.enabled.Load()
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if !on {
-		return in
+	on, startClean := c.model.activate()
+	if startClean {
+		// Back on after a pause, or a fresh model: no stale history smears into this frame.
+		c.clearFilters()
 	}
-	if c.restart.Swap(false) {
-		// Back on after a pause: don't let stale filter history smear into this frame.
-		c.rate.clear()
-	}
-	c.prepare()
 	// Only whole hops: the mic path always sends 40 ms (4-hop) frames.
-	if len(in) == 0 || len(in)%HopIn != 0 || !c.ready() {
+	if !on || len(in) == 0 || len(in)%HopIn != 0 {
 		return in
-	}
-	if len(c.out) < len(in) {
-		c.out = make([]float32, len(in)) // once, on the first frame
 	}
 	if why := c.run(in); why != "" {
-		c.fail(why)
-		return in
-	}
-	for i := range in {
-		in[i] = toInt16(c.out[i])
+		c.model.failWith(why)
 	}
 	return in
 }
 
-func toInt16(s float32) int16 {
-	v := s * 32768
-	// Round half away from zero, as Rust's f32::round.
-	if v >= 0 {
-		v += 0.5
-	} else {
-		v -= 0.5
-	}
-	switch {
-	case v >= 32767:
-		return 32767
-	case v <= -32768:
-		return -32768
-	}
-	return int16(v)
-}
-
-// run cleans frame into c.out; a non-empty result says why it failed and leaves frame as is.
-func (c *Cleaner) run(frame []int16) (why string) {
+// run cleans in through the chain; on failure in is left as it was.
+func (c *Cleaner) run(in []int16) (why string) {
 	defer func() {
 		if p := recover(); p != nil {
-			why = fmt.Sprintf("the model panicked: %v", p)
+			why = fmt.Sprintf("the noise filter panicked: %v", p)
 		}
 	}()
-	for k := 0; k+HopIn <= len(frame); k += HopIn {
-		for i, s := range frame[k : k+HopIn] {
-			c.mic[i] = float32(s) / 32768
-		}
-		c.rate.micToModel(c.mic[:], c.noisy)
-		if err := c.engine.ProcessHop(c.noisy, c.clean); err != nil {
-			return err.Error()
-		}
-		c.rate.modelToMic(c.clean, c.out[k:k+HopIn])
+	if _, err := c.adapter.Clean(in); err != nil {
+		return err.Error()
 	}
 	return ""
 }
@@ -305,46 +196,13 @@ func (c *Cleaner) run(frame []int16) (why string) {
 func (c *Cleaner) Reset() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.rate.clear()
-	if c.state != ready {
-		return
-	}
-	if why := c.resetEngine(); why != "" {
-		c.fail(why)
-	}
-}
-
-func (c *Cleaner) resetEngine() (why string) {
-	defer func() {
-		if p := recover(); p != nil {
-			why = fmt.Sprintf("resetting the model panicked: %v", p)
-		}
-	}()
-	if err := c.engine.Reset(); err != nil {
-		return "cannot reset the model: " + err.Error()
-	}
-	return ""
+	c.clearFilters()
+	c.model.Reset()
 }
 
 // Close releases the model; afterwards every frame passes through. Safe to call more than once.
 func (c *Cleaner) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	var err error
-	switch c.state {
-	case ready:
-		err = c.engine.Close()
-		c.engine = nil
-	case loading:
-		// The loader still owns the engine: close it when it arrives.
-		ch := c.loadCh
-		go func() {
-			if r := <-ch; r.engine != nil {
-				_ = r.engine.Close()
-			}
-		}()
-		c.loadCh = nil
-	}
-	c.state = closed
-	return err
+	return c.chain.Close()
 }

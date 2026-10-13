@@ -4,7 +4,8 @@ package denoise
 // df_process_frame calls) skips a hop whose mean square is below 1e-7 (about -70 dBFS) without
 // advancing its buffers, so after silence it would replay the audio from before it. A hop that
 // quiet gets faint noise (RMS 4e-4, about -68 dBFS); the model itself gates noise that faint to
-// silence. Engines apply it to each model-rate hop before the model sees it.
+// silence. The dither stage (stages.go) applies it to each model-rate hop before the model
+// sees it.
 type dither struct{ seed uint32 }
 
 const (

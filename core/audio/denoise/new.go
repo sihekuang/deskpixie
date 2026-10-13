@@ -21,11 +21,12 @@ type Config struct {
 	Logf func(format string, args ...any)
 }
 
-// New makes the mic noise filter for cfg.Model. The model loads on the first enabled frame;
+// New makes the mic noise filter for cfg.Model: the chain to16k -> dither -> denoise -> to24k
+// (Hush) or to48k -> dither -> denoise -> to24k (DFN3). The model loads on the first enabled frame;
 // in a build without libdf (no `deepfilter` tag) it fails to load, logs why once, and passes
 // audio through.
 func New(cfg Config) *Cleaner {
-	opts := Options{Enabled: cfg.Enabled, Logf: cfg.Logf}
+	opts := Options{Enabled: cfg.Enabled, Logf: cfg.Logf, Dither: true}
 	if cfg.Model == DFN3 {
 		path := cfg.DFN3ModelPath
 		return NewWithLoader(Hop48k, func() (Engine, error) { return loadDFN3(path) }, opts)

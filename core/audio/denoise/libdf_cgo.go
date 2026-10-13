@@ -84,14 +84,13 @@ var hushTar []byte
 
 // dfEngine is one libdf state (df_create) working in hop-sample hops.
 type dfEngine struct {
-	st     *C.DFState
-	hop    int
-	path   string
-	temp   bool // path is our temp copy of an embedded model: removed on Close
-	atten  float32
-	dither dither
-	in     []float32
-	out    []float32
+	st    *C.DFState
+	hop   int
+	path  string
+	temp  bool // path is our temp copy of an embedded model: removed on Close
+	atten float32
+	in    []float32
+	out   []float32
 }
 
 func loadHush() (Engine, error) {
@@ -117,7 +116,7 @@ func loadDFN3(path string) (Engine, error) {
 }
 
 func newDFEngine(path string, temp bool, atten float32, hop int) (*dfEngine, error) {
-	e := &dfEngine{path: path, temp: temp, atten: atten, hop: hop, dither: newDither(),
+	e := &dfEngine{path: path, temp: temp, atten: atten, hop: hop,
 		in: make([]float32, hop), out: make([]float32, hop)}
 	if err := e.create(); err != nil {
 		return nil, err
@@ -161,8 +160,7 @@ func (e *dfEngine) ProcessHop(noisy, clean []float32) error {
 	if e.st == nil {
 		return errors.New("the model is closed")
 	}
-	copy(e.in, noisy)
-	e.dither.apply(e.in)
+	copy(e.in, noisy) // already dithered: the dither stage runs just before this one
 	C.dp_df_process(e.st, (*C.float)(unsafe.Pointer(&e.in[0])), (*C.float)(unsafe.Pointer(&e.out[0])))
 	copy(clean, e.out)
 	return nil
@@ -175,7 +173,6 @@ func (e *dfEngine) Reset() error {
 		C.dp_df_free(e.st)
 		e.st = nil
 	}
-	e.dither = newDither()
 	return e.create()
 }
 
