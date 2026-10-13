@@ -22,6 +22,8 @@
 	<string>14.0</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>DeskPixie controls Music or Spotify when you ask Bit to play, pause or skip.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>DeskPixie listens when you start a conversation with Bit.</string>
 </dict>
