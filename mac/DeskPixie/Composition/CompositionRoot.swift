@@ -33,9 +33,9 @@ final class CompositionRoot {
     let engine = LibDeskPixieEngine()
     let voiceIO = VPIOVoiceIO()
     /// Playback ring: 120 s at 24 kHz, so a whole answer fits without back-pressure.
-    let ring = PlaybackRing(capacity: 24_000 * 120)
+    let ring = PlaybackRing(capacity: VoiceAudioSizes.speakerRingSamples)
     /// Mic ring: 2 s at 24 kHz.
-    let micRing = SampleRing(capacity: 48_000)
+    let micRing = SampleRing(capacity: VoiceAudioSizes.micRingSamples)
     let pump: AudioPump
     let hotkey = CarbonHotkey()
     let coordinator: EngineCoordinator

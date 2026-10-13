@@ -128,3 +128,10 @@ public final class PlaybackRing: @unchecked Sendable {
         samples.withUnsafeBufferPointer { rms($0) }
     }
 }
+
+/// The app's ring sizes (ai-mascot engine.rs): the speaker ring holds 120 s at 24 kHz so a
+/// whole answer fits without back-pressure; the mic ring holds 2 s.
+public enum VoiceAudioSizes {
+    public static let speakerRingSamples = 24_000 * 120
+    public static let micRingSamples = 24_000 * 2
+}

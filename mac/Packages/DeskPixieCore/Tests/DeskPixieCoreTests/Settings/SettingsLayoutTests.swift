@@ -265,6 +265,12 @@ final class SettingsLayoutTests: XCTestCase {
         XCTAssertEqual(L.formatHotkey("super+Space", platform: .windows), "Win+Space")
     }
 
+    func test_recorder_and_placeholder_texts_match_the_web_page() {
+        XCTAssertEqual(L.recording, "Type shortcut…")
+        XCTAssertEqual(L.notAvailable, "(not available on this platform)")
+        XCTAssertEqual(L.notFound, "(not found)")
+    }
+
     func test_chrome_texts_match_the_web_page() {
         XCTAssertEqual(L.bannerText("line 3"), "settings.json has a syntax error; fix it or reset it (line 3)")
         let fields = SettingsFixture.fields
