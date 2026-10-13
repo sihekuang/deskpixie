@@ -15,6 +15,8 @@ import os
 @MainActor
 final class MascotController {
     static let defaultScale: CGFloat = 8
+    /// ai-mascot's `proximity_fade.radius` default (150) × the monitor scale factor. AppKit works in
+    /// points, which already are physical pixels / backing scale, so 150 pt is the same distance.
     static let fadeRadius: CGFloat = 150
     static let cursorPollInterval: TimeInterval = 1.0 / 60.0
     /// A little past the 300 ms double-click window so timer jitter never expires it early.
@@ -31,6 +33,10 @@ final class MascotController {
     private var gesture = Gesture()
     /// True from a left press until all buttons are up (covers the window drag too).
     private var pointerActive = false
+    /// Proximity fade on/off (ai-mascot `proximity_fade.enabled`; no settings UI in Phase 3).
+    var fadeEnabled = true
+    /// The opacity last applied to the view (actions.rs `last_opacity`).
+    private var lastOpacity: CGFloat = 1.0
 
     let panel: MascotPanel
     let view: MascotView
@@ -167,9 +173,13 @@ final class MascotController {
         let overBit = bodySheetPoint(screen: cursor).map { sheet.isOpaque(sheetPoint: $0) } ?? false
         let ignore = !(pointerActive || overBit)
         if panel.ignoresMouseEvents != ignore { panel.ignoresMouseEvents = ignore }
-        let opacity = ProximityFade.opacity(spriteFrame: panel.frame, cursor: cursor,
-                                            fadeRadius: Self.fadeRadius, enabled: true)
-        view.setOpacity(Float(opacity))
+        // actions.rs spawn_proximity: fully visible while on Bit (or pressed/dragging), else fade.
+        let next = ProximityFade.target(cursor: cursor, rect: panel.frame, radius: Self.fadeRadius,
+                                        enabled: fadeEnabled, overBit: pointerActive || overBit)
+        if ProximityFade.shouldEmit(last: lastOpacity, next: next) {
+            view.setOpacity(Float(next))
+            lastOpacity = next
+        }
     }
 
     // MARK: Gestures

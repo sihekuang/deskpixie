@@ -1,26 +1,35 @@
 import CoreGraphics
 
-/// Fades Bit as the cursor approaches, so he never blocks what is underneath.
+/// Proximity fade, a port of ai-mascot `src-tauri/src/proximity.rs` (itself oled-saver's
+/// `BallPhysics.proximityOpacity`): fully visible beyond `radius`, invisible within 30% of it,
+/// quadratic between. Coordinates are AppKit points in the global desktop space (may be negative).
 public enum ProximityFade {
-    /// Bit never fully vanishes.
-    public static let minOpacity: CGFloat = 0.15
+    /// Distance from `p` to the nearest point of `r`; 0 when inside.
+    public static func distanceToRect(_ p: CGPoint, _ r: CGRect) -> CGFloat {
+        let dx = max(r.minX - p.x, p.x - r.maxX, 0)
+        let dy = max(r.minY - p.y, p.y - r.maxY, 0)
+        return (dx * dx + dy * dy).squareRoot()
+    }
 
-    // Borrowed from oled-saver-macos BallPhysics.proximityOpacity (MIT, same author), adapted to a rect.
-    /// Distance is from the cursor to the nearest point of `spriteFrame` (0 inside). Returns 1.0 at
-    /// >= `fadeRadius`, `minOpacity` at <= 30% of `fadeRadius`, quadratic in between (floored).
-    public static func opacity(spriteFrame: CGRect, cursor: CGPoint, fadeRadius: CGFloat, enabled: Bool) -> CGFloat {
-        guard enabled, fadeRadius > 0 else { return 1.0 }
+    public static func opacity(cursor: CGPoint, rect: CGRect, radius: CGFloat) -> CGFloat {
+        let d = distanceToRect(cursor, rect)
+        if d >= radius { return 1.0 }
+        let inner = radius * 0.3
+        if d <= inner { return 0.0 }
+        let t = (d - inner) / (radius - inner)
+        return t * t
+    }
 
-        let dx = max(spriteFrame.minX - cursor.x, 0, cursor.x - spriteFrame.maxX)
-        let dy = max(spriteFrame.minY - cursor.y, 0, cursor.y - spriteFrame.maxY)
-        let distFromEdge = (dx * dx + dy * dy).squareRoot()
+    /// actions.rs `spawn_proximity`: full opacity while the cursor is on Bit's own pixels
+    /// (`overBit`, which also covers an active press/drag) or when the fade is off.
+    public static func target(cursor: CGPoint, rect: CGRect, radius: CGFloat,
+                              enabled: Bool, overBit: Bool) -> CGFloat {
+        (overBit || !enabled) ? 1.0 : opacity(cursor: cursor, rect: rect, radius: radius)
+    }
 
-        // Fade reaches its floor at innerCutoff (30% of fadeRadius), not at the edge.
-        let innerCutoff = fadeRadius * 0.3
-        if distFromEdge >= fadeRadius { return 1.0 }
-        if distFromEdge <= innerCutoff { return minOpacity }
-
-        let linear = (distFromEdge - innerCutoff) / (fadeRadius - innerCutoff)
-        return max(linear * linear, minOpacity) // Quadratic fade
+    /// Skip tiny changes, but always deliver reaching fully hidden or fully visible.
+    public static func shouldEmit(last: CGFloat, next: CGFloat) -> Bool {
+        if next == last { return false }
+        return abs(next - last) >= 0.01 || next == 0.0 || next == 1.0
     }
 }

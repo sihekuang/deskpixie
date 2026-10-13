@@ -97,7 +97,7 @@ public final class VPIOVoiceIO: VoiceIO, @unchecked Sendable {
 
             // Keep other apps' audio as loud as possible while Bit listens. Best effort.
             var duck = AUVoiceIOOtherAudioDuckingConfiguration(
-                mEnableAdvancedDucking: true, mDuckingLevel: .min)
+                mEnableAdvancedDucking: false, mDuckingLevel: .min) // ai-mascot engine.rs value
             _ = AudioUnitSetProperty(u, kAUVoiceIOProperty_OtherAudioDuckingConfiguration,
                                      kAudioUnitScope_Global, 0, &duck,
                                      UInt32(MemoryLayout<AUVoiceIOOtherAudioDuckingConfiguration>.size))

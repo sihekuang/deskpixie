@@ -1,5 +1,6 @@
 import Foundation
 import CDP
+import os
 
 /// Shuttles audio between the AudioUnit rings and the Go engine on a dedicated
 /// thread every 10 ms (port of ai-mascot's audio-macos control loop + mic_pump).
@@ -23,6 +24,9 @@ public final class AudioPump: @unchecked Sendable {
     public static let sampleRate: UInt64 = 24_000
     public static let periodNanos: UInt64 = 10_000_000
     public static let expectingWindowNanos: UInt64 = 200_000_000
+
+    /// docs/go-no-go.md relies on one line per flush (barge-in timing cross-check).
+    private static let log = Logger(subsystem: "com.sihekuang.deskpixie", category: "audio")
 
     private let engine: CoreEngine
     private let ring: PlaybackRing
@@ -148,7 +152,11 @@ public final class AudioPump: @unchecked Sendable {
             let want = min(room, pullBuf.count)
             let dst = UnsafeMutableBufferPointer(rebasing: pullBuf[0..<want])
             let (n, flush) = engine.pullAudio(into: dst)
-            if flush { ring.flush() }
+            if flush {
+                let dropped = ring.buffered
+                ring.flush()
+                Self.log.notice("playback flush: dropped \(dropped, privacy: .public) buffered samples, played \(self.ring.played, privacy: .public)")
+            }
             guard n > 0 else { break }
             lastAudioAt = now
             pendingStart = 0
