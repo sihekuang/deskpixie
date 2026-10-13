@@ -156,8 +156,8 @@ final class SettingsModelTests: XCTestCase {
     }
 
     func test_an_untouched_text_field_does_not_commit() {
-        model.setEditing("voice.model", "gpt-realtime")
-        XCTAssertTrue(model.commitText("voice.model"))
+        model.setEditing("agent.session", "deskpixie")
+        XCTAssertTrue(model.commitText("agent.session"))
         XCTAssertTrue(client.sets.isEmpty)
     }
 
@@ -169,11 +169,11 @@ final class SettingsModelTests: XCTestCase {
     }
 
     func test_a_failed_save_is_a_notice_and_drops_the_draft() {
-        client.refuse["voice.model"] = .save("disk full")
-        model.setEditing("voice.model", "m2")
-        model.commitText("voice.model")
+        client.refuse["agent.session"] = .save("disk full")
+        model.setEditing("agent.session", "m2")
+        model.commitText("agent.session")
         XCTAssertEqual(model.noticeText, "Couldn't save settings: disk full")
-        XCTAssertNil(model.drafts["voice.model"])
+        XCTAssertNil(model.drafts["agent.session"])
         client.refuse = [:]
         model.commit("scale", .menu(3))
         XCTAssertNil(model.notice, "a good save clears the notice")

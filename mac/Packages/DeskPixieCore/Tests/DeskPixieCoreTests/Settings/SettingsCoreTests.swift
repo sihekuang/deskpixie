@@ -132,7 +132,7 @@ final class SettingsCoreTests: XCTestCase {
 
     func test_optional_text_clears_to_null_required_text_cannot_be_empty() {
         let spec = { (f: SettingsField) in L.controlSpec(f, values: [:], platform: .macos) }
-        let model = spec(field("agent.model", .agent, .text(optional: true)))
+        let model = spec(field("voice.homeCity", .voice, .text(optional: true)))
         let session = spec(field("agent.session", .advanced, .text(optional: false)))
         let root = spec(field("agent.projectsRoot", .agent, .path(dir: true, optional: false)))
         XCTAssertEqual(L.commitValue(model, .text("   ")), .success(.null))

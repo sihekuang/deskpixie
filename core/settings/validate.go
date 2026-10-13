@@ -60,7 +60,8 @@ func Validate(c Config, env Env) []FieldError {
 		case KindChoice:
 			// A device UID may name a device that isn't connected now (a hand edit, or one
 			// saved on another day): the audio unit falls back to the default for it.
-			if f.Kind.Choices.Nullable() {
+			// An open choice's options are only suggestions.
+			if f.Kind.Choices.Nullable() || f.Kind.Choices.Open {
 				continue
 			}
 			s, _ := value.(string)

@@ -3,6 +3,7 @@ package settings
 import (
 	"encoding/json"
 	"runtime"
+	"strings"
 )
 
 // Platform is a platform the Settings window styles itself for.
@@ -76,17 +77,28 @@ const (
 	SourceInputDevices
 	// SourceOutputDevices: connected speakers, after "System Default" (stored as null).
 	SourceOutputDevices
+	// SourceVoiceModels: the models of the current voice.provider (OptionSources.VoiceProvider).
+	SourceVoiceModels
+	// SourceVoiceVoices: the voices of the current voice.provider.
+	SourceVoiceVoices
 )
 
 // Choices is a choice field's option source; Static holds the options for SourceStatic.
 type Choices struct {
 	Source ChoiceSource
 	Static []Opt
+	// Open marks suggested choices: any text is still a valid value (the voice adapter
+	// substitutes what it can't use, Claude Code checks its --model), so a value not listed
+	// is kept and shown "(not found)" rather than refused.
+	Open bool
+	// Null: an option with the value "" stands for null (agent.model's "Default").
+	Null bool
 }
 
-// Nullable reports whether null is a value: the first option, "System Default", stands for it.
+// Nullable reports whether null is a value: the first option ("System Default", "Default")
+// stands for it.
 func (c Choices) Nullable() bool {
-	return c.Source == SourceInputDevices || c.Source == SourceOutputDevices
+	return c.Null || c.Source == SourceInputDevices || c.Source == SourceOutputDevices
 }
 
 // KindType is a field's control kind.
@@ -149,6 +161,12 @@ func intKind(min, max int64, menu bool) Kind {
 func textKind(optional bool) Kind      { return Kind{Type: KindText, Optional: optional} }
 func pathKind(dir, optional bool) Kind { return Kind{Type: KindPath, Dir: dir, Optional: optional} }
 func choiceKind(src ChoiceSource) Kind { return Kind{Type: KindChoice, Choices: Choices{Source: src}} }
+
+// openChoice is a choice whose options are suggestions (Choices.Open).
+func openChoice(c Choices) Kind {
+	c.Open = true
+	return Kind{Type: KindChoice, Choices: c}
+}
 func staticChoice(opts []Opt) Kind {
 	return Kind{Type: KindChoice, Choices: Choices{Source: SourceStatic, Static: opts}}
 }
@@ -157,6 +175,58 @@ func staticChoice(opts []Opt) Kind {
 var NoiseModels = []Opt{
 	{"hush", "Hush (noise and background voices)", mac},
 	{"dfn3", "DeepFilterNet3 (steady noise only)", mac},
+}
+
+// Suggested voice models and voices per provider. The Gemini lists mirror core/voice/gemini
+// (DefaultModel, the legacy preview its docs name, and Voices); a test keeps them in step.
+var (
+	OpenAIModels = []Opt{
+		{"gpt-realtime", "GPT Realtime", AllPlatforms},
+		{"gpt-realtime-mini", "GPT Realtime mini", AllPlatforms},
+	}
+	GeminiModels = []Opt{
+		{"gemini-3.8-live", "Gemini 3.8 Live", AllPlatforms},
+		{"gemini-3.1-flash-live-preview", "Gemini 3.1 Flash Live (preview)", AllPlatforms},
+	}
+	OpenAIVoices = titled("alloy", "ash", "ballad", "cedar", "coral", "echo", "marin", "sage", "shimmer", "verse")
+	GeminiVoices = titled(
+		"Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Aoede", "Callirrhoe", "Autonoe",
+		"Enceladus", "Iapetus", "Umbriel", "Algieba", "Despina", "Erinome", "Algenib", "Rasalgethi",
+		"Laomedeia", "Achernar", "Alnilam", "Schedar", "Gacrux", "Pulcherrima", "Achird",
+		"Zubenelgenubi", "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat",
+	)
+)
+
+// ProviderDefault is a voice provider's default model and voice.
+type ProviderDefault struct{ Model, Voice string }
+
+// ProviderDefaults: switching voice.provider swaps one provider's default for the other's.
+var ProviderDefaults = map[string]ProviderDefault{
+	ProviderOpenAI: {"gpt-realtime", "marin"},
+	ProviderGemini: {"gemini-3.8-live", "Puck"},
+}
+
+// titled is one option per name, labelled with a capital first letter.
+func titled(names ...string) []Opt {
+	out := make([]Opt, 0, len(names))
+	for _, n := range names {
+		out = append(out, Opt{n, strings.ToUpper(n[:1]) + n[1:], AllPlatforms})
+	}
+	return out
+}
+
+// AgentModels are suggested values of Claude Code's --model: "" (null) leaves it to Claude
+// Code, then the aliases `claude --help` documents, then full model ids.
+var AgentModels = []Opt{
+	{"", "Default (Claude Code decides)", AllPlatforms},
+	{"opus", "Opus (latest)", AllPlatforms},
+	{"sonnet", "Sonnet (latest)", AllPlatforms},
+	{"haiku", "Haiku (latest)", AllPlatforms},
+	{"fable", "Fable (latest)", AllPlatforms},
+	{"claude-opus-5-5", "Claude Opus 5.5", AllPlatforms},
+	{"claude-sonnet-5-5", "Claude Sonnet 5.5", AllPlatforms},
+	{"claude-haiku-5-5", "Claude Haiku 5.5", AllPlatforms},
+	{"claude-fable-5-1", "Claude Fable 5.1", AllPlatforms},
 }
 
 // WorkerKinds are the agents that may work as workers.
@@ -196,8 +266,10 @@ var Fields = []FieldSpec{
 	spec("position", SectionMascot, "Position", "Where Bit was last dragged; written by the app.", managedKind, ApplyLive),
 	spec("voice.provider", SectionVoice, "Voice service", "The realtime voice service Bit talks through.", choiceKind(SourceVoiceProviders), ApplyRestart),
 	spec("voice.audio", SectionVoice, "Audio", "The microphone and speaker backend.", choiceKind(SourceAudioBackends), ApplyRestart),
-	spec("voice.model", SectionVoice, "Model", "The voice model's name, e.g. gpt-realtime.", textKind(false), ApplyRestart),
-	spec("voice.voice", SectionVoice, "Voice", "The voice Bit speaks with, e.g. marin.", textKind(false), ApplyRestart),
+	// voice.model, voice.voice and agent.model are free Text in Rust; here they are open
+	// choices (suggestions; any text still validates) — a deliberate deviation (#45).
+	spec("voice.model", SectionVoice, "Model", "The voice model. The choices follow the voice service.", openChoice(Choices{Source: SourceVoiceModels}), ApplyRestart),
+	spec("voice.voice", SectionVoice, "Voice", "The voice Bit speaks with. The choices follow the voice service.", openChoice(Choices{Source: SourceVoiceVoices}), ApplyRestart),
 	spec("voice.chimes", SectionVoice, "Chimes", "A rising chime when Bit listens, a falling one when it stops.", boolKind, ApplyRestart),
 	macOnly(spec("voice.noiseFilter", SectionVoice, "Noise filter", "Cleans background noise (fans, typing, hum) from your mic on this Mac. With Hush it also turns quieter background voices down, like a TV.", boolKind, ApplyLive)),
 	macOnly(spec("voice.noiseModel", SectionVoice, "Noise model", "Hush also turns quieter background voices down by up to 18 dB. DeepFilterNet3 cleans steady noise only.", staticChoice(NoiseModels), ApplyRestart)),
@@ -209,7 +281,7 @@ var Fields = []FieldSpec{
 	spec("voice.personaPath", SectionVoice, "Persona file", "A Markdown file that replaces Bit's personality. Empty uses the built-in one.", pathKind(false, true), ApplyRestart),
 	spec("agent.enabled", SectionAgent, "Delegation", "Let Bit hand work to a Claude Code agent.", boolKind, ApplyRestart),
 	spec("agent.terminal", SectionAgent, "Terminal", "Where the agent session opens when you click Bit.", choiceKind(SourceTerminals), ApplyRestart),
-	spec("agent.model", SectionAgent, "Agent model", "Claude Code's --model for the coordinator. Empty uses its default.", textKind(true), ApplyRestart),
+	spec("agent.model", SectionAgent, "Agent model", "Claude Code's --model for the coordinator. Default lets Claude Code decide.", openChoice(Choices{Source: SourceStatic, Static: AgentModels, Null: true}), ApplyRestart),
 	spec("agent.warm", SectionAgent, "Start at launch", "Start the coordinator when the app starts, not on first use.", boolKind, ApplyRestart),
 	spec("agent.narration", SectionAgent, "Narration", "Bit says what the agent is doing.", boolKind, ApplyRestart),
 	spec("agent.holdOpenSecs", SectionAgent, "Hold open (seconds)", "How long a conversation stays open while a job runs.", intKind(0, 3600, false), ApplyRestart),
@@ -267,6 +339,9 @@ type OptionSources struct {
 	Inputs []Pair
 	// Outputs are speakers as (UID, label), like Inputs.
 	Outputs []Pair
+	// VoiceProvider is the current voice.provider; the model and voice choices follow it.
+	// Snapshot fills it from the config.
+	VoiceProvider string
 }
 
 // The value and label that stand for null in a device choice, and the labels of a saved
@@ -331,11 +406,7 @@ func named(known []Opt, registered []string) []OptionView {
 func Options(c Choices, src OptionSources) []OptionView {
 	switch c.Source {
 	case SourceStatic:
-		out := []OptionView{}
-		for _, o := range c.Static {
-			out = append(out, viewOf(o))
-		}
-		return out
+		return static(c.Static)
 	case SourcePacks:
 		out := []OptionView{}
 		for _, p := range src.Packs {
@@ -354,8 +425,20 @@ func Options(c Choices, src OptionSources) []OptionView {
 		return devices(src.Inputs)
 	case SourceOutputDevices:
 		return devices(src.Outputs)
+	case SourceVoiceModels:
+		return static(map[string][]Opt{ProviderOpenAI: OpenAIModels, ProviderGemini: GeminiModels}[src.VoiceProvider])
+	case SourceVoiceVoices:
+		return static(map[string][]Opt{ProviderOpenAI: OpenAIVoices, ProviderGemini: GeminiVoices}[src.VoiceProvider])
 	}
 	return []OptionView{}
+}
+
+func static(opts []Opt) []OptionView {
+	out := []OptionView{}
+	for _, o := range opts {
+		out = append(out, viewOf(o))
+	}
+	return out
 }
 
 // devices is "System Default", then each device.

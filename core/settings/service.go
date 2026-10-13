@@ -165,7 +165,7 @@ func (s *Service) Snapshot(env Env) Snapshot {
 	return Snapshot{
 		Platform:       env.Platform,
 		Values:         values,
-		Fields:         Views(env.Sources),
+		Fields:         Views(sourcesFor(env.Sources, current)),
 		RestartPending: s.RestartPending(),
 		FileError:      clonePtr(s.fileErr),
 		Warning:        clonePtr(s.warning),
@@ -220,6 +220,9 @@ func (s *Service) SetField(env Env, path string, value json.RawMessage) error {
 	candidate, msg := withValue(current, field, parsed)
 	if msg != "" {
 		return invalid(path, msg)
+	}
+	if path == "voice.provider" {
+		swapProviderDefaults(&candidate)
 	}
 	// Problems already in the saved config don't block other edits.
 	before := Validate(current, env)
@@ -418,7 +421,11 @@ func parse(kind Kind, value any) (any, string) {
 			return nil, "Expected text"
 		}
 		if s, ok := value.(string); ok {
-			return strings.TrimSpace(s), ""
+			// An open choice takes any text, but not none (it was required text before).
+			if t := strings.TrimSpace(s); t != "" || !kind.Choices.Open {
+				return t, ""
+			}
+			return nil, Empty
 		}
 		return nil, "Expected text"
 	case KindMultiChoice:
@@ -478,4 +485,31 @@ func withValue(current Config, field *FieldSpec, value any) (Config, string) {
 		return Config{}, RangeMessage(field.Kind.Min, field.Kind.Max)
 	}
 	return Config{}, "Not a valid value for this setting"
+}
+
+// sourcesFor is src with the voice provider of c, so the model and voice choices follow it.
+func sourcesFor(src OptionSources, c Config) OptionSources {
+	src.VoiceProvider = c.Voice.Provider
+	return src
+}
+
+// swapProviderDefaults: after voice.provider changes, a model or voice that is another
+// provider's default becomes the new provider's default (gpt-realtime <-> gemini-3.8-live,
+// marin <-> Puck). Anything else is left alone; the adapter substitutes what it can't use.
+func swapProviderDefaults(c *Config) {
+	to, ok := ProviderDefaults[c.Voice.Provider]
+	if !ok {
+		return
+	}
+	for name, d := range ProviderDefaults {
+		if name == c.Voice.Provider {
+			continue
+		}
+		if c.Voice.Model == d.Model {
+			c.Voice.Model = to.Model
+		}
+		if c.Voice.Voice == d.Voice {
+			c.Voice.Voice = to.Voice
+		}
+	}
 }

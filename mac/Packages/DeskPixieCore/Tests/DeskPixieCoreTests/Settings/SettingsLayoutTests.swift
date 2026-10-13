@@ -126,9 +126,9 @@ final class SettingsLayoutTests: XCTestCase {
     }
 
     func test_text_path_and_hotkey_controls_show_their_values() {
-        XCTAssertEqual(spec("voice.model", ["voice": ["model": "gpt-realtime"]]).control,
-                       .text(text: "gpt-realtime", optional: false))
-        XCTAssertEqual(spec("agent.model", ["agent": ["model": nil]]).control, .text(text: "", optional: true))
+        XCTAssertEqual(spec("agent.session", ["agent": ["session": "deskpixie"]]).control,
+                       .text(text: "deskpixie", optional: false))
+        XCTAssertEqual(spec("voice.homeCity", ["voice": ["homeCity": nil]]).control, .text(text: "", optional: true))
         XCTAssertEqual(spec("agent.projectsRoot", ["agent": ["projectsRoot": "/Users/me/Projects"]]).control,
                        .path(path: "/Users/me/Projects", dir: true, optional: false))
         XCTAssertEqual(spec("voice.personaPath", ["voice": ["personaPath": nil]]).control,
@@ -136,6 +136,44 @@ final class SettingsLayoutTests: XCTestCase {
         XCTAssertEqual(spec("hotkey", ["hotkey": "alt+super+Space"]).control,
                        .hotkey(combo: "alt+super+Space", title: "⌥⌘Space"))
         XCTAssertEqual(spec("canvas.autoOpen", ["canvas": ["autoOpen": true]]).control, .switch(on: true))
+    }
+
+    // Not a Rust port: voice.model, voice.voice and agent.model are free text there; here they are
+    // pop-ups of suggested values (#45). A value not offered stays selected as "(not found)".
+    func test_model_and_voice_pickers_offer_the_providers_choices() {
+        guard case .menu(let models, let m) = spec("voice.model", defaults).control,
+              case .menu(let voices, let v) = spec("voice.voice", defaults).control else {
+            return XCTFail("model and voice are pop-ups")
+        }
+        XCTAssertEqual(models.map(\.label), ["GPT Realtime", "GPT Realtime mini"])
+        XCTAssertEqual(m.map { models[$0].value }, "gpt-realtime")
+        XCTAssertEqual(voices.count, 10)
+        XCTAssertEqual(v.map { voices[$0].value }, "marin")
+        XCTAssertEqual(L.commitValue(spec("voice.voice", defaults), .menu(0)), .success("alloy"))
+    }
+
+    func test_a_custom_model_or_voice_shows_as_not_found_and_stays_selected() {
+        let custom = spec("voice.model", ["voice": ["model": "gpt-realtime-2025-08-28"]])
+        guard case .menu(let items, let selected) = custom.control else { return XCTFail("pop-up") }
+        XCTAssertEqual(items.last, L.MenuItem(label: "gpt-realtime-2025-08-28 (not found)",
+                                              value: "gpt-realtime-2025-08-28", enabled: false))
+        XCTAssertEqual(selected, items.count - 1)
+        XCTAssertEqual(L.commitValue(custom, .menu(items.count - 1)), .failure(.init(L.notAvailable)))
+    }
+
+    func test_the_agent_model_picker_maps_default_to_null() {
+        let unset = spec("agent.model", ["agent": ["model": nil]])
+        guard case .menu(let items, let selected) = unset.control else { return XCTFail("pop-up") }
+        XCTAssertEqual(items.first, L.MenuItem(label: "Default (Claude Code decides)", value: .null, enabled: true))
+        XCTAssertEqual(selected, 0)
+        XCTAssertEqual(items.map(\.value).compactMap(\.stringValue),
+                       ["opus", "sonnet", "haiku", "fable", "claude-opus-5-5", "claude-sonnet-5-5",
+                        "claude-haiku-5-5", "claude-fable-5-1"])
+        XCTAssertEqual(L.commitValue(unset, .menu(0)), .success(.null))
+        guard case .menu(let other, let s) = spec("agent.model", ["agent": ["model": "claude-opus-4-1"]]).control
+        else { return XCTFail("pop-up") }
+        XCTAssertEqual(other.last?.label, "claude-opus-4-1 (not found)")
+        XCTAssertEqual(s, other.count - 1)
     }
 
     func test_typed_text_is_parsed_like_the_web_page() {
@@ -146,10 +184,10 @@ final class SettingsLayoutTests: XCTestCase {
         XCTAssertEqual(L.commitValue(port, .text("")), .failure(.init(L.whole)))
         XCTAssertEqual(L.commitValue(port, .text("1e3")), .failure(.init(L.whole)))
         XCTAssertEqual(L.commitValue(port, .step(4000)), .success(4000))
-        let model = spec("voice.model", defaults)
+        let model = spec("agent.session", defaults)
         XCTAssertEqual(L.commitValue(model, .text("  ")), .failure(.init(L.empty)))
         XCTAssertEqual(L.commitValue(model, .text(" marin ")), .success("marin"))
-        let optional = spec("agent.model", defaults)
+        let optional = spec("voice.homeCity", defaults)
         XCTAssertEqual(L.commitValue(optional, .text("")), .success(.null))
         let persona = spec("voice.personaPath", defaults)
         XCTAssertEqual(L.commitValue(persona, .path(nil)), .success(.null))

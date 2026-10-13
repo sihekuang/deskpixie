@@ -2,7 +2,8 @@ import Foundation
 @testable import DeskPixieCore
 
 /// The Go core's `settings.Views` output for the sources Rust's layout tests use
-/// (packs bit/dino, both providers, macos-vpio, herdr, warp/iterm, one mic, no speakers), and
+/// (packs bit/dino, both providers with openai-realtime current, macos-vpio, herdr, warp/iterm,
+/// one mic, no speakers), and
 /// `settings.Default()` as JSON. Generated from core/settings on 2026-10-13; regenerate if the
 /// schema changes.
 enum SettingsFixture {
@@ -172,10 +173,29 @@ enum SettingsFixture {
   "path": "voice.model",
   "section": "Voice",
   "label": "Model",
-  "help": "The voice model's name, e.g. gpt-realtime.",
+  "help": "The voice model. The choices follow the voice service.",
   "kind": {
-   "type": "text",
-   "optional": false
+   "type": "choice",
+   "options": [
+    {
+     "value": "gpt-realtime",
+     "label": "GPT Realtime",
+     "platforms": [
+      "macos",
+      "windows",
+      "linux"
+     ]
+    },
+    {
+     "value": "gpt-realtime-mini",
+     "label": "GPT Realtime mini",
+     "platforms": [
+      "macos",
+      "windows",
+      "linux"
+     ]
+    }
+   ]
   },
   "apply": "restart",
   "platforms": [
@@ -188,10 +208,101 @@ enum SettingsFixture {
   "path": "voice.voice",
   "section": "Voice",
   "label": "Voice",
-  "help": "The voice Bit speaks with, e.g. marin.",
+  "help": "The voice Bit speaks with. The choices follow the voice service.",
   "kind": {
-   "type": "text",
-   "optional": false
+   "type": "choice",
+   "options": [
+    {
+     "value": "alloy",
+     "label": "Alloy",
+     "platforms": [
+      "macos",
+      "windows",
+      "linux"
+     ]
+    },
+    {
+     "value": "ash",
+     "label": "Ash",
+     "platforms": [
+      "macos",
+      "windows",
+      "linux"
+     ]
+    },
+    {
+     "value": "ballad",
+     "label": "Ballad",
+     "platforms": [
+      "macos",
+      "windows",
+      "linux"
+     ]
+    },
+    {
+     "value": "cedar",
+     "label": "Cedar",
+     "platforms": [
+      "macos",
+      "windows",
+      "linux"
+     ]
+    },
+    {
+     "value": "coral",
+     "label": "Coral",
+     "platforms": [
+      "macos",
+      "windows",
+      "linux"
+     ]
+    },
+    {
+     "value": "echo",
+     "label": "Echo",
+     "platforms": [
+      "macos",
+      "windows",
+      "linux"
+     ]
+    },
+    {
+     "value": "marin",
+     "label": "Marin",
+     "platforms": [
+      "macos",
+      "windows",
+      "linux"
+     ]
+    },
+    {
+     "value": "sage",
+     "label": "Sage",
+     "platforms": [
+      "macos",
+      "windows",
+      "linux"
+     ]
+    },
+    {
+     "value": "shimmer",
+     "label": "Shimmer",
+     "platforms": [
+      "macos",
+      "windows",
+      "linux"
+     ]
+    },
+    {
+     "value": "verse",
+     "label": "Verse",
+     "platforms": [
+      "macos",
+      "windows",
+      "linux"
+     ]
+    }
+   ]
   },
   "apply": "restart",
   "platforms": [
@@ -430,10 +541,92 @@ enum SettingsFixture {
   "path": "agent.model",
   "section": "Agent",
   "label": "Agent model",
-  "help": "Claude Code's --model for the coordinator. Empty uses its default.",
+  "help": "Claude Code's --model for the coordinator. Default lets Claude Code decide.",
   "kind": {
-   "type": "text",
-   "optional": true
+   "type": "choice",
+   "options": [
+    {
+     "value": "",
+     "label": "Default (Claude Code decides)",
+     "platforms": [
+      "macos",
+      "windows",
+      "linux"
+     ]
+    },
+    {
+     "value": "opus",
+     "label": "Opus (latest)",
+     "platforms": [
+      "macos",
+      "windows",
+      "linux"
+     ]
+    },
+    {
+     "value": "sonnet",
+     "label": "Sonnet (latest)",
+     "platforms": [
+      "macos",
+      "windows",
+      "linux"
+     ]
+    },
+    {
+     "value": "haiku",
+     "label": "Haiku (latest)",
+     "platforms": [
+      "macos",
+      "windows",
+      "linux"
+     ]
+    },
+    {
+     "value": "fable",
+     "label": "Fable (latest)",
+     "platforms": [
+      "macos",
+      "windows",
+      "linux"
+     ]
+    },
+    {
+     "value": "claude-opus-5-5",
+     "label": "Claude Opus 5.5",
+     "platforms": [
+      "macos",
+      "windows",
+      "linux"
+     ]
+    },
+    {
+     "value": "claude-sonnet-5-5",
+     "label": "Claude Sonnet 5.5",
+     "platforms": [
+      "macos",
+      "windows",
+      "linux"
+     ]
+    },
+    {
+     "value": "claude-haiku-5-5",
+     "label": "Claude Haiku 5.5",
+     "platforms": [
+      "macos",
+      "windows",
+      "linux"
+     ]
+    },
+    {
+     "value": "claude-fable-5-1",
+     "label": "Claude Fable 5.1",
+     "platforms": [
+      "macos",
+      "windows",
+      "linux"
+     ]
+    }
+   ]
   },
   "apply": "restart",
   "platforms": [
