@@ -19,7 +19,8 @@ let package = Package(
         .testTarget(
             name: "DeskPixieCoreTests",
             dependencies: ["DeskPixieCore", "CDPStubs"],
-            path: "Tests/DeskPixieCoreTests"
+            path: "Tests/DeskPixieCoreTests",
+            resources: [.copy("Fixtures")]
         ),
     ]
 )
