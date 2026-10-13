@@ -29,7 +29,6 @@ DeskPixie runs as a Swift macOS app over a Go core and shares its audio pipeline
 
 ### Out of scope
 - Windows and Linux. The app is macOS-only today (`audio-macos`, `terminal-macos`).
-- Rewriting the mascot player natively. It stays as `player.js` in a WKWebView (§4.3); a native renderer is a separate, optional project.
 - New features during the port. Each one waits for cut-over, or lands in the Rust app first and is ported with the rest.
 
 ## 2. Benefits and costs (why, and what it takes)
@@ -71,7 +70,7 @@ Line counts are Rust lines on `origin/main` 33dcf70.
 | `crates/canvas-core` | 2,089 | Canvas page store, URL→file resolver, CSP | **Go** core + **Swift** WKWebView window | — |
 | `crates/mascot-pack` | 2,235 | Pack manifests and sprite generators (Bit, Dino, Black Gold, Flash) | **Go** (or keep as a build-time tool) | — |
 | `src-tauri` | 10,782 | App shell: windows, tray, hotkey, bridge, settings I/O, canvas window, proximity/layout, agent wiring | **Swift** shell + Go `libdeskpixie` C-ABI | `mac/Howl` AppDelegate, MenuBar, Composition, EngineCoordinator pattern; `core/cmd/libhowl` C-ABI pattern |
-| `ui/mascot` (JS) | — | Mascot player | **Kept as is** in a WKWebView | — |
+| `ui/mascot` (JS) | — | Mascot player | **Swift** native renderer (§4.3) | oled-saver-macos proximity fade |
 | `ui/settings` (JS) | — | Settings page | **SwiftUI** | `mac/Howl/UI/Settings/*` (§4.2) |
 
 **Summary.**
@@ -115,7 +114,7 @@ deskpixie/                       (repo; renamed from ai-mascot, see §6)
     canvas/  packs/  config/
   mac/                         Swift app, xcodegen project.yml
     DeskPixie/  (AppDelegate, DataMigration, Engine/, Composition/, UI/Mascot, UI/Settings, UI/MenuBar, UI/FirstRun)
-  ui/mascot/                   player.js, loaded by a WKWebView
+  mascots/                     packs (mascot.json + sheet.png), unchanged
 ```
 
 The audio packages are **not** in this tree. They come from the shared module (#99 §10 Q1: either a new repo or `voice-keyboard/core/pkg`).
@@ -164,7 +163,7 @@ Go → Swift: playback audio and UI events, as callbacks.
 
 ### 4.3 The mascot
 
-`ui/mascot/player.js` and the packs keep working unchanged in a WKWebView inside a borderless, transparent, click-through-where-empty NSPanel. This replaces the Tauri window. `mascot_click` / `mascot_ready` become `WKScriptMessageHandler` messages.
+**Decided 2026-10-13 (D5): native Swift.** The packs (`mascot.json` + `sheet.png`) are unchanged. `player-core.js` (frame stepping, bob, mouth overlay, click/double-click/drag gestures) is ported to Swift with its tests, and drawn with Core Animation layers (nearest-neighbour scaling) in a borderless, transparent NSPanel. Click-through-where-empty uses the sheet's alpha under the cursor; the proximity fade and the 60 Hz cursor poll are borrowed from oled-saver-macos (`BallPhysics.proximityOpacity`, MIT, same author).
 
 ## 5. Phases
 
@@ -253,7 +252,7 @@ In the Rust app this is a small `src-tauri/src/migrate.rs` called at the top of 
 | D2 | Full port, or stop at the middle option (Phase 2a) | Decide after Phase 3's numbers at the latest |
 | D3 | When the full rename (§6) lands: in today's Rust app (the name changes now; the migration is a Rust module later replaced by Swift's) or with the Swift app in Phase 3 (one migration, but the name waits) | §6 |
 | D4 | Copy Howl's UI pieces, or extract a shared Swift package | §4.2 |
-| D5 | Mascot renderer: WKWebView (recommended for the port) or native later | §4.3 |
+| D5 | ~~Mascot renderer~~ **Decided 2026-10-13: native Swift** | §4.3 |
 
 ## 9. Handoff: state as of 2026-10-13, and where to start
 

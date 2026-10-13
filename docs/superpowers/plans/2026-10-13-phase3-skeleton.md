@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** A talking Bit in the new stack: Swift VoiceProcessingIO mic → Go cleanup (pass-through) → OpenAI Realtime → Swift playback, the mascot in a WKWebView panel, a tray menu, a global hotkey, and measured go/no-go numbers (latency, underruns, max GC pause).
+**Goal:** A talking Bit in the new stack: Swift VoiceProcessingIO mic → Go cleanup (pass-through) → OpenAI Realtime → Swift playback, the mascot drawn natively (Core Animation) with click-through and proximity fade, a tray menu, a global hotkey, and measured go/no-go numbers (latency, underruns, max GC pause).
 
 **Architecture:** A Go core (`core/`) is built as the C-ABI dylib `libdeskpixie` (`-buildmode=c-shared`), following Howl's `libhowl` pattern: JSON configure, Swift **polls** Go for events every 30 ms, and Go never calls into Swift. Audio crosses the boundary as 24 kHz mono int16. Swift pushes 40 ms mic frames and pulls playback samples into its own ring; a `flush` flag on the pull carries barge-in. The Swift app (`mac/`) is an xcodegen project with a local SwiftPM package `DeskPixieCore` that holds every unit-testable piece.
 
@@ -21,7 +21,7 @@
 - Never print, log or commit API keys. Phase 3 reads `OPENAI_API_KEY` from the process environment, or else from `~/Library/Application Support/com.sihekuang.deskpixie/.env` (Keychain comes in Phase 4).
 - Default hotkey: **⌃⌥Space** (the Rust app's `ctrl+alt+Space`).
 - Default model `gpt-realtime`, voice `marin`, idle timeout 7 s, chimes are out of scope for Phase 3.
-- `ui/mascot/*.js` is copied **unchanged** from ai-mascot; host differences are absorbed by an injected shim.
+- The mascot is rendered natively in Swift (decision 2026-10-13, replaces spec §4.3's WKWebView); packs (`mascots/*/mascot.json` + `sheet.png`) are unchanged.
 - Path-scoped commits (`git add <paths>`), never `git add -A`, never bare `git stash`. Each commit ends with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`. Each task closes its GitHub issue in the commit message (`Closes #N`).
 
 ## Review Focus
@@ -53,7 +53,7 @@ mac/
   project.yml  Makefile  Configs/SharedSettings.xcconfig
   DeskPixie/   DeskPixieApp.swift AppDelegate.swift Info.plist DeskPixie.entitlements
                Composition/CompositionRoot.swift  Engine/EngineCoordinator.swift
-               Mascot/MascotPanel.swift Mascot/MascotWebView.swift Mascot/tauri-shim.js
+               Mascot/{MascotPanel,MascotView,MascotController}.swift
                MenuBar/MenuBarMenu.swift
   Packages/DeskPixieCore/  Package.swift
     Sources/CDP/include/{module.modulemap,libdeskpixie_shim.h}
@@ -61,9 +61,8 @@ mac/
     Sources/DeskPixieCore/Bridge/{CoreEngine.swift,LibDeskPixieEngine.swift,EngineEvent.swift}
     Sources/DeskPixieCore/Audio/{PlaybackRing.swift,VoiceIO.swift,VPIOVoiceIO.swift,AudioPump.swift}
     Sources/DeskPixieCore/Hotkey/CarbonHotkey.swift
-    Sources/DeskPixieCore/Mascot/MascotBridge.swift
+    Sources/DeskPixieCore/Mascot/{Pack,MascotPlayer,Gesture,SpriteSheet,ProximityFade}.swift
     Tests/DeskPixieCoreTests/...
-ui/mascot/   index.html player.js player-core.js   (copied unchanged)
 mascots/     bit/ dino/ blackgold/ flash/          (copied unchanged)
 docs/go-no-go.md
 ```
@@ -438,45 +437,76 @@ public final class AudioPump {   // dedicated Thread, 10 ms period
 
 ---
 
-### Task 9: Mascot panel (WKWebView + Tauri shim)  (issue #14)
+### Task 9: Native Swift mascot (renderer, gestures, click-through, proximity fade)  (issue #14)
+
+The mascot is drawn natively; there is no WebView and no `player.js`. The pure logic is a port of ai-mascot's `ui/mascot/player-core.js` (**port its 23 tests from `ui/mascot/test/player-core.test.js` first**). Proximity fade and cursor polling are borrowed from `~/Documents/Projects/oled-saver-macos` (MIT, same author): `CircleKit/Sources/CircleKit/BallPhysics.swift` `proximityOpacity` and the 60 Hz `NSEvent.mouseLocation` poll in `CircleApp/CircleOverlayView.swift`. Keep a one-line attribution comment above each borrowed function.
 
 **Files:**
-- Copy (unchanged): `ui/mascot/{index.html,player.js,player-core.js}` from ai-mascot.
-- Create: `mac/DeskPixie/Mascot/{MascotPanel.swift,MascotWebView.swift,tauri-shim.js}`, `Sources/DeskPixieCore/Mascot/MascotBridge.swift`
-- Test: `Tests/DeskPixieCoreTests/MascotBridgeTests.swift`
+- Create (package, testable): `Sources/DeskPixieCore/Mascot/{Pack.swift,MascotPlayer.swift,Gesture.swift,SpriteSheet.swift,ProximityFade.swift}`
+- Create (app): `mac/DeskPixie/Mascot/{MascotPanel.swift,MascotView.swift,MascotController.swift}`
+- Test: `Tests/DeskPixieCoreTests/{MascotPlayerTests.swift,GestureTests.swift,SpriteSheetTests.swift,ProximityFadeTests.swift}`
 
-**Shim** (`tauri-shim.js`, injected as a `WKUserScript` at document start) defines the subset of `window.__TAURI__` that `player.js` uses:
-```js
-(() => {
-  const listeners = {}; let seq = 0; const pending = {};
-  window.__deskpixie = {
-    emit(name, payload) { (listeners[name] || []).forEach(cb => cb({ payload })); },
-    resolve(id, value, error) { const p = pending[id]; if (!p) return; delete pending[id]; error ? p.reject(error) : p.resolve(value); }
-  };
-  window.__TAURI__ = {
-    core: { invoke(cmd, args) { const id = ++seq; return new Promise((resolve, reject) => {
-      pending[id] = { resolve, reject }; window.webkit.messageHandlers.invoke.postMessage({ id, cmd, args: args || {} }); }); } },
-    event: { listen(name, cb) { (listeners[name] ||= []).push(cb); return Promise.resolve(() => {}); } },
-    window: { getCurrentWindow() { return { startDragging() { window.webkit.messageHandlers.invoke.postMessage({ id: 0, cmd: 'start_dragging', args: {} }); return Promise.resolve(); } }; } }
-  };
-})();
-```
-**MascotBridge** (testable, no WebKit): maps commands → actions and builds the JS to evaluate.
-```swift
-public enum MascotCommand: Equatable { case ready(id: Int), click, voiceToggle, log(level: String, message: String), startDragging, unknown(String) }
-public enum MascotBridge {
-    public static func parse(_ body: [String: Any]) -> MascotCommand
-    public static func emitJS(_ name: String, payloadJSON: String) -> String   // "window.__deskpixie.emit(\"mascot://state\", {...})"
-    public static func resolveJS(id: Int, valueJSON: String) -> String
-    public static func packPayload(packJSON: Data, scale: Int, state: String) -> String?  // {pack, sheetDataUrl:"data:image/png;base64,...", scale, state}
-}
-```
-**MascotPanel:** borderless `NSPanel` (`.nonactivatingPanel`), `isOpaque=false`, `backgroundColor=.clear`, `hasShadow=false`, `level=.floating`, `collectionBehavior=[.canJoinAllSpaces, .fullScreenAuxiliary]`, size `cell × scale` (default scale 8 → 256×256), placed bottom-right of the main screen's visible frame. WKWebView with `drawsBackground=false` (`setValue(false, forKey: "drawsBackground")`), loads `ui/mascot/index.html` from the bundle via `loadFileURL(_:allowingReadAccessTo:)`. `start_dragging` → `panel.performDrag(with: NSApp.currentEvent!)` (fall back to tracking mouse-dragged events if `currentEvent` is not a mouse event). `voice_toggle` → `engine.hotkey()`. `mascot_click` → no-op in Phase 3 (terminal is Phase 5). `ui_log` → `os_log`. Click-through-where-empty and proximity fade are **deferred** (issue "Phase 4 · mascot click-through + proximity fade").
+**Interfaces:**
+- Consumes: `CoreEngine.packJSON()` → `{"pack": ResolvedPack, "sheetPath": "/abs/sheet.png"}` (Task 6); `CoreEngine.hotkey()`.
+- Produces:
+  ```swift
+  public struct Pack: Decodable, Sendable, Equatable {            // ResolvedPack JSON (Task 6)
+      public struct Bob: Decodable, Sendable, Equatable { public let px: Int; public let frames: Int }
+      public struct StateSpec: Decodable, Sendable, Equatable { public let row, frames: Int; public let loop, bob: Bool; public let faceDy: [Int] }
+      public struct Mouth: Decodable, Sendable, Equatable { public let row: Int; public let anchor, size: [Int]; public let levels: Int }
+      public let name: String; public let cell: [Int]; public let fps: Int; public let bob: Bob
+      public let states: [String: StateSpec]; public let mouth: Mouth
+  }
+  public struct MascotPlayer: Equatable, Sendable {               // port of player-core.js
+      public var state: String; public var frame: Int; public var tick: Int
+      public init(state: String = "idle")
+      public func setting(_ name: String, pack: Pack) -> MascotPlayer   // setState: unknown or same state → unchanged
+      public func stepped(pack: Pack) -> MascotPlayer                   // step: non-loop end → idle
+      public func bobOffset(pack: Pack) -> Int
+      public func bodyRect(pack: Pack) -> CGRect                        // in sheet pixels, top-left origin
+      public static func clampLevel(_ level: Int, pack: Pack) -> Int
+      public static func mouthRect(level: Int, pack: Pack) -> CGRect
+      public func mouthPos(pack: Pack) -> CGPoint
+  }
+  public enum GestureResult: Equatable { case none, press, drag, wait, double, click }
+  public struct Gesture {                                           // port of gesture(); times in seconds
+      public init(slop: CGFloat = 3, double: TimeInterval = 0.3)
+      public mutating func down(at: CGPoint, time: TimeInterval, leftButton: Bool) -> GestureResult
+      public mutating func move(to: CGPoint) -> GestureResult
+      public mutating func up(at: CGPoint, time: TimeInterval, leftButton: Bool) -> GestureResult
+      public mutating func expire(now: TimeInterval) -> GestureResult
+  }
+  public final class SpriteSheet: @unchecked Sendable {
+      public init(image: CGImage)                                   // keeps RGBA bytes for hit tests
+      public convenience init?(url: URL)
+      public func crop(_ r: CGRect) -> CGImage?                     // cached per rect
+      public func isOpaque(sheetPoint: CGPoint) -> Bool             // alpha > 0 at that sheet pixel
+  }
+  public enum ProximityFade {
+      // borrowed from oled-saver-macos BallPhysics.proximityOpacity (MIT)
+      public static func opacity(spriteFrame: CGRect, cursor: CGPoint, fadeRadius: CGFloat, enabled: Bool) -> CGFloat
+      // distance is from the cursor to the nearest point of spriteFrame (0 inside); 1.0 at >= fadeRadius,
+      // 0.0 at <= 30% of fadeRadius, quadratic in between. Floor the result at `minOpacity` = 0.15 so Bit never fully vanishes.
+  }
+  ```
 
-- [ ] **Step 1:** Copy `ui/mascot` files from ai-mascot (`git show origin/main:ui/mascot/<f>`); change nothing.
-- [ ] **Step 2: Failing tests** (`MascotBridgeTests`): parse `{id:3,cmd:"mascot_ready"}` → `.ready(id:3)`; `voice_toggle`, `mascot_click`, `ui_log`, `start_dragging`, unknown; `emitJS` escapes the name and embeds JSON verbatim; `packPayload` with a 1×1 PNG yields a `data:image/png;base64,` URL and keeps `scale`/`state`.
-- [ ] **Step 3:** FAIL. **Step 4:** implement `MascotBridge` (package) and `MascotPanel`/`MascotWebView` (app target). **Step 5:** `swift test` PASS.
-- [ ] **Step 6: Commit** `ui/mascot mac/DeskPixie/Mascot mac/Packages/DeskPixieCore` — "feat(mac): mascot panel hosting player.js".
+**MascotView** (layer-backed `NSView`, `wantsLayer = true`, clear background): two `CALayer`s, body and mouth, both `magnificationFilter = .nearest`, contents from `SpriteSheet.crop`. Geometry in cell pixels × `scale` (default 8 → 256×256 for Bit), y flipped (sheet is top-left origin). Per update wrap in `CATransaction.begin(); setDisableActions(true) … commit()` (as oled-saver does).
+**MascotController** (`@MainActor`): owns `pack`, `sheet`, `player`, `mouthLevel`, `gesture`.
+- Animation: a `Timer` at `1/pack.fps` steps the player and redraws.
+- `setState(_:)`, `setMouth(_:)` — called by the coordinator on `state` / `mouth` engine events.
+- Cursor poll: a 60 Hz `Timer` reading `NSEvent.mouseLocation` (screen coords, oled-saver's reason: global monitors don't fire while our app is frontmost). Each tick:
+  1. **Click-through where empty:** map the cursor into the current *body* cell (account for bob, scale, flip); `panel.ignoresMouseEvents = !(cursor inside panel && sheet.isOpaque(...))`. While a gesture press/drag is active keep `false`.
+  2. **Proximity fade:** `view.layer.opacity = Float(ProximityFade.opacity(spriteFrame: panel.frame, cursor:, fadeRadius: 150, enabled: true))`.
+- Gestures: `MascotView` forwards `mouseDown/Dragged/Up` (window coords, `event.timestamp`). `drag` → `panel.performDrag(with: event)`; `double` → `engine.hotkey()`; `wait` → schedule `expire` after 0.31 s, `click` → no-op in Phase 3 (terminal is Phase 5), log it.
+**MascotPanel:** `NSPanel(styleMask: [.borderless, .nonactivatingPanel])`, `isOpaque = false`, `backgroundColor = .clear`, `hasShadow = false`, `level = .floating`, `collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]`, `isReleasedWhenClosed = false`, `acceptsMouseMovedEvents = true`, `becomesKeyOnlyIfNeeded = true`; initial frame bottom-right of `NSScreen.main!.visibleFrame` with a 24 pt margin; `orderFrontRegardless()`.
+
+- [ ] **Step 1: Port tests first.** Read `git -C ~/Documents/Projects/ai-moscot show origin/main:ui/mascot/test/player-core.test.js`; translate every test into `MascotPlayerTests` / `GestureTests` (same names, same fixtures — the test pack fixture becomes a `Pack` literal decoded from the same JSON). Add:
+  - `ProximityFadeTests`: cursor inside the frame → 0.15 (floor); far (≥ radius from the edge) → 1.0; disabled → 1.0; at 65% of radius → `((0.65-0.3)/0.7)^2` = 0.25 (± 1e-6); monotonic over 0…radius.
+  - `SpriteSheetTests`: build a 4×2 `CGImage` in-test (one opaque pixel at (1,0)); `isOpaque((1,0))` true, `(0,0)` false, out of bounds false; `crop` returns the right size.
+  - `PackDecodingTests`: decode `{"pack":…}` from Task 6's real output for `mascots/bit` (`git show`-free: load `../../../mascots/bit/mascot.json` through a tiny JSON fixture copied into `Tests/Fixtures/bit-pack.json` matching the ResolvedPack shape).
+- [ ] **Step 2:** `swift test` → FAIL. **Step 3:** implement the package files. **Step 4:** PASS.
+- [ ] **Step 5:** implement `MascotPanel`, `MascotView`, `MascotController` (verified live in Task 10 Step 4).
+- [ ] **Step 6: Commit** `mac/DeskPixie/Mascot mac/Packages/DeskPixieCore` — "feat(mac): native mascot renderer with click-through and proximity fade".
 
 ---
 
@@ -486,7 +516,7 @@ public enum MascotBridge {
 - Create: `mac/project.yml`, `mac/Makefile`, `mac/Configs/SharedSettings.xcconfig`, `mac/DeskPixie/{DeskPixieApp.swift,AppDelegate.swift,Info.plist,DeskPixie.entitlements}`, `mac/DeskPixie/Composition/CompositionRoot.swift`, `mac/DeskPixie/Engine/EngineCoordinator.swift`, `mac/DeskPixie/MenuBar/MenuBarMenu.swift`, `Sources/DeskPixieCore/Hotkey/CarbonHotkey.swift`, `Sources/DeskPixieCore/Secrets/EnvSecrets.swift`
 - Test: `Tests/DeskPixieCoreTests/EnvSecretsTests.swift`
 
-**project.yml** — mirror Howl's `mac/project.yml` (read it): one app target `DeskPixie`, `PRODUCT_BUNDLE_IDENTIFIER: com.sihekuang.deskpixie`, `PRODUCT_NAME: DeskPixie`, deployment 14.0, Swift 6, strict concurrency complete, arm64, hardened runtime, `LD_RUNPATH_SEARCH_PATHS: "@executable_path/../Frameworks"`, `LIBRARY_SEARCH_PATHS: "$(SRCROOT)/../core/build"`, `OTHER_LDFLAGS: "-ldeskpixie"`, local package `DeskPixieCore`. preBuildScript "Build Go core" (`source ~/.zprofile 2>/dev/null; export PATH=/opt/homebrew/bin:$PATH; cd "$SRCROOT/../core" && make build-dylib`, `basedOnDependencyAnalysis: false`); postCompileScript copies `libdeskpixie.dylib` into `$BUILT_PRODUCTS_DIR/$FRAMEWORKS_FOLDER_PATH`. Resources: folder references `../ui/mascot` → `ui/mascot`, `../mascots` → `mascots`, plus `DeskPixie/Mascot/tauri-shim.js`. xcconfig: ad-hoc signing (`CODE_SIGN_IDENTITY = -`), `#include? "DeveloperSettings.xcconfig"`.
+**project.yml** — mirror Howl's `mac/project.yml` (read it): one app target `DeskPixie`, `PRODUCT_BUNDLE_IDENTIFIER: com.sihekuang.deskpixie`, `PRODUCT_NAME: DeskPixie`, deployment 14.0, Swift 6, strict concurrency complete, arm64, hardened runtime, `LD_RUNPATH_SEARCH_PATHS: "@executable_path/../Frameworks"`, `LIBRARY_SEARCH_PATHS: "$(SRCROOT)/../core/build"`, `OTHER_LDFLAGS: "-ldeskpixie"`, local package `DeskPixieCore`. preBuildScript "Build Go core" (`source ~/.zprofile 2>/dev/null; export PATH=/opt/homebrew/bin:$PATH; cd "$SRCROOT/../core" && make build-dylib`, `basedOnDependencyAnalysis: false`); postCompileScript copies `libdeskpixie.dylib` into `$BUILT_PRODUCTS_DIR/$FRAMEWORKS_FOLDER_PATH`. Resources: folder reference `../mascots` → `mascots`. xcconfig: ad-hoc signing (`CODE_SIGN_IDENTITY = -`), `#include? "DeveloperSettings.xcconfig"`.
 **Info.plist:** `LSUIElement` true, `NSMicrophoneUsageDescription` "DeskPixie listens when you start a conversation with Bit.", `CFBundleName` DeskPixie. **Entitlements:** app-sandbox false, `com.apple.security.device.audio-input` true, `cs.disable-library-validation` true.
 **mac/Makefile:** `project` (xcodegen generate), `build` (`xcodebuild -project DeskPixie.xcodeproj -scheme DeskPixie -configuration Debug -derivedDataPath build build`), `test` (`cd Packages/DeskPixieCore && swift test`), `run` (`open build/Build/Products/Debug/DeskPixie.app`).
 
@@ -494,9 +524,9 @@ public enum MascotBridge {
 
 **CarbonHotkey:** port Howl's `CarbonHotkeyMonitor` key+modifier path only (`RegisterEventHotKey`), default `kVK_Space` + `controlKey | optionKey`, callback on press.
 
-**CompositionRoot** (`@MainActor`): `engine = LibDeskPixieEngine()`, `voiceIO = VPIOVoiceIO()`, `ring = PlaybackRing(capacity: 24000*120)`, `micRing = SampleRing(capacity: 48000)`, `pump`, `hotkey`, `mascot = MascotPanel(...)`, `coordinator`.
-**EngineCoordinator** (`@MainActor`): `start()` → `engine.configure(EngineConfig(apiKey: EnvSecrets…, packRoots: [Bundle.main.resourceURL!/mascots, AppSupport/com.sihekuang.deskpixie/mascots]))`; on error, set `status` and show `error` state. Register the hotkey → `engine.hotkey()`. Start `voiceIO` (mic disabled) and `pump`. 30 ms poll loop (Howl's pattern) handling events: `state` → `mascot.emit("mascot://state", {"state":…})` + store for tray; `mouth` → `mascot://mouth`; `mic(start:)` → `voiceIO.setMicEnabled`; `status`/`error` → tray status line; `metrics` → `os_log`. `voiceIO.start` throwing `.permissionDenied` → `engine.micFailed("Microphone access denied")`.
-**MenuBarMenu** (SwiftUI `MenuBarExtra`, `.menu` style): status line (disabled Text), "Talk to Bit (⌃⌥Space)", State ▸ the six states (debug: emits `mascot://state` directly), "Quit DeskPixie".
+**CompositionRoot** (`@MainActor`): `engine = LibDeskPixieEngine()`, `voiceIO = VPIOVoiceIO()`, `ring = PlaybackRing(capacity: 24000*120)`, `micRing = SampleRing(capacity: 48000)`, `pump`, `hotkey`, `mascot = MascotController(engine:, panel: MascotPanel())`, `coordinator`.
+**EngineCoordinator** (`@MainActor`): `start()` → `engine.configure(EngineConfig(apiKey: EnvSecrets…, packRoots: [Bundle.main.resourceURL!/mascots, AppSupport/com.sihekuang.deskpixie/mascots]))`; on error, set `status` and show `error` state. Register the hotkey → `engine.hotkey()`. Start `voiceIO` (mic disabled) and `pump`. 30 ms poll loop (Howl's pattern) handling events: `state` → `mascotController.setState` + store for tray; `mouth` → `mascotController.setMouth`; `mic(start:)` → `voiceIO.setMicEnabled`; `status`/`error` → tray status line; `metrics` → `os_log`. `voiceIO.start` throwing `.permissionDenied` → `engine.micFailed("Microphone access denied")`.
+**MenuBarMenu** (SwiftUI `MenuBarExtra`, `.menu` style): status line (disabled Text), "Talk to Bit (⌃⌥Space)", State ▸ the six states (debug: calls `mascotController.setState` directly), "Quit DeskPixie".
 
 - [ ] **Step 1: Failing tests** for `EnvSecrets` → FAIL → implement → PASS (`make -C mac test`).
 - [ ] **Step 2:** Write project.yml, plist, entitlements, xcconfig, Makefile, app sources.
@@ -518,6 +548,6 @@ public enum MascotBridge {
 ---
 
 ## Deferred to Phase 4 (create as issues)
-- Mascot click-through-where-empty + proximity fade + position persistence + size menu.
+- Mascot position persistence + size menu (#17).
 - Settings window (SwiftUI from Howl), Keychain secrets, first-run, data migration (§6.2).
 - Gemini adapter, local tools, chimes, device pinning, `deskpixie-cli` headless harness.
