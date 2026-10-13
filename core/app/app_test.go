@@ -848,6 +848,7 @@ type fakeVoice struct {
 	open     bool
 	injected []string
 	sig      chan voice.VoiceSignal
+	unsubs   int
 }
 
 func (f *fakeVoice) IsOpen() bool { f.mu.Lock(); defer f.mu.Unlock(); return f.open }
@@ -857,6 +858,78 @@ func (f *fakeVoice) Inject(n voice.Notice) {
 	f.mu.Unlock()
 }
 func (f *fakeVoice) Subscribe() <-chan voice.VoiceSignal { return f.sig }
+func (f *fakeVoice) Unsubscribe(ch <-chan voice.VoiceSignal) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if ch == (<-chan voice.VoiceSignal)(f.sig) {
+		f.unsubs++
+	}
+}
+func (f *fakeVoice) unsubscribed() int { f.mu.Lock(); defer f.mu.Unlock(); return f.unsubs }
+func (f *fakeVoice) setOpen(on bool)   { f.mu.Lock(); f.open = on; f.mu.Unlock() }
+
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatal(what)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// V-037: each fire unsubscribes once its wait ends, whether Bit said it or not.
+func TestATimerAlarmUnsubscribesAfterEachFire(t *testing.T) {
+	notes := make(chan string, 4)
+	v := &fakeVoice{open: true, sig: make(chan voice.VoiceSignal, 4)}
+	alarm := &TimerAlarm{
+		Voice:  func() VoiceLink { return v },
+		Notify: func(_, body string) { notes <- body },
+	}
+	alarm.Fire("tea", "3 minutes")
+	v.sig <- voice.VoiceSignal{Kind: voice.SigClosed} // said
+	waitFor(t, "not unsubscribed after a said alarm", func() bool { return v.unsubscribed() == 1 })
+	alarm.Fire("pasta", "5 minutes")
+	v.sig <- voice.VoiceSignal{Kind: voice.SigClosed, Undelivered: []voice.Notice{{Text: "Timer done: pasta (5 minutes)."}}}
+	if n := <-notes; n != "pasta (5 minutes)" {
+		t.Fatal(n)
+	}
+	waitFor(t, "not unsubscribed after a bounced alarm", func() bool { return v.unsubscribed() == 2 })
+	select {
+	case n := <-notes:
+		t.Fatalf("the said alarm was notified: %s", n)
+	default:
+	}
+}
+
+// V-037: when the Closed signal is missed (a lagging subscriber), the conversation being closed
+// with no Closed seen falls back to the notification instead of dropping the timer.
+func TestATimerAlarmNotifiesWhenTheClosedSignalIsMissed(t *testing.T) {
+	notes := make(chan string, 4)
+	v := &fakeVoice{open: true, sig: make(chan voice.VoiceSignal, 4)}
+	alarm := &TimerAlarm{
+		Voice:  func() VoiceLink { return v },
+		Notify: func(_, body string) { notes <- body },
+		Poll:   10 * time.Millisecond,
+	}
+	alarm.Fire("tea", "3 minutes")
+	select {
+	case n := <-notes:
+		t.Fatalf("notified while open: %s", n)
+	case <-time.After(60 * time.Millisecond):
+	}
+	v.setOpen(false) // closed, but the signal never arrives
+	select {
+	case n := <-notes:
+		if n != "tea (3 minutes)" {
+			t.Fatal(n)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("missed close dropped the timer")
+	}
+	waitFor(t, "not unsubscribed", func() bool { return v.unsubscribed() == 1 })
+}
 
 func TestATimerDuringAConversationIsSaidElseNotified(t *testing.T) {
 	type note struct{ title, body string }

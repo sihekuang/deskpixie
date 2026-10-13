@@ -835,3 +835,25 @@ func TestRecordingUnwritableFolderStillPassesTheMicThrough(t *testing.T) {
 		eqStates(t, r.sink.States(), thinking, listening, thinking, idle, listening)
 	})
 }
+
+// Unsubscribe closes that channel and stops sending to it; the others keep their signals.
+// Calling it twice, or after Close, is harmless (V-037: the timer alarm no longer leaks).
+func TestUnsubscribeClosesOnlyThatChannel(t *testing.T) {
+	run(t, func(t *testing.T) {
+		r := newRig(t, vt.NewScriptedModel(), rigOpts{})
+		gone := r.r.Subscribe()
+		kept := r.r.Subscribe()
+		r.r.Unsubscribe(gone)
+		r.r.Unsubscribe(gone)
+		if _, ok := <-gone; ok {
+			t.Fatal("unsubscribed channel still open")
+		}
+		r.r.Hotkey()
+		wait(100)
+		if s := recvSignal(t, kept); s.Kind != voice.SigOpened {
+			t.Fatalf("got %+v", s)
+		}
+		r.r.Close()
+		r.r.Unsubscribe(kept)
+	})
+}

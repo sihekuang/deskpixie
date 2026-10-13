@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/sihekuang/deskpixie/core/audio/denoise"
 	"github.com/sihekuang/deskpixie/core/settings"
@@ -51,19 +52,19 @@ func TestATimerNoticeLeftUnsaidAtCloseFallsBackToANotification(t *testing.T) {
 	ch := make(chan voice.VoiceSignal, 8)
 	ch <- voice.VoiceSignal{Kind: voice.SigUserSaid, Text: "thanks"}
 	ch <- voice.VoiceSignal{Kind: voice.SigClosed, Undelivered: []voice.Notice{{Text: text}}}
-	if !bounced(ch, text) {
+	if !bounced(ch, text, alwaysOpen, time.Hour) {
 		t.Error("closed with it unsaid")
 	}
 
 	ch = make(chan voice.VoiceSignal, 8)
 	ch <- voice.VoiceSignal{Kind: voice.SigClosed, Undelivered: []voice.Notice{{Text: "Agent reply: x"}}}
-	if bounced(ch, text) {
+	if bounced(ch, text, alwaysOpen, time.Hour) {
 		t.Error("said before the close")
 	}
 
 	ch = make(chan voice.VoiceSignal)
 	close(ch)
-	if !bounced(ch, text) {
+	if !bounced(ch, text, alwaysOpen, time.Hour) {
 		t.Error("the voice loop is gone: notify rather than lose it")
 	}
 }
@@ -249,3 +250,5 @@ func TestAToolErrorIsReportedToTheModelInBand(t *testing.T) {
 		t.Fatalf("%s %v", out.Output, out.EndConversation)
 	}
 }
+
+func alwaysOpen() bool { return true }

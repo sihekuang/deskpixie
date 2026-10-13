@@ -141,6 +141,7 @@ type VoiceLink interface {
 	IsOpen() bool
 	Inject(voice.Notice)
 	Subscribe() <-chan voice.VoiceSignal
+	Unsubscribe(<-chan voice.VoiceSignal)
 }
 
 // TimerAlarm: during a conversation Bit says it; otherwise, or if the conversation closes
@@ -151,6 +152,8 @@ type TimerAlarm struct {
 	Voice func() VoiceLink
 	// Notify shows the notification with the Glass sound.
 	Notify func(title, body string)
+	// Poll is how often a waiting alarm checks for a close whose signal it missed (default 1 s).
+	Poll time.Duration
 }
 
 func timerNotice(label, spoken string) string {
@@ -172,8 +175,13 @@ func (t *TimerAlarm) Fire(label, spoken string) {
 	text := timerNotice(label, spoken)
 	signals := v.Subscribe()
 	v.Inject(voice.Notice{Text: text})
+	poll := t.Poll
+	if poll <= 0 {
+		poll = time.Second
+	}
 	go func() {
-		if bounced(signals, text) {
+		defer v.Unsubscribe(signals)
+		if bounced(signals, text, v.IsOpen, poll) {
 			notify()
 		}
 	}()
@@ -181,19 +189,38 @@ func (t *TimerAlarm) Fire(label, spoken string) {
 
 // bounced: the conversation closed with text still unsaid (it waits for the next close). A
 // closed channel (the voice loop is gone) counts as unsaid: a rare duplicate beats a lost
-// timer. Go channels drop silently when a subscriber lags, so a missed close is not detected
-// (Rust's Lagged); the runtime's 64-signal buffer makes that unlikely for this short wait.
-func bounced(signals <-chan voice.VoiceSignal, text string) bool {
-	for s := range signals {
-		if s.Kind != voice.SigClosed {
-			continue
-		}
-		for _, n := range s.Undelivered {
-			if n.Text == text {
+// timer. Go channels drop silently when a subscriber lags (Rust's Lagged), so every poll it
+// checks isOpen: closed on two polls in a row with no Closed signal seen means the signal was
+// missed, which also counts as unsaid. (One poll of grace: the runtime clears IsOpen just
+// before it sends the signal.)
+func bounced(signals <-chan voice.VoiceSignal, text string, isOpen func() bool, poll time.Duration) bool {
+	tick := time.NewTicker(poll)
+	defer tick.Stop()
+	closedPolls := 0
+	for {
+		select {
+		case s, ok := <-signals:
+			if !ok {
+				return true
+			}
+			if s.Kind != voice.SigClosed {
+				continue
+			}
+			for _, n := range s.Undelivered {
+				if n.Text == text {
+					return true
+				}
+			}
+			return false
+		case <-tick.C:
+			if isOpen() {
+				closedPolls = 0
+				continue
+			}
+			closedPolls++
+			if closedPolls >= 2 {
 				return true
 			}
 		}
-		return false
 	}
-	return true
 }

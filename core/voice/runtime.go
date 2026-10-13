@@ -369,6 +369,20 @@ func (r *Runtime) Subscribe() <-chan VoiceSignal {
 	return ch
 }
 
+// Unsubscribe stops signals to ch (from Subscribe) and closes it. Safe to call more than
+// once and after Close.
+func (r *Runtime) Unsubscribe(ch <-chan VoiceSignal) {
+	r.sigMu.Lock()
+	defer r.sigMu.Unlock()
+	for i, c := range r.sigSubs {
+		if c == ch {
+			r.sigSubs = append(r.sigSubs[:i], r.sigSubs[i+1:]...)
+			close(c)
+			return
+		}
+	}
+}
+
 func (r *Runtime) control(c control) {
 	r.ctlMu.Lock()
 	r.ctlQueue = append(r.ctlQueue, c)
