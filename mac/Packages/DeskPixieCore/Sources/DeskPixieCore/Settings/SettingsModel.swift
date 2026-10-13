@@ -1,0 +1,270 @@
+import Foundation
+import Observation
+import os
+
+/// The Settings window's state: the snapshot shown, per-field errors and refused drafts, the
+/// notice line, key status, and the commit rules of ai-mascot's native window
+/// (`native/window.rs` `commit`, `reset_position`, `restart`, hotkey recorder). The SwiftUI
+/// views only read it and call its methods.
+@MainActor
+@Observable
+public final class SettingsModel {
+    /// Binds `combo`; on failure the binder keeps (or restores) `previous`, the combo bound now.
+    public typealias HotkeyBinder = @MainActor (_ combo: String, _ previous: String?) -> Bool
+
+    /// The snapshot shown; nil until the first read succeeds.
+    public private(set) var snapshot: SettingsSnapshot?
+    /// Why the first read failed, while nothing is shown.
+    public private(set) var loadError: String?
+    public private(set) var secrets: SettingsSecrets?
+    /// path → error shown under that field until its next good commit.
+    public private(set) var errors: [String: String] = [:]
+    /// path → refused text the field keeps.
+    public private(set) var drafts: [String: String] = [:]
+    /// path → text typed but not yet committed (text and number fields).
+    public private(set) var editing: [String: String] = [:]
+    /// A failed save or action; shown above the Restart bar, ahead of the snapshot's warning.
+    public private(set) var notice: String?
+    /// The hotkey field being recorded, if any.
+    public var recordingPath: String?
+
+    /// Binds a combo with the app's global hotkey before it is saved. Returns false when the
+    /// shortcut can't be had (another app holds it, or the key can't be named). The app
+    /// supplies it (see `DeskPixieApp`); when nil the combo is saved without binding.
+    public var rebindHotkey: HotkeyBinder?
+
+    @ObservationIgnored private let client: SettingsClient
+    @ObservationIgnored private static let log = Logger(subsystem: "com.sihekuang.deskpixie", category: "settings")
+
+    public init(client: SettingsClient) {
+        self.client = client
+    }
+
+    // MARK: Reading
+
+    /// Controls are enabled only while settings.json can be read.
+    public var enabled: Bool { snapshot?.fileError == nil }
+
+    /// The window opened: read the snapshot and the key status.
+    public func load() {
+        fetch { try client.snapshot() }
+        secrets = try? client.secrets()
+    }
+
+    /// The window became key: pick up hand edits and a key added to `.env`.
+    public func focusGained() {
+        fetch { try client.reload() }
+        secrets = try? client.secrets()
+    }
+
+    /// The core said settings changed (`settings.changed` event: tray write or hand edit).
+    public func refresh() {
+        fetch { try client.reload() }
+    }
+
+    private func fetch(_ read: () throws -> SettingsSnapshot) {
+        do {
+            show(try read())
+            loadError = nil
+        } catch {
+            Self.log.error("settings read failed: \(String(describing: error), privacy: .public)")
+            if snapshot == nil { loadError = Self.describe(error) }
+        }
+    }
+
+    /// Takes `next` if it is newer than the one shown; an older one is dropped.
+    public func show(_ next: SettingsSnapshot) {
+        guard SettingsLayout.isNewer(snapshot?.seq, next.seq) else { return }
+        var s = next
+        s.setError = nil
+        snapshot = s
+    }
+
+    public func fields(in section: SettingsSection) -> [SettingsField] {
+        guard let snapshot else { return [] }
+        return SettingsLayout.fields(in: section, snapshot.fields, platform: snapshot.platform)
+    }
+
+    public func spec(_ field: SettingsField) -> SettingsLayout.ControlSpec {
+        SettingsLayout.controlSpec(field, values: snapshot?.values ?? [:], platform: snapshot?.platform ?? .macos,
+                                   error: errors[field.path])
+    }
+
+    /// The text a text or number field shows: what is being typed, else a kept draft, else
+    /// the stored value.
+    public func text(for spec: SettingsLayout.ControlSpec) -> String {
+        editing[spec.path] ?? drafts[spec.path] ?? Self.shownText(spec)
+    }
+
+    /// The text the window writes into the field from the snapshot.
+    static func shownText(_ spec: SettingsLayout.ControlSpec) -> String {
+        switch spec.control {
+        case .text(let text, _): return text
+        case .stepper(_, _, _, let text): return text
+        case .path(let path, _, _): return path ?? ""
+        default: return ""
+        }
+    }
+
+    public func setEditing(_ path: String, _ text: String) {
+        editing[path] = text
+    }
+
+    /// Banner, notice and Restart bar texts.
+    public var bannerText: String? { snapshot?.fileError.map(SettingsLayout.bannerText) }
+    public var noticeText: String? { notice ?? snapshot?.warning }
+    public var restartText: String? {
+        guard let snapshot else { return nil }
+        return SettingsLayout.restartText(snapshot.restartPending, fields: snapshot.fields)
+    }
+
+    public func secretText(_ id: SettingsSecretID) -> String { SettingsLayout.secretText(secrets, id) }
+
+    // MARK: Committing
+
+    /// Saves `input` for the field at `path`. A good save is shown; a refused one leaves its
+    /// error under the field and the typed text in it. Returns whether it saved.
+    @discardableResult
+    public func commit(_ path: String, _ input: SettingsLayout.Input) -> Bool {
+        guard let field = snapshot?.fields.first(where: { $0.path == path }) else { return false }
+        let spec = self.spec(field)
+        let typed = input.typed
+        let value: JSONValue
+        switch SettingsLayout.commitValue(spec, input) {
+        case .success(let v): value = v
+        case .failure(let e):
+            errors[path] = e.message
+            if let typed { drafts[path] = typed }
+            editing[path] = nil
+            return false
+        }
+        return send(path, value, typed: typed)
+    }
+
+    /// Sends a value that is already JSON; the shared tail of `commit` and `recordHotkey`.
+    private func send(_ path: String, _ value: JSONValue, typed: String?) -> Bool {
+        editing[path] = nil
+        let result: SettingsSnapshot
+        do {
+            result = try client.set(path, value)
+        } catch {
+            notice = SettingsLayout.saveNotice(Self.describe(error))
+            drafts[path] = nil
+            return false
+        }
+        let refused = result.setError
+        show(result)
+        switch refused {
+        case nil:
+            errors[path] = nil
+            drafts[path] = nil
+            notice = nil
+            return true
+        case .invalid(let list)?:
+            for placed in SettingsLayout.placeErrors(path, list, fields: snapshot?.fields ?? []) {
+                errors[placed.path] = placed.message
+            }
+            if let typed { drafts[path] = typed }
+            return false
+        case .save(let message)?:
+            notice = SettingsLayout.saveNotice(message)
+            drafts[path] = nil
+            return false
+        }
+    }
+
+    /// Editing of a text or number field ended (Return or focus left): commit the typed text
+    /// unless the field is as the window left it.
+    @discardableResult
+    public func commitText(_ path: String) -> Bool {
+        guard let field = snapshot?.fields.first(where: { $0.path == path }) else { return true }
+        let spec = self.spec(field)
+        let shown = Self.shownText(spec)
+        let typed = editing[path] ?? drafts[path] ?? shown
+        guard SettingsLayout.shouldCommit(typed: typed, shown: shown, hasDraft: drafts[path] != nil,
+                                          hasError: errors[path] != nil) else {
+            editing[path] = nil
+            return true
+        }
+        if case .path = spec.control {
+            return commit(path, .path(typed))
+        }
+        return commit(path, .text(typed))
+    }
+
+    /// Commits every field with typed text (button clicks don't end editing). Returns false if
+    /// any commit was refused.
+    @discardableResult
+    public func commitPendingEdits() -> Bool {
+        var ok = true
+        for path in editing.keys.sorted() where !commitText(path) {
+            ok = false
+        }
+        return ok
+    }
+
+    /// A combo the recorder took: bind it with the app's hotkey first; only a bound combo is
+    /// saved. If the save is refused, the old combo is bound again.
+    @discardableResult
+    public func recordHotkey(_ path: String, _ combo: String) -> Bool {
+        recordingPath = nil
+        let old = snapshot?.values.at(path)?.stringValue
+        if let bind = rebindHotkey {
+            guard bind(combo, old) else {
+                errors[path] = SettingsLayout.hotkeyInUse
+                return false
+            }
+        }
+        let saved = commit(path, .hotkey(combo))
+        if !saved, let bind = rebindHotkey, let old, old != combo, !bind(old, combo) {
+            Self.log.error("could not bind the previous hotkey \(old, privacy: .public) again")
+        }
+        return saved
+    }
+
+    // MARK: Actions
+
+    /// Reset Position: the core forgets the saved position (`position` = null).
+    public func resetPosition() {
+        commitPendingEdits()
+        do {
+            let result = try client.set("position", .null)
+            show(result)
+            if let e = result.setError {
+                notice = "Couldn't reset the position: \(e.message)"
+            } else {
+                notice = nil
+            }
+        } catch {
+            notice = "Couldn't reset the position: \(Self.describe(error))"
+        }
+    }
+
+    public func openFile() {
+        commitPendingEdits()
+        do {
+            try client.openFile()
+        } catch {
+            notice = Self.describe(error)
+        }
+    }
+
+    /// Restart: commits any typed text first, and restarts only if that worked, so a typed
+    /// value is never lost or half-applied. Returns whether the restart was asked for.
+    @discardableResult
+    public func restart() -> Bool {
+        guard commitPendingEdits() else { return false }
+        do {
+            try client.restart()
+            return true
+        } catch {
+            notice = Self.describe(error)
+            return false
+        }
+    }
+
+    static func describe(_ error: Error) -> String {
+        if case DeskPixieEngineError.callFailed(let message) = error { return message }
+        return String(describing: error)
+    }
+}
