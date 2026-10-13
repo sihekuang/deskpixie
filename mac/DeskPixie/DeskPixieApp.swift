@@ -6,15 +6,16 @@ struct DeskPixieApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            MenuBarMenu(
-                appState: appDelegate.composition.appState,
-                talk: { appDelegate.composition.coordinator.talk() },
-                setState: { appDelegate.composition.coordinator.debugSetState($0) },
-                quit: { NSApp.terminate(nil) }
-            )
+            MenuBarMenu(appState: appDelegate.composition.appState) { id in
+                appDelegate.composition.coordinator.perform(id)
+            }
         } label: {
             Image(systemName: "sparkles")
         }
         .menuBarExtraStyle(.menu)
+
+        Settings {
+            SettingsPlaceholderView()
+        }
     }
 }

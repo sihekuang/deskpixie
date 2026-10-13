@@ -54,6 +54,21 @@ public final class LibDeskPixieEngine: CoreEngine, @unchecked Sendable {
         return Data(String(cString: cstr).utf8)
     }
 
+    public func call(_ method: String, _ args: any Encodable) throws -> Data {
+        let argsJSON = String(decoding: try JSONEncoder().encode(args), as: UTF8.self)
+        let reply: Data? = method.withCString { m in
+            argsJSON.withCString { a in
+                guard let cstr = dp_call(UnsafeMutablePointer(mutating: m), UnsafeMutablePointer(mutating: a)) else {
+                    return nil
+                }
+                defer { dp_free_string(cstr) }
+                return Data(String(cString: cstr).utf8)
+            }
+        }
+        guard let reply else { throw DeskPixieEngineError.callFailed("dp_call returned NULL") }
+        return try CallEnvelope.unwrap(reply)
+    }
+
     public func lastError() -> String? {
         guard let cstr = dp_last_error() else { return nil }
         defer { dp_free_string(cstr) }

@@ -2,12 +2,23 @@ import DeskPixieCore
 import Foundation
 import Observation
 
-/// What the tray shows: the status line and the last mascot state.
+/// What the tray shows: the menu built from the core's `app.state`, plus problems only
+/// Swift knows about (hotkey, audio, engine start), which lead the status lines.
 @MainActor
 @Observable
 final class AppState {
-    var status = "Starting…"
+    /// Last `app.state` from the core; nil until the first successful read.
+    var core: TrayAppState?
     var mascotState = "idle"
+    var hotkeyError: String?
+    var engineError: String?
+    var audioError: String?
+
+    var localStatusLines: [String] { [hotkeyError, engineError, audioError].compactMap { $0 } }
+
+    var menuItems: [TrayItem] {
+        TrayMenu.build(core, localStatusLines: localStatusLines, micModeAvailable: MicModes.available)
+    }
 }
 
 /// Builds the object graph once, at launch. Everything is long-lived (app lifetime).

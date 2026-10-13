@@ -8,7 +8,7 @@ import os
 @MainActor
 final class EngineCoordinator {
     static let pollInterval: UInt64 = 30_000_000
-    static let missingKeyStatus = "OPENAI_API_KEY not set"
+    static let hotkeyLabel = "⌃⌥Space"
 
     private static let log = Logger(subsystem: "com.sihekuang.deskpixie", category: "coordinator")
     private static let metricsLog = Logger(subsystem: "com.sihekuang.deskpixie", category: "metrics")
@@ -52,10 +52,9 @@ final class EngineCoordinator {
         do {
             try engine.configure(config)
             configured = true
-            appState.status = key == nil ? Self.missingKeyStatus : "Ready — press ⌃⌥Space"
         } catch {
             Self.log.error("configure failed: \(String(describing: error), privacy: .public)")
-            appState.status = "Engine error: \(Self.describe(error))"
+            appState.engineError = "Engine error: \(Self.describe(error))"
             appState.mascotState = "error"
         }
 
@@ -64,7 +63,7 @@ final class EngineCoordinator {
                 mascot = m
                 m.show()
             } else {
-                appState.status = "Could not load Bit's mascot pack"
+                appState.engineError = "Could not load the mascot pack"
             }
         }
 
@@ -72,9 +71,10 @@ final class EngineCoordinator {
             try hotkey.start { [weak self] in self?.talk() }
         } catch {
             Self.log.error("hotkey unavailable: \(String(describing: error), privacy: .public)")
-            appState.status = "⌃⌥Space unavailable (taken by another app)"
+            appState.hotkeyError = "Hotkey unavailable: \(Self.hotkeyLabel)"
         }
 
+        refreshTray()
         startPolling()
         if configured { startAudio(retryForHotkey: false) }
     }
@@ -102,10 +102,49 @@ final class EngineCoordinator {
         startAudio(retryForHotkey: true)
     }
 
-    /// Debug: State ▸ menu sets the sprite directly, bypassing the engine.
-    func debugSetState(_ s: String) {
-        mascot?.setState(s)
-        appState.mascotState = s
+    /// A tray menu id. Quit and Mic Mode are handled here (Settings… by the menu view);
+    /// every other id is the core's (`app.action`), after which the menu is re-read.
+    func perform(_ id: String) {
+        switch id {
+        case TrayMenu.quitID:
+            NSApp.terminate(nil)
+        case TrayMenu.micModeID:
+            MicModes.show()
+        default:
+            struct Action: Encodable { let id: String }
+            do {
+                _ = try engine.call("app.action", Action(id: id))
+            } catch {
+                Self.log.error("app.action \(id, privacy: .public): \(String(describing: error), privacy: .public)")
+            }
+            refreshTray()
+        }
+    }
+
+    /// Re-reads `app.state`; on failure the last good model stays.
+    func refreshTray() {
+        do {
+            appState.core = try engine.call("app.state", as: TrayAppState.self)
+        } catch {
+            Self.log.error("app.state: \(String(describing: error), privacy: .public)")
+        }
+    }
+
+    /// `restart` event: start a fresh copy once this process has exited (so the new one can
+    /// take the hotkey and the audio device), then quit.
+    private func relaunch() {
+        let pid = ProcessInfo.processInfo.processIdentifier
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/sh")
+        p.arguments = ["-c", "while kill -0 \(pid) 2>/dev/null; do sleep 0.1; done; exec /usr/bin/open \"$0\"",
+                       Bundle.main.bundleURL.path]
+        do {
+            try p.run()
+        } catch {
+            Self.log.error("relaunch failed: \(String(describing: error), privacy: .public)")
+            return
+        }
+        NSApp.terminate(nil)
     }
 
     // MARK: Audio
@@ -136,10 +175,8 @@ final class EngineCoordinator {
                 Self.log.error("audio start failed: \(String(describing: error), privacy: .public)")
                 failure = "Audio start failed: \(Self.describe(error))"
             }
-            if let failure {
-                self?.audioState = .stopped
-                self?.appState.status = failure
-            }
+            self?.appState.audioError = failure
+            if failure != nil { self?.audioState = .stopped }
             if retryForHotkey {
                 engine.hotkey()
                 if let failure { engine.micFailed(failure) }
@@ -171,14 +208,21 @@ final class EngineCoordinator {
             voiceIO.setMicEnabled(start)
             Self.log.info("mic \(start ? "on" : "off", privacy: .public)")
         case .status(let text):
-            appState.status = text
+            // The tray line comes from app.state; the core follows this with a tray event.
+            Self.log.info("status: \(text, privacy: .public)")
         case .error(let text):
             Self.log.error("engine error: \(text, privacy: .public)")
-            appState.status = text
         case .transcript(let role, let text):
             Self.log.info("\(role, privacy: .public): \(text, privacy: .private)")
         case .metrics(let json):
             Self.metricsLog.notice("\(json, privacy: .public)")
+        case .tray:
+            refreshTray()
+        case .restart:
+            relaunch()
+        case .pack, .position, .hotkey, .devices, .notify, .canvasOpen, .settingsChanged:
+            // Handled by later work packages (S2–S6); nothing emits these yet.
+            Self.log.debug("unhandled event \(String(describing: ev), privacy: .public)")
         }
     }
 
