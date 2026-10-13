@@ -744,5 +744,8 @@ App checks driven on the running app (DeskPixie built from this branch):
 | Hotkey (migrated ⌃B) → connect → mic live → frames sent (mic→send p50 8.9 ms / p95 22 ms, max GC 5.2 ms); idle timeout honoured | ✅ |
 | Quit: ~1 s, coordinator pane closed, `mcp/*.json` removed, port 48217 freed and re-bound on relaunch | ✅ |
 | Startup never blocks the UI (fixed after a live freeze on a TCC prompt) | ✅ f2f9064 |
+| Real-microphone turns: speech played through the MacBook speakers (Bit plays on the LG display, so echo cancellation does not remove it) into the Logi webcam mic — 4/4 recognised and answered, closed on the silence timeout | ✅ |
+| Device change mid-turn: a Bluetooth in-ear headset becoming the default output ended the turn with "Voice: audio device changed" (genuine change, as in Rust); default devices polled at 4 Hz on the other turns — no false positives | ✅ |
+| Settings… with real mouse clicks: DeskPixie frontmost, Settings main + focused; menu bar tooltip "DeskPixie" | ✅ |
 
-Human-only (cannot be automated here): a spoken conversation through the real microphone — VPIO echo cancellation removes same-machine `say` playback, so speech detection with a real voice, quiet-voice start and barge-in by voice need a person. The provider path itself is verified by the live tests above with recorded speech.
+Still worth a person's ear: quiet-voice start and barge-in with a live human voice (the microphone path itself is verified above with played speech).
