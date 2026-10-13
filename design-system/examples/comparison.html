@@ -1,0 +1,80 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Choosing a local database</title>
+<link rel="stylesheet" href="/ds/tokens.css">
+<link rel="stylesheet" href="/ds/base.css">
+<script src="/ds/vendor/chart.umd.min.js"></script>
+<script src="/ds/vendor/mermaid.min.js"></script>
+<script src="/ds/canvas.js"></script>
+</head>
+<body>
+<main class="page">
+  <header class="page-header">
+    <h1>Choosing a local database</h1>
+    <p class="subtitle">SQLite vs DuckDB vs Postgres for a single-user desktop app</p>
+  </header>
+
+  <div class="callout callout-good">
+    <p class="callout-title">Recommendation: SQLite</p>
+    <p>It ships inside the app, needs no server and handles this workload with room to spare. Add DuckDB later only if analytics queries become slow.</p>
+  </div>
+
+  <div class="grid grid-2">
+    <section class="card">
+      <h3 class="card-title">Scores (1–5, higher is better)</h3>
+      <div class="chart" id="scores"></div>
+    </section>
+    <section class="card">
+      <h3 class="card-title">Install size (MB)</h3>
+      <div class="chart" id="size"></div>
+    </section>
+  </div>
+
+  <h2>Side by side</h2>
+  <section class="card">
+    <table>
+      <thead><tr><th>Criterion</th><th>SQLite</th><th>DuckDB</th><th>Postgres</th></tr></thead>
+      <tbody>
+        <tr><td>Embedded, no server</td><td><span class="badge badge-good">yes</span></td><td><span class="badge badge-good">yes</span></td><td><span class="badge badge-bad">no</span></td></tr>
+        <tr><td>Many small writes</td><td><span class="badge badge-good">great</span></td><td><span class="badge badge-warn">fair</span></td><td><span class="badge badge-good">great</span></td></tr>
+        <tr><td>Analytics queries</td><td><span class="badge badge-warn">fair</span></td><td><span class="badge badge-good">great</span></td><td><span class="badge badge-good">good</span></td></tr>
+        <tr><td>Operational burden</td><td><span class="badge badge-good">none</span></td><td><span class="badge badge-good">none</span></td><td><span class="badge badge-bad">high</span></td></tr>
+        <tr><td>Install size</td><td>1.5 MB</td><td>40 MB</td><td>220 MB</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <div class="grid grid-2">
+    <div class="callout callout-warn">
+      <p class="callout-title">Risk: concurrent writers</p>
+      <p>SQLite allows one writer at a time. Use WAL mode and keep transactions short.</p>
+    </div>
+    <div class="callout callout-bad">
+      <p class="callout-title">Ruled out: Postgres</p>
+      <p>A server process for a single-user app adds install, upgrade and backup work for no gain.</p>
+    </div>
+  </div>
+</main>
+<script>
+  Canvas.chart('#scores', {
+    type: 'radar',
+    data: {
+      labels: ['Simplicity', 'Write speed', 'Analytics', 'Footprint', 'Ecosystem'],
+      datasets: [
+        { label: 'SQLite', data: [5, 5, 3, 5, 5] },
+        { label: 'DuckDB', data: [4, 3, 5, 3, 3] },
+        { label: 'Postgres', data: [2, 5, 4, 1, 5] }
+      ]
+    },
+    options: { scales: { r: { min: 0, max: 5, ticks: { stepSize: 1 } } } }
+  });
+  Canvas.chart('#size', {
+    type: 'bar',
+    data: { labels: ['SQLite', 'DuckDB', 'Postgres'], datasets: [{ label: 'MB', data: [1.5, 40, 220] }] },
+    options: { indexAxis: 'y', plugins: { legend: { display: false } } }
+  });
+</script>
+</body>
+</html>
