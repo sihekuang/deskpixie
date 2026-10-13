@@ -1,0 +1,9 @@
+.env
+.DS_Store
+*.xcodeproj/
+build/
+DerivedData/
+core/bin/
+*.dylib
+libdeskpixie.h
+.worktrees/
