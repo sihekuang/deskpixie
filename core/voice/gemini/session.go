@@ -199,7 +199,8 @@ func (m *model) Connect(ctx context.Context, cfg voice.SessionConfig, apiKey str
 	return s, nil
 }
 
-// traceEnabled: GEMINI_TRACE=1 logs every server message's shape and timing (audio elided).
+// traceEnabled: GEMINI_TRACE=1 logs every server message's shape and timing (audio elided,
+// the API key scrubbed).
 func traceEnabled() bool {
 	v := os.Getenv("GEMINI_TRACE")
 	return v != "" && v != "0"
@@ -327,7 +328,7 @@ func (s *session) readLoop() {
 		s.lastRx.Store(time.Now().UnixNano())
 		text := string(data)
 		if s.trace {
-			log.Printf("voice-gemini trace +%d ms: %s", time.Since(s.opened).Milliseconds(), traceLine(text))
+			log.Printf("voice-gemini trace +%d ms: %s", time.Since(s.opened).Milliseconds(), scrub(traceLine(text), s.key))
 		}
 		s.mu.Lock()
 		s.push(s.codec.decodeAt(text, time.Now())...)

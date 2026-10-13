@@ -8,9 +8,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -585,4 +587,77 @@ func TestCloseReasonsNeverCarryTheKey(t *testing.T) {
 		t.Fatal("stream ended without the fatal error")
 	}
 	want(t, []voice.Event{ev}, eFatal("closed (1008): API key *** not valid"))
+}
+
+// V-014: GEMINI_TRACE=1 logs every server message after setup with its timing, the audio data
+// elided and the API key never printed (even when a server message echoes it).
+func TestGeminiTraceLogsServerFramesWithTheKeyRedacted(t *testing.T) {
+	t.Setenv("GEMINI_TRACE", "1")
+	var buf syncBuf
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	const key = "AIza-trace_secret/+="
+	audioMsg := `{"serverContent":{"modelTurn":{"parts":[{"inlineData":{"mimeType":"audio/pcm;rate=24000","data":"` +
+		base64.StdEncoding.EncodeToString(make([]byte, 480)) + `"}}]}}}`
+	url, _ := serve(t, "/ws", func(c *websocket.Conn, ctx context.Context) {
+		_, _, _ = c.Read(ctx)
+		_ = bin(ctx, c, setupComplete)
+		_ = bin(ctx, c, audioMsg)
+		_ = bin(ctx, c, `{"serverContent":{"outputTranscription":{"text":"your key is `+key+` and `+queryEscape(key)+`"}}}`)
+		_ = bin(ctx, c, turnComplete)
+		<-ctx.Done()
+	})
+	s := connectTo(t, New(url), cfg(), key)
+	expectReady(t, s)
+	deadline := time.Now().Add(5 * time.Second)
+	for strings.Count(buf.String(), "voice-gemini trace +") < 3 {
+		if time.Now().After(deadline) {
+			t.Fatalf("trace lines missing:\n%s", buf.String())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	out := buf.String()
+	if strings.Contains(out, key) || strings.Contains(out, queryEscape(key)) {
+		t.Fatalf("key in the trace:\n%s", out)
+	}
+	if !strings.Contains(out, `"data":"<640 bytes>"`) || !strings.Contains(out, "turnComplete") || !strings.Contains(out, "***") {
+		t.Fatalf("trace shape:\n%s", out)
+	}
+}
+
+// Without GEMINI_TRACE nothing is traced.
+func TestNoGeminiTraceByDefault(t *testing.T) {
+	t.Setenv("GEMINI_TRACE", "")
+	var buf syncBuf
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	url, _ := serve(t, "/ws", func(c *websocket.Conn, ctx context.Context) {
+		_, _, _ = c.Read(ctx)
+		_ = bin(ctx, c, setupComplete)
+		_ = bin(ctx, c, turnComplete)
+		<-ctx.Done()
+	})
+	s := connectTo(t, New(url), cfg(), "k")
+	expectReady(t, s)
+	time.Sleep(100 * time.Millisecond)
+	if strings.Contains(buf.String(), "trace") {
+		t.Fatal(buf.String())
+	}
+}
+
+type syncBuf struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (s *syncBuf) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuf) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
 }
