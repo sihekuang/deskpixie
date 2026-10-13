@@ -1,6 +1,6 @@
 # Phase 3 go/no-go: DeskPixie (Go + Swift) vs ai-mascot (Rust)
 
-Decides whether the Go core + Swift shell is good enough to continue. A **no-go** triggers D2 (stop at the middle option, see `docs/decisions.md`).
+Decides whether the Go core + Swift shell is good enough to continue. A **no-go** triggers D2 (stop at the middle option, see the spec, `docs/specs/2026-10-13-deskpixie-port-design.md` §8).
 
 ## Setup (identical for both apps)
 
@@ -31,7 +31,7 @@ Checked with `git grep -i "underrun\|latency\|played\|elapsed" origin/main -- cr
 The Rust numbers therefore need **a throwaway instrumentation patch**, applied on a scratch branch of ai-mascot (do not merge it, do not touch the main checkout):
 
 1. **Mic to send**, `crates/audio-macos/src/mic_pump.rs` and `crates/voice-core/src/runtime.rs`. Stamp the capture time on each 40 ms frame when the VPIO input callback hands it to the pump (use `Instant::now()` at the point the 960-sample frame is complete, the same moment DeskPixie's Swift side stamps `capturedUnixNanos`), carry it alongside `AudioFrame`, and at `runtime.rs:219` (just before `s.commands.send(VoiceCommand::Audio(frame))`) compute `stamp.elapsed()`. Push the value into a 1024-sample ring and every 10 s `eprintln!("[metrics] micToSendP50Ms=.. micToSendP95Ms=.. n=..")` using the same nearest-rank percentile. If carrying the stamp through `AudioFrame` is too invasive, a parallel `VecDeque<Instant>` filled in `mic_pump.rs` and popped at `runtime.rs:219` is equivalent as long as frames are not dropped in between.
-2. **Underruns**, `crates/audio-macos/src/speaker.rs` `render()`. Add an `underruns: AtomicU64` to `Counters`; after the copy, `if copied < out.len() && !counters.is_idle_before_this_read() { counters.on_underrun() }`, i.e. count a render callback that had to zero-fill **while a response was still streaming** (written > read at entry, or a response is active). Do not count the normal silence between responses. Log it in the same 10 s `[metrics]` line (`underruns=..`). Use the same definition DeskPixie uses in `dp_report_playback` (Task 7: a render callback that zero-filled while the ring had been non-empty since the response started), and note any difference in the results.
+2. **Underruns**, `crates/audio-macos/src/speaker.rs` `render()`. Add an `underruns: AtomicU64` to `Counters`; after the copy, `if copied < out.len() && !counters.is_idle_before_this_read() { counters.on_underrun() }`, i.e. count a render callback that had to zero-fill **while a response was still streaming** (written > read at entry, or a response is active). Do not count the normal silence between responses. Log it in the same 10 s `[metrics]` line (`underruns=..`). Use the same definition DeskPixie uses in `dp_report_playback` (`PlaybackRing`: a render callback that zero-filled while `expectingAudio` was set, i.e. the engine returned playback samples within the last ~200 ms), and note any difference in the results.
 3. Run the Rust app from a terminal (`cargo tauri dev` or the built binary) and capture stderr: `... 2> rust-run.log`.
 
 ## Barge-in stop time (both apps)
@@ -39,7 +39,7 @@ The Rust numbers therefore need **a throwaway instrumentation patch**, applied o
 The target is playback silent within ~50 ms of the user speaking. Log timestamps alone do not capture the speaker-side delay, so measure with a recording:
 
 - **Method (primary, same for both apps):** record system audio + mic on one timeline (QuickTime screen recording with a loopback input, or any DAW recording the mic and the speaker output together; a phone filming the room with the Mac speaker audible also works as a coarse check). Open it in an audio editor, find the onset of the user's voice and the last audible Bit sample, and take the difference. Do this for all 10 barge-ins; report the median and the worst.
-- **Cross-check (DeskPixie):** the Go runtime logs the flush on speech-start, and the truncate `audio_end_ms` should equal what was *played* (queued audio excluded). Spot-check that `audio_end_ms` is far smaller than the total audio received for that item.
+- **Cross-check (DeskPixie):** the Swift audio pump logs each flush (`os_log`, subsystem `com.sihekuang.deskpixie`, category `audio`), and the truncate `audio_end_ms` should equal what was *played* (queued audio excluded). Spot-check that `audio_end_ms` is far smaller than the total audio received for that item.
 - **Cross-check (Rust):** `runtime.rs:193/307/312` call `playback.flush()`; with the instrumentation patch, also `eprintln!` an `Instant` at the `flush()` call and compare with the recording.
 
 ## Results (fill in after the live session)
