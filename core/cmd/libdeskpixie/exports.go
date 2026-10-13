@@ -30,6 +30,18 @@ func dp_init() C.int {
 	return 0
 }
 
+// dp_configure builds the app core from paths; everything else comes from settings.json:
+//
+//	{"appSupport":"…/Application Support/com.sihekuang.deskpixie",
+//	 "bundledMascots":"…/DeskPixie.app/Contents/Resources/mascots",
+//	 "designSystem":"…/DeskPixie.app/Contents/Resources/design-system",
+//	 "dfn3ModelPath":"…/DeskPixie.app/Contents/Resources/DeepFilterNet3.tar.gz",
+//	 "platform":"macos"}
+//
+// appSupport is required; the others may be "" (no bundled packs, no design system, no DFN3).
+// Phase 3's {apiKey, model, …, packRoots} is still accepted (see bridge.Config).
+// Returns 0 ok, 1 not initialized, 2 bad JSON / no appSupport, 3 build error (dp_last_error).
+//
 //export dp_configure
 func dp_configure(json *C.char) C.int {
 	if json == nil {

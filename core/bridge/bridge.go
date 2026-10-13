@@ -18,22 +18,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/sihekuang/deskpixie/core/app"
 	"github.com/sihekuang/deskpixie/core/metrics"
-	"github.com/sihekuang/deskpixie/core/packs"
 	"github.com/sihekuang/deskpixie/core/voice"
-	"github.com/sihekuang/deskpixie/core/voice/openai"
 )
-
-// Defaults applied to an empty Config field.
-const (
-	DefaultModel           = "gpt-realtime"
-	DefaultVoice           = "marin"
-	DefaultIdleTimeoutSecs = 7
-	DefaultPack            = "bit"
-)
-
-// holdTimeout is the silence timeout while a hold is on (unused in Phase 3, which has no tools).
-const holdTimeout = 180 * time.Second
 
 // DefaultMetricsInterval is how often a metrics snapshot is emitted and logged.
 const DefaultMetricsInterval = 10 * time.Second
@@ -48,38 +36,49 @@ var (
 	ErrBadJSON = errors.New("invalid config JSON")
 )
 
-// Config is the JSON Swift passes to Configure.
+// Config is the JSON Swift passes to dp_configure: paths only. Everything else comes from
+// settings.json in AppSupport (P14). Example:
+//
+//	{"appSupport":"/Users/me/Library/Application Support/com.sihekuang.deskpixie",
+//	 "bundledMascots":"/Applications/DeskPixie.app/Contents/Resources/mascots",
+//	 "designSystem":"/Applications/DeskPixie.app/Contents/Resources/design-system",
+//	 "dfn3ModelPath":"/Applications/DeskPixie.app/Contents/Resources/DeepFilterNet3.tar.gz",
+//	 "platform":"macos"}
+//
+// Phase 3's config ({apiKey, model, voice, personaPath, idleTimeoutSecs, pack, packRoots,
+// noisyRoom}) is still accepted while Swift moves over: packRoots[0] becomes bundledMascots
+// and the folder above the last root becomes appSupport; the other old keys are ignored
+// (settings.json and env/.env own them now).
 type Config struct {
-	APIKey          string   `json:"apiKey"`
-	Model           string   `json:"model"`
-	Voice           string   `json:"voice"`
-	PersonaPath     string   `json:"personaPath"`
-	IdleTimeoutSecs int      `json:"idleTimeoutSecs"`
-	Pack            string   `json:"pack"`
-	PackRoots       []string `json:"packRoots"` // bundled first, then user
-	NoisyRoom       bool     `json:"noisyRoom"`
+	app.Paths
+	// PackRoots is Phase 3's [bundled, user] mascot roots (deprecated).
+	PackRoots []string `json:"packRoots"`
 }
 
-func (c *Config) applyDefaults() {
-	if c.Model == "" {
-		c.Model = DefaultModel
+// paths resolves the legacy keys.
+func (c Config) paths() app.Paths {
+	p := c.Paths
+	if len(c.PackRoots) > 0 {
+		if p.BundledMascots == "" && len(c.PackRoots) > 1 {
+			p.BundledMascots = c.PackRoots[0]
+		}
+		if p.AppSupport == "" {
+			p.AppSupport = filepath.Dir(filepath.Clean(c.PackRoots[len(c.PackRoots)-1]))
+		}
 	}
-	if c.Voice == "" {
-		c.Voice = DefaultVoice
-	}
-	if c.IdleTimeoutSecs <= 0 {
-		c.IdleTimeoutSecs = DefaultIdleTimeoutSecs
-	}
-	if c.Pack == "" {
-		c.Pack = DefaultPack
-	}
+	return p
 }
 
 // Options are the engine's injectable dependencies (tests).
 type Options struct {
-	MetricsLogPath  string             // "" = ~/Library/Logs/DeskPixie/metrics.log
-	MetricsInterval time.Duration      // 0 = DefaultMetricsInterval
-	NewModel        func() voice.Model // nil = OpenAI Realtime
+	MetricsLogPath  string        // "" = ~/Library/Logs/DeskPixie/metrics.log
+	MetricsInterval time.Duration // 0 = DefaultMetricsInterval
+	// Providers replaces the voice provider registry (nil = OpenAI Realtime + Gemini Live).
+	Providers map[string]app.ModelFactory
+	// Secrets replaces the API key lookup (nil = env, then .env in the cwd and app support).
+	Secrets voice.SecretSource
+	// Run replaces starting helper programs (`open`); nil = os/exec.
+	Run func(program string, args ...string) error
 }
 
 // DefaultMetricsLogPath is ~/Library/Logs/DeskPixie/metrics.log ("" if HOME is unknown).
@@ -91,7 +90,7 @@ func DefaultMetricsLogPath() string {
 	return filepath.Join(home, "Library", "Logs", "DeskPixie", "metrics.log")
 }
 
-// Engine owns at most one voice.Runtime plus the active pack, the event queue and the
+// Engine owns at most one app core (and so one voice.Runtime), the event queue and the
 // metrics recorder. Safe for concurrent use.
 type Engine struct {
 	opts Options
@@ -101,22 +100,21 @@ type Engine struct {
 	cfgMu  sync.Mutex // serialises Configure and Close
 	closed bool       // guarded by cfgMu
 
+	app   atomic.Pointer[app.App]
 	rt    atomic.Pointer[voice.Runtime]
-	pack  atomic.Pointer[packs.Pack]
 	drops atomic.Uint64 // mic frames dropped (cumulative across runtimes)
 
 	errMu   sync.Mutex
 	lastErr string
 
-	calls handlers  // dp_call methods registered on this engine
-	tray  trayModel // what app.state reports until P14
+	calls handlers // dp_call methods registered on this engine
 
 	stop      chan struct{}
 	loopDone  chan struct{}
 	closeOnce sync.Once
 }
 
-// New starts an engine (and its metrics loop) with no runtime; Configure builds one.
+// New starts an engine (and its metrics loop) with no app; Configure builds one.
 func New(o Options) *Engine {
 	if o.MetricsLogPath == "" {
 		o.MetricsLogPath = DefaultMetricsLogPath()
@@ -124,18 +122,13 @@ func New(o Options) *Engine {
 	if o.MetricsInterval <= 0 {
 		o.MetricsInterval = DefaultMetricsInterval
 	}
-	if o.NewModel == nil {
-		o.NewModel = func() voice.Model { return openai.New("") }
-	}
 	e := &Engine{opts: o, stop: make(chan struct{}), loopDone: make(chan struct{})}
-	e.tray.state = string(voice.StateIdle)
-	e.registerTempHandlers()
 	go e.metricsLoop()
 	return e
 }
 
-// Configure parses cfg, resolves the pack and (re)builds the runtime. A runtime that
-// already exists is closed first. On error the previous runtime and pack are kept.
+// Configure parses the paths and (re)builds the app core from settings.json. An app that
+// already exists is closed once the new one is built; on error the previous one is kept.
 func (e *Engine) Configure(jsonCfg []byte) error {
 	err := e.configure(jsonCfg)
 	e.setErr(err)
@@ -147,15 +140,9 @@ func (e *Engine) configure(jsonCfg []byte) error {
 	if err := json.Unmarshal(jsonCfg, &c); err != nil {
 		return fmt.Errorf("%w: %v", ErrBadJSON, err)
 	}
-	c.applyDefaults()
-
-	found, rejected := packs.Load(c.PackRoots...)
-	if rejected != nil {
-		log.Printf("deskpixie: skipped invalid packs: %v", rejected)
-	}
-	pack, ok := packs.Select(found, c.Pack)
-	if !ok {
-		return fmt.Errorf("no valid mascot pack in packRoots %q", c.PackRoots)
+	paths := c.paths()
+	if paths.AppSupport == "" {
+		return fmt.Errorf("%w: appSupport is required", ErrBadJSON)
 	}
 
 	e.cfgMu.Lock()
@@ -163,35 +150,37 @@ func (e *Engine) configure(jsonCfg []byte) error {
 	if e.closed {
 		return ErrNotInit
 	}
-	if old := e.rt.Swap(nil); old != nil {
-		old.Close()
-		e.emit(voice.UIEvent{Kind: "state", State: string(voice.StateIdle)})
-	}
-	e.pack.Store(&pack)
-	e.setPacks(found, pack.ID)
-	rt := voice.NewRuntime(e.opts.NewModel(), nil, voice.RuntimeConfig{
-		Session: voice.SessionConfig{
-			Model:        c.Model,
-			Voice:        c.Voice,
-			Instructions: voice.Instructions(c.PersonaPath),
-			NoisyRoom:    c.NoisyRoom,
-		},
-		APIKey:      c.APIKey,
-		MouthLevels: int(pack.Mouth.Levels),
-		Conversation: voice.ConversationConfig{
-			IdleTimeout: time.Duration(c.IdleTimeoutSecs) * time.Second,
-			HoldTimeout: holdTimeout,
-		},
+	a, err := app.New(app.Deps{
+		Paths:     paths,
+		Emit:      e.q.push,
+		Providers: e.opts.Providers,
+		Secrets:   e.opts.Secrets,
+		Run:       e.opts.Run,
 		OnMicSent: e.onMicSent,
-	}, e.emit)
-	e.rt.Store(rt)
+	})
+	if err != nil {
+		return err
+	}
+	old := e.app.Swap(a)
+	e.rt.Store(a.Runtime())
+	a.Register(registrar{e})
+	if old != nil {
+		old.Close()
+	}
 	return nil
+}
+
+// registrar adapts the engine's registry to app.Registrar.
+type registrar struct{ e *Engine }
+
+func (r registrar) Register(method string, fn func(json.RawMessage) (any, error)) {
+	r.e.Register(method, Handler(fn))
 }
 
 // Hotkey starts or ends a conversation. No-op before Configure.
 func (e *Engine) Hotkey() {
-	if rt := e.rt.Load(); rt != nil {
-		rt.Hotkey()
+	if a := e.app.Load(); a != nil {
+		a.Hotkey()
 	}
 }
 
@@ -245,21 +234,13 @@ func (e *Engine) MicFailed(reason string) {
 // PollEvent returns the oldest queued UI event as JSON, or nil when there is none.
 func (e *Engine) PollEvent() []byte { return e.q.pop() }
 
-// PackJSON is {"pack":<resolved pack>,"sheetPath":"/abs/sheet.png"}, or nil before a
-// successful Configure.
+// PackJSON is {"pack":<resolved pack>,"sheetPath":"/abs/sheet.png","scale":n,"hitMask":
+// "<base64>"} for the pack shown, or nil before a successful Configure.
 func (e *Engine) PackJSON() []byte {
-	p := e.pack.Load()
-	if p == nil {
-		return nil
+	if a := e.app.Load(); a != nil {
+		return a.PackJSON()
 	}
-	b, err := json.Marshal(struct {
-		Pack      *packs.Pack `json:"pack"`
-		SheetPath string      `json:"sheetPath"`
-	}{p, p.SheetPath})
-	if err != nil {
-		return nil
-	}
-	return b
+	return nil
 }
 
 // LastError is the last Configure error ("" after a success).
@@ -269,17 +250,17 @@ func (e *Engine) LastError() string {
 	return e.lastErr
 }
 
-// Close stops the metrics loop and closes the runtime. Idempotent.
+// Close stops the metrics loop and closes the app core. Idempotent.
 func (e *Engine) Close() {
 	e.closeOnce.Do(func() {
 		close(e.stop)
 		<-e.loopDone
 		e.cfgMu.Lock()
 		e.closed = true
-		if rt := e.rt.Swap(nil); rt != nil {
-			rt.Close()
+		e.rt.Store(nil)
+		if a := e.app.Swap(nil); a != nil {
+			a.Close()
 		}
-		e.pack.Store(nil)
 		e.cfgMu.Unlock()
 	})
 }
@@ -294,17 +275,13 @@ func (e *Engine) setErr(err error) {
 	}
 }
 
-// emit is the runtime's event sink. It runs on the runtime goroutine and never blocks.
-// A state or status change is followed by a `tray` event so Swift re-reads app.state.
+// emit queues a voice-style UI event (metrics). It never blocks.
 func (e *Engine) emit(ev voice.UIEvent) {
 	b, err := json.Marshal(ev)
 	if err != nil {
 		return
 	}
 	e.q.push(ev.Kind, b)
-	if e.observe(ev) {
-		e.pushTray()
-	}
 }
 
 func (e *Engine) onMicSent(capturedAt time.Time) {

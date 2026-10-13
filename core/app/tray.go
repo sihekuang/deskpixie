@@ -1,0 +1,85 @@
+package app
+
+import (
+	"fmt"
+	"strings"
+	"unicode/utf8"
+)
+
+// AppState is the tray model returned by `app.state` (plan "Shared contract"). Lists always
+// encode as [] (never null).
+type AppState struct {
+	State        string       `json:"state"`
+	Packs        []PackRef    `json:"packs"`
+	Pack         string       `json:"pack"`
+	Scale        int          `json:"scale"`
+	Fade         bool         `json:"fade"`
+	Talking      bool         `json:"talking"`
+	CanvasRecent []CanvasPage `json:"canvasRecent"`
+	Agent        AgentState   `json:"agent"`
+	StatusLines  []string     `json:"statusLines"`
+	Hotkey       string       `json:"hotkey"`
+}
+
+// PackRef is one Tray ▸ Mascot row.
+type PackRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// CanvasPage is one Tray ▸ Canvas ▸ Recent row (Swift cuts long titles to 60 characters).
+type CanvasPage struct {
+	Slug  string `json:"slug"`
+	Title string `json:"title"`
+}
+
+// AgentState drives Tray ▸ Agent (shown only when Enabled).
+type AgentState struct {
+	Enabled bool     `json:"enabled"`
+	Jobs    []JobRef `json:"jobs"`
+}
+
+// JobRef is one agent job row; Label is preformatted by JobItems.
+type JobRef struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+// JobRow is what a job row shows (agent-core JobView's fields the tray uses). P14b maps
+// agent.JobView to it.
+type JobRow struct {
+	ID      string
+	Status  string // agent JobStatus name, e.g. "working"
+	Task    string
+	AgeSecs uint64
+}
+
+// IntegrationHint is the agent's standing tray hint when the runtime has no status.
+const IntegrationHint = "Agent: run `herdr integration install claude`"
+
+// JobItems are the Tray ▸ Agent rows: "<task ≤ 40 chars> — <status>, <age>".
+func JobItems(jobs []JobRow) []JobRef {
+	const maxTask = 40
+	out := make([]JobRef, 0, len(jobs))
+	for _, j := range jobs {
+		task := j.Task
+		if utf8.RuneCountInString(task) > maxTask {
+			task = string([]rune(task)[:maxTask-1]) + "…"
+		}
+		age := fmt.Sprintf("%d s", j.AgeSecs)
+		if j.AgeSecs >= 60 {
+			age = fmt.Sprintf("%d min", j.AgeSecs/60)
+		}
+		out = append(out, JobRef{ID: j.ID, Label: fmt.Sprintf("%s — %s, %s", task, j.Status, age)})
+	}
+	return out
+}
+
+// AgentStatusLine is the tray's agent line: the runtime's status if it has one, else the
+// standing hint; "" for none.
+func AgentStatusLine(status, hint string) string {
+	if strings.TrimSpace(status) != "" {
+		return status
+	}
+	return hint
+}

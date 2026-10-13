@@ -3,11 +3,10 @@ package bridge
 import (
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
-
-	"github.com/sihekuang/deskpixie/core/voice"
 )
 
 func callJSON(t *testing.T, b []byte) map[string]json.RawMessage {
@@ -139,63 +138,6 @@ func TestCallConcurrentWithRegister(t *testing.T) {
 	wg.Wait()
 }
 
-func appState(t *testing.T, e *Engine) AppState {
-	t.Helper()
-	m := callJSON(t, e.Call("app.state", nil))
-	var s AppState
-	if err := json.Unmarshal(m["ok"], &s); err != nil {
-		t.Fatalf("app.state %s: %v", m["ok"], err)
-	}
-	return s
-}
-
-func TestAppStateBeforeConfigure(t *testing.T) {
-	e := newEngine(t, Options{})
-	s := appState(t, e)
-	if s.State != "idle" || s.Scale != DefaultScale || s.Pack != "" || len(s.StatusLines) != 0 {
-		t.Fatalf("got %+v", s)
-	}
-	if s.Packs == nil || s.StatusLines == nil || s.CanvasRecent == nil || s.Agent.Jobs == nil {
-		t.Fatalf("lists must encode as [] not null: %+v", s)
-	}
-}
-
-func TestAppStateReportsPacksStateAndStatus(t *testing.T) {
-	e := newEngine(t, Options{})
-	if err := e.Configure(cfgJSON(t, "")); err != nil {
-		t.Fatal(err)
-	}
-	s := appState(t, e)
-	if s.Pack != "bit" {
-		t.Fatalf("pack = %q", s.Pack)
-	}
-	found := false
-	for _, p := range s.Packs {
-		if p.ID == "bit" && p.Name != "" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("packs = %+v", s.Packs)
-	}
-
-	e.emit(voice.UIEvent{Kind: "state", State: "thinking"})
-	e.emit(voice.UIEvent{Kind: "status", Text: "Voice: connection lost"})
-	s = appState(t, e)
-	if s.State != "thinking" || len(s.StatusLines) != 1 || s.StatusLines[0] != "Voice: connection lost" {
-		t.Fatalf("got %+v", s)
-	}
-	e.emit(voice.UIEvent{Kind: "error", Text: "connect: refused"})
-	if s = appState(t, e); len(s.StatusLines) != 1 || s.StatusLines[0] != "connect: refused" {
-		t.Fatalf("got %+v", s.StatusLines)
-	}
-	// An empty status clears the line (Rust: set_status(None)).
-	e.emit(voice.UIEvent{Kind: "status", Text: ""})
-	if s = appState(t, e); len(s.StatusLines) != 0 {
-		t.Fatalf("got %+v", s.StatusLines)
-	}
-}
-
 // drainKinds pops every queued event and returns their kinds in order.
 func drainKinds(t *testing.T, e *Engine) []string {
 	t.Helper()
@@ -216,35 +158,49 @@ func count(kinds []string, k string) int {
 	return n
 }
 
-func TestTrayEventOnStateAndStatusChange(t *testing.T) {
+func TestAppMethodsNeedConfigure(t *testing.T) {
 	e := newEngine(t, Options{})
-	drainKinds(t, e)
-	e.emit(voice.UIEvent{Kind: "state", State: "listening"})
-	if k := drainKinds(t, e); strings.Join(k, ",") != "state,tray" {
-		t.Fatalf("got %v", k)
+	if got := string(e.Call("app.state", nil)); got != `{"error":"unknown method app.state"}` {
+		t.Fatalf("got %s", got)
 	}
-	// Same state again: no tray refresh needed.
-	e.emit(voice.UIEvent{Kind: "state", State: "listening"})
-	if k := drainKinds(t, e); count(k, "tray") != 0 {
-		t.Fatalf("got %v", k)
+}
+
+// Every method of the shared contract (and P1's and P14a's additions) is served once
+// configured.
+func TestConfigureRegistersTheContractMethods(t *testing.T) {
+	e := newEngine(t, Options{})
+	if err := e.Configure(cfgJSON(t, "")); err != nil {
+		t.Fatal(err)
 	}
-	e.emit(voice.UIEvent{Kind: "status", Text: "Voice: model error"})
-	if k := drainKinds(t, e); strings.Join(k, ",") != "status,tray" {
-		t.Fatalf("got %v", k)
+	for _, m := range []string{
+		"settings.snapshot", "settings.set", "settings.reload", "settings.secrets", "settings.choices",
+		"settings.openFile", "settings.restart", "settings.hotkeyFailed",
+		"app.state", "app.action", "mascot.click", "mascot.moved",
+		"canvas.resolve", "canvas.geometry", "audio.deviceChanged", "audio.failed",
+	} {
+		if strings.HasPrefix(string(e.Call(m, []byte(`{"bogus":`))), `{"error":"unknown method`) {
+			t.Errorf("%s not registered", m)
+		}
 	}
-	e.emit(voice.UIEvent{Kind: "status", Text: "Voice: model error"})
-	if k := drainKinds(t, e); count(k, "tray") != 0 {
-		t.Fatalf("got %v", k)
+}
+
+func TestAppStateAfterConfigure(t *testing.T) {
+	e := newEngine(t, Options{})
+	if err := e.Configure(cfgJSON(t, "")); err != nil {
+		t.Fatal(err)
 	}
-	e.emit(voice.UIEvent{Kind: "error", Text: "boom"})
-	if k := drainKinds(t, e); strings.Join(k, ",") != "error,tray" {
-		t.Fatalf("got %v", k)
+	m := callJSON(t, e.Call("app.state", nil))
+	var s struct {
+		State, Pack string
+		Scale       int
+		Packs       []struct{ ID, Name string }
+		StatusLines []string `json:"statusLines"`
 	}
-	// Mouth and transcript never refresh the tray.
-	e.emit(voice.UIEvent{Kind: "mouth", Level: 2})
-	e.emit(voice.UIEvent{Kind: "transcript", Role: "user", Text: "hi"})
-	if k := drainKinds(t, e); count(k, "tray") != 0 {
-		t.Fatalf("got %v", k)
+	if err := json.Unmarshal(m["ok"], &s); err != nil {
+		t.Fatalf("app.state %s: %v", m["ok"], err)
+	}
+	if s.State != "idle" || s.Pack != "bit" || s.Scale != 8 || len(s.Packs) == 0 || s.StatusLines == nil {
+		t.Fatalf("got %+v", s)
 	}
 }
 
@@ -254,28 +210,29 @@ func TestTrayEventOnConfigure(t *testing.T) {
 	if err := e.Configure(cfgJSON(t, "")); err != nil {
 		t.Fatal(err)
 	}
-	if k := drainKinds(t, e); count(k, "tray") == 0 {
+	k := drainKinds(t, e)
+	if count(k, "tray") == 0 || count(k, "devices") != 1 {
 		t.Fatalf("got %v", k)
 	}
 }
 
-func TestTempAppActionSetsState(t *testing.T) {
+func TestAppActionThroughDpCall(t *testing.T) {
 	e := newEngine(t, Options{})
+	if err := e.Configure(cfgJSON(t, "")); err != nil {
+		t.Fatal(err)
+	}
 	drainKinds(t, e)
-	if got := string(e.Call("app.action", []byte(`{"id":"state:happy"}`))); got != `{"ok":{}}` {
+	if got := string(e.Call("app.action", []byte(`{"id":"state:thinking"}`))); got != `{"ok":{}}` {
 		t.Fatalf("got %s", got)
 	}
-	if k := drainKinds(t, e); strings.Join(k, ",") != "state,tray" {
+	if k := drainKinds(t, e); count(k, "state") != 1 || count(k, "tray") == 0 {
 		t.Fatalf("got %v", k)
-	}
-	if s := appState(t, e); s.State != "happy" {
-		t.Fatalf("state = %q", s.State)
 	}
 	if _, ok := callJSON(t, e.Call("app.action", []byte(`{"id":"state:nope"}`)))["error"]; !ok {
 		t.Fatal("unknown state must fail")
 	}
-	if _, ok := callJSON(t, e.Call("app.action", []byte(`{"id":"reload"}`)))["error"]; !ok {
-		t.Fatal("unported action must fail until P14")
+	if got := string(e.Call("app.action", []byte(`{"id":"reload"}`))); got != `{"ok":{}}` {
+		t.Fatalf("reload: %s", got)
 	}
 }
 
@@ -284,9 +241,14 @@ func TestGlobalCall(t *testing.T) {
 	if got := string(Call("app.state", nil)); got != `{"error":"unknown method app.state"}` {
 		t.Fatalf("before Init: %s", got)
 	}
+	defaultOptions = Options{MetricsLogPath: filepath.Join(t.TempDir(), "metrics.log"), Secrets: noSecrets}
+	t.Cleanup(func() { defaultOptions = Options{} })
 	Init()
 	t.Cleanup(Destroy)
+	if err := Configure(cfgJSON(t, "")); err != nil {
+		t.Fatal(err)
+	}
 	if _, ok := callJSON(t, Call("app.state", nil))["ok"]; !ok {
-		t.Fatal("app.state after Init")
+		t.Fatal("app.state after Configure")
 	}
 }
