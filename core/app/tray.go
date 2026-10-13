@@ -45,7 +45,7 @@ type JobRef struct {
 	Label string `json:"label"`
 }
 
-// JobRow is what a job row shows (agent-core JobView's fields the tray uses). P14b maps
+// JobRow is what a job row shows (agent-core JobView's fields the tray uses). agentapp maps
 // agent.JobView to it.
 type JobRow struct {
 	ID      string

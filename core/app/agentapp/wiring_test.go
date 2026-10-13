@@ -1,0 +1,462 @@
+package agentapp
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/sihekuang/deskpixie/core/agent"
+	"github.com/sihekuang/deskpixie/core/agent/agenttest"
+	"github.com/sihekuang/deskpixie/core/app"
+	"github.com/sihekuang/deskpixie/core/settings"
+	"github.com/sihekuang/deskpixie/core/voice"
+)
+
+// Go tests for the composition root (Rust's build/attach_voice/on_menu/shutdown are only
+// exercised by the app there): build, the end-to-end flow over the fakes, the tray, the menu,
+// the echo gate on the voice link, and the shutdown sequence.
+
+// stoppableHost is the fake session host plus the herdr Host's Shutdown.
+type stoppableHost struct {
+	*agenttest.FakeSessionHost
+	shut atomic.Int32
+}
+
+func (h *stoppableHost) Shutdown() { h.shut.Add(1) }
+
+// recorder records the app hooks.
+type recorder struct {
+	mu                  sync.Mutex
+	celebrated, flashed int
+	refreshed           int
+	notes               [][2]string
+}
+
+func (r *recorder) hooks() app.AgentHooks {
+	return app.AgentHooks{
+		Celebrate:   func() { r.mu.Lock(); r.celebrated++; r.mu.Unlock() },
+		FlashError:  func() { r.mu.Lock(); r.flashed++; r.mu.Unlock() },
+		RefreshTray: func() { r.mu.Lock(); r.refreshed++; r.mu.Unlock() },
+		Notify: func(title, body string) {
+			r.mu.Lock()
+			r.notes = append(r.notes, [2]string{title, body})
+			r.mu.Unlock()
+		},
+	}
+}
+
+func (r *recorder) counts() (celebrated, flashed int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.celebrated, r.flashed
+}
+
+// fakeVoice is the voice loop as the agent sees it.
+type fakeVoice struct {
+	mu       sync.Mutex
+	injected []string
+	holds    []bool
+	signals  chan voice.VoiceSignal
+}
+
+func newFakeVoice() *fakeVoice { return &fakeVoice{signals: make(chan voice.VoiceSignal, 16)} }
+
+func (v *fakeVoice) Inject(n voice.Notice) {
+	v.mu.Lock()
+	v.injected = append(v.injected, n.Text)
+	v.mu.Unlock()
+}
+
+func (v *fakeVoice) HoldOpen(on bool) {
+	v.mu.Lock()
+	v.holds = append(v.holds, on)
+	v.mu.Unlock()
+}
+
+func (v *fakeVoice) Subscribe() <-chan voice.VoiceSignal { return v.signals }
+
+func (v *fakeVoice) Injected() []string {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return slices.Clone(v.injected)
+}
+
+type fixture struct {
+	agent    *Agent
+	host     *stoppableHost
+	launcher *agenttest.FakeLauncher
+	rec      *recorder
+	data     string
+	home     string
+}
+
+func newFixture(t *testing.T, change func(*Config)) *fixture {
+	t.Helper()
+	f := &fixture{
+		host:     &stoppableHost{FakeSessionHost: agenttest.NewFakeSessionHost()},
+		launcher: &agenttest.FakeLauncher{},
+		rec:      &recorder{},
+		data:     t.TempDir(),
+		home:     t.TempDir(),
+	}
+	cfg := Config{
+		Settings:   settings.Default().Agent,
+		AppSupport: f.data,
+		Home:       f.home,
+		Hooks:      f.rec.hooks(),
+		Runner:     &agenttest.FakeRunner{},
+		Environ:    []string{"PATH=/usr/bin:/bin"},
+		Hosts: map[string]HostFactory{"herdr": func(HostDeps) (agent.SessionHost, error) {
+			return f.host, nil
+		}},
+		Terminals: map[string]TerminalFactory{"warp": func(agent.CommandRunner, string) agent.TerminalLauncher {
+			return f.launcher
+		}},
+		IDs:    &agenttest.SeqIds{},
+		Listen: func(uint16) (net.Listener, error) { return net.Listen("tcp", "127.0.0.1:0") },
+	}
+	if change != nil {
+		change(&cfg)
+	}
+	a := Build(cfg)
+	if a == nil {
+		t.Fatal("Build returned nil")
+	}
+	f.agent = a
+	t.Cleanup(a.Shutdown)
+	return f
+}
+
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func (f *fixture) tool(t *testing.T, name string) voice.Tool {
+	t.Helper()
+	for _, tool := range f.agent.Tools() {
+		if tool.Name() == name {
+			return tool
+		}
+	}
+	t.Fatalf("no %s tool", name)
+	return nil
+}
+
+func (f *fixture) delegate(t *testing.T, task string) agent.JobID {
+	t.Helper()
+	out := f.tool(t, "delegate").Invoke(context.Background(), json.RawMessage(`{"task":"`+task+`"}`))
+	var r struct {
+		JobID  string `json:"job_id"`
+		Status string `json:"status"`
+		Error  string `json:"error"`
+	}
+	if err := json.Unmarshal(out.Output, &r); err != nil || r.JobID == "" {
+		t.Fatalf("delegate: %s", out.Output)
+	}
+	return agent.JobID(r.JobID)
+}
+
+// coordinatorToken is the bearer the coordinator was started with.
+func (f *fixture) coordinatorToken(t *testing.T) string {
+	t.Helper()
+	for _, s := range f.host.Starts() {
+		for _, e := range s.Env {
+			if e.Key == "MASCOT_AGENT_TOKEN" {
+				return e.Value
+			}
+		}
+	}
+	t.Fatal("the coordinator has no token")
+	return ""
+}
+
+func (f *fixture) post(t *testing.T, path, token string, body any) (int, string) {
+	t.Helper()
+	b, _ := json.Marshal(body)
+	req, _ := http.NewRequest(http.MethodPost, "http://"+f.agent.Addr()+path, strings.NewReader(string(b)))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	text, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(text)
+}
+
+func openVoice(t *testing.T, f *fixture) *fakeVoice {
+	v := newFakeVoice()
+	f.agent.AttachVoice(v)
+	v.signals <- voice.VoiceSignal{Kind: voice.SigOpened}
+	waitFor(t, "the link to open", f.agent.link.IsOpen)
+	return v
+}
+
+// The whole flow over the fakes and the real hook server: delegate → the coordinator is started
+// and prompted → its Stop hook carries the reply → Bit is injected with it, Bit celebrates.
+func TestEndToEndDelegateToStopHookToVoiceInject(t *testing.T) {
+	f := newFixture(t, nil)
+	v := openVoice(t, f)
+	job := f.delegate(t, "count the open issues")
+	waitFor(t, "the coordinator prompt", func() bool {
+		for _, p := range f.host.Prompts() {
+			if p.Agent == agent.Coordinator && strings.Contains(p.Text, "count the open issues") && strings.Contains(p.Text, "[ref "+string(job)+"]") {
+				return true
+			}
+		}
+		return false
+	})
+	start := f.host.Starts()[0]
+	if start.Cwd != NewPaths(f.data).Workspace || !slices.Contains(start.Args, "--settings") {
+		t.Fatalf("%+v", start)
+	}
+	status, _ := f.post(t, "/hooks/stop", f.coordinatorToken(t), map[string]any{
+		"hook_event_name":        "Stop",
+		"last_assistant_message": `Counted. <spoken ref="` + string(job) + `" status="done">There are twelve open issues.</spoken>`,
+	})
+	if status != http.StatusOK {
+		t.Fatal(status)
+	}
+	waitFor(t, "the reply injected", func() bool {
+		return slices.Contains(v.Injected(), "Agent reply: There are twelve open issues.")
+	})
+	waitFor(t, "Bit celebrates", func() bool { c, _ := f.rec.counts(); return c == 1 })
+	waitFor(t, "the job to leave the tray", func() bool { return len(f.agent.Tray().Jobs) == 0 })
+}
+
+func TestAFailedJobFlashesTheErrorState(t *testing.T) {
+	f := newFixture(t, nil)
+	openVoice(t, f)
+	job := f.delegate(t, "deploy it")
+	waitFor(t, "the prompt", func() bool { return len(f.host.Prompts()) > 0 })
+	f.post(t, "/hooks/stop", f.coordinatorToken(t), map[string]any{
+		"last_assistant_message": `<spoken ref="` + string(job) + `" status="failed">I could not.</spoken>`,
+	})
+	waitFor(t, "Bit flashes the error", func() bool { _, e := f.rec.counts(); return e == 1 })
+}
+
+func TestTheTrayShowsOpenJobsAndTheMenuActsOnThem(t *testing.T) {
+	f := newFixture(t, func(c *Config) {
+		c.Hosts["herdr"] = func(HostDeps) (agent.SessionHost, error) {
+			f := agenttest.NewFakeSessionHost().ManualTurns()
+			return f, nil
+		}
+	})
+	job := f.delegate(t, "a task")
+	tray := f.agent.Tray()
+	if !tray.Enabled || len(tray.Jobs) != 1 || tray.Jobs[0].ID != string(job) || tray.Jobs[0].Task != "a task" {
+		t.Fatalf("%+v", tray)
+	}
+	if !f.agent.Menu("agent:cancel:" + string(job)) {
+		t.Fatal("cancel not handled")
+	}
+	waitFor(t, "the job cancelled", func() bool { return len(f.agent.Tray().Jobs) == 0 })
+	if !f.agent.Menu("agent:restart") {
+		t.Fatal("restart not handled")
+	}
+	if f.agent.Menu("agent:nope") || f.agent.Menu("talk") {
+		t.Fatal("not the agent's ids")
+	}
+}
+
+func TestOpenTerminalAttachesAndAFailureNamesTheTerminal(t *testing.T) {
+	f := newFixture(t, nil)
+	if !f.agent.Menu("agent:open") {
+		t.Fatal("agent:open")
+	}
+	waitFor(t, "the terminal", func() bool { return len(f.launcher.Opened()) == 1 })
+	if got := f.launcher.Opened()[0]; !slices.Equal(got, f.host.AttachCommand()) {
+		t.Fatal(got)
+	}
+	f.launcher.SetFail("no app")
+	f.agent.OpenTerminal()
+	waitFor(t, "the failure line", func() bool { return strings.HasPrefix(f.agent.Tray().Status, "Agent: ") })
+}
+
+func TestUserWordsHeardWhileBitSpeaksNeverReachTheAgent(t *testing.T) {
+	f := newFixture(t, nil)
+	var mu sync.Mutex
+	var got []voice.VoiceSignal
+	f.agent.toAgent = func(s voice.VoiceSignal) {
+		mu.Lock()
+		got = append(got, s)
+		mu.Unlock()
+	}
+	v := newFakeVoice()
+	f.agent.AttachVoice(v)
+	v.signals <- voice.VoiceSignal{Kind: voice.SigOpened}
+	f.agent.OnMouth(3) // Bit speaks
+	v.signals <- voice.VoiceSignal{Kind: voice.SigUserSaid, Text: "confirm hawk"}
+	f.agent.OnMouth(0) // and stops: the tail still drops
+	v.signals <- voice.VoiceSignal{Kind: voice.SigUserSaid, Text: "confirm hawk"}
+	v.signals <- voice.VoiceSignal{Kind: voice.SigClosed}
+	waitFor(t, "the close", func() bool { mu.Lock(); defer mu.Unlock(); return len(got) == 2 })
+	time.Sleep(20 * time.Millisecond)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 2 || got[0].Kind != voice.SigOpened || got[1].Kind != voice.SigClosed {
+		t.Fatalf("%+v", got)
+	}
+	if f.agent.link.IsOpen() {
+		t.Fatal("still open after Closed")
+	}
+}
+
+func TestBuildIsOffWhenTheAgentIsDisabled(t *testing.T) {
+	s := settings.Default().Agent
+	s.Enabled = false
+	if Build(Config{Settings: s, AppSupport: t.TempDir(), Home: t.TempDir()}) != nil {
+		t.Fatal("built")
+	}
+	if Factory(settings.Config{Agent: s}, t.TempDir(), app.AgentHooks{}) != nil {
+		t.Fatal("Factory must return a nil interface when off")
+	}
+}
+
+func TestBuildInstallsFilesClearsStaleMcpAndTrustsTheWorkspace(t *testing.T) {
+	data, home := t.TempDir(), t.TempDir()
+	paths := NewPaths(data)
+	if err := os.MkdirAll(paths.McpDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(paths.McpDir, "old-worker.json")
+	if err := os.WriteFile(stale, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f := newFixture(t, func(c *Config) { c.AppSupport, c.Home = data, home })
+	_ = f
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatal("stale MCP config left")
+	}
+	if readFile(t, paths.Settings) != RenderSettings(settings.Default().Agent.Port) {
+		t.Fatal("settings not installed")
+	}
+	claude := readFile(t, filepath.Join(home, ".claude.json"))
+	if !strings.Contains(claude, paths.Workspace) {
+		t.Fatal("workspace not trusted:", claude)
+	}
+}
+
+func TestSetupProblemsBecomeTheStatusLine(t *testing.T) {
+	busy := newFixture(t, func(c *Config) {
+		c.Listen = func(uint16) (net.Listener, error) { return nil, &net.OpError{Op: "listen"} }
+	})
+	waitFor(t, "port busy", func() bool { return busy.agent.Tray().Status == "Agent: hook port busy" })
+
+	missing := newFixture(t, func(c *Config) { c.Hosts = nil; p := "/definitely/not/herdr"; c.Settings.HerdrPath = &p })
+	waitFor(t, "herdr not found", func() bool { return missing.agent.Tray().Status == "Agent: herdr not found" })
+	out := missing.tool(t, "delegate").Invoke(context.Background(), json.RawMessage(`{"task":"x"}`))
+	if !strings.Contains(string(out.Output), "error") {
+		t.Fatal(string(out.Output))
+	}
+
+	unknown := newFixture(t, func(c *Config) { c.Settings.SessionHost = "tmux" })
+	waitFor(t, "invalid settings", func() bool { return unknown.agent.Tray().Status == "Agent: invalid settings (see log)" })
+}
+
+func TestTheIntegrationHintReachesTheTray(t *testing.T) {
+	f := newFixture(t, func(c *Config) {
+		c.Hosts["herdr"] = func(d HostDeps) (agent.SessionHost, error) {
+			return NewIntegrationCheck(agenttest.NewFakeSessionHost(), func() bool { return true }, d.Hint), nil
+		}
+	})
+	f.agent.OpenTerminal()
+	waitFor(t, "the hint", func() bool { return f.agent.Tray().Hint == IntegrationHint })
+}
+
+func TestWarmStartsTheCoordinatorNow(t *testing.T) {
+	f := newFixture(t, func(c *Config) { c.Settings.Warm = true })
+	waitFor(t, "the coordinator", func() bool { return len(f.host.Starts()) == 1 })
+}
+
+// Quit: pending permissions are denied, the panes stop, mcp/*.json is deleted, the host shut
+// down and the hook server closed.
+func TestShutdownDeniesStopsPanesClearsMcpAndShutsTheHostDown(t *testing.T) {
+	f := newFixture(t, func(c *Config) {
+		c.Settings.Workers = settings.WorkerSettings{Enabled: true, Max: 2, Kinds: []string{"claude"}}
+		c.Settings.ProjectsRoot = "~/code"
+		_ = os.MkdirAll(filepath.Join(c.Home, "code"), 0o755)
+	})
+	if _, err := os.Stat(NewPaths(f.data).CoordinatorMcp()); err != nil {
+		t.Fatal("workers on: the coordinator's MCP config is written:", err)
+	}
+	f.agent.Menu("agent:open")
+	waitFor(t, "the coordinator", func() bool { return len(f.host.Starts()) == 1 })
+	token := f.coordinatorToken(t)
+	type reply struct {
+		status int
+		body   string
+	}
+	pending := make(chan reply, 1)
+	go func() {
+		s, b := f.post(t, "/hooks/permission", token, map[string]any{"hook_event_name": "PermissionRequest", "tool_name": "Bash", "tool_input": map[string]any{"command": "git push"}})
+		pending <- reply{s, b}
+	}()
+	waitFor(t, "the question", func() bool { return len(f.rec.notesOrNil()) > 0 })
+	addr := f.agent.Addr()
+	began := time.Now()
+	f.agent.Shutdown()
+	if time.Since(began) > 5*time.Second {
+		t.Fatal("shutdown took too long")
+	}
+	select {
+	case r := <-pending:
+		if !strings.Contains(r.body, "deny") {
+			t.Fatal(r.body)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the permission was never answered")
+	}
+	if !slices.Contains(f.host.Closed(), agent.Coordinator) {
+		t.Fatal("the coordinator pane was not stopped")
+	}
+	entries, _ := os.ReadDir(NewPaths(f.data).McpDir)
+	if len(entries) != 0 {
+		t.Fatal("mcp/*.json left:", entries)
+	}
+	if f.host.shut.Load() != 1 {
+		t.Fatal("host not shut down")
+	}
+	if c, err := net.DialTimeout("tcp", addr, 200*time.Millisecond); err == nil {
+		c.Close()
+		t.Fatal("the hook server still listens")
+	}
+	f.agent.Shutdown() // idempotent
+}
+
+func TestKeepPanesOnQuitLeavesTheCoordinatorRunning(t *testing.T) {
+	f := newFixture(t, func(c *Config) { c.Settings.KeepPanesOnQuit = true })
+	f.agent.Menu("agent:open")
+	waitFor(t, "the coordinator", func() bool { return len(f.host.Starts()) == 1 })
+	f.agent.Shutdown()
+	if slices.Contains(f.host.Closed(), agent.Coordinator) {
+		t.Fatal("closed despite keepPanesOnQuit")
+	}
+	if f.host.shut.Load() != 1 {
+		t.Fatal("host not shut down")
+	}
+}
+
+func (r *recorder) notesOrNil() [][2]string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.notes)
+}

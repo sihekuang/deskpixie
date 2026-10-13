@@ -455,7 +455,7 @@ func TestAppStateHasEveryListAndTheSettingsValues(t *testing.T) {
 		t.Fatalf("packs %+v", s.Packs)
 	}
 	if s.Agent.Enabled {
-		t.Error("the agent menu stays hidden until P14b wires the runtime")
+		t.Error("the agent menu stays hidden without an agent")
 	}
 }
 
@@ -605,7 +605,7 @@ func TestUnknownActionsFail(t *testing.T) {
 	if _, err := h.callErr("app.action", map[string]string{"id": "nope"}); err == nil {
 		t.Fatal("nope accepted")
 	}
-	// Agent rows exist only once P14b wires the agent; until then they are logged no-ops.
+	// Without an agent (Deps.Agent nil) the agent ids are logged no-ops.
 	h.action("agent:open")
 }
 
@@ -643,7 +643,7 @@ func TestCanvasGeometryIsSavedAsTheCanvasWindow(t *testing.T) {
 	}
 }
 
-func TestMascotClickIsANoOpUntilTheAgentExists(t *testing.T) {
+func TestMascotClickIsANoOpWithoutAnAgent(t *testing.T) {
 	h := newHarness(t)
 	h.call("mascot.click", nil)
 }

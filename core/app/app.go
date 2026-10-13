@@ -3,8 +3,8 @@
 // methods Swift uses. Port of ai-mascot src-tauri/src/{lib.rs, actions.rs, settings/live.rs,
 // voice/mod.rs, canvas/mod.rs} minus the windows, tray and hotkey (Swift's).
 //
-// The delegation agent (P14b) plugs in through Deps.ExtraTools / Deps.ExtraPersona /
-// Deps.Agent; until then the Agent menu is hidden and mascot.click is a logged no-op.
+// The delegation agent plugs in through Deps.Agent (core/app/agentapp builds it); without it
+// the Agent menu is hidden and mascot.click is a logged no-op.
 //
 // Lock order: settings API lock → app lock (a.mu) → settings store lock. The app never holds
 // a.mu while calling the settings API, the canvas controller or the runtime's blocking calls,
@@ -56,7 +56,7 @@ type Registrar interface {
 	Register(method string, fn func(args json.RawMessage) (any, error))
 }
 
-// AgentTray is what the agent shows in the tray (P14b).
+// AgentTray is what the agent shows in the tray (Agent.Tray).
 type AgentTray struct {
 	Enabled bool
 	Jobs    []JobRow
@@ -80,10 +80,12 @@ type Deps struct {
 	// CanvasTick overrides the canvas loop tick (tests); 0 = CanvasTick.
 	CanvasTick time.Duration
 
-	// P14b hooks: the delegation tools and persona section, and the agent's tray rows.
+	// ExtraTools and ExtraPersona are added to the voice loop's tools and persona.
 	ExtraTools   []voice.Tool
 	ExtraPersona string
-	Agent        func() AgentTray
+	// Agent builds the delegation agent (nil = no agent; the factory returns nil when
+	// agent.enabled is false). Its tools and persona join the voice loop's.
+	Agent AgentFactory
 }
 
 // MouthMeter is the voice loop's view of a pack change.
@@ -109,6 +111,8 @@ type App struct {
 	setupFail *voice.Failure
 	cleaner   *denoise.Cleaner
 	recordDir string
+
+	agent Agent // nil when delegation is off
 
 	canvas   *canvas.CanvasController // nil when the canvas is unavailable
 	resolver *canvas.Resolver
@@ -205,6 +209,14 @@ func New(d Deps) (*App, error) {
 		log.Printf("canvas: unavailable: %v", err)
 		a.canvas = nil
 	}
+	if d.Agent != nil {
+		a.agent = d.Agent(cfg, p.AppSupport, AgentHooks{
+			Celebrate:   a.Celebrate,
+			FlashError:  a.FlashError,
+			RefreshTray: a.pushTray,
+			Notify:      func(title, body string) { a.emit("notify", map[string]any{"title": title, "body": body}) },
+		})
+	}
 	a.buildVoice(cfg)
 
 	a.wg.Add(1)
@@ -240,7 +252,8 @@ func (a *App) buildVoice(cfg settings.Config) {
 		home = *cfg.Voice.HomeCity
 	}
 	reg := LocalTools(home, &TimerAlarm{Voice: a.voiceLink, Notify: a.notify})
-	for _, t := range a.deps.ExtraTools {
+	extra, extraPersona := a.voiceExtras()
+	for _, t := range extra {
 		reg.Register(t)
 	}
 	persona := ""
@@ -251,7 +264,7 @@ func (a *App) buildVoice(cfg settings.Config) {
 	a.recordDir = voice.RecordingDir(a.paths.AppSupport)
 	levels, ok := a.currentLevels()
 	a.rt = voice.NewRuntime(model, a.cleaner, voice.RuntimeConfig{
-		Session:      SessionConfig(cfg.Voice, Instructions(voice.Instructions(persona), a.deps.ExtraPersona)),
+		Session:      SessionConfig(cfg.Voice, Instructions(voice.Instructions(persona), extraPersona)),
 		Secrets:      a.deps.Secrets,
 		Tools:        reg,
 		Facts:        tools.LocalFacts{Clock: tools.SystemClock{}, Home: home},
@@ -264,6 +277,9 @@ func (a *App) buildVoice(cfg settings.Config) {
 	a.mu.Lock()
 	a.meter = a.rt
 	a.mu.Unlock()
+	if a.agent != nil {
+		a.agent.AttachVoice(a.rt)
+	}
 	signals := a.rt.Subscribe()
 	a.wg.Add(1)
 	go func() {
@@ -277,6 +293,23 @@ func (a *App) buildVoice(cfg settings.Config) {
 			}
 		}
 	}()
+}
+
+// voiceExtras are the tools and persona section added to the voice loop's: Deps.ExtraTools /
+// ExtraPersona, then the agent's (Rust: persona + "\n\n" + DELEGATION_PERSONA, only when the
+// agent was built).
+func (a *App) voiceExtras() ([]voice.Tool, string) {
+	tools := append([]voice.Tool{}, a.deps.ExtraTools...)
+	persona := strings.TrimSpace(a.deps.ExtraPersona)
+	if a.agent != nil {
+		tools = append(tools, a.agent.Tools()...)
+		if persona == "" {
+			persona = a.agent.Persona()
+		} else {
+			persona = Instructions(persona, a.agent.Persona())
+		}
+	}
+	return tools, persona
 }
 
 func (a *App) setVoiceActive(on bool) {
@@ -296,9 +329,14 @@ func (a *App) voiceLink() VoiceLink {
 // Runtime is the voice loop (nil when it could not be set up). The bridge feeds it audio.
 func (a *App) Runtime() *voice.Runtime { return a.rt }
 
-// Close stops every loop and the voice runtime. Idempotent.
+// Close stops the agent (Rust agent::shutdown on exit: pending permissions denied, panes
+// stopped within 3 s unless keepPanesOnQuit, MCP configs deleted, the session host stopped),
+// then every loop and the voice runtime. Idempotent.
 func (a *App) Close() {
 	a.closeOnce.Do(func() {
+		if a.agent != nil {
+			a.agent.Shutdown()
+		}
 		close(a.stop)
 		a.talkMu.Lock()
 		a.talkClosed = true
@@ -363,6 +401,11 @@ func (a *App) onVoiceEvent(ev voice.UIEvent) {
 			a.pushTray()
 		}
 		return
+	case "mouth":
+		// Non-zero only while Bit's reply is audibly playing: feeds the agent's echo gate.
+		if a.agent != nil {
+			a.agent.OnMouth(ev.Level)
+		}
 	}
 	a.emitRaw(ev)
 }
@@ -438,7 +481,7 @@ func (a *App) Celebrate() {
 	a.showHeld("happy", h, ok)
 }
 
-// FlashError: Bit shows error (a delegated job failed), then returns to where it was (P14b).
+// FlashError: Bit shows error (a delegated job failed), then returns to where it was.
 func (a *App) FlashError() {
 	a.mu.Lock()
 	p, _ := a.currentPackLocked()
@@ -632,8 +675,8 @@ func (a *App) save(fn func(*settings.Config)) {
 func (a *App) State() AppState {
 	cfg := a.store.Current()
 	var agent AgentTray
-	if a.deps.Agent != nil {
-		agent = a.deps.Agent()
+	if a.agent != nil {
+		agent = a.agent.Tray()
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -731,7 +774,13 @@ func (a *App) action(id string) error {
 		}
 		return a.canvas.Open(page)
 	case strings.HasPrefix(id, "agent:"):
-		log.Printf("app: %s: the agent is not wired yet (P14b)", id)
+		if a.agent == nil {
+			log.Printf("app: %s: delegation is off (agent.enabled = false)", id)
+			return nil
+		}
+		if !a.agent.Menu(id) {
+			return fmt.Errorf("unknown action %q", id)
+		}
 		return nil
 	}
 	return fmt.Errorf("unknown action %q", id)
@@ -955,7 +1004,7 @@ func (a *App) Register(r Registrar) {
 		return struct{}{}, a.Action(in.ID)
 	})
 	r.Register("mascot.click", func(json.RawMessage) (any, error) {
-		log.Printf("app: mascot.click: the agent terminal is not wired yet (P14b)")
+		a.OpenAgentTerminal()
 		return struct{}{}, nil
 	})
 	r.Register("mascot.moved", func(args json.RawMessage) (any, error) {
@@ -1017,4 +1066,14 @@ func startAndReap(program string, args ...string) error {
 		}
 	}()
 	return nil
+}
+
+// OpenAgentTerminal is a single click on Bit (Rust agent::open_terminal): attach a terminal to
+// the agent session. With delegation off, nothing opens.
+func (a *App) OpenAgentTerminal() {
+	if a.agent == nil {
+		log.Printf("agent: delegation is off (agent.enabled = false); nothing to open")
+		return
+	}
+	a.agent.OpenTerminal()
 }

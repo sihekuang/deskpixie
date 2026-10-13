@@ -1,0 +1,48 @@
+package bridge
+
+import (
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/sihekuang/deskpixie/core/app"
+	"github.com/sihekuang/deskpixie/core/settings"
+	"github.com/sihekuang/deskpixie/core/voice"
+)
+
+// The engine builds the agent through Options.Agent and dp_destroy (Close) shuts it down.
+
+type bridgeAgent struct {
+	mu           sync.Mutex
+	opened, shut int
+}
+
+func (b *bridgeAgent) Tools() []voice.Tool        { return nil }
+func (b *bridgeAgent) Persona() string            { return "" }
+func (b *bridgeAgent) Tray() app.AgentTray        { return app.AgentTray{Enabled: true} }
+func (b *bridgeAgent) Menu(string) bool           { return true }
+func (b *bridgeAgent) OpenTerminal()              { b.mu.Lock(); b.opened++; b.mu.Unlock() }
+func (b *bridgeAgent) AttachVoice(app.AgentVoice) {}
+func (b *bridgeAgent) OnMouth(int)                {}
+func (b *bridgeAgent) Shutdown()                  { b.mu.Lock(); b.shut++; b.mu.Unlock() }
+
+func TestTheEngineBuildsTheAgentAndCloseShutsItDown(t *testing.T) {
+	ag := &bridgeAgent{}
+	e := newEngine(t, Options{Agent: func(settings.Config, string, app.AgentHooks) app.Agent { return ag }})
+	if err := e.Configure(cfgJSON(t, "")); err != nil {
+		t.Fatal(err)
+	}
+	if res := callJSON(t, e.Call("mascot.click", []byte(`{}`))); res["ok"] == nil {
+		t.Fatalf("mascot.click: %s", res["error"])
+	}
+	state := callJSON(t, e.Call("app.state", []byte(`{}`)))
+	if string(state["ok"]) == "" || !strings.Contains(string(state["ok"]), `"agent":{"enabled":true`) {
+		t.Fatalf("app.state: %s", state["ok"])
+	}
+	e.Close()
+	ag.mu.Lock()
+	defer ag.mu.Unlock()
+	if ag.opened != 1 || ag.shut != 1 {
+		t.Fatalf("opened %d, shut %d", ag.opened, ag.shut)
+	}
+}

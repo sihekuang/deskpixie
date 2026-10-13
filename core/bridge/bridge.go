@@ -19,7 +19,9 @@ import (
 	"time"
 
 	"github.com/sihekuang/deskpixie/core/app"
+	"github.com/sihekuang/deskpixie/core/app/agentapp"
 	"github.com/sihekuang/deskpixie/core/metrics"
+	"github.com/sihekuang/deskpixie/core/settings"
 	"github.com/sihekuang/deskpixie/core/voice"
 )
 
@@ -79,7 +81,13 @@ type Options struct {
 	Secrets voice.SecretSource
 	// Run replaces starting helper programs (`open`); nil = os/exec.
 	Run func(program string, args ...string) error
+	// Agent builds the delegation agent; nil = agentapp.Factory (herdr, the hook server on
+	// 127.0.0.1:agent.port, ~/.claude.json trust). Tests pass NoAgent.
+	Agent app.AgentFactory
 }
+
+// NoAgent is an agent factory that never builds one (delegation off).
+var NoAgent app.AgentFactory = func(settings.Config, string, app.AgentHooks) app.Agent { return nil }
 
 // DefaultMetricsLogPath is ~/Library/Logs/DeskPixie/metrics.log ("" if HOME is unknown).
 func DefaultMetricsLogPath() string {
@@ -157,6 +165,7 @@ func (e *Engine) configure(jsonCfg []byte) error {
 		Secrets:   e.opts.Secrets,
 		Run:       e.opts.Run,
 		OnMicSent: e.onMicSent,
+		Agent:     e.agentFactory(),
 	})
 	if err != nil {
 		return err
@@ -168,6 +177,13 @@ func (e *Engine) configure(jsonCfg []byte) error {
 		old.Close()
 	}
 	return nil
+}
+
+func (e *Engine) agentFactory() app.AgentFactory {
+	if e.opts.Agent != nil {
+		return e.opts.Agent
+	}
+	return agentapp.Factory
 }
 
 // registrar adapts the engine's registry to app.Registrar.

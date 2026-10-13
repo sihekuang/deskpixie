@@ -66,6 +66,9 @@ func newEngine(t *testing.T, o Options) *Engine {
 	if o.Run == nil {
 		o.Run = func(string, ...string) error { return nil }
 	}
+	if o.Agent == nil {
+		o.Agent = NoAgent // never the real herdr, port 48217 or ~/.claude.json
+	}
 	e := New(o)
 	t.Cleanup(e.Close)
 	return e
@@ -367,7 +370,7 @@ func TestBridgeMetricsEventAndLog(t *testing.T) {
 }
 
 func TestGlobalAPI(t *testing.T) {
-	defaultOptions = Options{MetricsLogPath: filepath.Join(t.TempDir(), "metrics.log"), Secrets: noSecrets, Run: func(string, ...string) error { return nil }}
+	defaultOptions = Options{MetricsLogPath: filepath.Join(t.TempDir(), "metrics.log"), Secrets: noSecrets, Run: func(string, ...string) error { return nil }, Agent: NoAgent}
 	t.Cleanup(func() { defaultOptions = Options{} })
 	Destroy()
 	if err := Configure(cfgJSON(t, "")); !errors.Is(err, ErrNotInit) {
