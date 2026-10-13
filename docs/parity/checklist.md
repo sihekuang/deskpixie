@@ -761,3 +761,23 @@ Other gaps that are not inventory rows:
 - Menu bar: nested menus, checkmarks, Settings… (Cmd-comma) from an LSUIElement app, Mic Mode (Voice Isolation) item.
 - Gemini and OpenAI realtime sessions with real keys (connect, barge-in, tool calls, goAway), Open-Meteo lookups and calculate/timer tools by voice.
 - Quit sequence: panes closed within about 3 s, mcp/*.json removed, worktree git links audited; relaunch frees port 48217; data migration from the old app directory.
+
+## Live verification (2026-10-13)
+
+Automated live runs: see `docs/parity/live-results.md` (`go test -tags live`): OpenAI Realtime and Gemini Live answer + tool call + barge-in/truncate, Herdr agent smoke and worker smoke (Claude and Codex workers), and delegate → coordinator → Stop hook → "Agent reply: Pong." end to end — all PASS.
+
+App checks driven on the running app (DeskPixie built from this branch):
+
+| Area | Result |
+|---|---|
+| Data migration from `com.sihekuang.aimascot` | ✅ copied settings/packs/canvas/agent/recordings; `agent.session` rewritten to `deskpixie`; old folder kept |
+| Tray menu tree + submenus (State, Size incl. Custom, Mascot packs, Canvas, Agent, Mic Mode, Settings…, Quit) | ✅ matches Rust |
+| Menu bar icon | ✅ Bit template icon present |
+| Settings window: 6 tabs, controls, key status, model/voice pickers | ✅ renders, comes to front |
+| Canvas: page dropped in `canvas/pages` auto-opens via `canvas://` with the design system, without stealing focus | ✅ |
+| Agent ▸ Open agent terminal: Herdr session `deskpixie`, coordinator pane, Warp attach tab | ✅ |
+| Hotkey (migrated ⌃B) → connect → mic live → frames sent (mic→send p50 8.9 ms / p95 22 ms, max GC 5.2 ms); idle timeout honoured | ✅ |
+| Quit: ~1 s, coordinator pane closed, `mcp/*.json` removed, port 48217 freed and re-bound on relaunch | ✅ |
+| Startup never blocks the UI (fixed after a live freeze on a TCC prompt) | ✅ f2f9064 |
+
+Human-only (cannot be automated here): a spoken conversation through the real microphone — VPIO echo cancellation removes same-machine `say` playback, so speech detection with a real voice, quiet-voice start and barge-in by voice need a person. The provider path itself is verified by the live tests above with recorded speech.
