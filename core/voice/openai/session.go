@@ -100,6 +100,7 @@ func (m *model) Connect(ctx context.Context, cfg voice.SessionConfig, apiKey str
 		ctx: sctx, cancel: scancel, done: make(chan struct{}),
 	}
 	s.lastRx.Store(time.Now().UnixNano())
+	s.events <- voice.Event{Kind: voice.EvReady} // queued before Connect returns (Rust: ready_is_first_event)
 	go s.readLoop(early)
 	go s.keepalive(m.pingEvery, m.idleDeadline)
 	return s, nil
@@ -147,7 +148,6 @@ func (s *session) emit(ev voice.Event) {
 func (s *session) readLoop(early []voice.Event) {
 	defer close(s.done)
 	defer close(s.events)
-	s.emit(voice.Event{Kind: voice.EvReady}) // Ready is always the first event
 	for _, ev := range early {
 		s.emit(ev)
 	}
