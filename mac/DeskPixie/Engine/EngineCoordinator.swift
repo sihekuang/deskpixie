@@ -20,13 +20,14 @@ final class EngineCoordinator {
     private let ring: PlaybackRing
     private let micRing: SampleRing
     private let pump: AudioPump
-    private let hotkey: CarbonHotkey
+    /// Binding, rollback and the "Hotkey unavailable" line (DeskPixieCore, tested there).
+    private var hotkeys: HotkeyBinder!
     private let notifier = Notifier()
     private lazy var canvas = CanvasWindowController(engine: engine)
 
     private(set) var mascot: MascotController?
     /// The combo the Carbon hotkey is bound to right now (nil = none).
-    private(set) var boundCombo: String?
+    var boundCombo: String? { hotkeys.boundCombo }
     /// Settings platform, for formatting combos in status lines.
     private var platform = SettingsPlatform.macos
     /// Re-sends the device menus on plug/unplug; kept for the app's lifetime.
@@ -46,7 +47,7 @@ final class EngineCoordinator {
         self.ring = ring
         self.micRing = micRing
         self.pump = pump
-        self.hotkey = hotkey
+        hotkeys = HotkeyBinder(registrar: hotkey) { [weak self] in self?.talk() }
     }
 
     // MARK: Lifecycle
@@ -65,6 +66,7 @@ final class EngineCoordinator {
         let snapshot = readSnapshot()
         let launch = LaunchSettings.fromSnapshot(snapshot)
         platform = launch.platform
+        hotkeys.platform = platform
 
         if configured {
             let mascotSettings = snapshot.flatMap(MascotSettings.fromSnapshot) ?? .defaults
@@ -78,9 +80,8 @@ final class EngineCoordinator {
         }
 
         // The stored combo (Rust binds config.hotkey at startup); a failure is a tray line.
-        if !bindHotkey(launch.hotkey, previous: nil) {
-            appState.hotkeyError = LaunchSettings.hotkeyUnavailable(launch.hotkey, platform: platform)
-        }
+        hotkeys.bindAtLaunch(launch.hotkey)
+        appState.hotkeyError = hotkeys.unavailableLine
 
         wireAudio(pinnedInput: launch.inputDevice, pinnedOutput: launch.outputDevice)
 
@@ -94,7 +95,7 @@ final class EngineCoordinator {
         audioTask?.cancel()
         deviceObserver?.cancel()
         deviceObserver = nil
-        hotkey.stop()
+        hotkeys.stop()
         pump.stop()
         voiceIO.stop()
         mascot?.stop()
@@ -105,51 +106,27 @@ final class EngineCoordinator {
 
     // MARK: Hotkey
 
-    /// Binds `combo` (a stored combo such as `ctrl+alt+Space`) as the talk hotkey.
-    /// `CarbonHotkey.start` drops the old binding first, so on failure `previous` (default:
-    /// the combo bound now) is bound again. Returns whether `combo` is now bound.
-    /// Used at launch, for the `hotkey` event and by the Settings window's recorder.
+    /// Binds `combo` (a stored combo such as `ctrl+alt+Space`) as the talk hotkey; on failure
+    /// `previous` (default: the combo bound now) is bound again. Returns whether `combo` is now
+    /// bound. Used at launch, for the `hotkey` event and by the Settings window's recorder.
     @discardableResult
     func bindHotkey(_ combo: String, previous: String?) -> Bool {
-        guard let wanted = HotkeyRecorder.carbon(combo) else {
-            // Nothing was unbound: the old binding (if any) still holds.
-            Self.log.error("hotkey \(combo, privacy: .public) has no key this Mac can bind")
-            return false
-        }
-        let fallback = previous ?? boundCombo
-        do {
-            try hotkey.start(keyCode: wanted.keyCode, modifiers: wanted.modifiers) { [weak self] in self?.talk() }
-            boundCombo = combo
-            appState.hotkeyError = nil
-            return true
-        } catch {
-            Self.log.error("hotkey \(combo, privacy: .public) unavailable: \(String(describing: error), privacy: .public)")
-            boundCombo = nil
-            if let fallback, fallback != combo, let old = HotkeyRecorder.carbon(fallback) {
-                do {
-                    try hotkey.start(keyCode: old.keyCode, modifiers: old.modifiers) { [weak self] in self?.talk() }
-                    boundCombo = fallback
-                } catch {
-                    Self.log.error("could not bind \(fallback, privacy: .public) again")
-                }
-            }
-            return false
-        }
+        let ok = hotkeys.bind(combo, previous: previous)
+        appState.hotkeyError = hotkeys.unavailableLine
+        return ok
     }
 
     /// `hotkey` event: the core reloaded a hand-edited combo. If it cannot be bound the old
     /// one stays and the core is told (`settings.hotkeyFailed`), so it does not adopt it.
     private func hotkeyChanged(_ combo: String) {
-        guard combo != boundCombo else { return }
-        if bindHotkey(combo, previous: boundCombo) { return }
-        do {
-            _ = try engine.call("settings.hotkeyFailed", HotkeyFailedArgs(combo: combo))
-        } catch {
-            Self.log.error("settings.hotkeyFailed: \(String(describing: error), privacy: .public)")
+        hotkeys.changed(combo) { failed in
+            do {
+                _ = try engine.call("settings.hotkeyFailed", HotkeyFailedArgs(combo: failed))
+            } catch {
+                Self.log.error("settings.hotkeyFailed: \(String(describing: error), privacy: .public)")
+            }
         }
-        if boundCombo == nil {
-            appState.hotkeyError = LaunchSettings.hotkeyUnavailable(combo, platform: platform)
-        }
+        appState.hotkeyError = hotkeys.unavailableLine
     }
 
     // MARK: Actions
@@ -168,15 +145,17 @@ final class EngineCoordinator {
     /// A tray menu id. Quit and Mic Mode are handled here (Settings… by the menu view);
     /// every other id is the core's (`app.action`), after which the menu is re-read.
     func perform(_ id: String) {
-        switch id {
-        case TrayMenu.quitID:
+        switch TrayMenu.route(id) {
+        case .quit:
             NSApp.terminate(nil)
-        case TrayMenu.micModeID:
-            MicModes.show()
-        default:
+        case .micMode:
+            MicModes.show(using: appState.micModes)
+        case .settings:
+            break // MenuBarMenu opens the Settings scene
+        case .core(let id, let focusCanvas):
             struct Action: Encodable { let id: String }
             // A canvas the user asked for comes forward; core-initiated opens never take focus.
-            if id == "canvas:open" || id.hasPrefix("canvas:page:") { canvas.requestFocusOnNextShow() }
+            if focusCanvas { canvas.requestFocusOnNextShow() }
             do {
                 _ = try engine.call("app.action", Action(id: id))
             } catch {

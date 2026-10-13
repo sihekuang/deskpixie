@@ -1,4 +1,3 @@
-import DeskPixieCore
 import Foundation
 import WebKit
 import os
@@ -8,7 +7,7 @@ import os
 /// the security headers to every response. The work runs off the main thread; a task WebKit
 /// has stopped is never called back.
 @MainActor
-final class CanvasSchemeHandler: NSObject, WKURLSchemeHandler {
+public final class CanvasSchemeHandler: NSObject, WKURLSchemeHandler {
     private static let log = Logger(subsystem: "com.sihekuang.deskpixie", category: "canvas")
 
     private struct ResolveArgs: Encodable, Sendable { let path: String }
@@ -17,11 +16,22 @@ final class CanvasSchemeHandler: NSObject, WKURLSchemeHandler {
     /// Live tasks by token (not by object identity, which a later task may reuse).
     private var live: [UUID: any WKURLSchemeTask] = [:]
 
-    init(engine: CoreEngine) {
+    public init(engine: CoreEngine) {
         self.engine = engine
     }
 
-    func webView(_ webView: WKWebView, start urlSchemeTask: any WKURLSchemeTask) {
+    public func webView(_ webView: WKWebView, start urlSchemeTask: any WKURLSchemeTask) {
+        start(urlSchemeTask)
+    }
+
+    public func webView(_ webView: WKWebView, stop urlSchemeTask: any WKURLSchemeTask) {
+        stop(urlSchemeTask)
+    }
+
+    /// Tasks still waiting for their response (tests).
+    var liveCount: Int { live.count }
+
+    func start(_ urlSchemeTask: any WKURLSchemeTask) {
         guard let url = urlSchemeTask.request.url else {
             urlSchemeTask.didFailWithError(URLError(.badURL))
             return
@@ -38,7 +48,7 @@ final class CanvasSchemeHandler: NSObject, WKURLSchemeHandler {
         }
     }
 
-    func webView(_ webView: WKWebView, stop urlSchemeTask: any WKURLSchemeTask) {
+    func stop(_ urlSchemeTask: any WKURLSchemeTask) {
         for (token, task) in live where task === urlSchemeTask {
             live[token] = nil
         }
@@ -57,5 +67,13 @@ final class CanvasSchemeHandler: NSObject, WKURLSchemeHandler {
         task.didReceive(response)
         if !r.body.isEmpty { task.didReceive(r.body) }
         task.didFinish()
+    }
+}
+
+public extension CanvasHardening {
+    /// `noWebRTCScript` as the canvas web view's user script: at document start, in every frame.
+    @MainActor
+    static func userScript() -> WKUserScript {
+        WKUserScript(source: noWebRTCScript, injectionTime: .atDocumentStart, forMainFrameOnly: false)
     }
 }

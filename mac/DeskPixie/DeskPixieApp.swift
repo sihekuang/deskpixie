@@ -1,8 +1,12 @@
+import DeskPixieCore
 import SwiftUI
 
 @main
 struct DeskPixieApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+
+    private static let menuBarIcon = MenuBarIcon.imageOrFallback(
+        packDirectory: (Bundle.main.resourceURL ?? Bundle.main.bundleURL).appendingPathComponent("mascots/bit"))
 
     var body: some Scene {
         MenuBarExtra {
@@ -10,7 +14,11 @@ struct DeskPixieApp: App {
                 appDelegate.composition.coordinator.perform(id)
             }
         } label: {
-            Image(systemName: "sparkles")
+            // Bit's face as a template image (tinted for light/dark menu bars); sparkles if
+            // the bundled pack cannot be read.
+            Image(nsImage: Self.menuBarIcon)
+                .help(MenuBarIcon.tooltip)
+                .accessibilityLabel(MenuBarIcon.tooltip)
         }
         .menuBarExtraStyle(.menu)
 

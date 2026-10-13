@@ -11,9 +11,11 @@ struct MenuBarMenu: View {
 
     var body: some View {
         TrayItemsView(items: appState.menuItems) { id in
-            if id == TrayMenu.settingsID {
-                NSApp.activate()
-                openSettings()
+            if TrayMenu.route(id) == .settings {
+                // From a menu-bar app the window would open behind other apps' windows.
+                WindowFocus.openSettings(app: NSApp, open: { openSettings() },
+                                         findWindow: { NSApp.windows.first { $0.identifier?.rawValue == "settings" } },
+                                         defer: { work in DispatchQueue.main.async { MainActor.assumeIsolated(work) } })
             } else {
                 perform(id)
             }

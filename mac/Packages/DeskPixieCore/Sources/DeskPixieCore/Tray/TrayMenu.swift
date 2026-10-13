@@ -106,6 +106,33 @@ public enum TrayMenu {
     public static let micModeID = "mic-mode"
     public static let micModeLabel = "Mic Mode (Voice Isolation)…"
 
+    /// Where a clicked id goes.
+    public enum Route: Equatable, Sendable {
+        case quit
+        /// Opens the Settings window (brought to the front).
+        case settings
+        /// Opens the Mic Mode picker (`MicModes.show`).
+        case micMode
+        /// `app.action {id}`; `focusCanvas` when the user asked for a canvas page, so the
+        /// canvas window comes forward (core-initiated opens never take focus).
+        case core(String, focusCanvas: Bool = false)
+    }
+
+    public static func route(_ id: String) -> Route {
+        switch id {
+        case quitID: .quit
+        case settingsID: .settings
+        case micModeID: .micMode
+        default: .core(id, focusCanvas: id == "canvas:open" || id.hasPrefix("canvas:page:"))
+        }
+    }
+
+    /// `build` with the Mic Mode row shown when `micModes` has the picker.
+    @MainActor
+    public static func build(_ s: TrayAppState?, localStatusLines: [String], micModes: any MicModeSystem) -> [TrayItem] {
+        build(s, localStatusLines: localStatusLines, micModeAvailable: micModes.hasPicker)
+    }
+
     /// Ids Swift handles itself (never sent to `app.action`).
     public static func isLocal(_ id: String) -> Bool { [quitID, settingsID, micModeID].contains(id) }
 

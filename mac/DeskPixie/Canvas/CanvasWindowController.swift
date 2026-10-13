@@ -70,8 +70,7 @@ final class CanvasWindowController: NSObject, NSWindowDelegate, WKNavigationDele
     /// Brings the canvas window forward. Only for explicit user actions.
     func focus() {
         guard let window else { return }
-        NSApp.activate()
-        window.makeKeyAndOrderFront(nil)
+        WindowFocus.bringForward(window, app: NSApp, showInDock: false)
     }
 
     private func build(url: URL, title: String) {
@@ -79,9 +78,7 @@ final class CanvasWindowController: NSObject, NSWindowDelegate, WKNavigationDele
         config.setURLSchemeHandler(CanvasSchemeHandler(engine: engine), forURLScheme: CanvasProtocol.scheme)
         config.websiteDataStore = .nonPersistent()
         config.preferences.javaScriptCanOpenWindowsAutomatically = false
-        config.userContentController.addUserScript(
-            WKUserScript(source: CanvasHardening.noWebRTCScript, injectionTime: .atDocumentStart,
-                         forMainFrameOnly: false))
+        config.userContentController.addUserScript(CanvasHardening.userScript())
         Self.disableWebRTC(config.preferences)
 
         let webView = WKWebView(frame: NSRect(origin: .zero, size: CanvasPlacement.defaultSize),

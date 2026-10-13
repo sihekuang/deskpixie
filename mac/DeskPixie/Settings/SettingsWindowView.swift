@@ -52,6 +52,8 @@ private final class WindowObservers {
         window.setFrameAutosaveName(SettingsWindowView.frameName)
         window.level = .normal
         window.collectionBehavior.insert([.moveToActiveSpace, .fullScreenAuxiliary])
+        // First open: the window exists only now; bring it in front of other apps' windows.
+        WindowFocus.bringForward(window, app: NSApp, showInDock: true)
         let center = NotificationCenter.default
         tokens = [
             center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { _ in

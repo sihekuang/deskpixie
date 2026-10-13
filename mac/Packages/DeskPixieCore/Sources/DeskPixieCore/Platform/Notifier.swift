@@ -55,16 +55,25 @@ public final class SystemNotificationSink: NotificationSink {
 
     public func post(title: String, body: String) async {
         guard await authorized() else { return }
-        let content = UNMutableNotificationContent()
-        content.title = title
-        content.body = body
-        // Sound is played separately (Glass.aiff) so it is independent of the user's notification sound setting.
-        let req = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        let req = UNNotificationRequest(identifier: UUID().uuidString, content: Self.content(title: title, body: body),
+                                        trigger: nil)
         try? await UNUserNotificationCenter.current().add(req)
     }
 
+    /// The chime for `sound: "glass"` (MacNotifier's `afplay` file).
+    public static let glassPath = "/System/Library/Sounds/Glass.aiff"
+
+    /// The notification for a `notify` event. No sound: Glass is played separately, so it does
+    /// not depend on the user's notification sound setting.
+    public nonisolated static func content(title: String, body: String) -> UNMutableNotificationContent {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        return content
+    }
+
     public func playGlass() {
-        NSSound(contentsOfFile: "/System/Library/Sounds/Glass.aiff", byReference: true)?.play()
+        NSSound(contentsOfFile: Self.glassPath, byReference: true)?.play()
     }
 }
 

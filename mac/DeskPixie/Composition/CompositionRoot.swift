@@ -14,10 +14,13 @@ final class AppState {
     var engineError: String?
     var audioError: String?
 
+    /// The Mic Mode picker seam (the tray row shows where it exists).
+    let micModes: any MicModeSystem = AVMicModeSystem()
+
     var localStatusLines: [String] { [hotkeyError, engineError, audioError].compactMap { $0 } }
 
     var menuItems: [TrayItem] {
-        TrayMenu.build(core, localStatusLines: localStatusLines, micModeAvailable: MicModes.available)
+        TrayMenu.build(core, localStatusLines: localStatusLines, micModes: micModes)
     }
 }
 

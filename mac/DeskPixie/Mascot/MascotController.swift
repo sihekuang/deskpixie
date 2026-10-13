@@ -35,9 +35,8 @@ final class MascotController {
     private(set) var settings: MascotSettings
     private(set) var player: MascotPlayer
     private(set) var mouthLevel = 0
-    private var gesture = Gesture()
-    /// True from a left press until all buttons are up (covers the window drag too).
-    private var pointerActive = false
+    /// Click / double-click / drag routing and the press state (DeskPixieCore, tested there).
+    private let gestures: MascotGestureRouter
     /// The opacity last applied to the view (actions.rs `last_opacity`).
     private var lastOpacity: CGFloat = 1.0
     private var moves = MoveDebounce()
@@ -45,7 +44,10 @@ final class MascotController {
     private var placing = false
 
     /// The voice hotkey action (double-click on Bit).
-    var onDoubleClick: (() -> Void)?
+    var onDoubleClick: (() -> Void)? {
+        get { gestures.onDoubleClick }
+        set { gestures.onDoubleClick = newValue }
+    }
 
     let panel: MascotPanel
     let view: MascotView
@@ -65,6 +67,7 @@ final class MascotController {
         self.hitMask = hitMask ?? HitMask.union(pack: pack, sheet: sheet)
         self.settings = settings
         player = MascotPlayer()
+        gestures = MascotGestureRouter(engine: engine)
         let size = Layout.windowSize(pack: pack, scale: scale)
         let topLeft = Layout.restorePosition(settings.position, size: size, displays: ScreenDisplays())
         panel = MascotPanel(frame: ScreenDisplays.appKitFrame(topLeft: topLeft, size: size))
@@ -277,13 +280,13 @@ final class MascotController {
         // tao's mixed-Retina correction (`rescale`) is the identity here.
         let cursor = DesktopSpace.desktopPoint(NSEvent.mouseLocation, primaryMaxY: top)
         let rect = DesktopSpace.desktopRect(panel.frame, primaryMaxY: top)
-        if pointerActive, NSEvent.pressedMouseButtons & 1 == 0 { pointerActive = false }
         // Click-through wherever no frame of Bit ever draws; never mid-press or mid-drag.
-        let overBit = hitMask.hit(cursor: cursor, window: rect)
-        let ignore = !(pointerActive || overBit)
-        if panel.ignoresMouseEvents != ignore { panel.ignoresMouseEvents = ignore }
-        let next = ProximityFade.target(cursor: cursor, rect: rect, radius: settings.fadeRadius,
-                                        enabled: settings.fadeEnabled, overBit: pointerActive || overBit)
+        let d = ClickThrough.decide(cursor: cursor, window: rect, mask: hitMask, pointerActive: gestures.pointerActive,
+                                    leftButtonDown: NSEvent.pressedMouseButtons & 1 != 0,
+                                    fadeEnabled: settings.fadeEnabled, fadeRadius: settings.fadeRadius)
+        gestures.pointerActive = d.pointerActive
+        if panel.ignoresMouseEvents != d.ignoresMouseEvents { panel.ignoresMouseEvents = d.ignoresMouseEvents }
+        let next = d.opacity
         if ProximityFade.shouldEmit(last: lastOpacity, next: next) {
             view.setOpacity(Float(next))
             lastOpacity = next
@@ -293,27 +296,21 @@ final class MascotController {
     // MARK: Gestures
 
     private func mouseDown(_ e: NSEvent) {
-        if gesture.down(at: e.locationInWindow, time: e.timestamp, leftButton: e.type == .leftMouseDown) == .press {
-            pointerActive = true
-        }
+        _ = gestures.down(at: e.locationInWindow, time: e.timestamp, leftButton: e.type == .leftMouseDown)
     }
 
     private func mouseDragged(_ e: NSEvent) {
-        guard gesture.move(to: e.locationInWindow) == .drag else { return }
+        guard gestures.dragged(to: e.locationInWindow) == .beginDrag else { return }
         expireTimer?.invalidate()
-        pointerActive = true
         panel.performDrag(with: e)
     }
 
+    /// Double-click talks (in the router); a single click waits out the double-click window.
     private func mouseUp(_ e: NSEvent) {
-        let r = gesture.up(at: e.locationInWindow, time: e.timestamp, leftButton: e.type == .leftMouseUp)
-        pointerActive = false
-        switch r {
-        case .double:
+        switch gestures.up(at: e.locationInWindow, time: e.timestamp, leftButton: e.type == .leftMouseUp) {
+        case .talked:
             expireTimer?.invalidate()
-            Self.log.info("double-click: voice hotkey")
-            if let onDoubleClick { onDoubleClick() } else { engine.hotkey() }
-        case .wait:
+        case .scheduleClickExpiry:
             expireTimer?.invalidate()
             expireTimer = Timer.scheduledTimer(withTimeInterval: Self.clickExpireDelay, repeats: false) { [weak self] _ in
                 MainActor.assumeIsolated { self?.expireClick() }
@@ -323,17 +320,8 @@ final class MascotController {
         }
     }
 
-    /// A single click (no second press within 300 ms): the core opens the agent terminal.
+    /// A single click (no second press within 300 ms): `mascot.click` opens the agent terminal.
     private func expireClick() {
-        guard gesture.expire(now: ProcessInfo.processInfo.systemUptime) == .click else { return }
-        Self.log.info("click on mascot")
-        let engine = engine
-        Task.detached {
-            do {
-                _ = try engine.call("mascot.click")
-            } catch {
-                Self.log.error("mascot.click: \(String(describing: error), privacy: .public)")
-            }
-        }
+        _ = gestures.expire(now: ProcessInfo.processInfo.systemUptime)
     }
 }
