@@ -373,3 +373,53 @@ func TestRuntimeHotkeyAgainEndsAndClosesSession(t *testing.T) {
 	}
 	eventually(t, "idle", func() bool { st := ui.states(); return st[len(st)-1] == "idle" })
 }
+
+// A mic failure reported while idle (e.g. the app could not start audio) makes the next
+// conversation fail as soon as it asks for the mic, instead of waiting MicPermissionWait.
+func TestRuntimeMicFailedWhileIdleFailsNextMicStartPromptly(t *testing.T) {
+	r, m, ui := newTestRuntime(t, "sk-test")
+	r.MicFailed("Microphone access denied")
+	time.Sleep(20 * time.Millisecond) // let the runtime record it while idle
+	if slices.Contains(ui.states(), "error") {
+		t.Fatalf("idle mic failure must not show error by itself: %v", ui.states())
+	}
+	start := time.Now()
+	startListening(t, r, m, ui)
+	eventually(t, "error state", func() bool { return slices.Contains(ui.states(), "error") })
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("took %v, want prompt failure", d)
+	}
+	if !ui.has(UIEvent{Kind: "status", Text: "Voice: microphone access denied"}) {
+		t.Fatalf("no mic-denied status in %+v", ui.all())
+	}
+}
+
+// The remembered failure is one-shot: after it has failed one conversation, the next one
+// asks for the mic normally.
+func TestRuntimeIdleMicFailureIsConsumedOnce(t *testing.T) {
+	r, m, ui := newTestRuntime(t, "sk-test")
+	r.MicFailed("denied")
+	time.Sleep(20 * time.Millisecond)
+	startListening(t, r, m, ui)
+	eventually(t, "error state", func() bool { return slices.Contains(ui.states(), "error") })
+	if r.micUnavailableForTest() != "" {
+		t.Fatal("failure not consumed")
+	}
+}
+
+// Mic frames arriving prove the mic works and clear a remembered failure.
+func TestRuntimeMicFramesClearIdleMicFailure(t *testing.T) {
+	r, _, _ := newTestRuntime(t, "sk-test")
+	r.MicFailed("denied")
+	eventually(t, "recorded", func() bool { return r.micUnavailableForTest() != "" })
+	r.PushMic(pcmFrame(1, 960), time.Now())
+	eventually(t, "cleared", func() bool { return r.micUnavailableForTest() == "" })
+}
+
+// micUnavailableForTest returns the remembered idle mic failure ("" when none).
+func (r *Runtime) micUnavailableForTest() string {
+	if p := r.micUnavailable.Load(); p != nil {
+		return *p
+	}
+	return ""
+}

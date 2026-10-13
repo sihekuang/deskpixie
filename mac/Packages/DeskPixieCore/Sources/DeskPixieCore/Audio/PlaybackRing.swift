@@ -40,6 +40,9 @@ public final class PlaybackRing: @unchecked Sendable {
         return Int(max(0, cdp_load(slots) - start))
     }
     public var played: Int64 { cdp_load(slots + 3) }
+    /// The consumer's read position. It moves on any read that finds samples or skips
+    /// flushed ones, so it shows the render callback is alive even when `played` cannot move.
+    var readPosition: Int64 { cdp_load(slots + 1) }
     public var underruns: Int64 { cdp_load(slots + 4) }
     public var lastRMS: Float { Float(bitPattern: UInt32(truncatingIfNeeded: cdp_load(slots + 5))) }
 

@@ -26,6 +26,9 @@ final class EngineCoordinator {
     private var audioTask: Task<Void, Never>?
     private var configured = false
 
+    private enum AudioState { case stopped, starting, running }
+    private var audioState = AudioState.stopped
+
     init(appState: AppState, engine: CoreEngine, voiceIO: VoiceIO, ring: PlaybackRing,
          micRing: SampleRing, pump: AudioPump, hotkey: CarbonHotkey) {
         self.appState = appState
@@ -73,7 +76,7 @@ final class EngineCoordinator {
         }
 
         startPolling()
-        if configured { startAudio() }
+        if configured { startAudio(retryForHotkey: false) }
     }
 
     func shutdown() {
@@ -88,9 +91,15 @@ final class EngineCoordinator {
 
     // MARK: Actions
 
-    /// Same call as the ⌃⌥Space hotkey and a double-click on Bit.
+    /// Same call as the ⌃⌥Space hotkey and a double-click on Bit. If audio failed to start
+    /// (e.g. mic permission was denied at launch and granted since), retry it first, so the
+    /// conversation does not open a session and wait out the mic timeout.
     func talk() {
-        engine.hotkey()
+        guard configured, audioState == .stopped else {
+            engine.hotkey()
+            return
+        }
+        startAudio(retryForHotkey: true)
     }
 
     /// Debug: State ▸ menu sets the sprite directly, bypassing the engine.
@@ -101,24 +110,39 @@ final class EngineCoordinator {
 
     // MARK: Audio
 
-    private func startAudio() {
+    /// Starts VoiceIO (mic gated off) and the pump.
+    /// - At launch (`retryForHotkey == false`) a failure only goes to the tray: reporting it to
+    ///   the engine would make it fail the next conversation even if a later retry succeeds.
+    /// - From `talk()` the hotkey is sent after the attempt; on failure `micFailed` follows it,
+    ///   so the engine fails that conversation at once (if the report arrives while it is
+    ///   still idle, the engine remembers it and fails at mic start instead).
+    private func startAudio(retryForHotkey: Bool) {
+        audioState = .starting
         let voiceIO = voiceIO, ring = ring, micRing = micRing, pump = pump, engine = engine
         audioTask = Task { @MainActor [weak self] in
+            var failure: String?
             do {
                 // Runs on the real-time input thread: ring write only.
                 try await voiceIO.start(playback: ring) { samples, unixNanos in
                     micRing.write(samples, timestamp: unixNanos)
                 }
                 pump.start()
+                self?.audioState = .running
                 Self.log.notice("audio started (mic gated off)")
             } catch VoiceIOError.permissionDenied {
                 Self.log.error("microphone permission denied")
-                engine.micFailed("Microphone access denied")
-                self?.appState.status = "Microphone access denied"
+                failure = "Microphone access denied"
             } catch {
                 Self.log.error("audio start failed: \(String(describing: error), privacy: .public)")
-                engine.micFailed("Audio start failed: \(Self.describe(error))")
-                self?.appState.status = "Audio start failed"
+                failure = "Audio start failed: \(Self.describe(error))"
+            }
+            if let failure {
+                self?.audioState = .stopped
+                self?.appState.status = failure
+            }
+            if retryForHotkey {
+                engine.hotkey()
+                if let failure { engine.micFailed(failure) }
             }
         }
     }

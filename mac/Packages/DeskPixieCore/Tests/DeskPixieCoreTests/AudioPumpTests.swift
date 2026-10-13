@@ -198,3 +198,85 @@ final class AudioPumpTests: XCTestCase {
         XCTAssertEqual(e.reports.count, n, "no ticks after stop")
     }
 }
+
+/// Backstop for a dead output (e.g. the VPIO unit stops rendering after a device change):
+/// buffered audio whose `played` count does not move for 1 s is flushed, and keeps being
+/// flushed until playback advances, so the engine sees `buffered == 0` and can end the turn.
+final class AudioPumpStallTests: XCTestCase {
+    private func drain(_ r: PlaybackRing, _ n: Int) {
+        var out = [Int16](repeating: 0, count: n)
+        _ = out.withUnsafeMutableBufferPointer { r.read(into: $0) }
+    }
+
+    func testStalledPlaybackIsFlushedAfterOneSecond() {
+        let e = FakeEngine()
+        e.queueAudio(100_000)
+        let clock = ManualClock()
+        let ring = PlaybackRing(capacity: 48000)
+        let pump = AudioPump(engine: e, ring: ring, mic: SampleRing(capacity: 4800),
+                             targetBufferedSamples: 4800, clock: { clock.now })
+        pump.tick()
+        XCTAssertEqual(ring.buffered, 4800)
+        clock.now += 900_000_000
+        pump.tick()
+        XCTAssertEqual(e.reports.last?.buffered, 4800, "not stalled long enough yet")
+        clock.now += 200_000_000
+        pump.tick()
+        XCTAssertEqual(e.reports.last?.buffered, 0, "flushed after 1 s without playback")
+        XCTAssertEqual(ring.buffered, 0)
+        // Still dead: every tick drains the engine and flushes, so its queue empties quickly.
+        for _ in 0..<40 { clock.now += 10_000_000; pump.tick() }
+        XCTAssertEqual(e.reports.last?.buffered, 0)
+        var probe = [Int16](repeating: 0, count: 1)
+        XCTAssertEqual(probe.withUnsafeMutableBufferPointer { e.pullAudio(into: $0).count }, 0,
+                       "engine queue drained")
+    }
+
+    func testAdvancingPlaybackIsNeverFlushed() {
+        let e = FakeEngine()
+        e.infiniteAudio = true
+        let clock = ManualClock()
+        let ring = PlaybackRing(capacity: 48000)
+        let pump = AudioPump(engine: e, ring: ring, mic: SampleRing(capacity: 4800),
+                             targetBufferedSamples: 4800, clock: { clock.now })
+        for _ in 0..<300 {  // 3 s of slow but live playback
+            pump.tick()
+            drain(ring, 240)
+            clock.now += 10_000_000
+        }
+        pump.tick()
+        XCTAssertEqual(e.reports.last?.buffered, 4800)
+    }
+
+    func testRecoversWhenPlaybackResumes() {
+        let e = FakeEngine()
+        e.infiniteAudio = true
+        let clock = ManualClock()
+        let ring = PlaybackRing(capacity: 48000)
+        let pump = AudioPump(engine: e, ring: ring, mic: SampleRing(capacity: 4800),
+                             targetBufferedSamples: 4800, clock: { clock.now })
+        pump.tick()
+        clock.now += 1_100_000_000
+        pump.tick()
+        pump.tick()
+        XCTAssertEqual(e.reports.last?.buffered, 0, "stalled")
+        drain(ring, 480)  // the unit was rebuilt and renders again
+        clock.now += 10_000_000
+        pump.tick()
+        XCTAssertGreaterThan(e.reports.last?.buffered ?? 0, 0, "no longer flushing once played advances")
+    }
+
+    func testEmptyRingIsNotAStall() {
+        let e = FakeEngine()
+        let clock = ManualClock()
+        let ring = PlaybackRing(capacity: 48000)
+        let pump = AudioPump(engine: e, ring: ring, mic: SampleRing(capacity: 4800),
+                             targetBufferedSamples: 4800, clock: { clock.now })
+        pump.tick()
+        clock.now += 5_000_000_000
+        pump.tick()
+        e.queueAudio(4800)
+        pump.tick()
+        XCTAssertEqual(e.reports.last?.buffered, 4800, "the idle gap before a reply is not a stall")
+    }
+}

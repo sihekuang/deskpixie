@@ -24,6 +24,9 @@ public final class AudioPump: @unchecked Sendable {
     public static let sampleRate: UInt64 = 24_000
     public static let periodNanos: UInt64 = 10_000_000
     public static let expectingWindowNanos: UInt64 = 200_000_000
+    /// Buffered audio whose `played` count has not moved for this long means the output is
+    /// dead (e.g. the unit stopped rendering after a device change).
+    public static let stallNanos: UInt64 = 1_000_000_000
 
     /// docs/go-no-go.md relies on one line per flush (barge-in timing cross-check).
     private static let log = Logger(subsystem: "com.sihekuang.deskpixie", category: "audio")
@@ -39,6 +42,9 @@ public final class AudioPump: @unchecked Sendable {
     private var pendingStart = 0
     private var pendingCount = 0
     private var lastAudioAt: UInt64?
+    private var lastReadPosition: Int64 = 0
+    private var stallSince: UInt64?
+    private var outputStalled = false
 
     // Atomic slot 0: running flag (1 while the thread should keep ticking).
     private let flags: UnsafeMutablePointer<Int64>
@@ -126,6 +132,7 @@ public final class AudioPump: @unchecked Sendable {
     public func tick() {
         pumpMic()
         pumpPlayback()
+        checkOutputStall()
         engine.reportPlayback(played: ring.played, buffered: ring.buffered,
                               rms: ring.lastRMS, underruns: ring.underruns)
     }
@@ -169,6 +176,44 @@ public final class AudioPump: @unchecked Sendable {
         } else {
             ring.expectingAudio = false
         }
+    }
+
+    /// Backstop for a dead output: while samples sit in the ring and the consumer's read
+    /// position (≈ `played`) does not move for `stallNanos`, flush the ring, and keep flushing
+    /// every tick until the render callback reads again. The engine then sees `buffered == 0`,
+    /// its queue drains, and its turn can end. The read position (not `played`) detects the
+    /// recovery: a revived consumer first skips the flushed samples, which moves it.
+    private func checkOutputStall() {
+        let pos = ring.readPosition
+        if pos != lastReadPosition {
+            lastReadPosition = pos
+            stallSince = nil
+            if outputStalled {
+                outputStalled = false
+                Self.log.notice("playback resumed after a stall")
+            }
+            return
+        }
+        if outputStalled {
+            ring.flush()
+            pendingCount = 0
+            return
+        }
+        guard ring.buffered > 0 else {
+            stallSince = nil
+            return
+        }
+        let now = clock()
+        guard let since = stallSince else {
+            stallSince = now
+            return
+        }
+        guard now &- since >= Self.stallNanos else { return }
+        let dropped = ring.buffered + pendingCount
+        ring.flush()
+        pendingCount = 0
+        outputStalled = true
+        Self.log.error("playback stalled for \(Self.stallNanos / 1_000_000, privacy: .public) ms: flushed \(dropped, privacy: .public) samples, flushing until the output renders again")
     }
 
     private func writePending() {

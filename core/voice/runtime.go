@@ -122,6 +122,11 @@ type Runtime struct {
 	cancel    context.CancelFunc
 	drops     atomic.Uint64
 	pb        playbackQueue
+	// micUnavailable is a mic failure reported while no conversation was active (the app
+	// could not start audio). The next EfStartMic fails at once with it instead of waiting
+	// MicPermissionWait; it is consumed there, and cleared when mic frames arrive. Written
+	// only by the runtime goroutine; atomic so tests can read it.
+	micUnavailable atomic.Pointer[string]
 
 	// Owned by the runtime goroutine.
 	conv          *Conversation
@@ -266,9 +271,11 @@ func (r *Runtime) run() {
 		case <-r.hotkey:
 			r.input(HotkeyInput())
 		case reason := <-r.micFailed:
-			if r.conv.IsActive() {
-				r.emit(UIEvent{Kind: "error", Text: "microphone: " + reason})
+			if !r.conv.IsActive() {
+				r.micUnavailable.Store(&reason) // fail the next mic start promptly
+				continue
 			}
+			r.emit(UIEvent{Kind: "error", Text: "microphone: " + reason})
 			r.input(FailedInput(Failure{Kind: FailMicDenied}))
 		case c := <-r.connected:
 			r.onConnected(c)
@@ -318,6 +325,9 @@ func (r *Runtime) input(in Input) {
 }
 
 func (r *Runtime) onMic(f micFrame) {
+	if r.micUnavailable.Load() != nil {
+		r.micUnavailable.Store(nil) // frames arriving prove the mic works
+	}
 	if !r.micActive || r.session == nil {
 		return
 	}
@@ -384,6 +394,10 @@ func (r *Runtime) apply(fx Effect) {
 	case EfStartMic:
 		r.micActive, r.micLiveSent = true, false
 		r.emit(UIEvent{Kind: "mic", Text: "start"})
+		if reason := r.micUnavailable.Swap(nil); reason != nil {
+			r.emit(UIEvent{Kind: "error", Text: "microphone: " + *reason})
+			r.pending = append(r.pending, FailedInput(Failure{Kind: FailMicDenied}))
+		}
 	case EfStopMic:
 		if r.micActive {
 			r.micActive = false

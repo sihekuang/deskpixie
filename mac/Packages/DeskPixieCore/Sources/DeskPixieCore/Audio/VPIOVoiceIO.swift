@@ -3,16 +3,32 @@ import AudioToolbox
 import CDP
 import Darwin
 import Foundation
+import os
 
 /// One `kAudioUnitSubType_VoiceProcessingIO` unit (echo cancellation) for both the mic
 /// (input element 1) and the speaker (output element 0), 24 kHz mono Int16 on both sides.
 /// Port of ai-mascot `crates/audio-macos/src/engine.rs` `build()`. System default devices
 /// (no device pinning in Phase 3). `init` has no side effects: permission is requested
 /// and the unit is built only in `start`.
+///
+/// A change of the default input or output device (headphones, AirPods) rebuilds the unit,
+/// flushing the playback ring, as ai-mascot's audio-macos does (it polls devices every 1 s
+/// and rebuilds on change; here a CoreAudio property listener does the same without polling).
 public final class VPIOVoiceIO: VoiceIO, @unchecked Sendable {
+    static let deviceChangeDebounce: TimeInterval = 0.3
+    private static let log = Logger(subsystem: "com.sihekuang.deskpixie", category: "audio")
+
     private let lock = NSLock()
     private var unit: AudioUnit?
     private var context: VPIOContext?
+    /// Serialises unit start/stop/rebuild (app calls vs. the device listener).
+    private let opLock = NSLock()
+    /// What the last `start` used, so a device change can rebuild the unit (under opLock).
+    private var playback: PlaybackRing?
+    private var onMic: (@Sendable (UnsafeBufferPointer<Int16>, UInt64) -> Void)?
+    private let listenerQueue = DispatchQueue(label: "deskpixie.audio-devices")
+    private var listener: AudioObjectPropertyListenerBlock?
+    private var deviceChangeGen = 0  // on listenerQueue only
     // Mic gate survives start/stop: slot 0 = 1 when enabled.
     private let micEnabled: UnsafeMutablePointer<Int64>
 
@@ -29,7 +45,12 @@ public final class VPIOVoiceIO: VoiceIO, @unchecked Sendable {
     public func start(playback: PlaybackRing,
                       onMicSamples: @escaping @Sendable (UnsafeBufferPointer<Int16>, UInt64) -> Void) async throws {
         try await Self.requireMicPermission()
-        try startUnit(playback: playback, onMicSamples: onMicSamples)
+        try opLock.withLock {
+            try startUnit(playback: playback, onMicSamples: onMicSamples)
+            self.playback = playback
+            self.onMic = onMicSamples
+            installDeviceListener()
+        }
     }
 
     public func setMicEnabled(_ on: Bool) {
@@ -37,6 +58,76 @@ public final class VPIOVoiceIO: VoiceIO, @unchecked Sendable {
     }
 
     public func stop() {
+        opLock.withLock {
+            removeDeviceListener()
+            playback = nil
+            onMic = nil
+            teardownUnit()
+        }
+    }
+
+    // MARK: - Default-device changes
+
+    private static let deviceSelectors = [kAudioHardwarePropertyDefaultInputDevice,
+                                          kAudioHardwarePropertyDefaultOutputDevice]
+
+    private static func address(_ selector: AudioObjectPropertySelector) -> AudioObjectPropertyAddress {
+        AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal,
+                                   mElement: kAudioObjectPropertyElementMain)
+    }
+
+    /// Under opLock.
+    private func installDeviceListener() {
+        guard listener == nil else { return }
+        let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            self?.deviceChanged()  // runs on listenerQueue
+        }
+        for sel in Self.deviceSelectors {
+            var addr = Self.address(sel)
+            let st = AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &addr,
+                                                         listenerQueue, block)
+            if st != noErr { Self.log.error("device listener \(sel, privacy: .public) failed: \(st, privacy: .public)") }
+        }
+        listener = block
+    }
+
+    /// Under opLock.
+    private func removeDeviceListener() {
+        guard let block = listener else { return }
+        for sel in Self.deviceSelectors {
+            var addr = Self.address(sel)
+            _ = AudioObjectRemovePropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &addr,
+                                                       listenerQueue, block)
+        }
+        listener = nil
+    }
+
+    /// On listenerQueue. A plug/unplug fires input and output changes together: debounce them.
+    private func deviceChanged() {
+        deviceChangeGen += 1
+        let gen = deviceChangeGen
+        listenerQueue.asyncAfter(deadline: .now() + Self.deviceChangeDebounce) { [weak self] in
+            guard let self, gen == self.deviceChangeGen else { return }
+            self.rebuildUnit()
+        }
+    }
+
+    private func rebuildUnit() {
+        opLock.withLock {
+            guard let playback, let onMic else { return }  // stopped meanwhile
+            Self.log.notice("default audio device changed: rebuilding the voice unit")
+            teardownUnit()
+            playback.flush()  // the old route's queued audio; the pump refills from the engine
+            do {
+                try startUnit(playback: playback, onMicSamples: onMic)
+            } catch {
+                Self.log.error("voice unit rebuild failed: \(String(describing: error), privacy: .public)")
+            }
+        }
+    }
+
+    /// Stops and disposes the unit (keeps the listener and the saved start parameters).
+    private func teardownUnit() {
         lock.lock()
         let u = unit
         let ctx = context
@@ -66,7 +157,7 @@ public final class VPIOVoiceIO: VoiceIO, @unchecked Sendable {
 
     private func startUnit(playback: PlaybackRing,
                            onMicSamples: @escaping @Sendable (UnsafeBufferPointer<Int16>, UInt64) -> Void) throws {
-        stop()
+        teardownUnit()
         var desc = AudioComponentDescription(
             componentType: kAudioUnitType_Output,
             componentSubType: kAudioUnitSubType_VoiceProcessingIO,
