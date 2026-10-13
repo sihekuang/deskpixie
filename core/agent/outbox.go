@@ -1,0 +1,137 @@
+package agent
+
+import (
+	"encoding/json"
+	"errors"
+	"strings"
+)
+
+// Lines the user has not heard yet (port of outbox.rs): replayed as one notice when a
+// conversation opens.
+
+// OutboxFile is the file name under `<app_data>/agent/`.
+const OutboxFile = "outbox.jsonl"
+
+// OutboxLine is one outbox.jsonl record (field names as in Rust).
+type OutboxLine struct {
+	ID        uint64   `json:"id"`
+	Text      string   `json:"text"`
+	Kind      LineKind `json:"kind"`
+	Token     *string  `json:"token"`
+	At        Millis   `json:"at"`
+	Delivered bool     `json:"delivered"`
+}
+
+// UnmarshalJSON requires id, text, kind and at; token and delivered default (as serde does).
+func (l *OutboxLine) UnmarshalJSON(b []byte) error {
+	var raw struct {
+		ID        *uint64   `json:"id"`
+		Text      *string   `json:"text"`
+		Kind      *LineKind `json:"kind"`
+		Token     *string   `json:"token"`
+		At        *Millis   `json:"at"`
+		Delivered bool      `json:"delivered"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	if raw.ID == nil || raw.Text == nil || raw.Kind == nil || raw.At == nil {
+		return errors.New("outbox line: missing field")
+	}
+	*l = OutboxLine{ID: *raw.ID, Text: *raw.Text, Kind: *raw.Kind, Token: raw.Token, At: *raw.At, Delivered: raw.Delivered}
+	return nil
+}
+
+func (l OutboxLine) record() string {
+	b, err := json.Marshal(l)
+	if err != nil {
+		panic("outbox line serializes: " + err.Error())
+	}
+	return string(b)
+}
+
+// Outbox holds the lines in order.
+type Outbox struct {
+	lines  []OutboxLine
+	nextID uint64
+}
+
+func NewOutbox() *Outbox { return &Outbox{} }
+
+// Push adds a line; returns its jsonl record to append.
+func (o *Outbox) Push(line Line, now Millis) string {
+	o.nextID++
+	entry := OutboxLine{ID: o.nextID, Text: line.Text, Kind: line.Kind, Token: line.Token, At: now}
+	o.lines = append(o.lines, entry)
+	return entry.record()
+}
+
+func (o *Outbox) Undelivered() []OutboxLine {
+	var out []OutboxLine
+	for _, l := range o.lines {
+		if !l.Delivered {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// Replay (on Opened) returns every undelivered line, in order, as one notice; each is marked
+// delivered. Permission questions whose token is no longer pending (decided or expired) are
+// dropped. Returns the notice (nil if nothing is left) and the jsonl records to append.
+func (o *Outbox) Replay(tokenPending func(string) bool) (*Notice, []string) {
+	var items, records []string
+	for k := range o.lines {
+		l := &o.lines[k]
+		if l.Delivered {
+			continue
+		}
+		l.Delivered = true
+		records = append(records, l.record())
+		if stale := l.Token != nil && !tokenPending(*l.Token); !stale {
+			items = append(items, "- "+l.Kind.Prefix()+l.Text)
+		}
+	}
+	if len(items) == 0 {
+		return nil, records
+	}
+	return &Notice{Text: "Agent replies while you were away:\n" + strings.Join(items, "\n")}, records
+}
+
+// Lines is every line as jsonl (the compacted file).
+func (o *Outbox) Lines() []string {
+	out := make([]string, len(o.lines))
+	for k, l := range o.lines {
+		out[k] = l.record()
+	}
+	return out
+}
+
+// RestoreOutbox rebuilds from outbox.jsonl: the last record per id wins; delivered lines older
+// than 14 days are dropped; permission questions from a previous run are dropped (their
+// requests died with that run).
+func RestoreOutbox(records []string, now Millis) *Outbox {
+	var order []uint64
+	latest := map[uint64]OutboxLine{}
+	for _, r := range records {
+		var l OutboxLine
+		if err := json.Unmarshal([]byte(r), &l); err != nil {
+			continue
+		}
+		if _, seen := latest[l.ID]; !seen {
+			order = append(order, l.ID)
+		}
+		latest[l.ID] = l
+	}
+	out := NewOutbox()
+	for _, id := range order {
+		l := latest[id]
+		out.nextID = max(out.nextID, l.ID)
+		old := l.Delivered && satSub(now, l.At) > RetentionMs
+		if old || l.Token != nil {
+			continue
+		}
+		out.lines = append(out.lines, l)
+	}
+	return out
+}
