@@ -135,15 +135,32 @@ func TestMissingFileGivesDefaultsAndCreatesIt(t *testing.T) {
 	}
 }
 
-func TestCorruptFileGivesDefaultsAndIsRewritten(t *testing.T) {
+// Rust's corrupt_file_gives_defaults_and_is_rewritten, deliberately changed: rewriting a file
+// with one typo lost every setting (final review I1). The defaults run in memory; the file is
+// left for the user to fix, and LoadFile says why it can't be used.
+func TestCorruptFileGivesDefaultsAndIsLeftAlone(t *testing.T) {
 	p := tmpFile(t)
 	os.WriteFile(p, []byte("{ not json"), 0o644)
+	c, err := LoadFile(p)
+	if !c.Equal(Default()) || err == nil {
+		t.Fatal("not defaults with an error", err)
+	}
 	if !Load(p).Equal(Default()) {
 		t.Fatal("not defaults")
 	}
-	text, _ := os.ReadFile(p)
-	if _, err := ParseConfig(text); err != nil {
-		t.Fatalf("rewritten file must be valid: %s", text)
+	if text, _ := os.ReadFile(p); string(text) != "{ not json" {
+		t.Fatalf("broken file was rewritten: %s", text)
+	}
+}
+
+func TestAMistypedFileIsLeftAlone(t *testing.T) {
+	p := tmpFile(t)
+	os.WriteFile(p, []byte(`{"scale":"big","pack":"blob"}`), 0o644)
+	if _, err := LoadFile(p); err == nil {
+		t.Fatal("no error")
+	}
+	if text, _ := os.ReadFile(p); string(text) != `{"scale":"big","pack":"blob"}` {
+		t.Fatalf("rewritten: %s", text)
 	}
 }
 

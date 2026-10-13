@@ -915,3 +915,69 @@ func TestRecordingsGoToAppDataOnlyWithVoiceDebug(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+// --- final review I1/I2: settings.json is never overwritten behind the user's back ---
+
+func withRawSettings(text string) harnessOpt {
+	return func(d *Deps, h *harness) {
+		if err := os.WriteFile(filepath.Join(d.Paths.AppSupport, "settings.json"), []byte(text), 0o644); err != nil {
+			h.t.Fatal(err)
+		}
+	}
+}
+
+func TestABrokenSettingsFileAtLaunchIsLeftAloneAndShowsTheBanner(t *testing.T) {
+	const broken = `{ "pack": "bit", "scale": 4,, }`
+	h := newHarness(t, withRawSettings(broken))
+	var s struct {
+		FileError *string `json:"fileError"`
+	}
+	if err := json.Unmarshal(h.call("settings.snapshot", nil), &s); err != nil {
+		t.Fatal(err)
+	}
+	if s.FileError == nil {
+		t.Fatal("no banner")
+	}
+	if snap := h.set("scale", 5); len(snap.SetError) == 0 || string(snap.SetError) == "null" {
+		t.Fatal("save not blocked")
+	}
+	h.call("mascot.moved", map[string]float64{"x": 1, "y": 2})
+	h.call("canvas.geometry", map[string]float64{"x": 1, "y": 2, "width": 800, "height": 600})
+	h.action("size:5")
+	h.action("fade")
+	h.action("reset-position")
+	if got := read(t, filepath.Join(h.dir, "settings.json")); got != broken {
+		t.Fatalf("broken settings.json overwritten: %s", got)
+	}
+}
+
+func TestAHandEditSurvivesADragAndATraySize(t *testing.T) {
+	h := newHarness(t)
+	h.handEdit(func(c *settings.Config) { c.Hotkey = "ctrl+shift+K"; c.Voice.Model = "hand-picked" })
+	h.call("mascot.moved", map[string]float64{"x": 10, "y": 20})
+	h.action("size:5")
+	got := h.saved()
+	if got.Hotkey != "ctrl+shift+K" || got.Voice.Model != "hand-picked" {
+		t.Fatalf("hand edit lost: hotkey %q model %q", got.Hotkey, got.Voice.Model)
+	}
+	if got.Scale != 5 || got.Position == nil || *got.Position != [2]float64{10, 20} {
+		t.Fatalf("app writes lost: scale %d position %v", got.Scale, got.Position)
+	}
+	if len(h.kinds(h.take(), "settings.changed")) == 0 {
+		t.Fatal("the settings window was not told")
+	}
+}
+
+func TestADragOverABrokenFileLeavesItAndTellsTheWindow(t *testing.T) {
+	h := newHarness(t)
+	const broken = `{ "scale": 4,, }`
+	write(t, filepath.Join(h.dir, "settings.json"), broken)
+	h.take()
+	h.call("mascot.moved", map[string]float64{"x": 10, "y": 20})
+	if got := read(t, filepath.Join(h.dir, "settings.json")); got != broken {
+		t.Fatalf("overwritten: %s", got)
+	}
+	if len(h.kinds(h.take(), "settings.changed")) == 0 {
+		t.Fatal("the settings window was not told")
+	}
+}

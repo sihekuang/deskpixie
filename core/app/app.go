@@ -663,6 +663,9 @@ func (a *App) resetPosition() {
 	a.emit("position", nil)
 }
 
+// save is an app write (tray, drag, canvas geometry). The store merges it onto settings.json as
+// it is on disk, so hand edits survive; a broken file is never overwritten (the change is kept
+// in memory only). Callers outside Action emit settings.changed so the window re-reads.
 func (a *App) save(fn func(*settings.Config)) {
 	if err := a.store.Update(fn); err != nil {
 		log.Printf("saving settings: %v", err)
@@ -1013,6 +1016,7 @@ func (a *App) Register(r Registrar) {
 			return nil, err
 		}
 		a.save(func(c *settings.Config) { c.Position = &[2]float64{in.X, in.Y} })
+		a.emit("settings.changed", nil)
 		return struct{}{}, nil
 	})
 	r.Register("canvas.resolve", func(args json.RawMessage) (any, error) {
@@ -1033,6 +1037,7 @@ func (a *App) Register(r Registrar) {
 			return nil, err
 		}
 		a.save(func(c *settings.Config) { c.Canvas.Window = &g })
+		a.emit("settings.changed", nil)
 		return struct{}{}, nil
 	})
 	r.Register("audio.deviceChanged", func(json.RawMessage) (any, error) {

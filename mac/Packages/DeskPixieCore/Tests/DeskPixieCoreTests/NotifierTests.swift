@@ -20,6 +20,12 @@ final class NotifierTests: XCTestCase {
         XCTAssertEqual(sink.posted.count, 2)
         XCTAssertEqual(sink.played, 0)
     }
+    func testForegroundNotificationsShowAsBanners() {
+        XCTAssertTrue(ForegroundPresenter.options.contains(.banner))
+        XCTAssertTrue(ForegroundPresenter.options.contains(.list))
+        // The engine plays Glass itself; a second system sound would double it.
+        XCTAssertFalse(ForegroundPresenter.options.contains(.sound))
+    }
     func testIgnoresOtherEvents() async {
         let sink = FakeSink()
         let n = Notifier(sink: sink)

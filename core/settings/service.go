@@ -142,7 +142,14 @@ type Service struct {
 
 // NewService takes the store's current config as the startup config.
 func NewService(store Store, applier Applier) *Service {
-	return &Service{store: store, applier: applier, startup: store.Current()}
+	s := &Service{store: store, applier: applier, startup: store.Current()}
+	// A settings.json that was broken at launch is still broken (Load left it alone): show the
+	// banner and block saves from the first snapshot on, as Reload does.
+	if _, err := store.Load(); err != nil {
+		reason := err.Error()
+		s.fileErr = &reason
+	}
+	return s
 }
 
 // Snapshot is the window's view now.

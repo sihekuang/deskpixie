@@ -38,7 +38,11 @@ public final class Notifier {
 public final class SystemNotificationSink: NotificationSink {
     private var authorization: Task<Bool, Never>?
 
-    public init() {}
+    /// Built once at launch (the coordinator's Notifier); installs the foreground presenter so
+    /// banners show while DeskPixie is frontmost.
+    public init() {
+        ForegroundPresenter.install(on: UNUserNotificationCenter.current())
+    }
 
     private func authorized() async -> Bool {
         if let authorization { return await authorization.value }
@@ -61,5 +65,29 @@ public final class SystemNotificationSink: NotificationSink {
 
     public func playGlass() {
         NSSound(contentsOfFile: "/System/Library/Sounds/Glass.aiff", byReference: true)?.play()
+    }
+}
+
+/// macOS only presents a notification from the frontmost app when the center's delegate asks
+/// for it. DeskPixie is frontmost whenever the Settings window or the canvas has focus, which is
+/// exactly when an agent's question or a timer must not go unseen. The center holds its delegate
+/// weakly, so the shared instance keeps it alive.
+public final class ForegroundPresenter: NSObject, UNUserNotificationCenterDelegate, Sendable {
+    public static let shared = ForegroundPresenter()
+
+    /// Banner plus Notification Center. No `.sound`: the Glass chime is played separately.
+    public static let options: UNNotificationPresentationOptions = [.banner, .list]
+
+    @MainActor
+    public static func install(on center: UNUserNotificationCenter) {
+        center.delegate = shared
+    }
+
+    public func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler(Self.options)
     }
 }

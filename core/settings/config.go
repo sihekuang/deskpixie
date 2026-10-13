@@ -289,20 +289,34 @@ func withLine(b []byte, err error) error {
 	return fmt.Errorf("%v at line %d column %d", err, line, col)
 }
 
-// Load reads settings.json and never fails: a missing or broken file gives the defaults,
-// written back so the user can edit them.
+// Load reads settings.json and never fails: a missing file gives the defaults, written so the
+// user can edit them. A file that exists but can't be read or parsed also gives the defaults,
+// but is left untouched (Rust rewrote it, losing every setting over one typo): the settings
+// service reports it as broken and blocks saves until it is fixed or reset.
 func Load(path string) Config {
-	text, err := os.ReadFile(path)
-	if err == nil {
-		if c, perr := ParseConfig(text); perr == nil {
-			return c.Normalized()
-		}
-	}
-	c := Default()
-	if err := c.Save(path); err != nil {
-		log.Printf("settings: could not write default settings to %s: %v", path, err)
-	}
+	c, _ := LoadFile(path)
 	return c
+}
+
+// LoadFile is Load plus why settings.json could not be used (nil when it was, or was missing).
+func LoadFile(path string) (Config, error) {
+	text, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		c := Default()
+		if err := c.Save(path); err != nil {
+			log.Printf("settings: could not write default settings to %s: %v", path, err)
+		}
+		return c, nil
+	}
+	if err == nil {
+		c, perr := ParseConfig(text)
+		if perr == nil {
+			return c.Normalized(), nil
+		}
+		err = perr
+	}
+	log.Printf("settings: %s can't be used, running with defaults and leaving it as is: %v", path, err)
+	return Default(), err
 }
 
 // Normalized applies load's lenient fixes: a zero scale becomes the default, a huge one is
