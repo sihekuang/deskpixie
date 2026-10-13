@@ -26,7 +26,7 @@ type VoiceSignal struct {
 	Text        string   // SigUserSaid
 }
 
-// Chime is an earcon. Phase 3's runtime ignores chime effects.
+// Chime is an earcon (synthesized by ChimeSamples; played when RuntimeConfig.Chimes).
 type Chime int
 
 const (

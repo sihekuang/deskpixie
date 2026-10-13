@@ -419,7 +419,7 @@ func TestRuntimeMicFramesClearIdleMicFailure(t *testing.T) {
 // micUnavailableForTest returns the remembered idle mic failure ("" when none).
 func (r *Runtime) micUnavailableForTest() string {
 	if p := r.micUnavailable.Load(); p != nil {
-		return *p
+		return p.Msg
 	}
 	return ""
 }

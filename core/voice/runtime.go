@@ -3,12 +3,16 @@ package voice
 // The runtime drives one Conversation: it feeds it inputs (hotkey, model events, mic state,
 // a ~30 Hz tick) and carries out its effects against a voice.Session, an audio.Cleaner and a
 // Go-side playback queue that the Swift audio engine drains (PullPlayback) and reports on
-// (ReportPlayback). Port of ai-mascot crates/voice-core/src/runtime.rs, simplified for
-// Phase 3: no tools, no delegation hold, chimes ignored.
+// (ReportPlayback). Port of ai-mascot crates/voice-core/src/runtime.rs: tools (one goroutine
+// per call, results tagged with the conversation generation), Inject, HoldOpen, signals
+// (Subscribe/IsOpen), session facts, chimes, SetMouthLevels and VOICE_DEBUG recording.
 
 import (
 	"context"
 	"encoding/json"
+	"log"
+	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -19,8 +23,26 @@ import (
 // Tick is how often the runtime ticks the state machine and samples the mouth (~30 Hz).
 const Tick = 33 * time.Millisecond
 
-// APIKeyEnv is the variable the Phase 3 app reads the OpenAI key from.
+// APIKeyEnv is the key hint used when RuntimeConfig.Secrets is nil (RuntimeConfig.APIKey).
 const APIKeyEnv = "OPENAI_API_KEY"
+
+// signalBuffer is how many signals a slow subscriber may fall behind before it misses some.
+const signalBuffer = 64
+
+// SessionFacts are facts that change between conversations (today's date, the time zone),
+// appended to the instructions on every connect so a long-running app never sends stale ones.
+type SessionFacts interface {
+	Facts() string
+}
+
+// withFacts is the instructions followed by a blank line and facts; blank facts add nothing.
+func withFacts(instructions, facts string) string {
+	f := strings.TrimSpace(facts)
+	if f == "" {
+		return instructions
+	}
+	return instructions + "\n\n" + f
+}
 
 // micQueueFrames bounds the mic hand-off: 32 frames of 40 ms = 1.28 s. Beyond that PushMic
 // drops frames (counted by MicDrops) rather than block the audio thread.
@@ -38,13 +60,29 @@ type UIEvent struct {
 
 // RuntimeConfig is what NewRuntime needs besides its collaborators.
 type RuntimeConfig struct {
-	Session      SessionConfig
-	APIKey       string // "" = not configured: the hotkey shows the error state
-	MouthLevels  int    // the active pack's mouth level count
+	// Session.Tools is ignored: the runtime fills it from Tools.
+	Session SessionConfig
+	// APIKey is used only when Secrets is nil: "" = not configured, the hotkey shows the
+	// error state naming APIKeyEnv. Kept for the bridge and tests; the app passes Secrets.
+	APIKey string
+	// Secrets finds the key for Model.Name() on each connect; nil = APIKey.
+	Secrets SecretSource
+	// Tools the model may call; nil = DefaultTools() (end_conversation).
+	Tools *ToolRegistry
+	// Facts, when set, are appended to the instructions on each connect.
+	Facts SessionFacts
+	// Chimes: play the start/end earcons through the playback queue.
+	Chimes bool
+	// RecordDir, when set, saves each conversation's mic audio there as WAV (see RecordingDir).
+	RecordDir    string
+	MouthLevels  int // the active pack's mouth level count
 	Conversation ConversationConfig
 	// OnMicSent, when set, is called on the runtime goroutine right after Session.Send
 	// returns for a mic frame, with the time PushMic was given for it. For latency metrics.
 	OnMicSent func(capturedAt time.Time)
+
+	// playHook sees every enqueue (n samples) and flush of the playback queue (tests).
+	playHook func(n int, flush bool)
 }
 
 type micFrame struct {
@@ -58,6 +96,28 @@ type connectResult struct {
 	err  error
 }
 
+// toolResult is a finished tool call, tagged with the conversation generation that invoked it.
+type toolResult struct {
+	gen     uint64
+	callID  string
+	outcome ToolOutcome
+}
+
+type controlKind int
+
+const (
+	ctlInject controlKind = iota
+	ctlHoldOpen
+	ctlMouthLevels
+)
+
+type control struct {
+	kind   controlKind
+	notice Notice
+	on     bool
+	levels int
+}
+
 // playbackQueue is the Go side of playback: samples waiting for Swift to pull, plus what
 // Swift last reported about its own ring.
 type playbackQueue struct {
@@ -67,12 +127,16 @@ type playbackQueue struct {
 	played       int64   // samples Swift has actually rendered (cumulative)
 	buffered     int     // samples Swift holds but hasn't rendered yet (estimate between reports)
 	rms          float32 // loudness of what Swift last rendered
+	hook         func(n int, flush bool)
 }
 
 func (p *playbackQueue) enqueue(s []int16) {
 	p.mu.Lock()
 	p.queue = append(p.queue, s...)
 	p.mu.Unlock()
+	if p.hook != nil {
+		p.hook(len(s), false)
+	}
 }
 
 func (p *playbackQueue) flush() {
@@ -82,6 +146,9 @@ func (p *playbackQueue) flush() {
 	p.rms = 0
 	p.flushPending = true
 	p.mu.Unlock()
+	if p.hook != nil {
+		p.hook(0, true)
+	}
 }
 
 func (p *playbackQueue) idle() bool {
@@ -110,11 +177,21 @@ type Runtime struct {
 	cleaner audio.Cleaner
 	cfg     RuntimeConfig
 	emitFn  func(UIEvent)
+	secrets SecretSource
+	tools   *ToolRegistry
 
 	mic       chan micFrame
 	hotkey    chan struct{}
-	micFailed chan string
+	micFailed chan AudioError
 	connected chan connectResult
+	toolDone  chan toolResult
+	ctlNotify chan struct{}
+	ctlMu     sync.Mutex
+	ctlQueue  []control
+	open      atomic.Bool
+	sigMu     sync.Mutex
+	sigSubs   []chan VoiceSignal
+	sigClosed bool
 	done      chan struct{}
 	exited    chan struct{}
 	closeOnce sync.Once
@@ -126,7 +203,7 @@ type Runtime struct {
 	// could not start audio). The next EfStartMic fails at once with it instead of waiting
 	// MicPermissionWait; it is consumed there, and cleared when mic frames arrive. Written
 	// only by the runtime goroutine; atomic so tests can read it.
-	micUnavailable atomic.Pointer[string]
+	micUnavailable atomic.Pointer[AudioError]
 
 	// Owned by the runtime goroutine.
 	conv          *Conversation
@@ -140,6 +217,9 @@ type Runtime struct {
 	micLiveSent   bool  // InMicLive fed for this mic start (on its first frame)
 	responseMark  int64 // pb.played when the current reply started
 	pending       []Input
+	recorder      *MicRecorder
+	take          *MicTake // the current conversation's recording
+	lastTake      <-chan struct{}
 }
 
 // NewRuntime starts the runtime goroutine. emit receives UI events on that goroutine; it
@@ -148,22 +228,39 @@ func NewRuntime(m Model, c audio.Cleaner, cfg RuntimeConfig, emit func(UIEvent))
 	if c == nil {
 		c = audio.Passthrough{}
 	}
+	secrets := cfg.Secrets
+	if secrets == nil {
+		secrets = fixedSecrets{key: cfg.APIKey, hint: APIKeyEnv}
+	}
+	tools := cfg.Tools
+	if tools == nil {
+		tools = DefaultTools()
+	}
+	cfg.Session.Tools = tools.Specs()
 	ctx, cancel := context.WithCancel(context.Background())
 	r := &Runtime{
 		model:     m,
 		cleaner:   c,
 		cfg:       cfg,
 		emitFn:    emit,
+		secrets:   secrets,
+		tools:     tools,
 		mic:       make(chan micFrame, micQueueFrames),
 		hotkey:    make(chan struct{}, 8),
-		micFailed: make(chan string, 4),
+		micFailed: make(chan AudioError, 4),
 		connected: make(chan connectResult, 4),
+		toolDone:  make(chan toolResult, 16),
+		ctlNotify: make(chan struct{}, 1),
 		done:      make(chan struct{}),
 		exited:    make(chan struct{}),
 		ctx:       ctx,
 		cancel:    cancel,
 		conv:      NewConversation(cfg.Conversation),
 		meter:     NewMouthMeter(cfg.MouthLevels),
+	}
+	r.pb.hook = cfg.playHook
+	if cfg.RecordDir != "" {
+		r.recorder = NewMicRecorder(cfg.RecordDir)
 	}
 	go r.run()
 	return r
@@ -229,10 +326,84 @@ func (r *Runtime) ReportPlayback(playedSamples int64, bufferedSamples int, rms f
 
 // MicFailed reports that the mic could not start (e.g. permission denied).
 func (r *Runtime) MicFailed(reason string) {
+	r.AudioFailed(AudioError{Kind: AudioPermissionDenied, Msg: reason})
+}
+
+// AudioFailed reports an audio failure: mid-conversation it ends the conversation with the
+// matching status line (e.g. "Voice: audio device changed"); while idle a mic failure makes
+// the next conversation fail as soon as it asks for the mic, and a device change is ignored.
+func (r *Runtime) AudioFailed(e AudioError) {
 	select {
-	case r.micFailed <- reason:
+	case r.micFailed <- e:
 	default:
 	}
+}
+
+// Inject asks Bit to say something about n once nobody is talking. If no conversation is
+// open it comes straight back as a SigClosed signal with n undelivered.
+func (r *Runtime) Inject(n Notice) { r.control(control{kind: ctlInject, notice: n}) }
+
+// HoldOpen: while on, the silence timeout is the hold timeout and Bit rests in delegating.
+func (r *Runtime) HoldOpen(on bool) { r.control(control{kind: ctlHoldOpen, on: on}) }
+
+// SetMouthLevels: the active pack changed; its mouth level count.
+func (r *Runtime) SetMouthLevels(levels int) {
+	r.control(control{kind: ctlMouthLevels, levels: levels})
+}
+
+// IsOpen: a conversation is open (SigOpened was sent and SigClosed hasn't been yet). For
+// re-syncing a subscriber that lagged and may have missed one of them.
+func (r *Runtime) IsOpen() bool { return r.open.Load() }
+
+// Subscribe returns signals from now on: conversation opened/closed and the user's words.
+// A subscriber more than 64 signals behind misses some. The channel closes with the runtime.
+func (r *Runtime) Subscribe() <-chan VoiceSignal {
+	ch := make(chan VoiceSignal, signalBuffer)
+	r.sigMu.Lock()
+	defer r.sigMu.Unlock()
+	if r.sigClosed {
+		close(ch)
+		return ch
+	}
+	r.sigSubs = append(r.sigSubs, ch)
+	return ch
+}
+
+func (r *Runtime) control(c control) {
+	r.ctlMu.Lock()
+	r.ctlQueue = append(r.ctlQueue, c)
+	r.ctlMu.Unlock()
+	select {
+	case r.ctlNotify <- struct{}{}:
+	default:
+	}
+}
+
+func (r *Runtime) publish(s VoiceSignal) {
+	switch s.Kind {
+	case SigOpened:
+		r.open.Store(true)
+	case SigClosed:
+		r.open.Store(false)
+	}
+	r.sigMu.Lock()
+	defer r.sigMu.Unlock()
+	for _, ch := range r.sigSubs {
+		select {
+		case ch <- s:
+		default: // a lagging subscriber misses it (IsOpen re-syncs)
+		}
+	}
+}
+
+func (r *Runtime) closeSignals() {
+	r.sigMu.Lock()
+	defer r.sigMu.Unlock()
+	r.sigClosed = true
+	for _, ch := range r.sigSubs {
+		close(ch)
+	}
+	r.sigSubs = nil
 }
 
 // Close ends any conversation, stops the runtime goroutine and closes the cleaner.
@@ -242,6 +413,7 @@ func (r *Runtime) Close() {
 		close(r.done)
 		r.cancel()
 		<-r.exited
+		r.closeSignals()
 		_ = r.cleaner.Close()
 	})
 }
@@ -270,23 +442,41 @@ func (r *Runtime) run() {
 			return
 		case <-r.hotkey:
 			r.input(HotkeyInput())
-		case reason := <-r.micFailed:
+		case e := <-r.micFailed:
 			if !r.conv.IsActive() {
-				r.micUnavailable.Store(&reason) // fail the next mic start promptly
+				if e.Kind != AudioDeviceChanged {
+					r.micUnavailable.Store(&e) // fail the next mic start promptly
+				}
 				continue
 			}
-			r.emit(UIEvent{Kind: "error", Text: "microphone: " + reason})
-			r.input(FailedInput(Failure{Kind: FailMicDenied}))
+			r.emit(UIEvent{Kind: "error", Text: "microphone: " + e.Error()})
+			r.input(FailedInput(FailureFromAudio(e)))
+		case <-r.ctlNotify:
+			r.ctlMu.Lock()
+			cs := r.ctlQueue
+			r.ctlQueue = nil
+			r.ctlMu.Unlock()
+			for _, c := range cs {
+				r.onControl(c)
+			}
 		case c := <-r.connected:
 			r.onConnected(c)
+		case t := <-r.toolDone:
+			r.onToolDone(t)
 		case ev, ok := <-r.events:
 			if !ok {
 				r.session, r.events = nil, nil
 				r.input(FailedInput(Failure{Kind: FailConnectionLost}))
 				continue
 			}
-			if ev.Kind == EvTranscript {
+			switch {
+			case ev.Kind == EvTranscript:
+				if debugEnabled() {
+					log.Printf("[voice] %s: %s", ev.Role, ev.Text)
+				}
 				r.emit(UIEvent{Kind: "transcript", Role: ev.Role, Text: ev.Text})
+			case ev.Kind == EvError && !ev.Fatal:
+				log.Printf("voice: model warning: %s", ev.Message)
 			}
 			r.input(ModelInput(ev))
 		case f := <-r.mic:
@@ -298,8 +488,43 @@ func (r *Runtime) run() {
 	}
 }
 
+func debugEnabled() bool {
+	_, ok := os.LookupEnv("VOICE_DEBUG")
+	return ok
+}
+
+func (r *Runtime) onControl(c control) {
+	switch c.kind {
+	case ctlInject:
+		r.input(InjectInput(c.notice))
+	case ctlHoldOpen:
+		r.input(HoldOpenInput(c.on))
+	case ctlMouthLevels:
+		r.cfg.MouthLevels = c.levels
+		r.meter = NewMouthMeter(c.levels)
+	}
+}
+
+func (r *Runtime) onToolDone(t toolResult) {
+	if t.gen != r.gen {
+		return // a result from a previous conversation
+	}
+	out := t.outcome.Output
+	if len(out) == 0 {
+		out = json.RawMessage("null")
+	}
+	r.send(Command{Kind: CmdToolResult, CallID: t.callID, Output: out, Respond: !t.outcome.EndConversation})
+	r.input(ToolDoneInput(t.callID, t.outcome.EndConversation))
+}
+
 func (r *Runtime) shutdown() {
 	r.apply(Effect{Kind: EfStopMic})
+	if r.lastTake != nil {
+		select { // let the last recording finish its files
+		case <-r.lastTake:
+		case <-time.After(time.Second):
+		}
+	}
 	if r.connectCancel != nil {
 		r.connectCancel()
 		r.connectCancel = nil
@@ -339,9 +564,17 @@ func (r *Runtime) onMic(f micFrame) {
 			return
 		}
 	}
+	if r.take != nil {
+		if _, plain := r.cleaner.(audio.Passthrough); !plain {
+			r.take.Unfiltered(f.samples)
+		}
+	}
 	out := r.cleaner.Process(f.samples)
 	if len(out) == 0 {
 		return
+	}
+	if r.take != nil {
+		r.take.Sent(out)
 	}
 	// An error here means the session is going away; its event stream reports it.
 	_ = r.session.Send(Command{Kind: CmdAudio, Audio: out})
@@ -373,16 +606,25 @@ func (r *Runtime) apply(fx Effect) {
 	switch fx.Kind {
 	case EfConnect:
 		r.gen++
-		if r.cfg.APIKey == "" {
-			r.emit(UIEvent{Kind: "error", Text: APIKeyEnv + " not set"})
-			r.pending = append(r.pending, FailedInput(NoAPIKey(APIKeyEnv)))
+		key, ok := r.secrets.APIKey(r.model.Name())
+		if !ok {
+			hint := r.secrets.KeyHint(r.model.Name())
+			if hint != "" {
+				r.emit(UIEvent{Kind: "error", Text: hint + " not set"})
+			} else {
+				r.emit(UIEvent{Kind: "error", Text: "API key not set"})
+			}
+			r.pending = append(r.pending, FailedInput(NoAPIKey(hint)))
 			return
 		}
 		ctx, cancel := context.WithCancel(r.ctx)
 		r.connectCancel = cancel
-		gen, model, cfg, key := r.gen, r.model, r.cfg.Session, r.cfg.APIKey
+		gen, model, cfg := r.gen, r.model, r.cfg.Session
+		if r.cfg.Facts != nil {
+			cfg.Instructions = withFacts(cfg.Instructions, r.cfg.Facts.Facts())
+		}
 		go func() {
-			s, err := model.Connect(ctx, cfg, key)
+			s, err := model.Connect(ctx, cfg, key.Expose())
 			select {
 			case r.connected <- connectResult{gen: gen, sess: s, err: err}:
 			case <-r.done:
@@ -393,12 +635,19 @@ func (r *Runtime) apply(fx Effect) {
 		}()
 	case EfStartMic:
 		r.micActive, r.micLiveSent = true, false
+		if r.recorder != nil && r.take == nil {
+			r.take = r.recorder.Begin()
+		}
 		r.emit(UIEvent{Kind: "mic", Text: "start"})
-		if reason := r.micUnavailable.Swap(nil); reason != nil {
-			r.emit(UIEvent{Kind: "error", Text: "microphone: " + *reason})
-			r.pending = append(r.pending, FailedInput(Failure{Kind: FailMicDenied}))
+		if e := r.micUnavailable.Swap(nil); e != nil {
+			r.emit(UIEvent{Kind: "error", Text: "microphone: " + e.Error()})
+			r.pending = append(r.pending, FailedInput(FailureFromAudio(*e)))
 		}
 	case EfStopMic:
+		if r.take != nil {
+			r.lastTake = r.take.End()
+			r.take = nil
+		}
 		if r.micActive {
 			r.micActive = false
 			r.emit(UIEvent{Kind: "mic", Text: "stop"})
@@ -423,12 +672,11 @@ func (r *Runtime) apply(fx Effect) {
 	case EfFlushPlayback:
 		r.pb.flush()
 	case EfPlayChime:
-		// Chimes are out of scope for Phase 3.
+		if r.cfg.Chimes {
+			r.pb.enqueue(ChimeSamples(fx.Chime))
+		}
 	case EfInvokeTool:
-		// Phase 3 registers no tools; answer so the turn doesn't wait on it.
-		out, _ := json.Marshal(map[string]string{"error": "unknown tool " + fx.ToolName})
-		r.send(Command{Kind: CmdToolResult, CallID: fx.CallID, Output: out, Respond: true})
-		r.pending = append(r.pending, ToolDoneInput(fx.CallID, false))
+		r.invokeTool(fx.CallID, fx.ToolName, fx.Args)
 	case EfMascot:
 		r.emit(UIEvent{Kind: "state", State: string(fx.State)})
 	case EfStatus:
@@ -436,8 +684,28 @@ func (r *Runtime) apply(fx Effect) {
 	case EfInject:
 		r.send(Command{Kind: CmdInject, Text: fx.Text, Respond: true})
 	case EfSignal:
-		// No subscribers in Phase 3.
+		r.publish(fx.Signal)
 	}
+}
+
+// invokeTool runs the tool on its own goroutine; the result comes back through toolDone,
+// tagged with the current generation so a result from an earlier conversation is dropped.
+func (r *Runtime) invokeTool(callID, name string, args json.RawMessage) {
+	gen := r.gen
+	deliver := func(o ToolOutcome) {
+		select {
+		case r.toolDone <- toolResult{gen: gen, callID: callID, outcome: o}:
+		case <-r.done:
+		}
+	}
+	tool, ok := r.tools.Get(name)
+	if !ok {
+		out, _ := json.Marshal(map[string]string{"error": "unknown tool " + name})
+		go deliver(ToolOutcome{Output: out})
+		return
+	}
+	ctx := r.ctx
+	go func() { deliver(tool.Invoke(ctx, args)) }()
 }
 
 func (r *Runtime) updateMouth() {
