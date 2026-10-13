@@ -7,3 +7,4 @@ core/bin/
 *.dylib
 libdeskpixie.h
 .worktrees/
+.superpowers/
