@@ -6,37 +6,46 @@ import os
 ///
 /// Usage (coordinator, main actor):
 /// ```swift
-/// guard let mascot = MascotController.load(engine: engine) else { ... }   // after engine.configure
+/// let settings = MascotSettings.fromSnapshot(try engine.call("settings.snapshot")) ?? .defaults
+/// guard let mascot = MascotController.load(engine: engine, settings: settings) else { ... }
+/// mascot.onDoubleClick = { coordinator.talk() }
 /// mascot.show()
-/// // EngineEvent.state(s) → mascot.setState(s); EngineEvent.mouth(l) → mascot.setMouth(l)
+/// // .state → setState, .mouth → setMouth, .pack → applyPack, .position → moveTo,
+/// // settings.changed → apply(settings:)
 /// ```
-/// A double-click on Bit calls `engine.hotkey()` (the voice toggle); a single click is
-/// logged only (the agent terminal is Phase 5); a drag moves the panel.
+/// Gestures (ai-mascot player.js): a single click calls `mascot.click` (agent terminal), a
+/// double-click runs `onDoubleClick` (the voice hotkey), a drag moves the panel. A move by the
+/// user (drag, or keep-feet on a size change) is reported with `mascot.moved {x,y}` once it has
+/// settled for 400 ms; placements the core asked for (`position` event, launch) are not.
 @MainActor
 final class MascotController {
-    static let defaultScale: CGFloat = 8
-    /// ai-mascot's `proximity_fade.radius` default (150) × the monitor scale factor. AppKit works in
-    /// points, which already are physical pixels / backing scale, so 150 pt is the same distance.
-    static let fadeRadius: CGFloat = 150
     static let cursorPollInterval: TimeInterval = 1.0 / 60.0
     /// A little past the 300 ms double-click window so timer jitter never expires it early.
     static let clickExpireDelay: TimeInterval = 0.31
 
-    private static let log = Logger(subsystem: "com.sihekuang.deskpixie", category: "mascot")
+    nonisolated private static let log = Logger(subsystem: "com.sihekuang.deskpixie", category: "mascot")
 
     private let engine: CoreEngine
-    let pack: Pack
-    let sheet: SpriteSheet
-    let scale: CGFloat
+    private(set) var pack: Pack
+    private(set) var sheet: SpriteSheet
+    private var currentSheetPath: String?
+    private(set) var scale: Int
+    /// Bit's pixels in any frame (the `pack` event's mask, or built from the sheet at launch).
+    private(set) var hitMask: HitMask
+    private(set) var settings: MascotSettings
     private(set) var player: MascotPlayer
     private(set) var mouthLevel = 0
     private var gesture = Gesture()
     /// True from a left press until all buttons are up (covers the window drag too).
     private var pointerActive = false
-    /// Proximity fade on/off (ai-mascot `proximity_fade.enabled`; no settings UI in Phase 3).
-    var fadeEnabled = true
     /// The opacity last applied to the view (actions.rs `last_opacity`).
     private var lastOpacity: CGFloat = 1.0
+    private var moves = MoveDebounce()
+    /// Set while the controller places the panel itself, so the move is not reported as the user's.
+    private var placing = false
+
+    /// The voice hotkey action (double-click on Bit).
+    var onDoubleClick: (() -> Void)?
 
     let panel: MascotPanel
     let view: MascotView
@@ -44,25 +53,36 @@ final class MascotController {
     private var animationTimer: Timer?
     private var cursorTimer: Timer?
     private var expireTimer: Timer?
+    private var moveObserver: NSObjectProtocol?
 
-    init(engine: CoreEngine, pack: Pack, sheet: SpriteSheet, scale: CGFloat = MascotController.defaultScale) {
+    init(engine: CoreEngine, pack: Pack, sheet: SpriteSheet, sheetPath: String?, scale: Int, hitMask: HitMask?,
+         settings: MascotSettings) {
         self.engine = engine
+        currentSheetPath = sheetPath
         self.pack = pack
         self.sheet = sheet
         self.scale = scale
+        self.hitMask = hitMask ?? HitMask.union(pack: pack, sheet: sheet)
+        self.settings = settings
         player = MascotPlayer()
-        let size = NSSize(width: CGFloat(pack.cellWidth) * scale, height: CGFloat(pack.cellHeight) * scale)
-        panel = MascotPanel(contentSize: size)
+        let size = Layout.windowSize(pack: pack, scale: scale)
+        let topLeft = Layout.restorePosition(settings.position, size: size, displays: ScreenDisplays())
+        panel = MascotPanel(frame: ScreenDisplays.appKitFrame(topLeft: topLeft, size: size))
         view = MascotView(frame: NSRect(origin: .zero, size: size))
         panel.contentView = view
         view.onMouseDown = { [weak self] in self?.mouseDown($0) }
         view.onMouseDragged = { [weak self] in self?.mouseDragged($0) }
         view.onMouseUp = { [weak self] in self?.mouseUp($0) }
+        moveObserver = NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification, object: panel,
+                                                              queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.panelMoved() }
+        }
         redraw()
     }
 
-    /// Reads `engine.packJSON()` (`{"pack":…, "sheetPath":…}`) and loads the sheet; nil (logged) on failure.
-    static func load(engine: CoreEngine, scale: CGFloat = defaultScale) -> MascotController? {
+    /// Reads `engine.packJSON()` and loads the sheet; nil (logged) on failure. The scale is the
+    /// payload's, else the saved one, else ×8; the hit mask is the payload's, else built here.
+    static func load(engine: CoreEngine, settings: MascotSettings) -> MascotController? {
         guard let json = engine.packJSON(), let payload = PackPayload.decode(json) else {
             log.error("no usable pack from the core")
             return nil
@@ -71,8 +91,13 @@ final class MascotController {
             log.error("cannot load sheet \(payload.sheetPath, privacy: .public)")
             return nil
         }
+        let scale = [payload.scale, settings.scale].compactMap { $0 }.first { $0 > 0 } ?? 8
+        let mask = payload.hitMask.flatMap {
+            HitMask(width: payload.pack.cellWidth, height: payload.pack.cellHeight, bits: $0)
+        }
         log.info("ready: \(payload.pack.name, privacy: .public) \(payload.pack.cellWidth)x\(payload.pack.cellHeight) scale \(scale)")
-        return MascotController(engine: engine, pack: payload.pack, sheet: sheet, scale: scale)
+        return MascotController(engine: engine, pack: payload.pack, sheet: sheet, sheetPath: payload.sheetPath, scale: scale,
+                                hitMask: mask, settings: settings)
     }
 
     /// Shows the panel and starts the animation timer and the 60 Hz cursor poll.
@@ -89,6 +114,8 @@ final class MascotController {
         animationTimer = nil
         cursorTimer = nil
         expireTimer = nil
+        if let moveObserver { NotificationCenter.default.removeObserver(moveObserver) }
+        moveObserver = nil
         panel.orderOut(nil)
     }
 
@@ -112,6 +139,91 @@ final class MascotController {
         redraw()
     }
 
+    /// `EngineEvent.pack`: a new pack and/or scale. Reloads the sheet and the hit mask and
+    /// resizes the panel keeping Bit's feet where they were (actions.rs `resize_window`); the
+    /// moved top-left is then saved like a drag. A sheet that cannot be read keeps the old pack.
+    func applyPack(_ ev: PackEvent) {
+        let newSheet: SpriteSheet
+        if ev.sheetPath == currentSheetPath {
+            newSheet = sheet
+        } else {
+            guard let s = SpriteSheet(url: URL(fileURLWithPath: ev.sheetPath)) else {
+                Self.log.error("cannot load sheet \(ev.sheetPath, privacy: .public)")
+                return
+            }
+            newSheet = s
+        }
+        let fpsChanged = ev.pack.fps != pack.fps
+        let oldSize = Layout.windowSize(pack: pack, scale: scale)
+        pack = ev.pack
+        sheet = newSheet
+        currentSheetPath = ev.sheetPath
+        scale = ev.scale > 0 ? ev.scale : scale
+        hitMask = HitMask.forEvent(ev) ?? HitMask.union(pack: pack, sheet: sheet)
+        player = MascotPlayer(state: pack.states[player.state] != nil ? player.state : "idle")
+        mouthLevel = MascotPlayer.clampLevel(mouthLevel, pack: pack)
+        let newSize = Layout.windowSize(pack: pack, scale: scale)
+        if newSize != oldSize {
+            let top = ScreenDisplays.desktopRect(panel.frame).origin
+            let feet = Layout.keepFeet(top, old: oldSize, new: newSize)
+            // A user-visible move: saved after it settles (Rust saves on every window move).
+            panel.setFrame(ScreenDisplays.appKitFrame(topLeft: feet, size: newSize), display: false)
+            view.frame = NSRect(origin: .zero, size: newSize)
+        }
+        if fpsChanged, animationTimer != nil {
+            animationTimer?.invalidate()
+            animationTimer = nil
+            startTimers()
+        }
+        redraw()
+        Self.log.info("pack: \(self.pack.name, privacy: .public) scale \(self.scale)")
+    }
+
+    /// `EngineEvent.position`: a desktop top-left (clamped onto a connected display like a
+    /// restored position), or both nil for the default spot (Tray ▸ Reset position). Not
+    /// reported back: the core already holds this position (or null).
+    func moveTo(x: Double?, y: Double?) {
+        let saved = x.flatMap { x in y.map { CGPoint(x: x, y: $0) } }
+        let size = Layout.windowSize(pack: pack, scale: scale)
+        let topLeft = Layout.restorePosition(saved, size: size, displays: ScreenDisplays())
+        place(ScreenDisplays.appKitFrame(topLeft: topLeft, size: size))
+    }
+
+    /// New settings (`settings.changed`): fade on/off and radius take effect at the next poll.
+    /// The position and scale are driven by `position` / `pack` events, not re-applied here.
+    func apply(settings s: MascotSettings) {
+        settings = s
+    }
+
+    /// Moves the panel without reporting it as the user's move.
+    private func place(_ frame: NSRect) {
+        placing = true
+        panel.setFrame(frame, display: true)
+        placing = false
+        moves.cancel()
+    }
+
+    private func panelMoved() {
+        guard !placing else { return }
+        moves.moved(at: ProcessInfo.processInfo.systemUptime)
+    }
+
+    /// actions.rs `save_position_after_drag`: once the panel has stood still for 400 ms, its
+    /// logical top-left goes to the core (`mascot.moved`), which saves it as `position`.
+    private func reportMoveIfSettled() {
+        guard moves.takeSettled(now: ProcessInfo.processInfo.systemUptime) else { return }
+        let top = ScreenDisplays.desktopRect(panel.frame).origin
+        let args = MovedArgs(x: top.x, y: top.y)
+        let engine = engine
+        Task.detached {
+            do {
+                _ = try engine.call("mascot.moved", args)
+            } catch {
+                Self.log.error("mascot.moved: \(String(describing: error), privacy: .public)")
+            }
+        }
+    }
+
     // MARK: Timers
 
     private func startTimers() {
@@ -119,13 +231,15 @@ final class MascotController {
         animationTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / Double(max(pack.fps, 1)), repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.step() }
         }
+        RunLoop.main.add(animationTimer!, forMode: .common)
+        guard cursorTimer == nil else { return }
         // Cursor poll, as in oled-saver-macos CircleOverlayView (MIT): NSEvent global monitors only
         // fire for events going to *other* apps, so they stop while our app is frontmost;
         // NSEvent.mouseLocation works regardless of focus.
         cursorTimer = Timer.scheduledTimer(withTimeInterval: Self.cursorPollInterval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.pollCursor() }
         }
-        for t in [animationTimer, cursorTimer] { t.map { RunLoop.main.add($0, forMode: .common) } }
+        RunLoop.main.add(cursorTimer!, forMode: .common)
     }
 
     private func step() {
@@ -135,11 +249,12 @@ final class MascotController {
 
     // MARK: Drawing
 
-    private var viewHeight: CGFloat { CGFloat(pack.cellHeight) * scale }
+    private var viewHeight: CGFloat { CGFloat(pack.cellHeight * scale) }
 
     /// Converts a top-left-origin rect in cell pixels (moved down by `bob`) to view points.
     private func viewRect(x: CGFloat, y: CGFloat, w: CGFloat, h: CGFloat, bob: Int) -> CGRect {
-        CGRect(x: x * scale, y: viewHeight - (y + CGFloat(bob) + h) * scale, width: w * scale, height: h * scale)
+        let s = CGFloat(scale)
+        return CGRect(x: x * s, y: viewHeight - (y + CGFloat(bob) + h) * s, width: w * s, height: h * s)
     }
 
     private func redraw() {
@@ -153,29 +268,22 @@ final class MascotController {
                     mouthFrame: viewRect(x: at.x, y: at.y, w: mouth.width, h: mouth.height, bob: bob))
     }
 
-    // MARK: Cursor poll: click-through and proximity fade
-
-    /// The sheet pixel under a screen point, inside the current body cell; nil outside it.
-    private func bodySheetPoint(screen p: NSPoint) -> CGPoint? {
-        let f = panel.frame
-        guard f.contains(p) else { return nil }
-        let cellX = (p.x - f.minX) / scale
-        let cellY = (f.maxY - p.y) / scale - CGFloat(player.bobOffset(pack: pack)) // top-left origin
-        guard cellX >= 0, cellY >= 0, cellX < CGFloat(pack.cellWidth), cellY < CGFloat(pack.cellHeight) else { return nil }
-        let body = player.bodyRect(pack: pack)
-        return CGPoint(x: body.minX + cellX, y: body.minY + cellY)
-    }
+    // MARK: Cursor poll: click-through, proximity fade, position save (actions.rs spawn_proximity)
 
     private func pollCursor() {
-        let cursor = NSEvent.mouseLocation
+        reportMoveIfSettled()
+        let top = ScreenDisplays.primaryMaxY
+        // AppKit gives the cursor and the frame in the same global points on every display, so
+        // tao's mixed-Retina correction (`rescale`) is the identity here.
+        let cursor = DesktopSpace.desktopPoint(NSEvent.mouseLocation, primaryMaxY: top)
+        let rect = DesktopSpace.desktopRect(panel.frame, primaryMaxY: top)
         if pointerActive, NSEvent.pressedMouseButtons & 1 == 0 { pointerActive = false }
-        // Click-through wherever Bit is transparent; never mid-press or mid-drag.
-        let overBit = bodySheetPoint(screen: cursor).map { sheet.isOpaque(sheetPoint: $0) } ?? false
+        // Click-through wherever no frame of Bit ever draws; never mid-press or mid-drag.
+        let overBit = hitMask.hit(cursor: cursor, window: rect)
         let ignore = !(pointerActive || overBit)
         if panel.ignoresMouseEvents != ignore { panel.ignoresMouseEvents = ignore }
-        // actions.rs spawn_proximity: fully visible while on Bit (or pressed/dragging), else fade.
-        let next = ProximityFade.target(cursor: cursor, rect: panel.frame, radius: Self.fadeRadius,
-                                        enabled: fadeEnabled, overBit: pointerActive || overBit)
+        let next = ProximityFade.target(cursor: cursor, rect: rect, radius: settings.fadeRadius,
+                                        enabled: settings.fadeEnabled, overBit: pointerActive || overBit)
         if ProximityFade.shouldEmit(last: lastOpacity, next: next) {
             view.setOpacity(Float(next))
             lastOpacity = next
@@ -204,7 +312,7 @@ final class MascotController {
         case .double:
             expireTimer?.invalidate()
             Self.log.info("double-click: voice hotkey")
-            engine.hotkey()
+            if let onDoubleClick { onDoubleClick() } else { engine.hotkey() }
         case .wait:
             expireTimer?.invalidate()
             expireTimer = Timer.scheduledTimer(withTimeInterval: Self.clickExpireDelay, repeats: false) { [weak self] _ in
@@ -215,10 +323,17 @@ final class MascotController {
         }
     }
 
+    /// A single click (no second press within 300 ms): the core opens the agent terminal.
     private func expireClick() {
-        if gesture.expire(now: ProcessInfo.processInfo.systemUptime) == .click {
-            // The agent terminal opens here in Phase 5.
-            Self.log.info("click on mascot (no action in Phase 3)")
+        guard gesture.expire(now: ProcessInfo.processInfo.systemUptime) == .click else { return }
+        Self.log.info("click on mascot")
+        let engine = engine
+        Task.detached {
+            do {
+                _ = try engine.call("mascot.click")
+            } catch {
+                Self.log.error("mascot.click: \(String(describing: error), privacy: .public)")
+            }
         }
     }
 }

@@ -59,8 +59,9 @@ final class EngineCoordinator {
         }
 
         if configured {
-            if let m = MascotController.load(engine: engine) {
+            if let m = MascotController.load(engine: engine, settings: readMascotSettings()) {
                 mascot = m
+                m.onDoubleClick = { [weak self] in self?.talk() }
                 m.show()
             } else {
                 appState.engineError = "Could not load the mascot pack"
@@ -117,6 +118,7 @@ final class EngineCoordinator {
             } catch {
                 Self.log.error("app.action \(id, privacy: .public): \(String(describing: error), privacy: .public)")
             }
+            if id == "fade" { mascot?.apply(settings: readMascotSettings()) }
             refreshTray()
         }
     }
@@ -220,13 +222,31 @@ final class EngineCoordinator {
             refreshTray()
         case .restart:
             relaunch()
-        case .pack, .position, .hotkey, .devices, .notify, .canvasOpen, .settingsChanged:
-            // Handled by later work packages (S2–S6); nothing emits these yet.
+        case .pack(let p):
+            mascot?.applyPack(p)
+        case .position(let x, let y):
+            mascot?.moveTo(x: x, y: y)
+        case .settingsChanged:
+            // The mascot follows proximityFade.{enabled,radius}; S4's settings window also listens.
+            mascot?.apply(settings: readMascotSettings())
+        case .hotkey, .devices, .notify, .canvasOpen:
+            // Handled by later work packages (S3–S6).
             Self.log.debug("unhandled event \(String(describing: ev), privacy: .public)")
         }
     }
 
     // MARK: Helpers
+
+    /// The mascot's settings (`position`, `scale`, `proximityFade`) from `settings.snapshot`;
+    /// config.rs defaults while the core does not serve it.
+    private func readMascotSettings() -> MascotSettings {
+        do {
+            return MascotSettings.fromSnapshot(try engine.call("settings.snapshot")) ?? .defaults
+        } catch {
+            Self.log.error("settings.snapshot: \(String(describing: error), privacy: .public)")
+            return .defaults
+        }
+    }
 
     /// Bundled packs first, then the user's (later roots override earlier ones).
     static func packRoots() -> [String] {
