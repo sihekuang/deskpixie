@@ -1,163 +1,170 @@
-import AVFoundation
 import AudioToolbox
 import CDP
+import CoreAudio
 import Darwin
 import Foundation
 import os
 
 /// One `kAudioUnitSubType_VoiceProcessingIO` unit (echo cancellation) for both the mic
 /// (input element 1) and the speaker (output element 0), 24 kHz mono Int16 on both sides.
-/// Port of ai-mascot `crates/audio-macos/src/engine.rs` `build()`. System default devices
-/// (no device pinning in Phase 3). `init` has no side effects: permission is requested
-/// and the unit is built only in `start`.
+/// Port of ai-mascot `crates/audio-macos/src/engine.rs`.
 ///
-/// A change of the default input or output device (headphones, AirPods) rebuilds the unit,
-/// flushing the playback ring, as ai-mascot's audio-macos does (it polls devices every 1 s
-/// and rebuilds on change; here a CoreAudio property listener does the same without polling).
+/// - `start` only arms it: the unit is built on demand (audio queued in the playback ring,
+///   or the mic switched on) and stopped after 300 ms with the mic off and the speaker idle;
+///   a failed build backs off 1 s (`VoiceUnitControl`, polled every 20 ms on a private queue).
+/// - Devices: the UIDs from `setPinned` are used when connected, else the Mac's default
+///   (`AudioDevices.pick`); a unit that can't start on them is retried on the defaults.
+/// - Device watch: polled every 1 s while a unit runs (3 s settle, 2 polls, a pinned device
+///   must keep its AudioDeviceID). A real change drops the unit, discards queued playback,
+///   mutes the mic and sends `.failed(.deviceChanged)` to the current conversation; the app
+///   forwards it to `audio.deviceChanged`. (Phase 3 rebuilt the unit from a default-device
+///   property listener instead; with on-demand units a new conversation always starts on
+///   the current devices, and a change mid-conversation ends it, as in ai-mascot.)
+/// - Permission (`MicSwitch`): `setMicEnabled(true)` asks when the user was never asked
+///   (the mic stays off; the Go runtime waits up to 60 s for the first frame); a denial
+///   sends `.failed(.permissionDenied)`.
 public final class VPIOVoiceIO: VoiceIO, @unchecked Sendable {
-    static let deviceChangeDebounce: TimeInterval = 0.3
+    static let tickInterval: DispatchTimeInterval = .milliseconds(20)
     private static let log = Logger(subsystem: "com.sihekuang.deskpixie", category: "audio")
+    private static let queueKey = DispatchSpecificKey<Bool>()
 
+    /// Mic on / unit running flags. Pass it to `AudioPump(…, gate:)`.
+    public let gate = AudioGate()
+    private let micState: MicState
+    private let mic: MicSwitch
+    private let auth: MicAuthorizer
+    private let devices: AudioDeviceSource & Sendable
+    private let queue = DispatchQueue(label: "deskpixie.audio-control", qos: .userInitiated)
+
+    // Under `lock`.
     private let lock = NSLock()
-    private var unit: AudioUnit?
-    private var context: VPIOContext?
-    /// Serialises unit start/stop/rebuild (app calls vs. the device listener).
-    private let opLock = NSLock()
-    /// What the last `start` used, so a device change can rebuild the unit (under opLock).
-    private var playback: PlaybackRing?
-    private var onMic: (@Sendable (UnsafeBufferPointer<Int16>, UInt64) -> Void)?
-    private let listenerQueue = DispatchQueue(label: "deskpixie.audio-devices")
-    private var listener: AudioObjectPropertyListenerBlock?
-    private var deviceChangeGen = 0  // on listenerQueue only
-    // Mic gate survives start/stop: slot 0 = 1 when enabled.
-    private let micEnabled: UnsafeMutablePointer<Int64>
+    private var pinned: (input: String?, output: String?) = (nil, nil)
+    private var handler: (@Sendable (MicEvent) -> Void)?
 
-    public init() {
-        micEnabled = .allocate(capacity: 1)
-        micEnabled.initialize(to: 0)
+    // On `queue` only.
+    private var control: VoiceUnitControl?
+    private var timer: DispatchSourceTimer?
+
+    public init(auth: MicAuthorizer = AVMicAuthorizer(), devices: AudioDeviceSource & Sendable = CoreAudioDevices()) {
+        self.auth = auth
+        self.devices = devices
+        let state = MicState(gate: gate)
+        micState = state
+        let queue = queue, owner = WeakBox<VPIOVoiceIO>()
+        mic = MicSwitch(state: state, auth: auth, onStarted: {
+            queue.async { owner.value?.control?.micStarted(now: Self.now()) }
+        })
+        owner.value = self
+        queue.setSpecific(key: Self.queueKey, value: true)
     }
 
     deinit {
         stop()
-        micEnabled.deallocate()
     }
+
+    // MARK: VoiceIO
 
     public func start(playback: PlaybackRing,
                       onMicSamples: @escaping @Sendable (UnsafeBufferPointer<Int16>, UInt64) -> Void) async throws {
-        try await Self.requireMicPermission()
-        try opLock.withLock {
-            try startUnit(playback: playback, onMicSamples: onMicSamples)
-            self.playback = playback
-            self.onMic = onMicSamples
-            installDeviceListener()
-        }
+        // Asking happens when a conversation turns the mic on; only a past denial fails here.
+        if auth.status() == .denied { throw VoiceIOError.permissionDenied }
+        onQueue { arm(playback: playback, onMicSamples: onMicSamples) }
     }
 
     public func setMicEnabled(_ on: Bool) {
-        cdp_store(micEnabled, on ? 1 : 0)
+        guard on else {
+            mic.stop()
+            return
+        }
+        do {
+            let started = try mic.start { [weak self] event in self?.deliver(event) }
+            Self.log.notice("mic on: \(started == .live ? "live" : "awaiting permission", privacy: .public)")
+        } catch {
+            Self.log.error("mic on: permission denied")
+            deliver(.failed(.permissionDenied))
+        }
+    }
+
+    public func setPinned(input: String?, output: String?) {
+        lock.withLock { pinned = (input, output) }
+    }
+
+    public func setEventHandler(_ handler: @escaping @Sendable (MicEvent) -> Void) {
+        lock.withLock { self.handler = handler }
     }
 
     public func stop() {
-        opLock.withLock {
-            removeDeviceListener()
-            playback = nil
-            onMic = nil
-            teardownUnit()
+        mic.stop()
+        onQueue {
+            timer?.cancel()
+            timer = nil
+            control?.shutdown()
+            control = nil
         }
     }
 
-    // MARK: - Default-device changes
+    // MARK: Control
 
-    private static let deviceSelectors = [kAudioHardwarePropertyDefaultInputDevice,
-                                          kAudioHardwarePropertyDefaultOutputDevice]
+    private static func now() -> TimeInterval { ProcessInfo.processInfo.systemUptime }
 
-    private static func address(_ selector: AudioObjectPropertySelector) -> AudioObjectPropertyAddress {
-        AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal,
-                                   mElement: kAudioObjectPropertyElementMain)
+    /// Runs `body` on the control queue and waits for it (inline when already there).
+    private func onQueue(_ body: () -> Void) {
+        if DispatchQueue.getSpecific(key: Self.queueKey) == true { body() } else { queue.sync(execute: body) }
     }
 
-    /// Under opLock.
-    private func installDeviceListener() {
-        guard listener == nil else { return }
-        let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-            self?.deviceChanged()  // runs on listenerQueue
-        }
-        for sel in Self.deviceSelectors {
-            var addr = Self.address(sel)
-            let st = AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &addr,
-                                                         listenerQueue, block)
-            if st != noErr { Self.log.error("device listener \(sel, privacy: .public) failed: \(st, privacy: .public)") }
-        }
-        listener = block
+    private func deliver(_ event: MicEvent) {
+        lock.withLock { handler }?(event)
     }
 
-    /// Under opLock.
-    private func removeDeviceListener() {
-        guard let block = listener else { return }
-        for sel in Self.deviceSelectors {
-            var addr = Self.address(sel)
-            _ = AudioObjectRemovePropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &addr,
-                                                       listenerQueue, block)
-        }
-        listener = nil
+    /// On the queue.
+    private func arm(playback: PlaybackRing,
+                     onMicSamples: @escaping @Sendable (UnsafeBufferPointer<Int16>, UInt64) -> Void) {
+        guard control == nil else { return }
+        let gate = gate, micState = micState, devices = devices
+        control = VoiceUnitControl(
+            source: { devices },
+            build: { chosen in try VPIOUnit.build(chosen, playback: playback, gate: gate, onMic: onMicSamples) },
+            hooks: VoiceUnitControl.Hooks(
+                saved: { [weak self] in self?.lock.withLock { self?.pinned } ?? (nil, nil) },
+                micOn: { gate.micOn },
+                speakerIdle: { playback.isIdle },
+                discardSpeaker: {
+                    let n = playback.discardAll()
+                    if n > 0 { Self.log.notice("discarded \(n, privacy: .public) samples queued for no unit") }
+                },
+                mute: { micState.mute() },
+                report: { micState.send(.failed($0)) },
+                log: { Self.log.notice("\($0, privacy: .public)") },
+                runningChanged: { gate.unitRunning = $0 }))
+        let t = DispatchSource.makeTimerSource(queue: queue)
+        t.schedule(deadline: .now(), repeating: Self.tickInterval, leeway: .milliseconds(5))
+        t.setEventHandler { [weak self] in self?.control?.tick(now: Self.now()) }
+        timer = t
+        t.resume()
+    }
+}
+
+/// Lets a closure created in `init` reach `self` weakly once `init` finishes.
+private final class WeakBox<T: AnyObject>: @unchecked Sendable {
+    weak var value: T?
+}
+
+/// One built and started VoiceProcessingIO unit.
+final class VPIOUnit: VoiceUnitHandle, AudioDeviceTarget {
+    private static let log = Logger(subsystem: "com.sihekuang.deskpixie", category: "audio")
+
+    let unit: AudioUnit
+    private var context: VPIOContext?
+
+    private init(unit: AudioUnit) {
+        self.unit = unit
     }
 
-    /// On listenerQueue. A plug/unplug fires input and output changes together: debounce them.
-    private func deviceChanged() {
-        deviceChangeGen += 1
-        let gen = deviceChangeGen
-        listenerQueue.asyncAfter(deadline: .now() + Self.deviceChangeDebounce) { [weak self] in
-            guard let self, gen == self.deviceChangeGen else { return }
-            self.rebuildUnit()
-        }
-    }
-
-    private func rebuildUnit() {
-        opLock.withLock {
-            guard let playback, let onMic else { return }  // stopped meanwhile
-            Self.log.notice("default audio device changed: rebuilding the voice unit")
-            teardownUnit()
-            playback.flush()  // the old route's queued audio; the pump refills from the engine
-            do {
-                try startUnit(playback: playback, onMicSamples: onMic)
-            } catch {
-                Self.log.error("voice unit rebuild failed: \(String(describing: error), privacy: .public)")
-            }
-        }
-    }
-
-    /// Stops and disposes the unit (keeps the listener and the saved start parameters).
-    private func teardownUnit() {
-        lock.lock()
-        let u = unit
-        let ctx = context
-        unit = nil
-        context = nil
-        lock.unlock()
-        guard let u else { return }
-        AudioOutputUnitStop(u)  // synchronous: no callback runs after it returns
-        AudioUnitUninitialize(u)
-        AudioComponentInstanceDispose(u)
-        ctx?.release()
-    }
-
-    // MARK: - Setup
-
-    private static func requireMicPermission() async throws {
-        switch AVCaptureDevice.authorizationStatus(for: .audio) {
-        case .authorized:
-            return
-        case .notDetermined:
-            if await AVCaptureDevice.requestAccess(for: .audio) { return }
-            throw VoiceIOError.permissionDenied
-        default:
-            throw VoiceIOError.permissionDenied
-        }
-    }
-
-    private func startUnit(playback: PlaybackRing,
-                           onMicSamples: @escaping @Sendable (UnsafeBufferPointer<Int16>, UInt64) -> Void) throws {
-        teardownUnit()
+    /// Builds and starts a unit on `chosen`; returns it and the devices it really uses (a
+    /// pinned device it can't be pointed at falls back to the default).
+    static func build(_ chosen: DevicePair, playback: PlaybackRing, gate: AudioGate,
+                      onMic: @escaping @Sendable (UnsafeBufferPointer<Int16>, UInt64) -> Void) throws
+        -> (unit: VoiceUnitHandle, used: DevicePair) {
         var desc = AudioComponentDescription(
             componentType: kAudioUnitType_Output,
             componentSubType: kAudioUnitSubType_VoiceProcessingIO,
@@ -169,12 +176,14 @@ public final class VPIOVoiceIO: VoiceIO, @unchecked Sendable {
         var maybeUnit: AudioUnit?
         try check("instantiate", AudioComponentInstanceNew(comp, &maybeUnit))
         guard let u = maybeUnit else { throw VoiceIOError.audioUnit(step: "instantiate", status: -1) }
-
-        let ctx = VPIOContext(unit: u, playback: playback, micEnabled: micEnabled, onMic: onMicSamples)
+        let vpio = VPIOUnit(unit: u)
+        let ctx = VPIOContext(unit: u, playback: playback, gate: gate, onMic: onMic)
         do {
             var one: UInt32 = 1
             try setProp(u, kAudioOutputUnitProperty_EnableIO, kAudioUnitScope_Input, 1, &one)
             try setProp(u, kAudioOutputUnitProperty_EnableIO, kAudioUnitScope_Output, 0, &one)
+            // Settings ▸ Voice ▸ Microphone / Speaker: before the formats and initialize.
+            let used = AudioDevices.apply(vpio, chosen) { log.notice("\($0, privacy: .public)") }
 
             var fmt = AudioStreamBasicDescription(
                 mSampleRate: 24_000,
@@ -203,25 +212,40 @@ public final class VPIOVoiceIO: VoiceIO, @unchecked Sendable {
             try check("initialize", AudioUnitInitialize(u))
             ctx.calibrateClock() // mach → Unix offset, computed once per start
             try check("start", AudioOutputUnitStart(u))
+            vpio.context = ctx
+            return (vpio, used)
         } catch {
             AudioUnitUninitialize(u)
             AudioComponentInstanceDispose(u)
             ctx.release()
             throw error
         }
-        lock.lock()
-        unit = u
-        context = ctx
-        lock.unlock()
     }
 
-    private func setProp<T: BitwiseCopyable>(_ u: AudioUnit, _ id: AudioUnitPropertyID, _ scope: AudioUnitScope,
-                            _ element: AudioUnitElement, _ value: inout T) throws {
+    /// The mic is the input element (bus 1), the speaker the output element (bus 0).
+    func setCurrentDevice(_ dir: AudioDirection, id: UInt32) throws {
+        var dev = AudioDeviceID(id)
+        let st = AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global,
+                                      dir == .input ? 1 : 0, &dev, UInt32(MemoryLayout<AudioDeviceID>.size))
+        if st != noErr { throw AudioStatusError(status: st) }
+    }
+
+    func stop() {
+        guard let ctx = context else { return }
+        context = nil
+        AudioOutputUnitStop(unit)  // synchronous: no callback runs after it returns
+        AudioUnitUninitialize(unit)
+        AudioComponentInstanceDispose(unit)
+        ctx.release()
+    }
+
+    private static func setProp<T: BitwiseCopyable>(_ u: AudioUnit, _ id: AudioUnitPropertyID, _ scope: AudioUnitScope,
+                                                    _ element: AudioUnitElement, _ value: inout T) throws {
         let status = AudioUnitSetProperty(u, id, scope, element, &value, UInt32(MemoryLayout<T>.size))
         try check("set property \(id) scope \(scope) element \(element)", status)
     }
 
-    private func check(_ step: String, _ status: OSStatus) throws {
+    private static func check(_ step: String, _ status: OSStatus) throws {
         if status != noErr { throw VoiceIOError.audioUnit(step: step, status: status) }
     }
 }
@@ -233,6 +257,8 @@ final class VPIOContext: @unchecked Sendable {
 
     let unit: AudioUnit
     let playback: PlaybackRing
+    /// Keeps the gate (and so `micEnabled`) alive while the callbacks run.
+    let gate: AudioGate
     let micEnabled: UnsafeMutablePointer<Int64>
     let onMic: @Sendable (UnsafeBufferPointer<Int16>, UInt64) -> Void
     let micBuf: UnsafeMutablePointer<Int16>
@@ -243,11 +269,12 @@ final class VPIOContext: @unchecked Sendable {
     private(set) var denom: UInt64 = 1
     private(set) var unixOffsetNanos: Int64 = 0
 
-    init(unit: AudioUnit, playback: PlaybackRing, micEnabled: UnsafeMutablePointer<Int64>,
+    init(unit: AudioUnit, playback: PlaybackRing, gate: AudioGate,
          onMic: @escaping @Sendable (UnsafeBufferPointer<Int16>, UInt64) -> Void) {
         self.unit = unit
         self.playback = playback
-        self.micEnabled = micEnabled
+        self.gate = gate
+        micEnabled = gate.micOnSlot
         self.onMic = onMic
         micBuf = .allocate(capacity: Self.micCapacityFrames)
         micBuf.initialize(repeating: 0, count: Self.micCapacityFrames)

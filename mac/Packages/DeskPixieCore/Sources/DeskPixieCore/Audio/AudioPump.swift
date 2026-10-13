@@ -17,6 +17,11 @@ import os
 ///    the last `expectingWindowNanos`, so underruns count only mid-response;
 /// 3. reports playback (`played`, `buffered`, `lastRMS`, `underruns`).
 ///
+/// With the VoiceIO's `gate` (`VPIOVoiceIO.gate`): while the mic is off the mic ring is
+/// emptied, so no partial frame leaks into the next conversation (ai-mascot `mic_pump.rs`);
+/// and the output-stall clock only runs while a unit is running (the unit is started on
+/// demand, so queued audio waiting for it to start is not a stall).
+///
 /// `tick` uses only preallocated buffers. It runs on the pump thread only
 /// (or the test thread when the pump is not started).
 public final class AudioPump: @unchecked Sendable {
@@ -34,6 +39,7 @@ public final class AudioPump: @unchecked Sendable {
     private let engine: CoreEngine
     private let ring: PlaybackRing
     private let mic: SampleRing
+    private let gate: AudioGate?
     private let target: Int
     private let clock: @Sendable () -> UInt64
 
@@ -52,19 +58,20 @@ public final class AudioPump: @unchecked Sendable {
     private var thread: Thread?
     private var exited: DispatchSemaphore?
 
-    public convenience init(engine: CoreEngine, ring: PlaybackRing, mic: SampleRing,
+    public convenience init(engine: CoreEngine, ring: PlaybackRing, mic: SampleRing, gate: AudioGate? = nil,
                             targetBufferedSamples: Int = 4800) {
-        self.init(engine: engine, ring: ring, mic: mic, targetBufferedSamples: targetBufferedSamples,
+        self.init(engine: engine, ring: ring, mic: mic, gate: gate, targetBufferedSamples: targetBufferedSamples,
                   clock: { DispatchTime.now().uptimeNanoseconds })
     }
 
     /// `clock` returns monotonic nanoseconds (injectable for tests).
-    init(engine: CoreEngine, ring: PlaybackRing, mic: SampleRing,
+    init(engine: CoreEngine, ring: PlaybackRing, mic: SampleRing, gate: AudioGate? = nil,
          targetBufferedSamples: Int = 4800, clock: @escaping @Sendable () -> UInt64) {
         precondition(targetBufferedSamples > 0)
         self.engine = engine
         self.ring = ring
         self.mic = mic
+        self.gate = gate
         self.target = targetBufferedSamples
         self.clock = clock
         micFrame = .allocate(capacity: Self.micFrameSamples)
@@ -138,6 +145,10 @@ public final class AudioPump: @unchecked Sendable {
     }
 
     private func pumpMic() {
+        if let gate, !gate.micOn {
+            mic.clear()  // no stale audio leaks into the next conversation
+            return
+        }
         let frame = Self.micFrameSamples
         while true {
             let avail = mic.available
@@ -192,6 +203,10 @@ public final class AudioPump: @unchecked Sendable {
                 outputStalled = false
                 Self.log.notice("playback resumed after a stall")
             }
+            return
+        }
+        if let gate, !gate.unitRunning {
+            stallSince = nil  // nothing reads until the unit starts
             return
         }
         if outputStalled {
