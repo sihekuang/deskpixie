@@ -1,0 +1,35 @@
+package voice
+
+// Notice is a line the app wants Bit to say something about ("Agent reply: ...").
+// Port of voice-core types.rs `Notice`.
+type Notice struct {
+	Text string
+}
+
+// SignalKind enumerates what the voice loop tells the rest of the app.
+type SignalKind int
+
+const (
+	// SigOpened: a conversation started (the session is ready and the mic is open).
+	SigOpened SignalKind = iota
+	// SigClosed: the conversation ended; Undelivered are injected notices never spoken.
+	// Can arrive without a preceding SigOpened (failed connect, inject while idle).
+	SigClosed
+	// SigUserSaid: the user's transcribed words, in Text.
+	SigUserSaid
+)
+
+// VoiceSignal is a port of voice-core types.rs `VoiceSignal`.
+type VoiceSignal struct {
+	Kind        SignalKind
+	Undelivered []Notice // SigClosed
+	Text        string   // SigUserSaid
+}
+
+// Chime is an earcon. Phase 3's runtime ignores chime effects.
+type Chime int
+
+const (
+	ChimeStart Chime = iota
+	ChimeEnd
+)
