@@ -61,31 +61,19 @@ If notarization is rejected the step prints Apple's log (`notarytool log`) and f
 
 ## One-time setup: signing secrets
 
-The `release` environment exists on `sihekuang/deskpixie`; its secrets do not. They are the
-same eight secrets ai-mascot uses. GitHub secrets cannot be read back, so re-enter them from
-wherever the originals are stored (the `.p12` export of the Developer ID Application
-certificate, its password, the App Store Connect API key `.p8` and its IDs):
+Same as ai-mascot, Howl and oled-saver: from the repo root run the shared setup script, which
+validates the Developer ID `.p12` (temp keychain import) and the App Store Connect API key
+(`notarytool history`), then pushes the eight secrets to the repo with `gh secret set`:
 
 ```bash
-R=sihekuang/deskpixie
-
-# Developer ID Application certificate (.p12) and its export password
-base64 -i DeveloperID.p12 | gh secret set MACOS_CERT_P12_BASE64 --env release -R $R
-gh secret set MACOS_CERT_PASSWORD --env release -R $R          # prompts for the value
-# Any random string; only protects the throwaway CI keychain
-openssl rand -base64 24 | gh secret set MACOS_KEYCHAIN_PASSWORD --env release -R $R
-# Exactly as `security find-identity -v -p codesigning` prints it
-gh secret set MACOS_SIGNING_IDENTITY --env release -R $R \
-  --body "Developer ID Application: Daniel Lee (TULKQWS4XL)"
-gh secret set APPLE_TEAM_ID --env release -R $R --body "TULKQWS4XL"
-
-# App Store Connect API key for notarytool (Users and Access > Integrations > Keys)
-base64 -i AuthKey_XXXXXXXXXX.p8 | gh secret set APPLE_API_KEY_BASE64 --env release -R $R
-gh secret set APPLE_API_KEY_ID --env release -R $R             # the key ID (XXXXXXXXXX)
-gh secret set APPLE_API_ISSUER_ID --env release -R $R          # the issuer UUID
-
-gh secret list --env release -R $R                             # expect all eight
+cd ~/Documents/Projects/deskpixie
+~/Documents/AppleSigning/setup-notarization.sh
+gh secret list -R sihekuang/deskpixie                       # expect all eight
 ```
 
-Pipe values (or let `gh` prompt) rather than passing them with `--body`, so they stay out of
-shell history; the identity and team ID are not secret. The CI workflow needs none of these.
+The eight are repo secrets (as in ai-mascot): `MACOS_CERT_P12_BASE64`, `MACOS_CERT_PASSWORD`,
+`MACOS_KEYCHAIN_PASSWORD`, `MACOS_SIGNING_IDENTITY`, `APPLE_TEAM_ID`, `APPLE_API_KEY_BASE64`,
+`APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID`. The release job declares `environment: release`
+(created, no protection rules yet) and can read repo secrets; for stricter protection, later
+move them into that environment and restrict it to `main` and `v*` tags. The CI workflow
+needs none of these.
