@@ -9,18 +9,19 @@ import (
 //go:embed assets/persona.md
 var defaultPersona string
 
-// DefaultPersona is Bit's built-in persona.
-func DefaultPersona() string { return defaultPersona }
+// DefaultPersona is Bit's built-in persona, trimmed (Rust: DEFAULT_PERSONA.trim()).
+func DefaultPersona() string { return strings.TrimSpace(defaultPersona) }
 
-// Instructions returns the persona file's contents, or DefaultPersona when the
+// Instructions returns the persona file's trimmed contents, or DefaultPersona when the
 // path is empty, unreadable or blank.
 func Instructions(personaPath string) string {
 	if personaPath == "" {
 		return DefaultPersona()
 	}
 	b, err := os.ReadFile(personaPath)
-	if err != nil || strings.TrimSpace(string(b)) == "" {
+	text := strings.TrimSpace(string(b))
+	if err != nil || text == "" {
 		return DefaultPersona()
 	}
-	return string(b)
+	return text
 }
