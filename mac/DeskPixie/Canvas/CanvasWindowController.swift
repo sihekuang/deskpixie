@@ -16,7 +16,7 @@ import os
 ///   close / app exit (`flushGeometry()`).
 @MainActor
 final class CanvasWindowController: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate {
-    private static let log = Logger(subsystem: "com.sihekuang.deskpixie", category: "canvas")
+    nonisolated private static let log = Logger(subsystem: "com.sihekuang.deskpixie", category: "canvas")
 
     private let engine: CoreEngine
     private let navGuard = CanvasNavGuard()
@@ -173,22 +173,27 @@ final class CanvasWindowController: NSObject, NSWindowDelegate, WKNavigationDele
         settleTask = Task { [weak self] in
             try? await Task.sleep(for: CanvasPlacement.settleDelay)
             guard !Task.isCancelled else { return }
-            self?.flushGeometry()
+            self?.flushGeometry(waitForCore: false)
         }
     }
 
-    /// Saves any pending geometry now (settled, window closing, app exiting).
-    func flushGeometry() {
+    /// Saves any pending geometry now (settled, window closing, app exiting). The settled save
+    /// writes settings.json off main (`waitForCore: false`); closing and quitting wait for it.
+    func flushGeometry(waitForCore: Bool = true) {
         settleTask?.cancel()
         settleTask = nil
         guard let g = pending else { return }
         pending = nil
         lastSaved = g
-        do {
-            _ = try engine.call("canvas.geometry", g)
-        } catch {
-            Self.log.error("canvas.geometry: \(String(describing: error), privacy: .public)")
+        let engine = engine
+        let save: @Sendable () -> Void = {
+            do {
+                _ = try engine.call("canvas.geometry", g)
+            } catch {
+                Self.log.error("canvas.geometry: \(String(describing: error), privacy: .public)")
+            }
         }
+        if waitForCore { save() } else { Task.detached(priority: .utility, operation: save) }
     }
 
     /// Frame top-left (title bar) and content size, in the top-left space settings use.

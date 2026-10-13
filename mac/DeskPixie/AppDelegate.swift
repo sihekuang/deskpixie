@@ -3,13 +3,12 @@ import DeskPixieCore
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    // Migrate the old AI Mascot data folder before anything reads it.
-    // Property initializers run in order, so this precedes CompositionRoot().
-    private let migration = DataMigration.runIfNeeded()
+    // Nothing here touches the disk or the core: data migration and dp_configure run off the
+    // main thread in `EngineCoordinator.start()`, so the menu bar item appears at once.
     let composition = CompositionRoot()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        composition.coordinator.start()
+        composition.coordinator.start() // returns at once; the core starts in the background
         // MenuBarExtra has no tooltip API: set it on the status item's button once it exists.
         DispatchQueue.main.async { Self.setStatusItemToolTip(MenuBarIcon.tooltip) }
     }

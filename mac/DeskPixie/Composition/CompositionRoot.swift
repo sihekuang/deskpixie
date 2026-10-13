@@ -9,6 +9,8 @@ import Observation
 final class AppState {
     /// Last `app.state` from the core; nil until the first successful read.
     var core: TrayAppState?
+    /// Launch progress: "Starting…" (and the permission hint) until the core is configured.
+    var startup = StartupPhase.starting
     var mascotState = "idle"
     var hotkeyError: String?
     var engineError: String?
@@ -17,10 +19,10 @@ final class AppState {
     /// The Mic Mode picker seam (the tray row shows where it exists).
     let micModes: any MicModeSystem = AVMicModeSystem()
 
-    var localStatusLines: [String] { [hotkeyError, engineError, audioError].compactMap { $0 } }
+    var localStatusLines: [String] { [startup.statusLine, hotkeyError, engineError, audioError].compactMap { $0 } }
 
     var menuItems: [TrayItem] {
-        TrayMenu.build(core, localStatusLines: localStatusLines, micModes: micModes)
+        TrayMenu.build(core, localStatusLines: localStatusLines, micModes: micModes, starting: startup.isStarting)
     }
 }
 

@@ -7,6 +7,11 @@ import os
 /// the canvas window and the settings window, and drains engine events on the main actor
 /// every 30 ms (Howl's poll pattern). Every event kind of the plan's shared contract is
 /// handled in `handle(_:)`.
+///
+/// Threading: no core call that can touch the disk, the network or spawn a process runs on the
+/// main thread. Launch (migration, `dp_configure`, first reads) runs in `StartupSequencer`;
+/// `app.action`, `app.state`, `settings.snapshot`/`choices`/`hotkeyFailed` go through `worker`.
+/// Only `dp_poll_event` (a non-blocking queue pop), `dp_hotkey` and `dp_pack_json` stay on main.
 @MainActor
 final class EngineCoordinator {
     static let pollInterval: UInt64 = 30_000_000
@@ -35,6 +40,11 @@ final class EngineCoordinator {
     private var pollTask: Task<Void, Never>?
     private var audioTask: Task<Void, Never>?
     private var configured = false
+    /// True once launch work has returned (configured or failed).
+    private var startupFinished = false
+    private let startup = StartupSequencer()
+    /// Serial background queue for core calls that may block.
+    private let worker = CoreWorker()
 
     private enum AudioState { case stopped, starting, running }
     private var audioState = AudioState.stopped
@@ -52,18 +62,29 @@ final class EngineCoordinator {
 
     // MARK: Lifecycle
 
+    /// Returns at once: the tray shows "Starting…" while the core starts in the background;
+    /// the mascot, hotkey and audio come up in `finishStart` back on the main actor.
     func start() {
-        do {
-            try engine.configure(Self.engineConfig())
-            configured = true
-        } catch {
-            Self.log.error("configure failed: \(String(describing: error), privacy: .public)")
-            appState.engineError = "Engine error: \(Self.describe(error))"
+        startup.onPhase = { [weak self] phase in self?.appState.startup = phase }
+        let engine = engine
+        Task { @MainActor [weak self] in
+            guard let startup = self?.startup else { return }
+            let result = await startup.run(engine: engine, config: { Self.engineConfig() },
+                                           migrate: { DataMigration.runIfNeeded() })
+            self?.finishStart(result)
+        }
+    }
+
+    private func finishStart(_ result: StartupResult) {
+        if let error = result.configureError {
+            appState.engineError = "Engine error: \(error)"
             appState.mascotState = "error"
+        } else {
+            configured = true
         }
 
         // One read for everything launch needs; defaults when the core does not serve it.
-        let snapshot = readSnapshot()
+        let snapshot = result.snapshot
         let launch = LaunchSettings.fromSnapshot(snapshot)
         platform = launch.platform
         hotkeys.platform = platform
@@ -85,7 +106,8 @@ final class EngineCoordinator {
 
         wireAudio(pinnedInput: launch.inputDevice, pinnedOutput: launch.outputDevice)
 
-        refreshTray()
+        if let core = result.appState { appState.core = core }
+        startupFinished = true
         startPolling()
         if configured { startAudio(retryForHotkey: false) }
     }
@@ -99,6 +121,9 @@ final class EngineCoordinator {
         pump.stop()
         voiceIO.stop()
         mascot?.stop()
+        // Quitting while the core is still starting: dp_configure may be blocked on another
+        // thread; tearing the core down under it is unsafe, and there is nothing to save.
+        guard startupFinished else { return }
         // Before the engine goes: the last move/resize must still reach `canvas.geometry`.
         canvas.flushGeometry()
         engine.shutdown()
@@ -119,11 +144,14 @@ final class EngineCoordinator {
     /// `hotkey` event: the core reloaded a hand-edited combo. If it cannot be bound the old
     /// one stays and the core is told (`settings.hotkeyFailed`), so it does not adopt it.
     private func hotkeyChanged(_ combo: String) {
+        let engine = engine, worker = worker
         hotkeys.changed(combo) { failed in
-            do {
-                _ = try engine.call("settings.hotkeyFailed", HotkeyFailedArgs(combo: failed))
-            } catch {
-                Self.log.error("settings.hotkeyFailed: \(String(describing: error), privacy: .public)")
+            worker.async {
+                do {
+                    _ = try engine.call("settings.hotkeyFailed", HotkeyFailedArgs(combo: failed))
+                } catch {
+                    Self.log.error("settings.hotkeyFailed: \(String(describing: error), privacy: .public)")
+                }
             }
         }
         appState.hotkeyError = hotkeys.unavailableLine
@@ -135,6 +163,7 @@ final class EngineCoordinator {
     /// (e.g. mic permission was denied at launch and granted since), retry it first, so the
     /// conversation does not open a session and wait out the mic timeout.
     func talk() {
+        guard startupFinished else { return }
         guard configured, audioState == .stopped else {
             engine.hotkey()
             return
@@ -156,22 +185,36 @@ final class EngineCoordinator {
             struct Action: Encodable { let id: String }
             // A canvas the user asked for comes forward; core-initiated opens never take focus.
             if focusCanvas { canvas.requestFocusOnNextShow() }
-            do {
-                _ = try engine.call("app.action", Action(id: id))
-            } catch {
-                Self.log.error("app.action \(id, privacy: .public): \(String(describing: error), privacy: .public)")
+            // Off main: actions open Finder/Terminal, rescan packs, restart the agent, …
+            let engine = engine, worker = worker
+            Task { @MainActor [weak self] in
+                await worker.run {
+                    do {
+                        _ = try engine.call("app.action", Action(id: id))
+                    } catch {
+                        Self.log.error("app.action \(id, privacy: .public): \(String(describing: error), privacy: .public)")
+                    }
+                }
+                guard let self else { return }
+                if id == "fade" { self.applyMascotSettings() }
+                self.refreshTray()
             }
-            if id == "fade" { mascot?.apply(settings: readMascotSettings()) }
-            refreshTray()
         }
     }
 
-    /// Re-reads `app.state`; on failure the last good model stays.
+    /// Re-reads `app.state` off main; on failure the last good model stays.
     func refreshTray() {
-        do {
-            appState.core = try engine.call("app.state", as: TrayAppState.self)
-        } catch {
-            Self.log.error("app.state: \(String(describing: error), privacy: .public)")
+        let engine = engine, worker = worker
+        Task { @MainActor [weak self] in
+            let state: TrayAppState? = await worker.run {
+                do {
+                    return try engine.call("app.state", as: TrayAppState.self)
+                } catch {
+                    Self.log.error("app.state: \(String(describing: error), privacy: .public)")
+                    return nil
+                }
+            }
+            if let state { self?.appState.core = state }
         }
     }
 
@@ -222,12 +265,16 @@ final class EngineCoordinator {
     }
 
     /// The Microphone and Speaker menus (`settings.choices`); Go adds "System Default".
+    /// Enumerates devices and calls the core off main.
     private func sendDeviceChoices() {
-        for args in AudioDevices.settingsChoices(CoreAudioDevices()) {
-            do {
-                _ = try engine.call("settings.choices", args)
-            } catch {
-                Self.log.error("settings.choices \(args.field, privacy: .public): \(String(describing: error), privacy: .public)")
+        let engine = engine
+        worker.async {
+            for args in AudioDevices.settingsChoices(CoreAudioDevices()) {
+                do {
+                    _ = try engine.call("settings.choices", args)
+                } catch {
+                    Self.log.error("settings.choices \(args.field, privacy: .public): \(String(describing: error), privacy: .public)")
+                }
             }
         }
     }
@@ -324,7 +371,7 @@ final class EngineCoordinator {
             mascot?.moveTo(x: x, y: y)
         case .settingsChanged:
             // The mascot follows proximityFade.{enabled,radius}; the open Settings window re-reads.
-            mascot?.apply(settings: readMascotSettings())
+            applyMascotSettings()
             SettingsHub.shared?.refresh()
         case .hotkey(let combo):
             hotkeyChanged(combo)
@@ -339,24 +386,26 @@ final class EngineCoordinator {
 
     // MARK: Helpers
 
-    /// `settings.snapshot`, or nil (logged) while the core does not serve it.
-    private func readSnapshot() -> Data? {
-        do {
-            return try engine.call("settings.snapshot")
-        } catch {
-            Self.log.error("settings.snapshot: \(String(describing: error), privacy: .public)")
-            return nil
+    /// Reads the mascot's settings (`position`, `scale`, `proximityFade`) off main and applies
+    /// them; config.rs defaults while the core does not serve them.
+    private func applyMascotSettings() {
+        let engine = engine, worker = worker
+        Task { @MainActor [weak self] in
+            let snapshot: Data? = await worker.run {
+                do {
+                    return try engine.call("settings.snapshot")
+                } catch {
+                    Self.log.error("settings.snapshot: \(String(describing: error), privacy: .public)")
+                    return nil
+                }
+            }
+            self?.mascot?.apply(settings: snapshot.flatMap(MascotSettings.fromSnapshot) ?? .defaults)
         }
     }
 
-    /// The mascot's settings (`position`, `scale`, `proximityFade`); config.rs defaults
-    /// while the core does not serve them.
-    private func readMascotSettings() -> MascotSettings {
-        readSnapshot().flatMap(MascotSettings.fromSnapshot) ?? .defaults
-    }
-
     /// The `dp_configure` payload: paths only (P14a). Creates the user's data and pack folders.
-    static func engineConfig() -> EngineConfig {
+    /// Runs off main (inside the startup work).
+    nonisolated static func engineConfig() -> EngineConfig {
         let support = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/com.sihekuang.deskpixie", isDirectory: true)
         let userPacks = support.appendingPathComponent("mascots", isDirectory: true)
@@ -369,7 +418,7 @@ final class EngineCoordinator {
         return EngineConfig.forBundle(resources: resources, appSupport: support)
     }
 
-    private static func describe(_ error: Error) -> String {
+    nonisolated private static func describe(_ error: Error) -> String {
         switch error {
         case DeskPixieEngineError.configureFailed(let m), DeskPixieEngineError.invalidConfig(let m): return m
         default: return String(describing: error)

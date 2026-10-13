@@ -129,8 +129,9 @@ public enum TrayMenu {
 
     /// `build` with the Mic Mode row shown when `micModes` has the picker.
     @MainActor
-    public static func build(_ s: TrayAppState?, localStatusLines: [String], micModes: any MicModeSystem) -> [TrayItem] {
-        build(s, localStatusLines: localStatusLines, micModeAvailable: micModes.hasPicker)
+    public static func build(_ s: TrayAppState?, localStatusLines: [String], micModes: any MicModeSystem,
+                             starting: Bool = false) -> [TrayItem] {
+        build(s, localStatusLines: localStatusLines, micModeAvailable: micModes.hasPicker, starting: starting)
     }
 
     /// Ids Swift handles itself (never sent to `app.action`).
@@ -156,7 +157,10 @@ public enum TrayMenu {
 
     /// The whole menu. `s == nil` (app.state unavailable) leaves only the app's own items.
     /// `localStatusLines` are Swift-side problems (hotkey, audio, engine) shown first.
-    public static func build(_ s: TrayAppState?, localStatusLines: [String], micModeAvailable: Bool) -> [TrayItem] {
+    /// `starting`: the core is still configuring, so Settings… (which reads the core
+    /// synchronously) is disabled until it is ready.
+    public static func build(_ s: TrayAppState?, localStatusLines: [String], micModeAvailable: Bool,
+                             starting: Bool = false) -> [TrayItem] {
         var items: [TrayItem] = []
         var seen = Set<String>()
         for line in localStatusLines + (s?.statusLines ?? []) where !line.isEmpty && seen.insert(line).inserted {
@@ -201,7 +205,7 @@ public enum TrayMenu {
         if micModeAvailable {
             items.append(.action(Row(id: micModeID, title: micModeLabel)))
         }
-        items.append(.action(Row(id: settingsID, title: "Settings…", shortcut: ",")))
+        items.append(.action(Row(id: settingsID, title: "Settings…", enabled: !starting, shortcut: ",")))
         items.append(.separator)
         items.append(.action(Row(id: quitID, title: "Quit")))
         return items
