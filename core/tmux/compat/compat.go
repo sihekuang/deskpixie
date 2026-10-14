@@ -8,8 +8,10 @@ import (
 	"strings"
 )
 
-// SupportedVersions is the label settings and the version-mismatch line show. 3.2 brought
-// what the host relies on: `new-window -e` and the pane options it sets.
+// SupportedVersions is the label settings and the version-mismatch line show. Everything the
+// host sends exists in tmux 3.2 (checked against tmux's CHANGES up to 3.8): new-window -e/-P/-F,
+// pane and user (@) options, select-pane -T, send-keys -l, set-buffer -a, paste-buffer -p -d,
+// capture-pane -J, remain-on-exit; only allow-set-title (3.4) is newer, and it is best-effort.
 const SupportedVersions = "tmux 3.2 or newer"
 
 // MinMajor and MinMinor are the oldest supported release.

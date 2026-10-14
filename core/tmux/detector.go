@@ -8,9 +8,10 @@ package tmux
 //   - The screen (capture-pane every ScreenPoll) for Codex, which has no hooks, and for a
 //     Claude agent that has not reported yet (e.g. one adopted after an app restart), read with
 //     the markers the controller already uses (agent.BusyMarkers, the ready prompts). A hooked
-//     Claude agent's screen still ends a turn its hooks left open: Claude Code fires no Stop
-//     hook for a turn interrupted with Escape (the first idle screen after an Escape the host
-//     sent counts), nor, presumably, for one that failed (an idle screen for HookIdleGrace).
+//     Claude agent's screen still ends a turn its hooks left open, since a turn can end
+//     without a Stop hook: one interrupted with Escape (seen on the Herdr smokes with Claude
+//     Code 2.1; the first idle screen after an Escape the host sent counts), or one that
+//     failed (an idle screen held for HookIdleGrace).
 //   - tmux's pane state (list-panes every ExitPoll): a dead or vanished pane is Exited.
 //
 // Events follow Herdr's rules: a status only when it changes, an exit once (nothing more for
