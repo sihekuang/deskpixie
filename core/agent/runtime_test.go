@@ -386,6 +386,23 @@ func TestTheTimeWeatherAndMathGoToTheLocalToolsNotTheAgent(t *testing.T) {
 	}
 }
 
+func TestThePersonaOffloadsWorkToTheAgentByDefault(t *testing.T) {
+	for _, phrase := range []string{
+		"You are the voice; it does the work.",
+		"If you are unsure whether something is work, delegate it.",
+		"Keep for yourself only:",
+		"The agent does not hear this conversation.",
+		"One delegate call per independent task.",
+	} {
+		if !strings.Contains(DelegationPersona, phrase) {
+			t.Fatal(phrase)
+		}
+	}
+	if d := (Delegate{}).Description(); !strings.Contains(d, "the task and context must stand on their own") {
+		t.Fatal(d)
+	}
+}
+
 func TestAnswerJobSendsTheUsersAnswerToTheWaitingJob(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		r := newRig(t)

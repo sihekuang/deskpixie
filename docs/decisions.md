@@ -23,3 +23,7 @@
 **Sources:**
 - ai-mascot `.github/workflows/release.yml` (origin/main 33dcf70): tag/dispatch triggers, temp keychain, notarytool, dmg signing, artifact names, `release` environment.
 - Howl `core/third_party/deepfilter/` (libdf v0.5.6 committed, 16 MB + 7.6 MB) and its `build.yml`.
+
+## 2026-10-13 — Bit offloads work to the coordinator by default
+**Decision:** The voice agent delegates anything that needs more than what it knows, what was said and its local tools (time, weather, math), and delegates when unsure. It keeps small talk, simple facts, one clarifying question, ending the conversation and the job tools. Delegated tasks stand on their own (the coordinator can't hear the conversation); independent requests are separate delegate calls; follow-ups are new work; Bit doesn't poll running jobs.
+**Basis:** User's choice; handoff mechanics follow DeepSeek Harness's `subagent` tool guidance (github.com/deepseek-ai/deepseek-harness).
