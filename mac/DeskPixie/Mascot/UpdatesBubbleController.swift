@@ -132,7 +132,11 @@ final class UpdatesBubbleController {
     // MARK: Poll
 
     private func poll() {
-        let inside = panel.isVisible && panel.frame.contains(NSEvent.mouseLocation)
+        // A badge faded with Bit is not looked at: a passing pointer neither opens it nor marks
+        // it seen.
+        let inside = UpdatesBubbleModel.hoverCounts(
+            pointerOnPanel: panel.isVisible && panel.frame.contains(NSEvent.mouseLocation),
+            alpha: panel.alphaValue, alreadyInside: pointerInside)
         var changed = false
         if inside != pointerInside {
             pointerInside = inside
@@ -148,11 +152,33 @@ final class UpdatesBubbleController {
     // MARK: Drawing
 
     /// Badge only while away (held for one pop on return), when a fullscreen app is in front
-    /// (the menu bar is hidden) or while Bit is hidden.
+    /// or while Bit is hidden.
     private func popPermission() -> PopPermission {
         if !present { return .hold }
-        if !NSMenu.menuBarVisible() || !mascot.isShown { return .badgeOnly }
+        if !mascot.isShown || Self.fullscreenAppInFront() { return .badgeOnly }
         return .allowed
+    }
+
+    /// The frontmost app (not DeskPixie) has an on-screen, layer-0 window covering a whole
+    /// screen. Not `NSMenu.menuBarVisible()`, which is false all the time when the menu bar
+    /// hides automatically. Bounds and pid need no screen-recording permission.
+    private static func fullscreenAppInFront() -> Bool {
+        guard let app = NSWorkspace.shared.frontmostApplication,
+              app.processIdentifier != ProcessInfo.processInfo.processIdentifier,
+              let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
+                                                    kCGNullWindowID) as? [[String: Any]]
+        else { return false }
+        let pid = Int(app.processIdentifier)
+        let windows: [CGRect] = info.compactMap { w in
+            guard (w[kCGWindowOwnerPID as String] as? Int) == pid,
+                  (w[kCGWindowLayer as String] as? Int) == 0,
+                  let b = w[kCGWindowBounds as String] as? NSDictionary
+            else { return nil }
+            return CGRect(dictionaryRepresentation: b as CFDictionary)
+        }
+        let top = ScreenDisplays.primaryMaxY
+        let screens = NSScreen.screens.map { DesktopSpace.desktopRect($0.frame, primaryMaxY: top) }
+        return Fullscreen.isFullscreen(windows: windows, screens: screens)
     }
 
     private func render() {
@@ -161,7 +187,7 @@ final class UpdatesBubbleController {
             onLine: { [weak self] in self?.clicked($0) },
             onMore: { [weak self] in self?.onTalk?() },
             onBadge: { [weak self] in
-                guard let self else { return }
+                guard let self, self.panel.alphaValue >= UpdatesBubbleModel.hoverMinAlpha else { return }
                 self.model.pointerEntered(now: Self.now)
                 self.render()
             }))
@@ -185,8 +211,11 @@ final class UpdatesBubbleController {
         let screen = NSScreen.screens.first { $0.frame.contains(NSPoint(x: bit.midX, y: bit.midY)) }
             ?? mascot.panel.screen ?? NSScreen.main
         let area = DesktopSpace.desktopRect(screen?.visibleFrame ?? bit, primaryMaxY: top)
+        // The side comes from the open bubble's width in every phase: the badge and the bubble
+        // that opens from it stay on the same side, next to Bit (no flip under the pointer).
         let (rect, _) = BubblePlacement.frame(mascot: DesktopSpace.desktopRect(bit, primaryMaxY: top),
-                                              bubble: size, screen: area)
+                                              bubble: size, screen: area,
+                                              sideWidth: UpdatesBubbleView.width)
         panel.setFrame(ScreenDisplays.appKitFrame(topLeft: rect.origin, size: rect.size), display: true)
         if panel.parent == nil {
             mascot.panel.addChildWindow(panel, ordered: .above)

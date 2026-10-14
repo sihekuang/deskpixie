@@ -120,6 +120,21 @@ func (o *Outbox) MarkSeen(ids []uint64, keep func(OutboxLine) bool) []string {
 	return records
 }
 
+// MarkDeliveredWhere marks the undelivered lines match picks delivered (a question decided
+// elsewhere). Returns the jsonl records to append.
+func (o *Outbox) MarkDeliveredWhere(match func(OutboxLine) bool) []string {
+	var records []string
+	for k := range o.lines {
+		l := &o.lines[k]
+		if l.Delivered || !match(*l) {
+			continue
+		}
+		l.Delivered = true
+		records = append(records, l.record())
+	}
+	return records
+}
+
 // Lines is every line as jsonl (the compacted file).
 func (o *Outbox) Lines() []string {
 	out := make([]string, len(o.lines))

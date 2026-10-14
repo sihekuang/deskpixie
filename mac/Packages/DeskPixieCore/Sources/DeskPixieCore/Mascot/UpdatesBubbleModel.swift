@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// One unheard agent update, as the core's `updates` event lists it (outbox order, oldest first).
@@ -51,6 +52,16 @@ public struct UpdatesBubbleModel: Sendable {
     /// How long the open-under-the-pointer bubble takes to count as seen (fixed, not a setting).
     public static let seenAfter: TimeInterval = 1
 
+    /// Below this opacity the bubble is too faded to count as looked at.
+    public static let hoverMinAlpha: CGFloat = 0.1
+
+    /// Whether the pointer over the panel counts as hovering the bubble: only while it can be
+    /// seen (a badge faded with Bit is not opened or marked seen by a passing pointer). Once
+    /// open under the pointer it is drawn opaque, so it stays open.
+    public static func hoverCounts(pointerOnPanel: Bool, alpha: CGFloat, alreadyInside: Bool) -> Bool {
+        pointerOnPanel && (alreadyInside || alpha >= hoverMinAlpha)
+    }
+
     /// `notifications.bubble.popSecs` (live).
     public var popSecs: TimeInterval
     /// `notifications.bubble.lines` (live).
@@ -64,7 +75,9 @@ public struct UpdatesBubbleModel: Sendable {
     /// added since. The core drops seen lines after the 1 s call; the open bubble keeps them
     /// until the pointer leaves.
     private var frozen: [UpdateLine]?
-    private var seenSent = false
+    /// While expanded: when each shown line was first shown, and which were already reported.
+    private var shownSince: [UInt64: TimeInterval] = [:]
+    private var seenSent: Set<UInt64> = []
     /// Something arrived while away: pop once on return.
     private var heldPop = false
     /// The first list after launch is the restored outbox: badge, never a pop.
@@ -103,6 +116,7 @@ public struct UpdatesBubbleModel: Sendable {
         lines = new
         if isExpanded, !added.isEmpty {
             frozen = added.reversed() + (frozen ?? [])
+            noteShown(now)
         }
 
         if !applied {
@@ -135,28 +149,44 @@ public struct UpdatesBubbleModel: Sendable {
         guard !lines.isEmpty || isPopped else { return }
         phase = .expanded(since: now)
         frozen = lines.reversed()
-        seenSent = false
+        shownSince = [:]
+        seenSent = []
+        noteShown(now)
     }
 
     /// The pointer left: back to the badge, or hidden when nothing unheard is left.
     public mutating func pointerLeft() {
         frozen = nil
+        shownSince = [:]
+        seenSent = []
         phase = lines.isEmpty ? .hidden : .badge
     }
 
-    /// Advances timers. Returns the ids to send to `agent.updatesSeen`: the shown lines, once per
-    /// expansion, after it has been open `seenAfter`.
+    /// Advances timers. Returns the ids to send to `agent.updatesSeen`: each shown line once per
+    /// expansion, after it has been shown `seenAfter` (lines added while open count from when
+    /// they appeared).
     public mutating func tick(now: TimeInterval) -> [UInt64] {
         switch phase {
         case .popped(let until) where now >= until:
             phase = .badge
-        case .expanded(let since) where !seenSent && now - since >= Self.seenAfter:
-            seenSent = true
-            return shown.map(\.id)
+        case .expanded:
+            noteShown(now)
+            let due = shown.map(\.id).filter { id in
+                !seenSent.contains(id) && now - (shownSince[id] ?? now) >= Self.seenAfter
+            }
+            seenSent.formUnion(due)
+            return due
         default:
             break
         }
         return []
+    }
+
+    /// Stamps the lines shown now that weren't shown before in this expansion.
+    private mutating func noteShown(_ now: TimeInterval) {
+        for l in shown where shownSince[l.id] == nil {
+            shownSince[l.id] = now
+        }
     }
 
     /// Presence came back: one pop if anything arrived while away.

@@ -69,6 +69,23 @@ func (c *AgentController) updatesSeen(ids []uint64, fx *[]Effect) {
 	}
 }
 
+// dropDecidedQuestions: a job question (no permission token) whose job has left Question (it
+// was answered in the pane, moved on, or ended) is no longer waiting for you: it is marked
+// delivered so the bubble and the next conversation drop it. Permission questions keep their
+// token rule.
+func (c *AgentController) dropDecidedQuestions(fx *[]Effect) {
+	decided := func(l OutboxLine) bool {
+		if l.Kind != LineQuestion || l.Token != nil || l.Job == "" {
+			return false
+		}
+		j, ok := c.jobs.Get(l.Job)
+		return !ok || j.Status != JobQuestion
+	}
+	for _, r := range c.outbox.MarkDeliveredWhere(decided) {
+		*fx = append(*fx, Effect{Kind: EfAppend, File: OutboxFile, Line: r})
+	}
+}
+
 // FocusTarget is the pane a click on a bubble line focuses: the line's worker if its pane is
 // up, else the job's first worker whose pane is up, else the coordinator.
 func (c *AgentController) FocusTarget(job JobID, worker string) string {

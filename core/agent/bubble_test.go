@@ -192,3 +192,62 @@ func TestFocusTargetPrefersTheLiveWorkerThenTheCoordinator(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+const questionStop = `<spoken ref="job_000000000001" status="question">Which branch?</spoken>`
+
+func TestAQuestionAnsweredInThePaneLeavesTheBubbleAndIsSavedAsDelivered(t *testing.T) {
+	c := workingOnJob1()
+	items, _ := lastUpdates(t, stop(c, questionStop, T0))
+	if len(items) != 1 || items[0].Kind != LineQuestion {
+		t.Fatalf("%+v", items)
+	}
+	// The user answered in the herdr pane; the job moved on.
+	fx := stop(c, `<spoken ref="job_000000000001" status="working">Using main.</spoken>`, T0+1000)
+	got, ok := lastUpdates(t, fx)
+	if !ok || len(got) != 1 || got[0].ID == items[0].ID || got[0].Text != "Using main." {
+		t.Fatalf("the answered question is still listed: %v %+v", ok, got)
+	}
+	if !anyKind(fx, EfAppend) {
+		t.Fatal("the delivered mark is not saved")
+	}
+	for _, l := range c.outbox.Undelivered() {
+		if l.ID == items[0].ID {
+			t.Fatal("the answered question is still undelivered")
+		}
+	}
+}
+
+func TestAQuestionLeavesTheBubbleWhenItsJobEnds(t *testing.T) {
+	c := workingOnJob1()
+	items, _ := lastUpdates(t, stop(c, questionStop, T0))
+	c.Step(CancelInput(job(1)), T0+1000)
+	for _, g := range c.Updates() {
+		if g.ID == items[0].ID {
+			t.Fatalf("the question of a cancelled job is still listed: %+v", g)
+		}
+	}
+}
+
+func TestAQuestionStaysWhileItsJobIsStillWaiting(t *testing.T) {
+	c := workingOnJob1()
+	items, _ := lastUpdates(t, stop(c, questionStop, T0))
+	c.Step(TickInput(), T0+1000)
+	if got := c.Updates(); len(got) != 1 || got[0].ID != items[0].ID {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestAPermissionQuestionKeepsItsTokenRuleWhenTheJobMovesOn(t *testing.T) {
+	c := workingOnJob1()
+	items, _ := lastUpdates(t, askPush(c, 7, T0))
+	// The job leaves Question while the permission is still pending: the token decides.
+	_, _ = c.jobs.Transition(job(1), JobWorking, T0+500)
+	c.Step(TickInput(), T0+1000)
+	found := false
+	for _, g := range c.Updates() {
+		found = found || g.ID == items[0].ID
+	}
+	if !found {
+		t.Fatal("a pending permission question left with its job's status")
+	}
+}

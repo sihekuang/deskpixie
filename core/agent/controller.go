@@ -570,6 +570,7 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 	case InPresence:
 		c.setAway(in.Away, now, &fx)
 	}
+	c.dropDecidedQuestions(&fx)
 	c.syncCoordTab(&fx)
 	c.syncUpdates(&fx)
 	return fx

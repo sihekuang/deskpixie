@@ -136,4 +136,35 @@ final class UpdatesBubbleModelTests: XCTestCase {
         XCTAssertEqual(m.shown.map(\.id), [5, 4]); XCTAssertEqual(m.more, 3)
         XCTAssertEqual(m.count, 5)
     }
+
+    // M2: a line added while open, after the first seen call, is reported once shown 1 s.
+    func testALineAddedAfterTheSeenCallIsReportedOnceShownOneSecond() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        m.apply([line(1)], now: 1, pop: .allowed)
+        m.pointerEntered(now: 2)
+        XCTAssertEqual(m.tick(now: 3), [1])
+        m.apply([line(2)], now: 3.5, pop: .allowed)      // the core dropped 1; 2 is new
+        XCTAssertEqual(m.shown.map(\.id), [2, 1])
+        XCTAssertEqual(m.tick(now: 4.4), [], "2 has been shown 0.9 s")
+        XCTAssertEqual(m.tick(now: 4.5), [2])
+        XCTAssertEqual(m.tick(now: 6), [], "each line once")
+    }
+
+    func testANewExpansionReportsAgain() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        m.apply([line(1)], now: 1, pop: .allowed)
+        m.pointerEntered(now: 2); XCTAssertEqual(m.tick(now: 3), [1])
+        m.pointerLeft()                                  // 1 is a kept question, still listed
+        m.pointerEntered(now: 10); XCTAssertEqual(m.tick(now: 11), [1])
+    }
+
+    // M1: hover counts only while the bubble can be seen.
+    func testHoverCountsOnlyWhenTheBubbleIsVisible() {
+        XCTAssertFalse(UpdatesBubbleModel.hoverCounts(pointerOnPanel: true, alpha: 0, alreadyInside: false))
+        XCTAssertFalse(UpdatesBubbleModel.hoverCounts(pointerOnPanel: true, alpha: 0.05, alreadyInside: false))
+        XCTAssertTrue(UpdatesBubbleModel.hoverCounts(pointerOnPanel: true, alpha: 0.5, alreadyInside: false))
+        XCTAssertTrue(UpdatesBubbleModel.hoverCounts(pointerOnPanel: true, alpha: 0, alreadyInside: true),
+                      "already open under the pointer: it is drawn at full opacity")
+        XCTAssertFalse(UpdatesBubbleModel.hoverCounts(pointerOnPanel: false, alpha: 1, alreadyInside: true))
+    }
 }
