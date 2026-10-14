@@ -1,0 +1,90 @@
+/* Canvas design tokens: light by default, dark via prefers-color-scheme.
+   Color tokens are plain 6-digit hex on purpose: canvas.js hands them to Chart.js and
+   Mermaid, which cannot read var(). Use the tokens; never hard-code colors in pages. */
+:root {
+  color-scheme: light dark;
+
+  /* Surfaces and text */
+  --c-bg: #f6f6f3;
+  --c-surface: #ffffff;
+  --c-surface-2: #efefea;
+  --c-border: #deded7;
+  --c-text: #1c1c1a;
+  --c-text-muted: #66665f;
+
+  /* Accent and status (each has a soft background partner) */
+  --c-accent: #2559b8;
+  --c-accent-soft: #e4ecfb;
+  --c-good: #17724b;
+  --c-good-soft: #e0f2e9;
+  --c-warn: #8a560a;
+  --c-warn-soft: #fbefd9;
+  --c-bad: #aa312c;
+  --c-bad-soft: #f9e2e0;
+
+  /* Categorical chart palette, in order */
+  --chart-1: #2f6fde;
+  --chart-2: #e07b39;
+  --chart-3: #1d8656;
+  --chart-4: #8b5cf6;
+  --chart-5: #d64f7a;
+  --chart-6: #0e9aa7;
+
+  /* Type */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-md: 15px;
+  --fs-lg: 18px;
+  --fs-xl: 24px;
+  --fs-2xl: 32px;
+  --lh: 1.5;
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-bold: 650;
+
+  /* Space, shape, layout */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  --sp-7: 48px;
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 1px 1px rgba(0, 0, 0, 0.04);
+  --page-max: 1100px;
+  --size-chart: 280px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --c-bg: #141413;
+    --c-surface: #1e1e1c;
+    --c-surface-2: #282826;
+    --c-border: #363631;
+    --c-text: #ecebe6;
+    --c-text-muted: #a4a39c;
+
+    --c-accent: #6b9cf0;
+    --c-accent-soft: #1f2b45;
+    --c-good: #4cbf8a;
+    --c-good-soft: #16332a;
+    --c-warn: #e2a64b;
+    --c-warn-soft: #3a2e17;
+    --c-bad: #ef6f68;
+    --c-bad-soft: #3e1f1d;
+
+    --chart-1: #6b9cf0;
+    --chart-2: #f0995e;
+    --chart-3: #4cbf8a;
+    --chart-4: #a98bfa;
+    --chart-5: #ec7aa0;
+    --chart-6: #3cc4cf;
+
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  }
+}

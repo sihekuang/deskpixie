@@ -1,0 +1,7 @@
+{"id":"evt_1","result":{"type":"subscription_started"}}
+{"data":{"pane":{"agent_status":"unknown","cwd":"/tmp/probe","focused":true,"foreground_cwd":"/tmp/probe","pane_id":"w1:p1","revision":0,"scroll":{"max_offset_from_bottom":0,"offset_from_bottom":0,"viewport_rows":24},"tab_id":"w1:t1","terminal_id":"term_65d78eb806fab1","workspace_id":"w1"},"type":"pane_created"},"event":"pane_created"}
+{"data":{"agent":"claude","pane_id":"w1:p2","type":"pane_agent_detected","workspace_id":"w1"},"event":"pane_agent_detected"}
+{"data":{"agent":"claude","agent_status":"idle","pane_id":"w1:p2","workspace_id":"w1"},"event":"pane.agent_status_changed"}
+{"data":{"agent":"claude","agent_status":"blocked","pane_id":"w1:p2","workspace_id":"w1"},"event":"pane.agent_status_changed"}
+{"data":{"agent":"claude","agent_status":"done","pane_id":"w1:p2","workspace_id":"w1"},"event":"pane.agent_status_changed"}
+{"data":{"pane_id":"w1:p2","type":"pane_closed","workspace_id":"w1"},"event":"pane_closed"}

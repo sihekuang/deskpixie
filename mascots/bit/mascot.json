@@ -1,0 +1,17 @@
+{
+  "name": "Bit",
+  "contract": 1,
+  "cell": [32, 32],
+  "sheet": "sheet.png",
+  "fps": 8,
+  "bob": { "px": 1, "frames": 4 },
+  "states": {
+    "idle":       { "row": 0, "frames": 8 },
+    "listening":  { "row": 1, "frames": 8 },
+    "thinking":   { "row": 2, "frames": 8 },
+    "delegating": { "row": 3, "frames": 8 },
+    "happy":      { "row": 4, "frames": 8, "loop": false, "bob": false,
+                    "faceDy": [0, -1, -2, -2, -2, -1, 0, 0] }
+  },
+  "mouth": { "row": 5, "anchor": [12, 20], "size": [8, 5], "levels": 4 }
+}

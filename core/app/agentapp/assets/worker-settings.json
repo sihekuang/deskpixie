@@ -1,0 +1,46 @@
+{
+  "permissions": {
+    "ask": [
+      "Bash(git push:*)",
+      "Bash(npm publish:*)",
+      "Bash(cargo publish:*)",
+      "Bash(vercel deploy:*)",
+      "Bash(vercel --prod:*)",
+      "Bash(rm -rf:*)",
+      "Read(./.env*)",
+      "Edit(./.env*)",
+      "Read(**/.env*)",
+      "Edit(**/.env*)"
+    ],
+    "deny": ["AskUserQuestion"],
+    "allow": ["mcp__mascot"]
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "http",
+            "url": "http://127.0.0.1:{{PORT}}/hooks/stop",
+            "timeout": 5,
+            "headers": { "Authorization": "Bearer $MASCOT_AGENT_TOKEN" },
+            "allowedEnvVars": ["MASCOT_AGENT_TOKEN"]
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "http",
+            "url": "http://127.0.0.1:{{PORT}}/hooks/permission",
+            "timeout": 125,
+            "headers": { "Authorization": "Bearer $MASCOT_AGENT_TOKEN" },
+            "allowedEnvVars": ["MASCOT_AGENT_TOKEN"]
+          }
+        ]
+      }
+    ]
+  }
+}

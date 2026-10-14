@@ -1,0 +1,4 @@
+module CDP {
+    header "libdeskpixie_shim.h"
+    export *
+}

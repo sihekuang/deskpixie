@@ -1,0 +1,408 @@
+package settings
+
+// Ported from ai-mascot src-tauri/src/settings/schema.rs (19 tests, all ported).
+
+import (
+	"encoding/json"
+	"reflect"
+	"runtime"
+	"sort"
+	"strings"
+	"testing"
+)
+
+// leaves collects the dotted paths of every leaf (non-object value) in v.
+func leaves(v any, prefix string, out *[]string) {
+	if m, ok := v.(map[string]any); ok {
+		for k, child := range m {
+			p := k
+			if prefix != "" {
+				p = prefix + "." + k
+			}
+			leaves(child, p, out)
+		}
+		return
+	}
+	*out = append(*out, prefix)
+}
+
+func defaultTree(t *testing.T) any {
+	t.Helper()
+	return mustJSON(t, Default())
+}
+
+func TestEveryConfigLeafHasExactlyOneField(t *testing.T) {
+	var configPaths []string
+	leaves(defaultTree(t), "", &configPaths)
+	sort.Strings(configPaths)
+	var fieldPaths []string
+	seen := map[string]bool{}
+	for _, f := range Fields {
+		if seen[f.Path] {
+			t.Fatalf("a path is listed twice in Fields: %s", f.Path)
+		}
+		seen[f.Path] = true
+		fieldPaths = append(fieldPaths, f.Path)
+	}
+	sort.Strings(fieldPaths)
+	if !reflect.DeepEqual(configPaths, fieldPaths) {
+		t.Fatalf("add a FieldSpec (or a Managed entry) for every Config field\nconfig %v\nfields %v", configPaths, fieldPaths)
+	}
+}
+
+func TestEachKindMatchesTheDefaultValuesJSONType(t *testing.T) {
+	tree := defaultTree(t)
+	for _, f := range Fields {
+		v, _ := lookup(tree, f.Path)
+		_, isStr := v.(string)
+		_, isBool := v.(bool)
+		_, isNum := v.(float64)
+		var fits bool
+		switch f.Kind.Type {
+		case KindBool:
+			fits = isBool
+		case KindInt:
+			fits = isNum
+		case KindChoice:
+			fits = isStr || (f.Kind.Choices.Nullable() && v == nil)
+		case KindHotkey:
+			fits = isStr
+		case KindText, KindPath:
+			fits = isStr || (f.Kind.Optional && v == nil)
+		case KindMultiChoice:
+			arr, ok := v.([]any)
+			fits = ok
+			for _, e := range arr {
+				if _, s := e.(string); !s {
+					fits = false
+				}
+			}
+		case KindManaged:
+			fits = true
+		}
+		if !fits {
+			t.Fatalf("%s is %v but its default is %v", f.Path, f.Kind.Type, v)
+		}
+	}
+}
+
+func TestEveryFieldPathExistsInConfig(t *testing.T) {
+	tree := defaultTree(t)
+	for _, f := range Fields {
+		if _, ok := lookup(tree, f.Path); !ok {
+			t.Fatalf("%s is not in Config", f.Path)
+		}
+	}
+}
+
+func TestTheLiveListIsPinned(t *testing.T) {
+	want := []string{"hotkey", "pack", "scale", "proximityFade.enabled", "proximityFade.radius",
+		"voice.noiseFilter", "voice.inputDevice", "voice.outputDevice", "canvas.autoOpen"}
+	if got := LivePaths(); !reflect.DeepEqual(got, want) {
+		t.Fatal(got)
+	}
+}
+
+func TestTheNoiseFilterIsALiveMacOnlySwitch(t *testing.T) {
+	f := FieldByPath("voice.noiseFilter")
+	if f.Section != SectionVoice || f.Kind.Type != KindBool || f.Apply != ApplyLive {
+		t.Fatalf("%+v", f)
+	}
+	if !reflect.DeepEqual(f.Platforms, mac) || f.Label != "Noise filter" {
+		t.Fatalf("%+v", f)
+	}
+}
+
+func TestTheNoiseModelIsAMacOnlyRestartChoiceOfHushOrDfn3(t *testing.T) {
+	f := FieldByPath("voice.noiseModel")
+	if f.Section != SectionVoice || f.Kind.Type != KindChoice || f.Kind.Choices.Source != SourceStatic || f.Apply != ApplyRestart {
+		t.Fatalf("%+v", f)
+	}
+	if !reflect.DeepEqual(f.Kind.Choices.Static, NoiseModels) || !reflect.DeepEqual(f.Platforms, mac) {
+		t.Fatalf("%+v", f)
+	}
+	var values []string
+	for _, o := range NoiseModels {
+		values = append(values, o.Value)
+	}
+	if !reflect.DeepEqual(values, []string{"hush", "dfn3"}) {
+		t.Fatal(values)
+	}
+}
+
+func TestTheMicAndSpeakerAreLiveMacOnlyDeviceChoices(t *testing.T) {
+	mic := FieldByPath("voice.inputDevice")
+	if mic.Section != SectionVoice || mic.Kind.Type != KindChoice || mic.Kind.Choices.Source != SourceInputDevices || mic.Apply != ApplyLive {
+		t.Fatalf("%+v", mic)
+	}
+	if mic.Label != "Microphone" || !reflect.DeepEqual(mic.Platforms, mac) {
+		t.Fatalf("%+v", mic)
+	}
+	if !strings.Contains(mic.Help, "Bluetooth mics are slow to start") {
+		t.Fatal(mic.Help)
+	}
+	speaker := FieldByPath("voice.outputDevice")
+	if speaker.Section != SectionVoice || speaker.Kind.Type != KindChoice || speaker.Kind.Choices.Source != SourceOutputDevices || speaker.Apply != ApplyLive {
+		t.Fatalf("%+v", speaker)
+	}
+	if speaker.Label != "Speaker" || !reflect.DeepEqual(speaker.Platforms, mac) {
+		t.Fatalf("%+v", speaker)
+	}
+	var order []string
+	for _, f := range Fields {
+		if f.Section == SectionVoice {
+			order = append(order, f.Path)
+		}
+	}
+	at := func(p string) int {
+		for i, o := range order {
+			if o == p {
+				return i
+			}
+		}
+		return -1
+	}
+	nf := at("voice.noiseFilter")
+	if at("voice.noiseModel") != nf+1 || at("voice.inputDevice") != nf+2 || at("voice.outputDevice") != nf+3 {
+		t.Fatal(order)
+	}
+	if !(Choices{Source: SourceInputDevices}).Nullable() || !(Choices{Source: SourceOutputDevices}).Nullable() {
+		t.Fatal("devices are nullable")
+	}
+	if (Choices{Source: SourcePacks}).Nullable() || (Choices{Source: SourceAudioBackends}).Nullable() {
+		t.Fatal("packs/audio are not nullable")
+	}
+}
+
+func pairsOf(opts []OptionView) [][2]string {
+	var out [][2]string
+	for _, o := range opts {
+		out = append(out, [2]string{o.Value, o.Label})
+	}
+	return out
+}
+
+func TestDeviceOptionsStartWithTheSystemDefault(t *testing.T) {
+	src := OptionSources{
+		Inputs:  []Pair{{"BuiltInMic", "MacBook Pro Microphone"}, {"AA-BB", "AirPods Pro (Bluetooth)"}},
+		Outputs: []Pair{{"BuiltInSpeaker", "MacBook Pro Speakers"}},
+	}
+	mics := Options(Choices{Source: SourceInputDevices}, src)
+	want := [][2]string{{"", "System Default"}, {"BuiltInMic", "MacBook Pro Microphone"}, {"AA-BB", "AirPods Pro (Bluetooth)"}}
+	if !reflect.DeepEqual(pairsOf(mics), want) {
+		t.Fatal(pairsOf(mics))
+	}
+	for _, o := range mics {
+		if !reflect.DeepEqual(o.Platforms, AllPlatforms) {
+			t.Fatal(o)
+		}
+	}
+	var speakers []string
+	for _, o := range Options(Choices{Source: SourceOutputDevices}, src) {
+		speakers = append(speakers, o.Label)
+	}
+	if !reflect.DeepEqual(speakers, []string{"System Default", "MacBook Pro Speakers"}) {
+		t.Fatal(speakers)
+	}
+	if n := len(Options(Choices{Source: SourceInputDevices}, OptionSources{})); n != 1 {
+		t.Fatal("no devices: only the default")
+	}
+}
+
+func TestASavedDeviceThatIsNotConnectedStaysListed(t *testing.T) {
+	listed := []Pair{{"BuiltInMic", "MacBook Pro Microphone"}}
+	if got := WithSaved(listed, nil, MissingMic); !reflect.DeepEqual(got, listed) {
+		t.Fatal(got)
+	}
+	if got := WithSaved(listed, ptr(""), MissingMic); !reflect.DeepEqual(got, listed) {
+		t.Fatal(got)
+	}
+	if got := WithSaved(listed, ptr("BuiltInMic"), MissingMic); !reflect.DeepEqual(got, listed) {
+		t.Fatal("connected: listed once", got)
+	}
+	out := WithSaved(listed, ptr("USB-1"), MissingMic)
+	if out[1] != (Pair{"USB-1", "Saved microphone — not connected"}) {
+		t.Fatal(out)
+	}
+	if len(listed) != 1 {
+		t.Fatal("the input slice must not be changed")
+	}
+	if WithSaved(nil, ptr("USB-1"), MissingSpeaker)[0].Label != "Saved speaker — not connected" {
+		t.Fatal("speaker")
+	}
+}
+
+func TestNoisyRoomIsARestartSwitchOnEveryPlatform(t *testing.T) {
+	f := FieldByPath("voice.noisyRoom")
+	if f.Section != SectionVoice || f.Kind.Type != KindBool || f.Apply != ApplyRestart {
+		t.Fatalf("%+v", f)
+	}
+	if !reflect.DeepEqual(f.Platforms, AllPlatforms) || f.Label != "Noisy room" {
+		t.Fatalf("%+v", f)
+	}
+}
+
+func TestGeometryIsManaged(t *testing.T) {
+	var managed []string
+	for _, f := range Fields {
+		if f.Kind.Type == KindManaged {
+			managed = append(managed, f.Path)
+		}
+	}
+	if !reflect.DeepEqual(managed, []string{"position", "canvas.window"}) {
+		t.Fatal(managed)
+	}
+}
+
+func TestNumberBoundsComeFromTheSharedConstants(t *testing.T) {
+	if k := FieldByPath("scale").Kind; !reflect.DeepEqual(k, Kind{Type: KindInt, Min: 1, Max: MaxScale, Menu: true}) {
+		t.Fatalf("%+v", k)
+	}
+	if k := FieldByPath("agent.workers.max").Kind; !reflect.DeepEqual(k, Kind{Type: KindInt, Min: 1, Max: MaxWorkers, Menu: true}) {
+		t.Fatalf("%+v", k)
+	}
+	if k := FieldByPath("agent.port").Kind; !reflect.DeepEqual(k, Kind{Type: KindInt, Min: 1024, Max: 65535}) {
+		t.Fatalf("%+v", k)
+	}
+	if FieldByPath("nope") != nil {
+		t.Fatal("nope")
+	}
+}
+
+func TestPointersFollowTheDottedPath(t *testing.T) {
+	tree := map[string]any{"agent": map[string]any{"workers": map[string]any{"max": 3.0}}, "hotkey": "x"}
+	if v, ok := lookup(tree, "agent.workers.max"); !ok || v != 3.0 {
+		t.Fatal(v)
+	}
+	if v, ok := lookup(tree, "hotkey"); !ok || v != "x" {
+		t.Fatal(v)
+	}
+	if _, ok := lookup(tree, "agent.nope"); ok {
+		t.Fatal("missing")
+	}
+}
+
+func TestRegistryOptionsCarryLabelsAndPlatforms(t *testing.T) {
+	src := OptionSources{
+		Packs:     []Pair{{"bit", "Bit"}},
+		Terminals: []string{"warp", "iterm", "kitty"},
+	}
+	terminals := Options(Choices{Source: SourceTerminals}, src)
+	if !reflect.DeepEqual(terminals[0], OptionView{Value: "warp", Label: "Warp", Platforms: []Platform{Macos}}) {
+		t.Fatal(terminals[0])
+	}
+	if terminals[1].Label != "iTerm" {
+		t.Fatal(terminals[1])
+	}
+	if !reflect.DeepEqual(terminals[2], OptionView{Value: "kitty", Label: "kitty", Platforms: AllPlatforms}) {
+		t.Fatal(terminals[2])
+	}
+	packs := Options(Choices{Source: SourcePacks}, src)
+	if !reflect.DeepEqual(packs, []OptionView{{Value: "bit", Label: "Bit", Platforms: AllPlatforms}}) {
+		t.Fatal(packs)
+	}
+	var kinds []string
+	for _, o := range Options(Choices{Source: SourceStatic, Static: WorkerKinds}, src) {
+		kinds = append(kinds, o.Value)
+	}
+	if !reflect.DeepEqual(kinds, []string{"claude", "codex"}) {
+		t.Fatal(kinds)
+	}
+	audio := Options(Choices{Source: SourceAudioBackends}, OptionSources{Audio: []string{"macos-vpio"}})
+	if !reflect.DeepEqual(audio[0].Platforms, []Platform{Macos}) {
+		t.Fatal(audio)
+	}
+}
+
+func TestAKnownNameThisBuildLacksIsListedAsAvailableNowhere(t *testing.T) {
+	audio := Options(Choices{Source: SourceAudioBackends}, OptionSources{})
+	want := []OptionView{{Value: "macos-vpio", Label: "macOS voice processing", Platforms: []Platform{}}}
+	if !reflect.DeepEqual(audio, want) {
+		t.Fatal(audio)
+	}
+}
+
+func TestGeminiLiveIsAnOfferedVoiceProvider(t *testing.T) {
+	// Rust read crate::voice::provider_names(); the registry is P14's, so the names it will
+	// register are listed here.
+	src := OptionSources{Providers: []string{ProviderOpenAI, ProviderGemini}}
+	providers := Options(Choices{Source: SourceVoiceProviders}, src)
+	var gemini, openai *OptionView
+	for i := range providers {
+		switch providers[i].Value {
+		case "gemini-live":
+			gemini = &providers[i]
+		case "openai-realtime":
+			openai = &providers[i]
+		}
+	}
+	if gemini == nil || gemini.Label != "Gemini Live" || !reflect.DeepEqual(gemini.Platforms, AllPlatforms) {
+		t.Fatal("gemini-live is offered", gemini)
+	}
+	if openai == nil || !reflect.DeepEqual(openai.Platforms, AllPlatforms) {
+		t.Fatal(openai)
+	}
+}
+
+func TestViewsLeaveOutManagedFieldsAndResolveOptions(t *testing.T) {
+	src := OptionSources{Packs: []Pair{{"dino", "Dino"}}}
+	views := Views(src)
+	n := 0
+	for _, f := range Fields {
+		if f.Kind.Type != KindManaged {
+			n++
+		}
+	}
+	if len(views) != n {
+		t.Fatal(len(views))
+	}
+	for _, v := range views {
+		if v.Path == "position" || v.Path == "canvas.window" {
+			t.Fatal(v.Path)
+		}
+		if v.Path == "pack" && !reflect.DeepEqual(v.Kind.Options, Options(Choices{Source: SourcePacks}, src)) {
+			t.Fatal(v.Kind)
+		}
+	}
+}
+
+func TestAViewSerializesForThePage(t *testing.T) {
+	var max, kinds *FieldView
+	views := Views(OptionSources{})
+	for i := range views {
+		switch views[i].Path {
+		case "agent.workers.max":
+			max = &views[i]
+		case "agent.workers.kinds":
+			kinds = &views[i]
+		}
+	}
+	got := mustJSON(t, max)
+	want := map[string]any{
+		"path": "agent.workers.max", "section": "Workers", "label": "Most workers at once",
+		"help":  "Up to four workers run at the same time.",
+		"kind":  map[string]any{"type": "int", "min": float64(1), "max": float64(4), "menu": true},
+		"apply": "restart", "platforms": []any{"macos", "windows", "linux"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		b, _ := json.Marshal(got)
+		t.Fatal(string(b))
+	}
+	if mustJSON(t, kinds)["kind"].(map[string]any)["type"] != "multiChoice" {
+		t.Fatal(kinds)
+	}
+}
+
+func TestTheCurrentPlatformIsOneOfTheThree(t *testing.T) {
+	p := CurrentPlatform()
+	found := false
+	for _, q := range AllPlatforms {
+		found = found || q == p
+	}
+	if !found {
+		t.Fatal(p)
+	}
+	if runtime.GOOS == "darwin" && p != Macos {
+		t.Fatal(p)
+	}
+}

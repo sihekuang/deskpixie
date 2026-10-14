@@ -1,0 +1,2 @@
+# Vendored libdf v0.5.6 (see VERSION.md). The root .gitignore ignores *.dylib; keep this one.
+!lib/libdf.dylib

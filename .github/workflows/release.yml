@@ -1,0 +1,216 @@
+name: Release
+
+# Triggered by:
+#   - Tag pushes matching vX.Y.Z (e.g. v0.4.0) : full release (sign + notarize + staple + GitHub Release)
+#   - Manual dispatch from main                : Developer ID signed build, artifact only (no GitHub Release);
+#                                                with input notarize=true it is also notarized + stapled
+#
+# Mirrors ai-mascot's release.yml (same secret names, `release` environment). Apple's flow:
+# sign every Mach-O with Developer ID + hardened runtime + timestamp (make -C mac release),
+# notarize the zipped .app and staple it, build the .dmg from the stapled .app, sign the dmg,
+# notarize and staple it, then check both with spctl.
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+  workflow_dispatch:
+    inputs:
+      notarize:
+        description: Notarize and staple the app and dmg (still no GitHub Release)
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  HOMEBREW_NO_AUTO_UPDATE: "1"
+  HOMEBREW_NO_INSTALL_CLEANUP: "1"
+
+jobs:
+  build:
+    name: Build, sign, notarize, release
+    # Dispatch builds sign with the real cert, so only allow them from main or a release tag.
+    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || github.ref == 'refs/heads/main'
+    environment: release
+    # macos-15 runners are arm64, hence arm64 in the artifact names.
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Resolve release tag and version
+        id: tag
+        env:
+          NOTARIZE_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.notarize && 'true' || 'false' }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+            if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::Tag '$TAG' must match vMAJOR.MINOR.PATCH (e.g. v0.4.0)"
+              exit 1
+            fi
+            VERSION="${TAG#v}"
+            IS_RELEASE=true
+            NOTARIZE=true
+          else
+            TAG="dispatch-${GITHUB_RUN_NUMBER}"
+            VERSION="0.0.0"
+            IS_RELEASE=false
+            NOTARIZE="$NOTARIZE_INPUT"
+          fi
+          {
+            echo "name=$TAG"
+            echo "version=$VERSION"
+            echo "is_release=$IS_RELEASE"
+            echo "notarize=$NOTARIZE"
+            echo "ref_slug=${GITHUB_REF_NAME//\//-}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Release tag: $TAG  Version: $VERSION  Is release: $IS_RELEASE  Notarize: $NOTARIZE"
+
+      # Same choice as ci.yml: the newest stable Xcode on the image.
+      - name: Select Xcode
+        run: |
+          set -euo pipefail
+          XCODE=$(printf '%s\n' /Applications/Xcode_*.app | grep -viE 'beta|release_candidate|_rc' | sort -V | tail -1)
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: core/go.mod
+          cache: true
+          cache-dependency-path: core/go.sum
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      # Offline tests only (fakes; live tests are behind -tags live). No macOS permissions needed.
+      - name: Run tests
+        run: |
+          set -euo pipefail
+          (cd core && go vet ./... && go test -race ./... && go test -race -tags deepfilter ./audio/denoise/)
+          (cd mac/Packages/DeskPixieCore && swift test)
+
+      # Import the Developer ID Application cert into a temp keychain.
+      # The keychain is wiped in the always-run cleanup step at the end
+      # of the job, so the cert never persists past this run.
+      - name: Set up signing keychain
+        env:
+          P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          KC_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KC="$RUNNER_TEMP/build.keychain-db"
+          P12="$RUNNER_TEMP/cert.p12"
+
+          echo "$P12_BASE64" | base64 --decode > "$P12"
+          [ -s "$P12" ] || { echo "::error::decoded p12 is empty; re-push MACOS_CERT_P12_BASE64"; exit 1; }
+
+          security create-keychain -p "$KC_PASSWORD" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p "$KC_PASSWORD" "$KC"
+
+          # macOS 15's `security import` needs -f pkcs12; -A lets codesign use the key.
+          security import "$P12" \
+            -k "$KC" \
+            -P "$P12_PASSWORD" \
+            -f pkcs12 \
+            -A \
+            -T /usr/bin/codesign
+
+          # Prepend the temp keychain to the search list so codesign finds the identity
+          # (word splitting intended: one argument per existing keychain).
+          # shellcheck disable=SC2046
+          security list-keychains -d user -s "$KC" \
+            $(security list-keychains -d user | tr -d '"' | xargs)
+
+          # Without this, codesign waits on an "always allow" dialog on the headless runner.
+          security set-key-partition-list \
+            -S apple-tool:,apple: -s -k "$KC_PASSWORD" "$KC" >/dev/null
+
+          rm -f "$P12"
+
+      # Tag builds and notarize=true dispatches: the App Store Connect API key used for
+      # notarization. Removed in the cleanup step.
+      - name: Decode notarization API key
+        if: steps.tag.outputs.notarize == 'true'
+        env:
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+        run: |
+          set -euo pipefail
+          P8="$RUNNER_TEMP/AuthKey.p8"
+          echo "$APPLE_API_KEY_BASE64" | base64 --decode > "$P8"
+          [ -s "$P8" ] || { echo "::error::decoded p8 is empty; re-push APPLE_API_KEY_BASE64"; exit 1; }
+          chmod 600 "$P8"
+
+      # Signs the app and re-signs the bundled libdeskpixie/libdf with the Developer ID identity,
+      # hardened runtime and a secure timestamp; verify-release runs at the end.
+      - name: Build and sign
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+          SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+          DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          [ -n "$SIGNING_IDENTITY" ] || { echo "::error::MACOS_SIGNING_IDENTITY is not set"; exit 1; }
+          make -C mac release VERSION="$VERSION" BUILD_NUMBER="$GITHUB_RUN_NUMBER"
+
+      # scripts/package-mac.sh: Developer ID / hardened runtime / timestamp checks, then (when
+      # notarizing) notarize + staple the app, dmg from the stapled app, sign, notarize + staple
+      # the dmg, stapler validate + spctl both. Writes dmg= and zip= to GITHUB_OUTPUT.
+      - name: Verify, notarize and package
+        id: pack
+        env:
+          APP: mac/build/Build/Products/Release/DeskPixie.app
+          VERSION: ${{ steps.tag.outputs.version }}
+          OUT_DIR: out
+          NOTARIZE: ${{ steps.tag.outputs.notarize }}
+          SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+          NOTARY_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
+          NOTARY_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          NOTARY_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+        run: scripts/package-mac.sh
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: DeskPixie-${{ steps.tag.outputs.ref_slug }}
+          path: |
+            ${{ steps.pack.outputs.dmg }}
+            ${{ steps.pack.outputs.zip }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Create GitHub Release
+        if: github.event_name == 'push' && steps.tag.outputs.is_release == 'true'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          files: |
+            ${{ steps.pack.outputs.dmg }}
+            ${{ steps.pack.outputs.zip }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          body: |
+            **DeskPixie**: Developer ID signed and notarized (Apple silicon).
+
+            ### Install
+            1. Download the `.dmg`, open it and drag DeskPixie to `/Applications`.
+            2. Launch it (it lives in the menu bar) and allow microphone access when prompted
+               (needed for voice).
+
+            The `.app.zip` is the same app, zipped.
+
+      # always() so a failed build leaves neither the cert nor the API key behind.
+      - name: Cleanup signing keychain and API key
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/build.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/AuthKey.p8" "$RUNNER_TEMP/cert.p12"

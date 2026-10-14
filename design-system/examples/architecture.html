@@ -1,0 +1,56 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>DeskPixie architecture</title>
+<link rel="stylesheet" href="/ds/tokens.css">
+<link rel="stylesheet" href="/ds/base.css">
+<script src="/ds/vendor/chart.umd.min.js"></script>
+<script src="/ds/vendor/mermaid.min.js"></script>
+<script src="/ds/canvas.js"></script>
+</head>
+<body>
+<main class="page">
+  <header class="page-header">
+    <h1>DeskPixie architecture</h1>
+    <p class="subtitle">High-level design: who talks to whom, and where the trust boundaries are</p>
+  </header>
+
+  <pre class="mermaid">
+flowchart LR
+  user([You]) -- voice --> voice[Voice loop]
+  subgraph app [DeskPixie app]
+    voice -- state, mouth --> mascot[Mascot window]
+    voice -- delegate --> agent[Agent]
+    agent -- writes HTML --> pages[(canvas/pages)]
+    pages -- polled every 500 ms --> canvas[Canvas window]
+  end
+  voice <-- realtime audio --> model{{Realtime model}}
+  </pre>
+
+  <h2>Components</h2>
+  <section class="card">
+    <table>
+      <thead><tr><th>Component</th><th>Responsibility</th><th>Talks to</th><th>Trust</th></tr></thead>
+      <tbody>
+        <tr><td>Voice loop</td><td>Hotkey, mic and speaker, conversation state</td><td>Realtime model, mascot, agent</td><td><span class="badge badge-info">app</span></td></tr>
+        <tr><td>Mascot window</td><td>Draws Bit and its states</td><td>Events from the app only</td><td><span class="badge badge-info">app</span></td></tr>
+        <tr><td>Agent</td><td>Long tasks; writes canvas pages</td><td>Pages folder</td><td><span class="badge badge-warn">delegated</span></td></tr>
+        <tr><td>Canvas window</td><td>Shows one agent-written page</td><td>Nothing: no IPC, no network</td><td><span class="badge badge-bad">sandboxed</span></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <div class="grid grid-2">
+    <div class="callout callout-good">
+      <p class="callout-title">Why the canvas is safe</p>
+      <p>A strict CSP blocks every network request, the window has no IPC permissions, and navigation away from the page is refused.</p>
+    </div>
+    <div class="callout callout-info">
+      <p class="callout-title">The only interface is a folder</p>
+      <p>Any agent that can write a file can draw on the canvas. There is no code dependency between the agent and the app.</p>
+    </div>
+  </div>
+</main>
+</body>
+</html>
