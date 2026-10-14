@@ -29,6 +29,7 @@ type fakeAgent struct {
 	seen     [][]uint64
 	away     []bool
 	focused  [][2]string
+	updates  any
 }
 
 func (f *fakeAgent) Tools() []voice.Tool { return []voice.Tool{namedTool("delegate")} }
@@ -61,6 +62,7 @@ func (f *fakeAgent) UpdatesSeen(ids []uint64) {
 	f.seen = append(f.seen, ids)
 	f.mu.Unlock()
 }
+func (f *fakeAgent) Updates() any      { f.mu.Lock(); defer f.mu.Unlock(); return f.updates }
 func (f *fakeAgent) SetAway(away bool) { f.mu.Lock(); f.away = append(f.away, away); f.mu.Unlock() }
 func (f *fakeAgent) FocusJob(job, worker string) {
 	f.mu.Lock()
@@ -255,6 +257,27 @@ func TestTheUpdatesHookEmitsAnUpdatesEvent(t *testing.T) {
 	e = h.waitFor("updates", nil, time.Second)
 	if b, _ := json.Marshal(e); string(b) != `{"kind":"updates","lines":[]}` {
 		t.Fatal("an empty list is [], not null:", string(b))
+	}
+}
+
+func TestAgentUpdatesReturnsTheCurrentList(t *testing.T) {
+	type item struct {
+		ID   uint64 `json:"id"`
+		Text string `json:"text"`
+	}
+	f := &fakeAgent{updates: []item{{ID: 3, Text: "There are 12."}}}
+	h := newHarness(t, withAgent(f))
+	if out := h.call("agent.updates", nil); string(out) != `{"lines":[{"id":3,"text":"There are 12."}]}` {
+		t.Fatal(string(out))
+	}
+}
+
+func TestAgentUpdatesIsAnEmptyListWithoutAnAgent(t *testing.T) {
+	h := newHarness(t, func(d *Deps, _ *harness) {
+		d.Agent = func(settings.Config, string, AgentHooks) Agent { return nil }
+	})
+	if out := h.call("agent.updates", nil); string(out) != `{"lines":[]}` {
+		t.Fatal(string(out))
 	}
 }
 

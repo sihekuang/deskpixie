@@ -1064,6 +1064,13 @@ func (a *App) Register(r Registrar) {
 		a.emit("settings.changed", nil)
 		return struct{}{}, nil
 	})
+	r.Register("agent.updates", func(json.RawMessage) (any, error) {
+		var lines any = []any{}
+		if a.agent != nil {
+			lines = a.agent.Updates()
+		}
+		return map[string]any{"lines": lines}, nil
+	})
 	r.Register("agent.updatesSeen", func(args json.RawMessage) (any, error) {
 		var in struct {
 			IDs []uint64 `json:"ids"`

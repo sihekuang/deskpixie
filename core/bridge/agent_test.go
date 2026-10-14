@@ -26,6 +26,7 @@ func (b *bridgeAgent) AttachVoice(app.AgentVoice) {}
 func (b *bridgeAgent) OnMouth(int)                {}
 func (b *bridgeAgent) Shutdown()                  { b.mu.Lock(); b.shut++; b.mu.Unlock() }
 func (b *bridgeAgent) UpdatesSeen([]uint64)       {}
+func (b *bridgeAgent) Updates() any               { return []any{} }
 func (b *bridgeAgent) SetAway(bool)               {}
 func (b *bridgeAgent) FocusJob(string, string)    {}
 

@@ -481,12 +481,21 @@ func (h *AgentHandle) UpdatesSeen(ids []uint64) { h.Input(UpdatesSeenInput(ids))
 // SetAway: the shell's presence (screen locked, displays asleep or idle).
 func (h *AgentHandle) SetAway(away bool) { h.Input(PresenceInput(away)) }
 
+// Updates is the bubble's current list (the `updates` event's lines), for the shell's first read.
+func (h *AgentHandle) Updates() []UpdateItem {
+	h.ctlMu.Lock()
+	defer h.ctlMu.Unlock()
+	return h.ctl.Updates()
+}
+
 // FocusJob is a click on a bubble line: bring that job's pane (FocusTarget) to the front, then
-// attach a terminal. Unlike OpenTerminal it does not start the coordinator.
+// attach a terminal. Like OpenTerminal it starts the coordinator, so the terminal never attaches
+// to an empty session.
 func (h *AgentHandle) FocusJob(ctx context.Context, job JobID, worker string) error {
 	if err := h.deps.Host.Session().EnsureSession(ctx); err != nil {
 		return err
 	}
+	h.Input(EnsureCoordinatorInput())
 	h.ctlMu.Lock()
 	target := h.ctl.FocusTarget(job, worker)
 	h.ctlMu.Unlock()

@@ -119,6 +119,25 @@ func TestNoFeedWhenBitOpensConversationsForUpdates(t *testing.T) {
 	}
 }
 
+func TestUpdatesIsTheCurrentListForAShellThatMissedTheEvent(t *testing.T) {
+	c := workingOnJob1()
+	if got := c.Updates(); got == nil || len(got) != 0 {
+		t.Fatalf("nothing yet is an empty list: %#v", got)
+	}
+	stop(c, doneStop, T0)
+	if got := c.Updates(); len(got) != 1 || got[0].Text != "There are 12 open issues." || got[0].Job != job(1) {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestUpdatesIsEmptyWhenBitOpensConversationsForUpdates(t *testing.T) {
+	c := openingCtl()
+	stop(c, doneStop, T0)
+	if got := c.Updates(); got == nil || len(got) != 0 {
+		t.Fatalf("%#v", got)
+	}
+}
+
 func TestAwayHoldsTheOpenAndTheChimeUntilBack(t *testing.T) {
 	c := openingCtl()
 	c.Step(PresenceInput(true), T0)

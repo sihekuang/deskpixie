@@ -563,3 +563,11 @@ func TestTheUpdateQuietTimeIsTheDebounceSetting(t *testing.T) {
 		t.Fatal("debounceSecs is seconds, 0 stays 0")
 	}
 }
+
+func TestUpdatesIsTheBubblesCurrentList(t *testing.T) {
+	f := newFixture(t, nil)
+	waitFor(t, "an empty list", func() bool {
+		items, ok := f.agent.Updates().([]agent.UpdateItem)
+		return ok && items != nil && len(items) == 0
+	})
+}

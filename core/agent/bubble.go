@@ -28,6 +28,15 @@ func (c *AgentController) bubbleItems() []UpdateItem {
 	return items
 }
 
+// Updates is the bubble's current list, for a shell that missed the last `updates` event (it
+// subscribes after the first Step). Empty while Bit opens conversations for updates. Never nil.
+func (c *AgentController) Updates() []UpdateItem {
+	if c.settings.OpenConversation || c.shutDown {
+		return []UpdateItem{}
+	}
+	return c.bubbleItems()
+}
+
 // syncUpdates sends the bubble its list when it changed (every Step ends here). The first
 // Step always sends one, so the shell starts from the current list.
 func (c *AgentController) syncUpdates(fx *[]Effect) {

@@ -936,6 +936,9 @@ func TestTheUpdatesBubbleGetsTheListAtStartAndWhenALineIsOutboxed(t *testing.T) 
 		if len(lists) != 2 || len(last) != 1 || last[0].Text != "There are 12." || last[0].Job != JobIDFromBits(1) {
 			t.Fatalf("%+v", lists)
 		}
+		if got := r.h.Updates(); len(got) != 1 || got[0].ID != last[0].ID {
+			t.Fatalf("Updates is the current list: %+v", got)
+		}
 		r.h.UpdatesSeen([]uint64{last[0].ID})
 		settle()
 		if lists = r.updates.Lists(); len(lists) != 3 || len(lists[2]) != 0 {
@@ -959,15 +962,15 @@ func TestAwayHoldsTheChime(t *testing.T) {
 	})
 }
 
-func TestFocusJobFocusesTheCoordinatorWithoutALiveWorkerAndAttaches(t *testing.T) {
+func TestFocusJobStartsAndFocusesTheCoordinatorWithoutALiveWorkerAndAttaches(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		r := newRig(t)
 		if err := r.h.FocusJob(context.Background(), JobIDFromBits(1), ""); err != nil {
 			t.Fatal(err)
 		}
 		settle()
-		if len(r.host.Starts()) != 0 || len(r.host.Focused()) != 0 {
-			t.Fatal("a click on a bubble line does not start the coordinator:", r.host.Starts(), r.host.Focused())
+		if len(r.host.Starts()) != 1 {
+			t.Fatal("a click on a bubble line starts the coordinator, so it never attaches to an empty session:", r.host.Starts())
 		}
 		delegate(t, r, "count issues")
 		settle()

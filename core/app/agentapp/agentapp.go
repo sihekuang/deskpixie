@@ -400,6 +400,9 @@ func (a *Agent) OpenTerminal() {
 // UpdatesSeen: the updates bubble showed these lines long enough to count as heard.
 func (a *Agent) UpdatesSeen(ids []uint64) { a.handle.UpdatesSeen(ids) }
 
+// Updates is the bubble's current list ([]agent.UpdateItem, never nil).
+func (a *Agent) Updates() any { return a.handle.Updates() }
+
 // SetAway is the shell's presence (screen locked, displays asleep or idle).
 func (a *Agent) SetAway(away bool) { a.handle.SetAway(away) }
 
