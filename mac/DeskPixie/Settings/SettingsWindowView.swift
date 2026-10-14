@@ -34,7 +34,6 @@ struct SettingsWindowView: View {
             }
             .listStyle(.sidebar)
             .frame(width: 200)
-            .ignoresSafeArea(edges: .top)
 
             SettingsDetailView(model: model, tab: SettingsLayout.tabs[selectedIndex])
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
