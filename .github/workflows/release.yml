@@ -35,7 +35,7 @@ jobs:
   build:
     name: Build, sign, notarize, release
     # Dispatch builds sign with the real cert, so only allow them from main or a release tag.
-    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || github.ref == 'refs/heads/main'
     environment: release
     # macos-15 runners are arm64, hence arm64 in the artifact names.
     runs-on: macos-15
@@ -49,7 +49,7 @@ jobs:
           NOTARIZE_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.notarize && 'true' || 'false' }}
         run: |
           set -euo pipefail
-          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+          if [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF" == refs/tags/* ]]; then
             TAG="${GITHUB_REF#refs/tags/}"
             if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
               echo "::error::Tag '$TAG' must match vMAJOR.MINOR.PATCH (e.g. v0.4.0)"
@@ -189,7 +189,7 @@ jobs:
           retention-days: 30
 
       - name: Create GitHub Release
-        if: steps.tag.outputs.is_release == 'true'
+        if: github.event_name == 'push' && steps.tag.outputs.is_release == 'true'
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.tag.outputs.name }}
