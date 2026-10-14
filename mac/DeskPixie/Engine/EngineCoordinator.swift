@@ -384,6 +384,8 @@ final class EngineCoordinator {
             notifier.handle(ev)
         case .canvasOpen(let url, let title):
             canvas.show(url: url, title: title)
+        case .updates:
+            break // Not shown yet: the updates bubble window is still to come.
         }
     }
 
