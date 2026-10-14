@@ -7,7 +7,10 @@ package tmux
 //     reported, its screen is no longer read.
 //   - The screen (capture-pane every ScreenPoll) for Codex, which has no hooks, and for a
 //     Claude agent that has not reported yet (e.g. one adopted after an app restart), read with
-//     the markers the controller already uses (agent.BusyMarkers, the ready prompts).
+//     the markers the controller already uses (agent.BusyMarkers, the ready prompts). A hooked
+//     Claude agent's screen still ends a turn its hooks left open: Claude Code fires no Stop
+//     hook for a turn interrupted with Escape (the first idle screen after an Escape the host
+//     sent counts), nor, presumably, for one that failed (an idle screen for HookIdleGrace).
 //   - tmux's pane state (list-panes every ExitPoll): a dead or vanished pane is Exited.
 //
 // Events follow Herdr's rules: a status only when it changes, an exit once (nothing more for
@@ -18,6 +21,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/sihekuang/deskpixie/core/agent"
 )
@@ -35,6 +39,10 @@ var CodexApprovalMarkers = []string{
 	"Would you like to run the following command",
 	"Would you like to make the following edits",
 }
+
+// HookIdleGrace is how long a hooked Claude agent whose hooks left it working or blocked must
+// show its idle prompt (and no busy marker) before it counts as idle without a Stop hook.
+const HookIdleGrace = 5 * time.Second
 
 // busyLines is how many non-empty lines at the bottom of a screen the busy marker is looked for
 // in (agent.InputStateOf's window).
@@ -105,9 +113,12 @@ type tracked struct {
 	// started: StartAgent finished (or the pane was adopted from List); before that, nothing is
 	// reported for it.
 	started bool
-	// hooked: the agent has reported its status through hooks; its screen is not read again.
-	hooked bool
-	status agent.PaneStatus
+	// hooked: the agent has reported its status through hooks; its screen only ends a turn the
+	// hooks left open (idleSince: since when it has shown idle; interrupted: Escape was sent).
+	hooked      bool
+	idleSince   time.Time
+	interrupted bool
+	status      agent.PaneStatus
 	// sent is the last status reported to subscribers (hasSent false before the first).
 	sent    agent.PaneStatus
 	hasSent bool
@@ -135,10 +146,19 @@ type Detector struct {
 	panes map[string]*tracked
 	seq   uint64
 	emit  func(agent.PaneEvent)
+	now   func() time.Time
+	grace time.Duration
 }
 
 func NewDetector(emit func(agent.PaneEvent)) *Detector {
-	return &Detector{panes: map[string]*tracked{}, emit: emit}
+	return &Detector{panes: map[string]*tracked{}, emit: emit, now: time.Now, grace: HookIdleGrace}
+}
+
+// SetClock replaces the clock and HookIdleGrace (tests).
+func (d *Detector) SetClock(now func() time.Time, grace time.Duration) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.now, d.grace = now, grace
 }
 
 func (d *Detector) send(evs []agent.PaneEvent) {
@@ -225,21 +245,36 @@ func (d *Detector) Hook(name string, status agent.PaneStatus) {
 	d.mu.Lock()
 	var evs []agent.PaneEvent
 	if t := d.newest(name); t != nil && status != agent.PaneUnknown {
-		t.hooked = true
+		t.hooked, t.idleSince, t.interrupted = true, time.Time{}, false
 		evs = t.update(status)
 	}
 	d.send(evs) // under the lock: events keep their order
 	d.mu.Unlock()
 }
 
-// ScreenPanes is every started pane whose screen is read: Codex agents, and Claude agents that
-// haven't reported through hooks yet.
+// Interrupted: the host sent Escape to the agent (its newest pane). A hooked Claude agent's
+// turn ends on its next idle screen.
+func (d *Detector) Interrupted(name string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if t := d.newest(name); t != nil && t.hooked {
+		t.interrupted = true
+	}
+}
+
+// openTurn: a hooked agent whose hooks say it is in a turn (only its screen can end it early).
+func (t *tracked) openTurn() bool {
+	return t.status == agent.PaneWorking || t.status == agent.PaneBlocked
+}
+
+// ScreenPanes is every started pane whose screen is read: Codex agents, Claude agents that
+// haven't reported through hooks yet, and hooked ones in a turn.
 func (d *Detector) ScreenPanes() []string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	var out []string
 	for p, t := range d.panes {
-		if t.started && (t.kind == agent.Codex || !t.hooked) {
+		if t.started && (t.kind == agent.Codex || !t.hooked || t.openTurn()) {
 			out = append(out, p)
 		}
 	}
@@ -247,13 +282,28 @@ func (d *Detector) ScreenPanes() []string {
 	return out
 }
 
-// Screen is a read of pane's screen: its status, if it shows one (ignored once its agent
-// reports through hooks, and for a Claude agent that does).
+// Screen is a read of pane's screen: its status, if it shows one. For a Claude agent that
+// reports through hooks, only an idle screen that ends a turn the hooks left open (see the
+// file comment).
 func (d *Detector) Screen(pane, screen string) {
 	d.mu.Lock()
 	var evs []agent.PaneEvent
-	if t, ok := d.panes[pane]; ok && (t.kind == agent.Codex || !t.hooked) {
+	t, ok := d.panes[pane]
+	switch {
+	case !ok:
+	case t.kind == agent.Codex || !t.hooked:
 		evs = t.update(Classify(t.kind, screen))
+	case !t.openTurn() || Classify(t.kind, screen) != agent.PaneIdle:
+		t.idleSince = time.Time{}
+	default:
+		now := d.now()
+		if t.idleSince.IsZero() {
+			t.idleSince = now
+		}
+		if t.interrupted || now.Sub(t.idleSince) >= d.grace {
+			t.idleSince, t.interrupted = time.Time{}, false
+			evs = t.update(agent.PaneIdle)
+		}
 	}
 	d.send(evs) // under the lock: events keep their order
 	d.mu.Unlock()

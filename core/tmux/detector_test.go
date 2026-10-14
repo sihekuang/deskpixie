@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/sihekuang/deskpixie/core/agent"
 )
@@ -146,7 +147,7 @@ func TestHookStatesAreReportedWhenTheyChange(t *testing.T) {
 	wantEvents(t, e)
 }
 
-func TestAHookedClaudeAgentsScreenIsNoLongerRead(t *testing.T) {
+func TestAnIdleHookedClaudeAgentsScreenIsNotRead(t *testing.T) {
 	e := &events{}
 	d := NewDetector(e.emit)
 	d.Adopt("%3", "w-claude", agent.Claude) // adopted after a restart: no hook yet
@@ -258,4 +259,53 @@ func TestHooksGoToTheNewestPaneOfAName(t *testing.T) {
 	if d.Adopt("%9", "w-a", agent.Claude) {
 		t.Fatal("already tracked")
 	}
+}
+
+func TestAHookedClaudeTurnEndsOnItsScreenAfterEscapeOrAfterTheGrace(t *testing.T) {
+	e := &events{}
+	d := NewDetector(e.emit)
+	now := time.Unix(1000, 0)
+	d.SetClock(func() time.Time { return now }, 5*time.Second)
+	d.Track("%1", "coordinator", agent.Claude)
+	d.Started("%1", agent.PaneIdle)
+	d.Hook("coordinator", agent.PaneWorking)
+	wantEvents(t, e, status("coordinator", agent.PaneIdle), status("coordinator", agent.PaneWorking))
+	if got := d.ScreenPanes(); !reflect.DeepEqual(got, []string{"%1"}) {
+		t.Fatal("a hooked agent in a turn is still watched", got)
+	}
+	// Busy screens say nothing new; an idle one ends the turn only after an Escape...
+	d.Screen("%1", claudeBusy)
+	d.Screen("%1", claudeIdle)
+	wantEvents(t, e)
+	d.Interrupted("coordinator")
+	d.Screen("%1", claudeBusy) // Escape not handled yet
+	wantEvents(t, e)
+	d.Screen("%1", claudeIdle)
+	wantEvents(t, e, status("coordinator", agent.PaneIdle))
+	if got := d.ScreenPanes(); len(got) != 0 {
+		t.Fatal("an idle hooked agent's screen is not read", got)
+	}
+	// ...or once it has shown idle for the whole grace (a turn that failed without a Stop).
+	d.Hook("coordinator", agent.PaneBlocked)
+	wantEvents(t, e, status("coordinator", agent.PaneBlocked))
+	d.Screen("%1", claudeIdle)
+	now = now.Add(4 * time.Second)
+	d.Screen("%1", claudeIdle)
+	wantEvents(t, e)
+	d.Screen("%1", claudeBusy) // the streak breaks
+	now = now.Add(2 * time.Second)
+	d.Screen("%1", claudeIdle)
+	wantEvents(t, e)
+	now = now.Add(5 * time.Second)
+	d.Screen("%1", claudeIdle)
+	wantEvents(t, e, status("coordinator", agent.PaneIdle))
+	// A hook clears an Escape that did not end anything.
+	d.Interrupted("coordinator")
+	d.Hook("coordinator", agent.PaneWorking)
+	wantEvents(t, e, status("coordinator", agent.PaneWorking))
+	d.Screen("%1", claudeIdle)
+	wantEvents(t, e)
+	// Escape to an agent not hooked: nothing special (its screen is read anyway).
+	d.Track("%2", "w-a", agent.Claude)
+	d.Interrupted("w-a")
 }

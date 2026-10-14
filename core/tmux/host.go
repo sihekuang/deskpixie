@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -529,6 +530,9 @@ func (h *Host) SendKeys(ctx context.Context, agentName string, keys []string) er
 	r, err := h.find(ctx, agentName, false)
 	if err != nil {
 		return err
+	}
+	if slices.Contains(keys, "Escape") {
+		h.det.Interrupted(agentName)
 	}
 	_, err = h.onPane(ctx, agentName, "send-keys", append([]string{"send-keys", "-t", r.Pane}, keys...)...)
 	return err

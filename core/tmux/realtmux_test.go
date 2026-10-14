@@ -540,3 +540,22 @@ func TestRealTmuxPlaceholderLabelsFocusAndAttach(t *testing.T) {
 		t.Fatalf("after a restart: %q", w)
 	}
 }
+
+func TestRealTmuxEscapeEndsAHookedClaudeTurn(t *testing.T) {
+	r := newRealRig(t)
+	h := r.host()
+	rx := h.Subscribe()
+	if _, err := h.StartAgent(bg, r.spec("coordinator", agent.Claude)); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Prompt(bg, "coordinator", "Count from 1 to 300, slowly."); err != nil {
+		t.Fatal(err)
+	}
+	h.ReportStatus("coordinator", agent.PaneWorking) // its UserPromptSubmit hook
+	waitStatus(t, rx, "coordinator", agent.PaneWorking)
+	// Claude Code fires no Stop hook for an interrupted turn: the screen ends it.
+	if err := h.SendKeys(bg, "coordinator", []string{"Escape"}); err != nil {
+		t.Fatal(err)
+	}
+	waitStatus(t, rx, "coordinator", agent.PaneIdle)
+}
