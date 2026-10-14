@@ -557,3 +557,17 @@ func TestADoneReplyWhileClosedOpensAConversationThatSaysIt(t *testing.T) {
 		}
 	}
 }
+
+func TestTheUpdateQuietTimeIsTheDebounceSetting(t *testing.T) {
+	if UpdateQuietMs(settings.NotificationSettings{DebounceSecs: 7}) != 7_000 || UpdateQuietMs(settings.NotificationSettings{}) != 0 {
+		t.Fatal("debounceSecs is seconds, 0 stays 0")
+	}
+}
+
+func TestUpdatesIsTheBubblesCurrentList(t *testing.T) {
+	f := newFixture(t, nil)
+	waitFor(t, "an empty list", func() bool {
+		items, ok := f.agent.Updates().([]agent.UpdateItem)
+		return ok && items != nil && len(items) == 0
+	})
+}

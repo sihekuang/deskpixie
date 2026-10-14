@@ -40,3 +40,8 @@
 ## 2026-10-13 — Bit delegates eagerly (#57)
 **Decision:** Delegating is Bit's default: every request goes to the coordinator except small talk, simple stable facts Bit is certain of, what the user just said, Bit's own tools (time, weather, math, timers, music) and the job/recall tools. Bit doesn't try first, hesitate or ask permission; a vague request is delegated with what Bit has, and Bit asks only when it can't tell what the task is at all. The persona, delegation rules, delegate tool description and the "Recent work with the agent" block all say the same, with examples, and tests forbid the old hedging lines. Provider tool calling stays on auto (Gemini sends no toolConfig; OpenAI uses tool_choice auto), since forcing a tool call would break small talk.
 **Basis:** User's choice (issue #57); supersedes the "one clarifying question" part of the entry above.
+
+## 2026-10-14 — Updates bubble: no Focus / Do Not Disturb check
+**Decision:** The bubble skips its pop when a fullscreen app is in front (menu bar hidden) but does not detect Focus / Do Not Disturb.
+**Trigger:** Spec §4 asks for badge-only during Focus; the only API, INFocusStatusCenter, needs the Communication Notifications entitlement and a permission prompt.
+**Basis:** Planning ruling; revisit if Focus suppression is wanted enough to add the entitlement.

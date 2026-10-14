@@ -860,3 +860,19 @@ func TestQuittingTouchesTheLiveWorktreesFileOnlyWhenWorkersChangedIt(t *testing.
 		}
 	})
 }
+
+func TestFocusJobFocusesTheJobsLiveWorker(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := withJob(t, true)
+		if name := workerName(t, call(r, Coordinator, startCall("focus"))); name != wName {
+			t.Fatal(name)
+		}
+		settle()
+		if err := r.h.FocusJob(t.Context(), JobIDFromBits(1), ""); err != nil {
+			t.Fatal(err)
+		}
+		if got := r.host.Focused(); len(got) == 0 || got[len(got)-1] != wName {
+			t.Fatal(got)
+		}
+	})
+}

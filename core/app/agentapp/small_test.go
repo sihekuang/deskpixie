@@ -9,6 +9,7 @@ import (
 
 	"github.com/sihekuang/deskpixie/core/agent"
 	"github.com/sihekuang/deskpixie/core/agent/agenttest"
+	"github.com/sihekuang/deskpixie/core/app"
 	"github.com/sihekuang/deskpixie/core/voice"
 )
 
@@ -118,4 +119,13 @@ func TestAppendLoadAndRewrite(t *testing.T) {
 	if len(entries) != 1 {
 		t.Fatal("a temp file was left", entries)
 	}
+}
+
+func TestTheUpdatesSinkHandsTheListToTheHook(t *testing.T) {
+	var got any
+	updatesSink{app.AgentHooks{Updates: func(items any) { got = items }}}.Updates([]agent.UpdateItem{{ID: 1, Text: "Done."}})
+	if items, ok := got.([]agent.UpdateItem); !ok || len(items) != 1 || items[0].Text != "Done." {
+		t.Fatalf("%#v", got)
+	}
+	updatesSink{}.Updates([]agent.UpdateItem{}) // no hook: ignored
 }

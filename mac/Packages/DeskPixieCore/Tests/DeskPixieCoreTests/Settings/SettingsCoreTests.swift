@@ -41,7 +41,7 @@ final class SettingsCoreTests: XCTestCase {
             field("hotkey", .mascot, .hotkey),
             field("macOnly", .mascot, .bool, [.macos]),
         ]
-        XCTAssertEqual(L.tabs.map(\.section.rawValue), ["Mascot", "Voice", "Agent", "Workers", "Canvas", "Advanced"])
+        XCTAssertEqual(L.tabs.map(\.section.rawValue), ["Mascot", "Voice", "Agent", "Workers", "Notifications", "Canvas", "Advanced"])
         XCTAssertEqual(SettingsSection.allCases.map(\.rawValue), L.tabs.map(\.section.rawValue))
         XCTAssertEqual(L.fields(in: .mascot, fields, platform: .linux).map(\.path), ["hotkey"])
         XCTAssertEqual(L.fields(in: .mascot, fields, platform: .macos).map(\.path), ["hotkey", "macOnly"])

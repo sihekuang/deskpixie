@@ -78,6 +78,8 @@ public enum EngineEvent: Sendable, Equatable {
     case canvasOpen(url: String, title: String)
     case settingsChanged
     case restart
+    /// The unheard agent updates, oldest first (the whole current list; empty = none left).
+    case updates([UpdateLine])
 
     private struct Kind: Decodable { var kind: String }
 
@@ -93,6 +95,7 @@ public enum EngineEvent: Sendable, Equatable {
     private struct Devices: Decodable { var input: String?, output: String? }
     private struct Notify: Decodable { var title: String, body: String, sound: String? }
     private struct CanvasOpen: Decodable { var url: String, title: String }
+    private struct Updates: Decodable { var lines: [UpdateLine] }
 
     /// Decodes one event JSON object; unknown kinds, malformed JSON and events missing a
     /// required field yield nil.
@@ -121,6 +124,7 @@ public enum EngineEvent: Sendable, Equatable {
         case "devices": return get(Devices.self).map { .devices(input: $0.input, output: $0.output) }
         case "notify": return get(Notify.self).map { .notify(title: $0.title, body: $0.body, sound: $0.sound) }
         case "canvas.open": return get(CanvasOpen.self).map { .canvasOpen(url: $0.url, title: $0.title) }
+        case "updates": return get(Updates.self).map { .updates($0.lines) }
         default: return nil
         }
     }

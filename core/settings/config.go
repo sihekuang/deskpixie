@@ -37,11 +37,12 @@ type Config struct {
 	Scale  uint32 `json:"scale"`
 	// Position is the logical top-left of the mascot window; nil = bottom-right of the primary
 	// display. Managed: written by the app.
-	Position      *[2]float64    `json:"position"`
-	ProximityFade Fade           `json:"proximityFade"`
-	Voice         VoiceSettings  `json:"voice"`
-	Canvas        CanvasSettings `json:"canvas"`
-	Agent         AgentSettings  `json:"agent"`
+	Position      *[2]float64          `json:"position"`
+	ProximityFade Fade                 `json:"proximityFade"`
+	Voice         VoiceSettings        `json:"voice"`
+	Canvas        CanvasSettings       `json:"canvas"`
+	Agent         AgentSettings        `json:"agent"`
+	Notifications NotificationSettings `json:"notifications"`
 	// Extra holds top-level keys this version doesn't know, kept so a save never drops them.
 	Extra map[string]json.RawMessage `json:"-"`
 }
@@ -70,6 +71,23 @@ type VoiceSettings struct {
 	InputDevice      *string `json:"inputDevice"`
 	OutputDevice     *string `json:"outputDevice"`
 	HomeCity         *string `json:"homeCity"`
+}
+
+// NotificationSettings is the notifications block: how agent updates reach you.
+type NotificationSettings struct {
+	// DebounceSecs: a job's worker reports and progress go out once it has been quiet this long
+	// (at most 1.5× this); 0 lets each one out as it comes.
+	DebounceSecs uint64         `json:"debounceSecs"`
+	Bubble       BubbleSettings `json:"bubble"`
+	// AwayAfterMins: this long with no keyboard or mouse input counts as away.
+	AwayAfterMins uint64 `json:"awayAfterMins"`
+}
+
+// BubbleSettings is notifications.bubble: the updates bubble beside Bit.
+type BubbleSettings struct {
+	Enabled bool   `json:"enabled"`
+	PopSecs uint64 `json:"popSecs"`
+	Lines   uint64 `json:"lines"`
 }
 
 // CanvasSettings is the canvas block.
@@ -132,7 +150,8 @@ func Default() Config {
 			Provider: "openai-realtime", Audio: "macos-vpio", Model: "gpt-realtime", Voice: "marin",
 			Chimes: true, IdleTimeoutSecs: 7, NoiseModel: "hush", LiveBackendModel: "gpt-6-luna",
 		},
-		Canvas: CanvasSettings{AutoOpen: true, Keep: 50},
+		Canvas:        CanvasSettings{AutoOpen: true, Keep: 50},
+		Notifications: NotificationSettings{DebounceSecs: 20, Bubble: BubbleSettings{Enabled: true, PopSecs: 6, Lines: 5}, AwayAfterMins: 5},
 		Agent: AgentSettings{
 			Enabled: true, SessionHost: "herdr", Session: "deskpixie", Terminal: "warp",
 			Port: 48217, HoldOpenSecs: 180, PermissionTimeoutSecs: 120, NotifyPerMinute: 4,
@@ -182,19 +201,20 @@ func (c Config) Equal(o Config) bool {
 
 // configFields is Config without Extra or custom marshalling.
 type configFields struct {
-	Hotkey        string         `json:"hotkey"`
-	Pack          string         `json:"pack"`
-	Scale         uint32         `json:"scale"`
-	Position      *[2]float64    `json:"position"`
-	ProximityFade Fade           `json:"proximityFade"`
-	Voice         VoiceSettings  `json:"voice"`
-	Canvas        CanvasSettings `json:"canvas"`
-	Agent         AgentSettings  `json:"agent"`
+	Hotkey        string               `json:"hotkey"`
+	Pack          string               `json:"pack"`
+	Scale         uint32               `json:"scale"`
+	Position      *[2]float64          `json:"position"`
+	ProximityFade Fade                 `json:"proximityFade"`
+	Voice         VoiceSettings        `json:"voice"`
+	Canvas        CanvasSettings       `json:"canvas"`
+	Agent         AgentSettings        `json:"agent"`
+	Notifications NotificationSettings `json:"notifications"`
 }
 
 var knownKeys = map[string]bool{
 	"hotkey": true, "pack": true, "scale": true, "position": true, "proximityFade": true,
-	"voice": true, "canvas": true, "agent": true,
+	"voice": true, "canvas": true, "agent": true, "notifications": true,
 }
 
 // MarshalJSON writes the known fields in declaration order, then unknown keys (sorted).
@@ -203,7 +223,7 @@ func (c Config) MarshalJSON() ([]byte, error) {
 	if kinds == nil {
 		kinds = []string{}
 	}
-	f := configFields{c.Hotkey, c.Pack, c.Scale, c.Position, c.ProximityFade, c.Voice, c.Canvas, c.Agent}
+	f := configFields{c.Hotkey, c.Pack, c.Scale, c.Position, c.ProximityFade, c.Voice, c.Canvas, c.Agent, c.Notifications}
 	f.Agent.Workers.Kinds = kinds
 	b, err := json.Marshal(f)
 	if err != nil || len(c.Extra) == 0 {
@@ -246,6 +266,7 @@ func (c *Config) UnmarshalJSON(b []byte) error {
 	targets := map[string]any{
 		"hotkey": &c.Hotkey, "pack": &c.Pack, "scale": &c.Scale, "position": &c.Position,
 		"proximityFade": &c.ProximityFade, "voice": &c.Voice, "canvas": &c.Canvas, "agent": &c.Agent,
+		"notifications": &c.Notifications,
 	}
 	c.Extra = nil
 	keys := make([]string, 0, len(top))

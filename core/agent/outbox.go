@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 )
 
@@ -20,6 +21,9 @@ type OutboxLine struct {
 	Token     *string  `json:"token"`
 	At        Millis   `json:"at"`
 	Delivered bool     `json:"delivered"`
+	// Job and Worker: what the line is about (absent in older records).
+	Job    JobID  `json:"job,omitempty"`
+	Worker string `json:"worker,omitempty"`
 }
 
 // UnmarshalJSON requires id, text, kind and at; token and delivered default (as serde does).
@@ -31,6 +35,8 @@ func (l *OutboxLine) UnmarshalJSON(b []byte) error {
 		Token     *string   `json:"token"`
 		At        *Millis   `json:"at"`
 		Delivered bool      `json:"delivered"`
+		Job       JobID     `json:"job"`
+		Worker    string    `json:"worker"`
 	}
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
@@ -38,7 +44,7 @@ func (l *OutboxLine) UnmarshalJSON(b []byte) error {
 	if raw.ID == nil || raw.Text == nil || raw.Kind == nil || raw.At == nil {
 		return errors.New("outbox line: missing field")
 	}
-	*l = OutboxLine{ID: *raw.ID, Text: *raw.Text, Kind: *raw.Kind, Token: raw.Token, At: *raw.At, Delivered: raw.Delivered}
+	*l = OutboxLine{ID: *raw.ID, Text: *raw.Text, Kind: *raw.Kind, Token: raw.Token, At: *raw.At, Delivered: raw.Delivered, Job: raw.Job, Worker: raw.Worker}
 	return nil
 }
 
@@ -61,7 +67,7 @@ func NewOutbox() *Outbox { return &Outbox{} }
 // Push adds a line; returns its jsonl record to append.
 func (o *Outbox) Push(line Line, now Millis) string {
 	o.nextID++
-	entry := OutboxLine{ID: o.nextID, Text: line.Text, Kind: line.Kind, Token: line.Token, At: now}
+	entry := OutboxLine{ID: o.nextID, Text: line.Text, Kind: line.Kind, Token: line.Token, At: now, Job: line.Job, Worker: line.Worker}
 	o.lines = append(o.lines, entry)
 	return entry.record()
 }
@@ -96,6 +102,37 @@ func (o *Outbox) Replay(tokenPending func(string) bool) (*Notice, []string) {
 		return nil, records
 	}
 	return &Notice{Text: "Agent replies while you were away:\n" + strings.Join(items, "\n")}, records
+}
+
+// MarkSeen (the updates bubble was looked at) marks those undelivered lines delivered, except
+// the ones keep says still need you (a question waiting for its answer). Unknown or already
+// delivered ids are ignored. Returns the jsonl records to append.
+func (o *Outbox) MarkSeen(ids []uint64, keep func(OutboxLine) bool) []string {
+	var records []string
+	for k := range o.lines {
+		l := &o.lines[k]
+		if l.Delivered || !slices.Contains(ids, l.ID) || keep(*l) {
+			continue
+		}
+		l.Delivered = true
+		records = append(records, l.record())
+	}
+	return records
+}
+
+// MarkDeliveredWhere marks the undelivered lines match picks delivered (a question decided
+// elsewhere). Returns the jsonl records to append.
+func (o *Outbox) MarkDeliveredWhere(match func(OutboxLine) bool) []string {
+	var records []string
+	for k := range o.lines {
+		l := &o.lines[k]
+		if l.Delivered || !match(*l) {
+			continue
+		}
+		l.Delivered = true
+		records = append(records, l.record())
+	}
+	return records
 }
 
 // Lines is every line as jsonl (the compacted file).

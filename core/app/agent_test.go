@@ -26,6 +26,10 @@ type fakeAgent struct {
 	tray     AgentTray
 	hooks    AgentHooks
 	cfg      settings.Config
+	seen     [][]uint64
+	away     []bool
+	focused  [][2]string
+	updates  any
 }
 
 func (f *fakeAgent) Tools() []voice.Tool { return []voice.Tool{namedTool("delegate")} }
@@ -53,6 +57,18 @@ func (f *fakeAgent) OnMouth(level int) {
 	f.mu.Unlock()
 }
 func (f *fakeAgent) Shutdown() { f.mu.Lock(); f.shut++; f.mu.Unlock() }
+func (f *fakeAgent) UpdatesSeen(ids []uint64) {
+	f.mu.Lock()
+	f.seen = append(f.seen, ids)
+	f.mu.Unlock()
+}
+func (f *fakeAgent) Updates() any      { f.mu.Lock(); defer f.mu.Unlock(); return f.updates }
+func (f *fakeAgent) SetAway(away bool) { f.mu.Lock(); f.away = append(f.away, away); f.mu.Unlock() }
+func (f *fakeAgent) FocusJob(job, worker string) {
+	f.mu.Lock()
+	f.focused = append(f.focused, [2]string{job, worker})
+	f.mu.Unlock()
+}
 
 type namedTool string
 
@@ -201,5 +217,81 @@ func TestEachVoiceSessionGetsTheAgentsRecentWork(t *testing.T) {
 	}
 	if got := (&App{agent: &fakeAgent{}}).sessionFacts("Leeds").Facts(); strings.Contains(got, "Recent work") {
 		t.Fatal(got)
+	}
+}
+
+func TestTheUpdatesBubbleCallsReachTheAgent(t *testing.T) {
+	f := &fakeAgent{}
+	h := newHarness(t, withAgent(f))
+	h.call("agent.updatesSeen", map[string]any{"ids": []uint64{1, 2}})
+	h.call("presence.set", map[string]any{"away": true})
+	h.call("presence.set", map[string]any{"away": false})
+	h.call("agent.focusJob", map[string]any{"job": "job_000000000001", "worker": "focus-upload"})
+	h.call("agent.focusJob", map[string]any{"job": "job_000000000002"})
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.seen) != 1 || !slices.Equal(f.seen[0], []uint64{1, 2}) {
+		t.Fatal(f.seen)
+	}
+	if !slices.Equal(f.away, []bool{true, false}) {
+		t.Fatal(f.away)
+	}
+	if !slices.Equal(f.focused, [][2]string{{"job_000000000001", "focus-upload"}, {"job_000000000002", ""}}) {
+		t.Fatal(f.focused)
+	}
+}
+
+func TestTheUpdatesHookEmitsAnUpdatesEvent(t *testing.T) {
+	f := &fakeAgent{}
+	h := newHarness(t, withAgent(f))
+	type item struct {
+		ID   uint64 `json:"id"`
+		Text string `json:"text"`
+	}
+	f.hooks.Updates([]item{{ID: 3, Text: "There are 12."}})
+	e := h.waitFor("updates", nil, time.Second)
+	if b, _ := json.Marshal(e); string(b) != `{"kind":"updates","lines":[{"id":3,"text":"There are 12."}]}` {
+		t.Fatal(string(b))
+	}
+	f.hooks.Updates([]item{})
+	e = h.waitFor("updates", nil, time.Second)
+	if b, _ := json.Marshal(e); string(b) != `{"kind":"updates","lines":[]}` {
+		t.Fatal("an empty list is [], not null:", string(b))
+	}
+}
+
+func TestAgentUpdatesReturnsTheCurrentList(t *testing.T) {
+	type item struct {
+		ID   uint64 `json:"id"`
+		Text string `json:"text"`
+	}
+	f := &fakeAgent{updates: []item{{ID: 3, Text: "There are 12."}}}
+	h := newHarness(t, withAgent(f))
+	if out := h.call("agent.updates", nil); string(out) != `{"lines":[{"id":3,"text":"There are 12."}]}` {
+		t.Fatal(string(out))
+	}
+}
+
+func TestAgentUpdatesIsAnEmptyListWithoutAnAgent(t *testing.T) {
+	h := newHarness(t, func(d *Deps, _ *harness) {
+		d.Agent = func(settings.Config, string, AgentHooks) Agent { return nil }
+	})
+	if out := h.call("agent.updates", nil); string(out) != `{"lines":[]}` {
+		t.Fatal(string(out))
+	}
+}
+
+func TestTheUpdatesBubbleCallsAreNoOpsWithoutAnAgent(t *testing.T) {
+	h := newHarness(t, func(d *Deps, _ *harness) {
+		d.Agent = func(settings.Config, string, AgentHooks) Agent { return nil }
+	})
+	for method, args := range map[string]any{
+		"agent.updatesSeen": map[string]any{"ids": []uint64{1}},
+		"agent.focusJob":    map[string]any{"job": "job_000000000001"},
+		"presence.set":      map[string]any{"away": true},
+	} {
+		if out := h.call(method, args); string(out) != "{}" {
+			t.Fatal(method, string(out))
+		}
 	}
 }

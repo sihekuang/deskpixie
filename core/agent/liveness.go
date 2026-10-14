@@ -112,7 +112,7 @@ func (c *AgentController) expireQuestion(j Job, now Millis, fx *[]Effect) {
 	c.forgetUpdates(j.ID)
 	c.stopJobWorkers(j.ID, fx)
 	c.saveJob(j.ID, fx)
-	c.deliver(NewLine(LineInfo, "Agent: closed a question you didn't answer: "+short(j.Task)), now, fx)
+	c.deliver(NewJobLine(LineInfo, "Agent: closed a question you didn't answer: "+short(j.Task), j.ID), now, fx)
 	c.inbox.DropQueued(j.ID)
 	c.inbox.Push(MessageForJob(j.ID, questionExpiredNote))
 	c.flush(now, fx)

@@ -65,6 +65,15 @@ func (m mascotCue) Cue(cue agent.Cue) {
 	}
 }
 
+// updatesSink: the updates bubble's list → the app's `updates` event.
+type updatesSink struct{ hooks app.AgentHooks }
+
+func (u updatesSink) Updates(items []agent.UpdateItem) {
+	if u.hooks.Updates != nil {
+		u.hooks.Updates(items)
+	}
+}
+
 func call(f func()) {
 	if f != nil {
 		f()

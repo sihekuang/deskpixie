@@ -462,7 +462,9 @@ func (c *AgentController) tickWorkers(now Millis, fx *[]Effect) {
 		if w.Plan.Kind == Codex {
 			text = fmt.Sprintf("The Codex worker in %s is waiting for approval in its terminal; click me to open it.", w.Plan.RepoName)
 		}
-		c.deliver(NewLine(LineInfo, text), now, fx)
+		l := NewJobLine(LineInfo, text, w.Plan.Job)
+		l.Worker = name
+		c.deliver(l, now, fx)
 	}
 }
 

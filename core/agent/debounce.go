@@ -11,15 +11,15 @@ import (
 //   - dedupe: a line already said for a job (same text after normalising case, spaces and end
 //     punctuation) is not said again within UpdateDedupeMs;
 //   - coalesce: a job's worker reports and progress are held until the job has been quiet for
-//     UpdateQuietMs (at most UpdateMaxHoldMs), then said as one line: the reports (the latest
+//     the quiet time (notifications.debounceSecs; at most 1.5× that), then said as one line: the reports (the latest
 //     per worker, combined), or else the latest progress; a report beats progress;
 //   - supersede: the coordinator's (checked) reply for the job drops what is still held.
-// Questions never come here. What comes out still goes through the Router's per-minute cap.
+// The times below are the defaults. Questions never come here. What comes out still goes through the Router's per-minute cap.
 
 const (
-	// UpdateQuietMs: a job's held updates go out once nothing new came for it for this long.
+	// UpdateQuietMs: by default a job's held updates go out once nothing new came for it for this long.
 	UpdateQuietMs Millis = 20_000
-	// UpdateMaxHoldMs: a job that keeps reporting is still heard this often.
+	// UpdateMaxHoldMs: by default a job that keeps reporting is still heard this often.
 	UpdateMaxHoldMs Millis = 30_000
 	// UpdateDedupeMs: an identical line for the same job is not said again within this window.
 	UpdateDedupeMs Millis = 10 * 60_000
@@ -45,6 +45,8 @@ type saidLine struct {
 type DueUpdate struct {
 	Job  JobID
 	Text string
+	// Worker: the one worker whose report this is ("" for several workers or progress).
+	Worker string
 	// Progress: Text is a progress phrase (narration), not worker reports.
 	Progress bool
 }
@@ -53,10 +55,16 @@ type Updates struct {
 	held  map[JobID]*heldUpdate
 	order []JobID
 	said  map[JobID][]saidLine
+	// quiet, maxHold: how long a job must be quiet, and the longest it is held.
+	quiet, maxHold Millis
 }
 
-func NewUpdates() *Updates {
-	return &Updates{held: map[JobID]*heldUpdate{}, said: map[JobID][]saidLine{}}
+func NewUpdates() *Updates { return NewUpdatesWith(UpdateQuietMs) }
+
+// NewUpdatesWith: quiet is notifications.debounceSecs; a job that keeps reporting is still
+// heard after 1.5× that.
+func NewUpdatesWith(quiet Millis) *Updates {
+	return &Updates{held: map[JobID]*heldUpdate{}, said: map[JobID][]saidLine{}, quiet: quiet, maxHold: quiet * 3 / 2}
 }
 
 // normLine is a line's text for dedupe: lowercase, single spaces, no end punctuation.
@@ -130,7 +138,7 @@ func (u *Updates) Due(now Millis, ready func(JobID) bool) []DueUpdate {
 	var out []DueUpdate
 	for _, job := range slices.Clone(u.order) {
 		h := u.held[job]
-		if satSub(now, h.last) < UpdateQuietMs && satSub(now, h.first) < UpdateMaxHoldMs {
+		if satSub(now, h.last) < u.quiet && satSub(now, h.first) < u.maxHold {
 			continue
 		}
 		if len(h.reports) == 0 && !ready(job) {
@@ -147,7 +155,11 @@ func (u *Updates) Due(now Millis, ready func(JobID) bool) []DueUpdate {
 			texts[i] = r.text
 			u.remember(job, r.text, now)
 		}
-		out = append(out, DueUpdate{Job: job, Text: combineReports(texts)})
+		due := DueUpdate{Job: job, Text: combineReports(texts)}
+		if len(h.reports) == 1 {
+			due.Worker = h.reports[0].worker
+		}
+		out = append(out, due)
 	}
 	return out
 }

@@ -55,6 +55,9 @@ type Settings struct {
 	NotifyPerMinute     int
 	PermissionTimeoutMs Millis
 	Narration           bool
+	// UpdateQuietMs (`notifications.debounceSecs`): how long a job must be quiet before its
+	// updates are said (debounce.go).
+	UpdateQuietMs Millis
 	// KeepPanesOnQuit (`agent.keepPanesOnQuit`): leave the coordinator and workers running when
 	// the app quits.
 	KeepPanesOnQuit bool
@@ -71,7 +74,7 @@ type Settings struct {
 
 // DefaultSettings: 4 notifications a minute, 2-minute permission timeout, narration on.
 func DefaultSettings() Settings {
-	return Settings{NotifyPerMinute: 4, PermissionTimeoutMs: 120_000, Narration: true, Workers: DefaultWorkerPolicy()}
+	return Settings{NotifyPerMinute: 4, PermissionTimeoutMs: 120_000, Narration: true, UpdateQuietMs: UpdateQuietMs, Workers: DefaultWorkerPolicy()}
 }
 
 // WorkerPolicy is `agent.workers` (spec §12): whether the coordinator may start workers, how
@@ -120,6 +123,8 @@ const (
 	InWorkerPromptFailed                  // Name, Text: EfPromptWorker could not be typed
 	InAdoptWorker                         // Plan, Worktree, Status: a worker kept over the quit, its pane still there; answered with EfAdmitted
 	InOpenRefused                         // the voice loop was busy and did not start the conversation EfOpenConversation asked for
+	InUpdatesSeen                         // IDs: the updates bubble showed these lines long enough to count as heard
+	InPresence                            // Away: the user is away (screen locked, displays asleep or idle) or back
 )
 
 // Input is one stimulus for AgentController.Step. Build it with the *Input constructors.
@@ -154,6 +159,10 @@ type Input struct {
 	Plan WorkerPlan
 	// Memories (InRestored): memories.jsonl's lines.
 	Memories []string
+	// IDs (InUpdatesSeen): outbox line ids.
+	IDs []uint64
+	// Away (InPresence).
+	Away bool
 }
 
 // RestoredInput: keep says the coordinator was kept running over the quit: its open jobs stay
@@ -209,6 +218,8 @@ func WorkerFailedInput(name, reason string) Input {
 }
 func WorkerClosedInput(name string) Input { return Input{Kind: InWorkerClosed, Name: name} }
 func OpenRefusedInput() Input             { return Input{Kind: InOpenRefused} }
+func UpdatesSeenInput(ids []uint64) Input { return Input{Kind: InUpdatesSeen, IDs: ids} }
+func PresenceInput(away bool) Input       { return Input{Kind: InPresence, Away: away} }
 func WorkerScreenInput(name, text string) Input {
 	return Input{Kind: InWorkerScreen, Name: name, Text: text}
 }
@@ -245,6 +256,7 @@ const (
 	EfForgetWorker     // Name: the worker is gone: revoke its token and delete its launch files
 	EfLabel            // Tab: relabel the coordinator's tab (its current request, or idle)
 	EfOpenConversation // start a conversation if the voice loop is at rest (else answered with InOpenRefused)
+	EfUpdates          // Value: []UpdateItem: the updates bubble's list (sent when it changes)
 )
 
 // Effect is one thing the caller must do, in order. Err set (non-empty) is the Err branch of
@@ -338,6 +350,11 @@ type AgentController struct {
 	coordTab string
 	// opener: opening a conversation for an update (opener.go).
 	opener *opener
+	// bubbleSent, bubbleLast: the updates bubble's list as last sent (bubble.go).
+	bubbleSent bool
+	bubbleLast []UpdateItem
+	// away: the user is away (InPresence): Bit opens no conversation and plays no chime.
+	away bool
 }
 
 func NewAgentController(settings Settings) *AgentController {
@@ -345,7 +362,7 @@ func NewAgentController(settings Settings) *AgentController {
 		router:   NewRouter(settings.NotifyPerMinute),
 		confirms: NewConfirmations(settings.PermissionTimeoutMs),
 		narrator: NewNarrator(NarrateIntervalMs),
-		updates:  NewUpdates(),
+		updates:  NewUpdatesWith(settings.UpdateQuietMs),
 		settings: settings,
 		jobs:     NewJobTable(),
 		inbox:    NewInbox(),
@@ -548,8 +565,14 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 		c.workerSendFailed(in.Name, in.Text, now, &fx)
 	case InOpenRefused:
 		c.openRefused(now, &fx)
+	case InUpdatesSeen:
+		c.updatesSeen(in.IDs, &fx)
+	case InPresence:
+		c.setAway(in.Away, now, &fx)
 	}
+	c.dropDecidedQuestions(&fx)
 	c.syncCoordTab(&fx)
+	c.syncUpdates(&fx)
 	return fx
 }
 
@@ -597,7 +620,7 @@ func (c *AgentController) voiceOpened(fx *[]Effect) {
 	var digest []Line
 	for _, l := range c.outbox.Undelivered() {
 		if l.Token == nil || c.confirms.IsPendingToken(*l.Token) {
-			digest = append(digest, Line{Text: l.Text, Kind: l.Kind, Token: l.Token})
+			digest = append(digest, Line{Text: l.Text, Kind: l.Kind, Token: l.Token, Job: l.Job, Worker: l.Worker})
 		}
 	}
 	notice, records := c.outbox.Replay(c.confirms.IsPendingToken)
@@ -875,7 +898,7 @@ func (c *AgentController) failJobSaying(id JobID, reason, line string, now Milli
 	c.stopJobWorkers(id, fx)
 	c.forgetUpdates(id)
 	c.saveJob(id, fx)
-	c.deliverOpening(NewLine(LineReply, line), now, fx)
+	c.deliverOpening(NewJobLine(LineReply, line, id), now, fx)
 	*fx = append(*fx, Effect{Kind: EfCue, Cue: CueError})
 }
 
@@ -1065,12 +1088,12 @@ func (c *AgentController) onReply(id JobID, status SpokenStatus, text string, no
 		_, _ = c.jobs.Transition(id, JobWorking, now)
 		c.jobs.SetProgress(id, text, now)
 		c.saveJob(id, fx)
-		c.deliver(NewLine(LineReply, text), now, fx)
+		c.deliver(NewJobLine(LineReply, text, id), now, fx)
 	case SpokenQuestion:
 		_, _ = c.jobs.Transition(id, JobQuestion, now)
 		c.jobs.SetReply(id, text, now)
 		c.saveJob(id, fx)
-		c.deliverOpening(NewLine(LineQuestion, text), now, fx)
+		c.deliverOpening(NewJobLine(LineQuestion, text, id), now, fx)
 	case SpokenDone:
 		_, _ = c.jobs.Transition(id, JobDone, now)
 		c.jobs.SetReply(id, text, now)
@@ -1078,7 +1101,7 @@ func (c *AgentController) onReply(id JobID, status SpokenStatus, text string, no
 		c.forgetUpdates(id)
 		c.denyPendingFor(id, "The job ended.", fx)
 		c.stopJobWorkers(id, fx)
-		if c.deliverOpening(NewLine(LineReply, text), now, fx) {
+		if c.deliverOpening(NewJobLine(LineReply, text, id), now, fx) {
 			*fx = append(*fx, Effect{Kind: EfCue, Cue: CueHappy})
 		}
 	case SpokenFailed:
@@ -1087,7 +1110,7 @@ func (c *AgentController) onReply(id JobID, status SpokenStatus, text string, no
 		c.forgetUpdates(id)
 		c.denyPendingFor(id, "The job ended.", fx)
 		c.stopJobWorkers(id, fx)
-		c.deliverOpening(NewLine(LineReply, text), now, fx)
+		c.deliverOpening(NewJobLine(LineReply, text, id), now, fx)
 		*fx = append(*fx, Effect{Kind: EfCue, Cue: CueError})
 	}
 	c.syncHold(fx)
@@ -1138,7 +1161,11 @@ func (c *AgentController) onPermission(id RequestID, agent, toolName string, too
 		}
 	}
 	text := ConfirmQuestionLine(Describe(toolName, toolInput, label), token)
-	c.deliverOpening(Line{Text: text, Kind: LineQuestion, Token: &token}, now, fx)
+	q := Line{Text: text, Kind: LineQuestion, Token: &token, Job: job}
+	if agent != Coordinator {
+		q.Worker = agent
+	}
+	c.deliverOpening(q, now, fx)
 }
 
 func (c *AgentController) onUserSaid(text string, now Millis, fx *[]Effect) {
@@ -1206,7 +1233,9 @@ func (c *AgentController) flushUpdates(now Millis, fx *[]Effect) {
 	ready := func(job JobID) bool { return !c.voiceOpen || c.narrator.Ready(job, now) }
 	for _, u := range c.updates.Due(now, ready) {
 		if !u.Progress {
-			c.deliverUpdate(NewLine(LineInfo, u.Text), now, fx)
+			l := NewJobLine(LineInfo, u.Text, u.Job)
+			l.Worker = u.Worker
+			c.deliverUpdate(l, now, fx)
 			continue
 		}
 		if c.voiceOpen && c.router.Take(now) {
@@ -1391,7 +1420,9 @@ func (c *AgentController) applyDelivery(d RouteDelivery, now Millis, fx *[]Effec
 	case DeliverInject:
 		*fx = append(*fx, Effect{Kind: EfInject, Notice: d.Notice})
 	case DeliverChime:
-		*fx = append(*fx, Effect{Kind: EfChime})
+		if !c.away {
+			*fx = append(*fx, Effect{Kind: EfChime})
+		}
 	case DeliverNotify:
 		*fx = append(*fx, Effect{Kind: EfNotify, Text: d.Text})
 	case DeliverOutbox:

@@ -288,3 +288,26 @@ func TestChoicesMustBeAvailableOnThisPlatform(t *testing.T) {
 		t.Fatal(p)
 	}
 }
+
+func TestNotificationRanges(t *testing.T) {
+	env := testEnv(t)
+	for _, tc := range []struct {
+		name string
+		set  func(c *Config, n uint64)
+		n    uint64
+		ok   bool
+	}{
+		{"bubble lines 11", func(c *Config, n uint64) { c.Notifications.Bubble.Lines = n }, 11, false},
+		{"bubble lines 10", func(c *Config, n uint64) { c.Notifications.Bubble.Lines = n }, 10, true},
+		{"debounce 0", func(c *Config, n uint64) { c.Notifications.DebounceSecs = n }, 0, true},
+		{"debounce 301", func(c *Config, n uint64) { c.Notifications.DebounceSecs = n }, 301, false},
+		{"pop 0", func(c *Config, n uint64) { c.Notifications.Bubble.PopSecs = n }, 0, false},
+		{"away 61", func(c *Config, n uint64) { c.Notifications.AwayAfterMins = n }, 61, false},
+	} {
+		c := Default()
+		tc.set(&c, tc.n)
+		if valid(c, env) != tc.ok {
+			t.Fatal(tc.name)
+		}
+	}
+}

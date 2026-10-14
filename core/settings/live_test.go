@@ -26,15 +26,19 @@ func TestEveryLiveFieldHasARouteAndRestartFieldsHaveNone(t *testing.T) {
 
 func TestEachLiveFieldTakesTheTrayPath(t *testing.T) {
 	for path, want := range map[string]Route{
-		"hotkey":                RouteHotkey,
-		"pack":                  RoutePack,
-		"scale":                 RouteScale,
-		"proximityFade.enabled": RouteReadEachTick,
-		"proximityFade.radius":  RouteReadEachTick,
-		"canvas.autoOpen":       RouteAutoOpen,
-		"voice.noiseFilter":     RouteNoiseFilter,
-		"voice.inputDevice":     RouteAudioDevices,
-		"voice.outputDevice":    RouteAudioDevices,
+		"hotkey":                       RouteHotkey,
+		"pack":                         RoutePack,
+		"scale":                        RouteScale,
+		"proximityFade.enabled":        RouteReadEachTick,
+		"proximityFade.radius":         RouteReadEachTick,
+		"canvas.autoOpen":              RouteAutoOpen,
+		"voice.noiseFilter":            RouteNoiseFilter,
+		"voice.inputDevice":            RouteAudioDevices,
+		"voice.outputDevice":           RouteAudioDevices,
+		"notifications.bubble.enabled": RouteNotifications,
+		"notifications.bubble.popSecs": RouteNotifications,
+		"notifications.bubble.lines":   RouteNotifications,
+		"notifications.awayAfterMins":  RouteNotifications,
 	} {
 		if r, ok := RouteFor(path); !ok || r != want {
 			t.Fatalf("%s → %v", path, r)

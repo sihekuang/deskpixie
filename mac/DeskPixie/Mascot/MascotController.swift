@@ -52,6 +52,13 @@ final class MascotController {
     let panel: MascotPanel
     let view: MascotView
 
+    /// Bit's panel frame (AppKit) after every move, drag or placement (the updates bubble follows it).
+    var onFrameChange: ((NSRect) -> Void)?
+    /// The opacity the proximity fade just applied to Bit (the updates bubble follows it).
+    var onOpacityChange: ((CGFloat) -> Void)?
+    /// Whether Bit is on screen.
+    var isShown: Bool { panel.isVisible }
+
     private var animationTimer: Timer?
     private var cursorTimer: Timer?
     private var expireTimer: Timer?
@@ -204,9 +211,11 @@ final class MascotController {
         panel.setFrame(frame, display: true)
         placing = false
         moves.cancel()
+        onFrameChange?(panel.frame)
     }
 
     private func panelMoved() {
+        onFrameChange?(panel.frame)
         guard !placing else { return }
         moves.moved(at: ProcessInfo.processInfo.systemUptime)
     }
@@ -290,6 +299,7 @@ final class MascotController {
         if ProximityFade.shouldEmit(last: lastOpacity, next: next) {
             view.setOpacity(Float(next))
             lastOpacity = next
+            onOpacityChange?(next)
         }
     }
 

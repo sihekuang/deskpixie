@@ -58,6 +58,23 @@ final class EngineEventTests: XCTestCase {
         XCTAssertNil(d(#"{"kind":"pack","sheetPath":"/x"}"#))
     }
 
+    func testUpdatesEventDecodes() {
+        let json = #"{"kind":"updates","lines":[{"id":3,"text":"Done.","kind":"reply","at":1700000000000,"job":"job_000000000001"},{"id":4,"text":"hi","kind":"info","at":1700000000001}]}"#
+        guard case .updates(let lines)? = EngineEvent.decode(Data(json.utf8)) else { return XCTFail() }
+        XCTAssertEqual(lines.map(\.id), [3, 4])
+        XCTAssertEqual(lines[0].job, "job_000000000001")
+        XCTAssertEqual(lines[0].kind, "reply")
+        XCTAssertEqual(lines[0].at, 1_700_000_000_000)
+        XCTAssertNil(lines[1].job)
+        XCTAssertNil(lines[1].worker)
+    }
+
+    func testEmptyUpdatesDecodes() {
+        guard case .updates(let l)? = EngineEvent.decode(Data(#"{"kind":"updates","lines":[]}"#.utf8)) else { return XCTFail() }
+        XCTAssertTrue(l.isEmpty)
+        XCTAssertNil(d(#"{"kind":"updates"}"#), "lines is required")
+    }
+
     func testMouthDefaultsToZeroWhenLevelOmitted() {
         XCTAssertEqual(d(#"{"kind":"mouth"}"#), .mouth(0))
     }

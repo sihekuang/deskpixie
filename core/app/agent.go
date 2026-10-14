@@ -26,6 +26,8 @@ type AgentHooks struct {
 	RefreshTray func()
 	// Notify shows a macOS notification (no sound: the agent chimes on its own).
 	Notify func(title, body string)
+	// Updates is the updates bubble's list (the `updates` event's lines; never nil).
+	Updates func(items any)
 }
 
 // Agent is the running delegation agent.
@@ -43,6 +45,15 @@ type Agent interface {
 	AttachVoice(v AgentVoice)
 	// OnMouth is each mouth level the voice loop reports (the echo gate).
 	OnMouth(level int)
+	// UpdatesSeen: the updates bubble showed these lines long enough to count as heard.
+	UpdatesSeen(ids []uint64)
+	// Updates is the bubble's current list (the `updates` event's lines), for the shell's first
+	// read: the event may go out before the shell's bubble exists. An empty list, never nil.
+	Updates() any
+	// SetAway is the shell's presence (screen locked, displays asleep or idle).
+	SetAway(away bool)
+	// FocusJob is a click on a bubble line: focus that job's (or worker's) pane in a terminal (async).
+	FocusJob(job, worker string)
 	// Shutdown is the app's quit: deny pending permissions, stop the panes, clear the MCP
 	// configs, stop the session host and the hook server. Idempotent; blocks ~3 s at most.
 	Shutdown()

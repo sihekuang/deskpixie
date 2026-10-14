@@ -84,3 +84,43 @@ func TestRestoreDropsOldDeliveredLinesAndStaleQuestions(t *testing.T) {
 		t.Fatal(texts)
 	}
 }
+
+func TestPushKeepsTheLinesJobAndWorker(t *testing.T) {
+	o := NewOutbox()
+	l := NewJobLine(LineInfo, "The upload worker says it's done.", job(3))
+	l.Worker = "w-upload"
+	o.Push(l, T0)
+	got := o.Undelivered()[0]
+	if got.Job != job(3) || got.Worker != "w-upload" {
+		t.Fatalf("%+v", got)
+	}
+	r := RestoreOutbox(o.Lines(), T0+1).Undelivered()[0]
+	if r.Job != job(3) || r.Worker != "w-upload" {
+		t.Fatalf("restored %+v", r)
+	}
+}
+
+func TestAnOldRecordWithoutJobRestores(t *testing.T) {
+	o := RestoreOutbox([]string{`{"id":1,"text":"hi","kind":"info","token":null,"at":5,"delivered":false}`}, 10)
+	if u := o.Undelivered(); len(u) != 1 || u[0].Job != "" || u[0].Worker != "" {
+		t.Fatalf("%+v", u)
+	}
+}
+
+func TestMarkSeenDeliversTheShownLinesButKeepsWhatKeepSays(t *testing.T) {
+	o := NewOutbox()
+	o.Push(NewLine(LineReply, "a"), T0)
+	o.Push(NewLine(LineQuestion, "b?"), T0)
+	o.Push(NewLine(LineReply, "c"), T0)
+	recs := o.MarkSeen([]uint64{1, 2, 99}, func(l OutboxLine) bool { return l.Kind == LineQuestion })
+	if len(recs) != 1 {
+		t.Fatalf("records %v", recs)
+	}
+	u := o.Undelivered()
+	if len(u) != 2 || u[0].Text != "b?" || u[1].Text != "c" {
+		t.Fatalf("%+v", u)
+	}
+	if again := o.MarkSeen([]uint64{1}, func(OutboxLine) bool { return false }); len(again) != 0 {
+		t.Fatal("idempotent")
+	}
+}

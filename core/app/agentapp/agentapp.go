@@ -65,6 +65,11 @@ func PermissionTimeoutMs(secs uint64) agent.Millis {
 	return agent.Millis(min(max(secs, 1), limit) * 1000)
 }
 
+// UpdateQuietMs is notifications.debounceSecs in ms.
+func UpdateQuietMs(n settings.NotificationSettings) agent.Millis {
+	return agent.Millis(n.DebounceSecs) * 1000
+}
+
 // HostProblem is the tray status line when the configured session host can't be built (a
 // sticky setup disable).
 func HostProblem(err error) string {
@@ -84,7 +89,8 @@ func TerminalFailureStatus(err string) string {
 
 // Config is what Build needs. The zero test seams pick the real adapters.
 type Config struct {
-	Settings settings.AgentSettings
+	Settings      settings.AgentSettings
+	Notifications settings.NotificationSettings
 	// AppSupport is the app-data folder; Home the user's home folder.
 	AppSupport, Home string
 	Hooks            app.AgentHooks
@@ -132,7 +138,7 @@ func Factory(cfg settings.Config, appSupport string, hooks app.AgentHooks) app.A
 		log.Print("agent: no home dir; delegation unavailable")
 		return nil
 	}
-	a := Build(Config{Settings: cfg.Agent, AppSupport: appSupport, Home: home, Hooks: hooks})
+	a := Build(Config{Settings: cfg.Agent, Notifications: cfg.Notifications, AppSupport: appSupport, Home: home, Hooks: hooks})
 	if a == nil {
 		return nil
 	}
@@ -263,6 +269,7 @@ func Build(c Config) *Agent {
 		Clock:       c.Clock,
 		IDs:         c.IDs,
 		Kept:        KeptFile(paths.Kept()),
+		Updates:     updatesSink{c.Hooks},
 	}
 	// Exactly 127.0.0.1 (the hook server refuses any non-loopback listener). Bound before the
 	// runtime is built, so a busy port is known before a warm start could launch anything.
@@ -277,6 +284,7 @@ func Build(c Config) *Agent {
 			NotifyPerMinute:     int(max(s.NotifyPerMinute, 1)),
 			PermissionTimeoutMs: PermissionTimeoutMs(s.PermissionTimeoutSecs),
 			Narration:           s.Narration,
+			UpdateQuietMs:       UpdateQuietMs(c.Notifications),
 			KeepPanesOnQuit:     s.KeepPanesOnQuit,
 			Workers:             ws.Policy,
 			SpeakWorkerReports:  s.Workers.SpeakResults,
@@ -384,6 +392,29 @@ func (a *Agent) OpenTerminal() {
 	a.wg.Go(func() {
 		if err := a.handle.OpenTerminal(a.ctx); err != nil {
 			log.Printf("agent: open terminal: %v", err)
+			a.setStatus(TerminalFailureStatus(err.Error()))
+		}
+	})
+}
+
+// UpdatesSeen: the updates bubble showed these lines long enough to count as heard.
+func (a *Agent) UpdatesSeen(ids []uint64) { a.handle.UpdatesSeen(ids) }
+
+// Updates is the bubble's current list ([]agent.UpdateItem, never nil).
+func (a *Agent) Updates() any { return a.handle.Updates() }
+
+// SetAway is the shell's presence (screen locked, displays asleep or idle).
+func (a *Agent) SetAway(away bool) { a.handle.SetAway(away) }
+
+// FocusJob is a click on a bubble line (async): that job's pane in a terminal. A failure becomes
+// the tray status line, as for OpenTerminal.
+func (a *Agent) FocusJob(job, worker string) {
+	if a.ctx.Err() != nil {
+		return // quitting
+	}
+	a.wg.Go(func() {
+		if err := a.handle.FocusJob(a.ctx, agent.JobID(job), worker); err != nil {
+			log.Printf("agent: focus job: %v", err)
 			a.setStatus(TerminalFailureStatus(err.Error()))
 		}
 	})

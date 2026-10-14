@@ -33,7 +33,7 @@ func TestAnIdenticalOrNearIdenticalReportIsNotSaidAgainWithinTheWindow(t *testin
 	if u.AddReport(job(1), "w", "  worker SAYS it's done:   fixed it ", T0+1) {
 		t.Fatal("near-identical while held")
 	}
-	wantDue(t, u.Due(T0+UpdateQuietMs, always), DueUpdate{Job: job(1), Text: "Worker says it's done: fixed it."})
+	wantDue(t, u.Due(T0+UpdateQuietMs, always), DueUpdate{Job: job(1), Text: "Worker says it's done: fixed it.", Worker: "w"})
 	if u.AddReport(job(1), "w", "Worker says it's done: fixed it.", T0+UpdateDedupeMs-1) {
 		t.Fatal("said within the window")
 	}
@@ -79,7 +79,7 @@ func TestSupersedeDropsWhatIsHeld(t *testing.T) {
 	u.AddReport(job(1), "a", "A says it's done.", T0)
 	u.AddReport(job(2), "b", "B says it's done.", T0)
 	u.Supersede(job(1))
-	wantDue(t, u.Due(T0+UpdateQuietMs, always), DueUpdate{Job: job(2), Text: "B says it's done."})
+	wantDue(t, u.Due(T0+UpdateQuietMs, always), DueUpdate{Job: job(2), Text: "B says it's done.", Worker: "b"})
 }
 
 // ---------- Router ----------
@@ -332,5 +332,49 @@ func TestQuestionsAreNeverHeldByTheDebounceOrTheCap(t *testing.T) {
 		} else {
 			wantContains(t, fx, eNotify("Which branch?"))
 		}
+	}
+}
+
+func TestTheQuietTimeIsASettingAndTheMaxHoldFollowsIt(t *testing.T) {
+	u := NewUpdatesWith(10_000)
+	u.AddReport(job(1), "w", "first", T0)
+	wantDue(t, u.Due(T0+9_999, always))
+	wantDue(t, u.Due(T0+10_000, always), DueUpdate{Job: job(1), Text: "first", Worker: "w"})
+	// Keeps reporting every 5 s: still heard at 1.5× = 15 s.
+	u.AddReport(job(2), "w", "a", T0)
+	u.AddReport(job(2), "w", "b", T0+5_000)
+	u.AddReport(job(2), "w", "c", T0+10_000)
+	wantDue(t, u.Due(T0+15_000, always), DueUpdate{Job: job(2), Text: "c", Worker: "w"})
+}
+
+func TestAZeroQuietTimeLetsEachUpdateOutAtOnce(t *testing.T) {
+	u := NewUpdatesWith(0)
+	u.AddReport(job(1), "w", "done", T0)
+	wantDue(t, u.Due(T0, always), DueUpdate{Job: job(1), Text: "done", Worker: "w"})
+	if u.AddReport(job(1), "w", "done", T0+1) {
+		t.Fatal("dedupe still applies")
+	}
+}
+
+func TestADueUpdateNamesTheWorkerOnlyWhenOneWorkerReported(t *testing.T) {
+	u := NewUpdates()
+	u.AddReport(job(1), "w", "W says it's done.", T0)
+	u.AddReport(job(2), "a", "A says it's done.", T0)
+	u.AddReport(job(2), "b", "B says it's done.", T0)
+	wantDue(t, u.Due(T0+UpdateQuietMs, always),
+		DueUpdate{Job: job(1), Text: "W says it's done.", Worker: "w"},
+		DueUpdate{Job: job(2), Text: "2 worker updates: A says it's done. B says it's done."})
+}
+
+func TestTheReplayedDigestKeepsEachLinesJobAndWorker(t *testing.T) {
+	c := speakingCtl()
+	running(t, c)
+	l := NewJobLine(LineInfo, "The upload worker says it's done.", job(7))
+	l.Worker = "w-upload"
+	c.outbox.Push(l, T0)
+	c.Step(voiceOpened(), T0+1)
+	last := c.injected[len(c.injected)-1].lines
+	if len(last) != 1 || last[0].Job != job(7) || last[0].Worker != "w-upload" {
+		t.Fatalf("%+v", last)
 	}
 }
