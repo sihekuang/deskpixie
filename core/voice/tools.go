@@ -80,8 +80,9 @@ type EndConversation struct{}
 func (EndConversation) Name() string { return EndConversationTool }
 
 func (EndConversation) Description() string {
-	return "End the voice conversation. Call only when the user clearly signals they are done " +
-		"(e.g. \"thanks, that's all\", \"bye\"). Say a short goodbye before calling it."
+	return "End the voice conversation. Call it when the user clearly signals they are done " +
+		"(e.g. \"thanks, that's all\", \"bye\"), after a short goodbye, or right after you have " +
+		"handed work off and the user has nothing more to say, after your acknowledgement."
 }
 
 func (EndConversation) Parameters() json.RawMessage {

@@ -394,6 +394,8 @@ func TestThePersonaOffloadsWorkToTheAgentByDefault(t *testing.T) {
 		"The agent does not hear this conversation.",
 		"One delegate call per independent task.",
 		"If you think you can't do it yourself, that is the signal to delegate",
+		"Then go idle if the user doesn't need to say anything more: call end_conversation",
+		"stay after \"Let me check that.\"",
 	} {
 		if !strings.Contains(DelegationPersona, phrase) {
 			t.Fatal(phrase)
