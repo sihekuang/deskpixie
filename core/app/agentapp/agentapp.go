@@ -73,8 +73,9 @@ func UpdateQuietMs(n settings.NotificationSettings) agent.Millis {
 // HostProblem is the tray status line when the configured session host can't be built (a
 // sticky setup disable).
 func HostProblem(err error) string {
-	if agent.IsHostError(err, agent.HostNotFound) {
-		return "Agent: herdr not found"
+	var he agent.HostError
+	if errors.As(err, &he) && he.Kind == agent.HostNotFound {
+		return "Agent: " + he.HostName() + " not found"
 	}
 	return "Agent: invalid settings (see log)"
 }

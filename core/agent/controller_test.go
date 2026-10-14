@@ -401,6 +401,22 @@ func TestHerdrMissingOrMismatchedTurnsDelegationOff(t *testing.T) {
 	wantDisabled(t, c, "Agent: herdr version mismatch: you have herdr 0.8.0 (protocol 20); DeskPixie supports Herdr 0.7.5 (protocol 17) or 0.9.x (protocol 22)")
 }
 
+// Another session host's name is the one the status line names (Herdr's lines are unchanged).
+func TestTheStatusLineNamesTheActiveHost(t *testing.T) {
+	c := ctl()
+	c.Step(CoordinatorFailedInput(HostError{Kind: HostNotFound, Host: "tmux"}), T0)
+	wantDisabled(t, c, "Agent: tmux not found")
+	c = ctl()
+	c.Step(CoordinatorFailedInput(HostError{Kind: HostVersionMismatch, Host: "tmux"}), T0)
+	wantDisabled(t, c, "Agent: tmux version mismatch (update tmux)")
+	c = ctl()
+	c.Step(CoordinatorFailedInput(HostError{Kind: HostVersionMismatch, Host: "tmux", Detail: "you have tmux 3.1; DeskPixie supports tmux 3.2 or newer"}), T0)
+	wantDisabled(t, c, "Agent: tmux version mismatch: you have tmux 3.1; DeskPixie supports tmux 3.2 or newer")
+	c = ctl()
+	c.Step(CoordinatorFailedInput(HostError{Kind: HostNotFound, Host: "herdr"}), T0)
+	wantDisabled(t, c, "Agent: herdr not found")
+}
+
 func TestRestartTurnsDelegationBackOn(t *testing.T) {
 	// A runtime disable (repeated crashes) is what Restart undoes.
 	c := workingOnJob1()

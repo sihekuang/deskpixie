@@ -361,13 +361,31 @@ type HostError struct {
 	// NoAgent name, Timeout what, ExitedAtStart kind, Other text; for VersionMismatch, what the
 	// user has and which versions are supported ("" if the host doesn't say).
 	Detail string
+	// Host is the session host's program for NotFound and VersionMismatch, e.g. "tmux"; ""
+	// is Herdr (HostName).
+	Host string
+}
+
+// HostName is the program the error is about: Host, or "herdr" when unset.
+func (e HostError) HostName() string {
+	if e.Host == "" {
+		return "herdr"
+	}
+	return e.Host
 }
 
 func (e HostError) Error() string {
 	switch e.Kind {
 	case HostNotFound:
-		return "herdr not found"
+		return e.HostName() + " not found"
 	case HostVersionMismatch:
+		if e.HostName() != "herdr" {
+			// Herdr's socket protocols mean nothing for another host.
+			if e.Detail != "" {
+				return e.HostName() + " version mismatch: " + e.Detail
+			}
+			return e.HostName() + " version mismatch"
+		}
 		msg := fmt.Sprintf("herdr version mismatch (client protocol %d, server %d)", e.Client, e.Server)
 		if e.Detail != "" {
 			msg += ": " + e.Detail

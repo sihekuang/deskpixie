@@ -123,4 +123,14 @@ func TestAVersionMismatchSaysWhatTheHostReported(t *testing.T) {
 	if told.Error() != "herdr version mismatch (client protocol 20, server 0): you have herdr 0.8.0 (protocol 20)" {
 		t.Fatal(told.Error())
 	}
+	tmux := HostError{Kind: HostVersionMismatch, Host: "tmux", Detail: "you have tmux 3.1"}
+	if tmux.Error() != "tmux version mismatch: you have tmux 3.1" {
+		t.Fatal(tmux.Error())
+	}
+	if e := (HostError{Kind: HostVersionMismatch, Host: "tmux"}); e.Error() != "tmux version mismatch" {
+		t.Fatal(e.Error())
+	}
+	if e := (HostError{Kind: HostNotFound, Host: "tmux"}); e.Error() != "tmux not found" || (HostError{Kind: HostNotFound}).Error() != "herdr not found" {
+		t.Fatal(e.Error())
+	}
 }
