@@ -307,6 +307,7 @@ var Fields = []FieldSpec{
 	spec("agent.workers.enabled", SectionWorkers, "Workers", "Let the agent start worker agents in git worktrees.", boolKind, ApplyRestart),
 	spec("agent.workers.max", SectionWorkers, "Most workers at once", "Up to four workers run at the same time.", intKind(1, MaxWorkers, true), ApplyRestart),
 	spec("agent.workers.kinds", SectionWorkers, "Worker kinds", "Which agents may work as workers.", Kind{Type: KindMultiChoice, Choices: Choices{Source: SourceStatic, Static: WorkerKinds}}, ApplyRestart),
+	spec("agent.workers.speakResults", SectionWorkers, "Speak worker reports", "Bit tells you as soon as a worker says it's done, couldn't finish or is stuck, before the agent has checked its work.", boolKind, ApplyRestart),
 	spec("canvas.autoOpen", SectionCanvas, "Open new pages", "Show new and changed canvas pages automatically.", boolKind, ApplyLive),
 	spec("canvas.keep", SectionCanvas, "Pages kept", "Older pages are deleted at startup.", intKind(1, 1000, false), ApplyRestart),
 	spec("canvas.window", SectionCanvas, "Canvas window", "The canvas window's last place and size; written by the app.", managedKind, ApplyLive),

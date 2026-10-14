@@ -235,3 +235,35 @@ func TestPlainTextKeepsNewlinesAndDropsControlCharacters(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func TestWorkerSpokenLinesArePlainCappedSpeech(t *testing.T) {
+	who := WorkerWho(WorkerPlan{Slug: "fix-login", RepoName: "focus"})
+	cases := []struct{ got, want string }{
+		{WorkerResultSpoken(who, OutcomeDone, "Fixed the login bug"), "The fix login worker in focus says it's done: Fixed the login bug."},
+		{WorkerResultSpoken(who, OutcomeFailed, "Tests fail!"), "The fix login worker in focus couldn't finish: Tests fail!"},
+		{WorkerBlockedSpoken(who, "no access"), "The fix login worker in focus is stuck: no access."},
+		// Links are dropped, paths cut to their file name, markup removed.
+		{WorkerResultSpoken(who, OutcomeDone, "Fixed `core/agent/spoken.go`, see https://example.com/x."), "The fix login worker in focus says it's done: Fixed spoken.go, see."},
+		{WorkerResultSpoken(who, OutcomeDone, "https://x.y"), "The fix login worker in focus says it's done."},
+	}
+	for _, c := range cases {
+		if c.got != c.want {
+			t.Errorf("got %q want %q", c.got, c.want)
+		}
+	}
+	long := WorkerResultSpoken(who, OutcomeDone, strings.Repeat("word ", 60))
+	if n := len(strings.Fields(long)); n > SpokenMaxWords {
+		t.Fatalf("%d words: %s", n, long)
+	}
+	if strings.ContainsAny(long, "<>\"") {
+		t.Fatal(long)
+	}
+}
+
+func TestReportResultsDescriptionSaysTheSummaryIsSpoken(t *testing.T) {
+	for _, tool := range Catalog(RoleWorker) {
+		if tool["name"] == "report_result" && !strings.Contains(tool["description"].(string), "spoken aloud to the user") {
+			t.Fatal(tool["description"])
+		}
+	}
+}

@@ -212,6 +212,7 @@ func (c *AgentController) onMcp(agent string, call McpCall, now Millis, fx *[]Ef
 		value, err = c.reportProgress(agent, call.Summary, now, fx)
 	case call.Kind == CallReportResult && !coordinator:
 		if err = c.report(agent, ResultLine(agent, call.Outcome, call.Summary, call.Evidence), now, fx); err == nil {
+			c.sayForWorker(agent, func(who string) string { return WorkerResultSpoken(who, call.Outcome, call.Summary) }, now, fx)
 			value = map[string]any{"ok": true}
 		}
 	case call.Kind == CallAskCoordinator && !coordinator:
@@ -220,6 +221,7 @@ func (c *AgentController) onMcp(agent string, call McpCall, now Millis, fx *[]Ef
 		}
 	case call.Kind == CallReportBlocked && !coordinator:
 		if err = c.report(agent, BlockedLine(agent, call.Reason), now, fx); err == nil {
+			c.sayForWorker(agent, func(who string) string { return WorkerBlockedSpoken(who, call.Reason) }, now, fx)
 			value = map[string]any{"ok": true}
 		}
 	case call.Kind == CallStartWorker && coordinator:
@@ -299,6 +301,26 @@ func (c *AgentController) report(agent, line string, now Millis, fx *[]Effect) e
 	// A held Codex Idle/Done may have stood: queued messages can go now.
 	c.flushWorker(agent, now, fx)
 	return nil
+}
+
+// sayForWorker tells the user a worker's own report right away, by the same route as the
+// coordinator's replies (spoken in an open conversation, else a notification and the outbox).
+// Only with agent.workers.speakResults on (off: just as before, the coordinator alone hears it).
+// The coordinator still gets the report and gives its own, checked reply. Called after report
+// accepted it, so the job is open; a worker being stopped (its job ended or the coordinator
+// stopped it) is not spoken for: the coordinator has already moved on.
+func (c *AgentController) sayForWorker(agent string, line func(who string) string, now Millis, fx *[]Effect) {
+	if !c.settings.SpeakWorkerReports {
+		return
+	}
+	w := c.workers.Get(agent)
+	if w == nil || w.StopRequested || c.shutDown {
+		return
+	}
+	text := maskPendingTokens(line(WorkerWho(w.Plan)), c.pendingTokens())
+	if text != "" {
+		c.deliver(NewLine(LineInfo, text), now, fx)
+	}
 }
 
 func (c *AgentController) onWorkerStatus(name string, status PaneStatus, now Millis, fx *[]Effect) {
