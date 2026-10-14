@@ -393,6 +393,7 @@ func TestThePersonaOffloadsWorkToTheAgentByDefault(t *testing.T) {
 		"Keep for yourself only:",
 		"The agent does not hear this conversation.",
 		"One delegate call per independent task.",
+		"If you think you can't do it yourself, that is the signal to delegate",
 	} {
 		if !strings.Contains(DelegationPersona, phrase) {
 			t.Fatal(phrase)
