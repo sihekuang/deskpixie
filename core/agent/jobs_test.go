@@ -166,7 +166,7 @@ func TestLinesRoundTripAndTheLastLinePerJobWins(t *testing.T) {
 	mustTransition(t, tbl, id(1), JobDone, 2_000)
 	l, _ = tbl.Line(id(1))
 	file = append(file, l, "not json")
-	back, restarted := RestoreJobTable(file, 3_000)
+	back, restarted := RestoreJobTable(file, 3_000, false)
 	if len(restarted) != 0 {
 		t.Fatal(restarted)
 	}
@@ -180,13 +180,33 @@ func TestLinesRoundTripAndTheLastLinePerJobWins(t *testing.T) {
 
 func TestOpenJobsFailOnRestart(t *testing.T) {
 	tbl := tableWith(1)
-	back, restarted := RestoreJobTable(tbl.Lines(), 5_000)
+	back, restarted := RestoreJobTable(tbl.Lines(), 5_000, false)
 	if !reflect.DeepEqual(restarted, []JobID{id(1)}) {
 		t.Fatal(restarted)
 	}
 	j, _ := back.Get(id(1))
 	if j.Status != JobFailed || j.Reason == nil || *j.Reason != "app restarted" || j.Updated != 5_000 {
 		t.Fatalf("%+v", j)
+	}
+}
+
+// With the coordinator kept running over the quit (agent.keepPanesOnQuit), its open jobs stay
+// open; their worker rows still read stopped until the workers are adopted again.
+func TestOpenJobsStayOpenWhenTheCoordinatorWasKept(t *testing.T) {
+	tbl := tableWith(1)
+	if err := tbl.AttachWorker(row("focus-fix", 1, WorkerRunning), 2_000); err != nil {
+		t.Fatal(err)
+	}
+	back, restarted := RestoreJobTable(tbl.Lines(), 5_000, true)
+	if len(restarted) != 0 {
+		t.Fatal(restarted)
+	}
+	j, _ := back.Get(id(1))
+	if !j.Status.IsOpen() || j.Reason != nil {
+		t.Fatalf("%+v", j)
+	}
+	if j.Workers[0].Status != WorkerStopped {
+		t.Fatalf("%+v", j.Workers)
 	}
 }
 
@@ -254,7 +274,7 @@ func TestWorkerRowsListOpenJobsAndLiveWorkersOfClosedOnes(t *testing.T) {
 func TestRestoredWorkersAreStopped(t *testing.T) {
 	tbl := tableWith(1)
 	_ = tbl.AttachWorker(row("a", 1, WorkerRunning), 1_000)
-	back, _ := RestoreJobTable(tbl.Lines(), 2_000)
+	back, _ := RestoreJobTable(tbl.Lines(), 2_000, false)
 	if j, _ := back.Get(id(1)); j.Workers[0].Status != WorkerStopped {
 		t.Fatal(j.Workers[0].Status)
 	}
@@ -265,7 +285,7 @@ func TestClosedJobsOlderThan14DaysAreDropped(t *testing.T) {
 	tbl.Create(id(2), "newer", 1_000)
 	mustTransition(t, tbl, id(1), JobDone, 1_000)
 	mustTransition(t, tbl, id(2), JobDone, 2_000)
-	back, _ := RestoreJobTable(tbl.Lines(), 1_001+RetentionMs)
+	back, _ := RestoreJobTable(tbl.Lines(), 1_001+RetentionMs, false)
 	if _, ok := back.Get(id(1)); ok {
 		t.Fatal("1 kept")
 	}

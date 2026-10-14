@@ -90,6 +90,57 @@ func (c *AgentController) workerUp(name, worktree string, status PaneStatus, now
 	}
 }
 
+// WorkerRestartNote goes to a worker kept over the quit in place of its brief: a report it made
+// while the app was down was rejected.
+const WorkerRestartNote = "The app restarted while you worked. If you already finished, call report_result again with your result and evidence; otherwise carry on."
+
+// adoptWorker: a worker kept running over the quit whose pane is still there (agent.keepPanesOnQuit)
+// is live again, as if it had just come up, with the restart note in place of its brief. One
+// whose job is no longer open is stopped.
+func (c *AgentController) adoptWorker(plan WorkerPlan, worktree string, status PaneStatus, now Millis, fx *[]Effect) {
+	refuse := func(why string) { *fx = append(*fx, Effect{Kind: EfAdmitted, Err: why}) }
+	if c.workers.Get(plan.Name) != nil {
+		refuse(fmt.Sprintf("A worker named %s is already running.", plan.Name))
+		return
+	}
+	if c.shutDown || !c.jobs.IsOpen(plan.Job) {
+		*fx = append(*fx, Effect{Kind: EfStopWorker, Name: plan.Name})
+		refuse(fmt.Sprintf("No open job %s.", plan.Job))
+		return
+	}
+	c.workers.Admit(plan)
+	c.workers.Up(plan.Name, worktree, status, WorkerRestartNote, now)
+	row := WorkerRunning
+	if status == PaneBlocked {
+		row = WorkerBlocked
+	}
+	c.setRow(plan.Name, row, now, fx)
+	if j, ok := c.jobs.Get(plan.Job); ok && j.Status == JobDelegated {
+		if _, err := c.jobs.Transition(plan.Job, JobWorking, now); err == nil {
+			c.saveJob(plan.Job, fx)
+		}
+	}
+	*fx = append(*fx, logEffect(fmt.Sprintf("worker %s adopted", plan.Name)), Effect{Kind: EfAdmitted, Plan: plan})
+	c.flushWorker(plan.Name, now, fx)
+}
+
+// LiveWorker is a live worker's plan and worktree (what a quit keeps).
+type LiveWorker struct {
+	Plan     WorkerPlan
+	Worktree string
+}
+
+// LiveWorkers are the workers that are up and not being stopped, in name order.
+func (c *AgentController) LiveWorkers() []LiveWorker {
+	var out []LiveWorker
+	for _, name := range c.workers.Names() {
+		if w := c.workers.Get(name); w != nil && w.IsUp() && !w.StopRequested {
+			out = append(out, LiveWorker{Plan: w.Plan, Worktree: w.Worktree})
+		}
+	}
+	return out
+}
+
 // workerFailed: the reason goes to the coordinator as start_worker's error; it is never logged
 // (free text).
 func (c *AgentController) workerFailed(name, _ string, now Millis, fx *[]Effect) {

@@ -30,6 +30,9 @@ type CoordinatorRecipe struct {
 	Args []string
 	// Env is [MASCOT_AGENT_TOKEN=<token>].
 	Env []EnvVar
+	// AdoptEarlier: Env's token was kept from the run before (agent.keepPanesOnQuit), so a
+	// coordinator found running from that run still holds it and is adopted as it is.
+	AdoptEarlier bool
 }
 
 // Ensured is EnsureCoordinator's result: Started false is Rust's Running(Status) (it was
@@ -61,6 +64,16 @@ func NewAgentHost(host SessionHost, clock Clock, recipe CoordinatorRecipe) *Agen
 	return &AgentHost{host: host, clock: clock, recipe: recipe, ensuring: make(chan struct{}, 1)}
 }
 
+// Token is the coordinator's bearer token (its recipe's MASCOT_AGENT_TOKEN), "" if none.
+func (h *AgentHost) Token() string {
+	for _, e := range h.recipe.Env {
+		if e.Key == "MASCOT_AGENT_TOKEN" {
+			return e.Value
+		}
+	}
+	return ""
+}
+
 // Session is the session host the coordinator runs in.
 func (h *AgentHost) Session() SessionHost { return h.host }
 
@@ -90,7 +103,9 @@ func (h *AgentHost) EnsureCoordinator(ctx context.Context) (Ensured, error) {
 		return Ensured{}, err
 	}
 	idx := slices.IndexFunc(agents, func(a AgentInfo) bool { return a.Name == Coordinator })
-	if idx >= 0 && startedBefore {
+	if idx >= 0 && (startedBefore || h.recipe.AdoptEarlier) {
+		// Kept over a quit with this run's (restored) token: it is this run's coordinator now.
+		h.startedBefore.Store(true)
 		return Ensured{Status: agents[idx].Status}, nil
 	}
 	adopted := idx >= 0

@@ -84,7 +84,7 @@ func DefaultWorkerPolicy() WorkerPolicy {
 type InputKind int
 
 const (
-	InRestored           InputKind = iota // Jobs, Outbox: the stored jobs.jsonl and outbox.jsonl lines, at start
+	InRestored           InputKind = iota // Jobs, Outbox, Keep: the stored jobs.jsonl and outbox.jsonl lines, at start
 	InDelegate                            // Job, Task, Context ("" = none)
 	InCancel                              // Job
 	InAnswer                              // Job ("" = the only job waiting on an answer), Text; answered with EfAnswerResult
@@ -111,6 +111,7 @@ const (
 	InWorkerClosed                        // Name: EfStopWorker finished (the pane is closed or was already gone)
 	InWorkerScreen                        // Name, Text: EfReadWorker's screen
 	InWorkerPromptFailed                  // Name, Text: EfPromptWorker could not be typed
+	InAdoptWorker                         // Plan, Worktree, Status: a worker kept over the quit, its pane still there; answered with EfAdmitted
 )
 
 // Input is one stimulus for AgentController.Step. Build it with the *Input constructors.
@@ -140,10 +141,15 @@ type Input struct {
 	Name       string
 	Worktree   string
 	Reason     string
+	// Keep (InRestored): the coordinator was kept running over the quit (agent.keepPanesOnQuit).
+	Keep bool
+	Plan WorkerPlan
 }
 
-func RestoredInput(jobs, outbox []string) Input {
-	return Input{Kind: InRestored, Jobs: jobs, Outbox: outbox}
+// RestoredInput: keep says the coordinator was kept running over the quit: its open jobs stay
+// open and it is asked for their results again.
+func RestoredInput(jobs, outbox []string, keep bool) Input {
+	return Input{Kind: InRestored, Jobs: jobs, Outbox: outbox, Keep: keep}
 }
 func DelegateInput(id JobID, task, context string) Input {
 	return Input{Kind: InDelegate, Job: id, Task: task, Context: context}
@@ -181,6 +187,9 @@ func ShutdownInput() Input                      { return Input{Kind: InShutdown}
 func McpInput(agent string, call McpCall) Input { return Input{Kind: InMcp, Agent: agent, Call: call} }
 func AdmitWorkerInput(req WorkerRequest, repo string, taken []string) Input {
 	return Input{Kind: InAdmitWorker, Worker: req, Repo: repo, Taken: taken}
+}
+func AdoptWorkerInput(plan WorkerPlan, worktree string, status PaneStatus) Input {
+	return Input{Kind: InAdoptWorker, Plan: plan, Worktree: worktree, Status: status}
 }
 func WorkerUpInput(name, worktree string, status PaneStatus) Input {
 	return Input{Kind: InWorkerUp, Name: name, Worktree: worktree, Status: status}
@@ -370,7 +379,7 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 	var fx []Effect
 	switch in.Kind {
 	case InRestored:
-		c.restore(in.Jobs, in.Outbox, now, &fx)
+		c.restore(in.Jobs, in.Outbox, in.Keep, now, &fx)
 	case InDelegate:
 		c.delegate(in.Job, in.Task, in.Context, now, &fx)
 	case InCancel:
@@ -488,6 +497,8 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 		c.admitWorker(in.Worker, in.Repo, in.Taken, now, &fx)
 	case InWorkerUp:
 		c.workerUp(in.Name, in.Worktree, in.Status, now, &fx)
+	case InAdoptWorker:
+		c.adoptWorker(in.Plan, in.Worktree, in.Status, now, &fx)
 	case InWorkerFailed:
 		c.workerFailed(in.Name, in.Reason, now, &fx)
 	case InWorkerClosed:
@@ -538,10 +549,18 @@ func (c *AgentController) voiceOpened(fx *[]Effect) {
 
 // ---------- jobs ----------
 
-func (c *AgentController) restore(jobs, outbox []string, now Millis, fx *[]Effect) {
-	table, restarted := RestoreJobTable(jobs, now)
+// CoordinatorRestartNote goes to a kept coordinator for each job still open: a reply it sent
+// while the app was down was lost.
+const CoordinatorRestartNote = "The app restarted while you were working on this. If you already replied with its result, reply again with it; otherwise carry on."
+
+func (c *AgentController) restore(jobs, outbox []string, keep bool, now Millis, fx *[]Effect) {
+	table, restarted := RestoreJobTable(jobs, now, keep)
 	c.jobs = table
 	c.outbox = RestoreOutbox(outbox, now)
+	// Queued only: the runtime ensures the coordinator once setup problems are known.
+	for _, j := range c.jobs.Open() {
+		c.inbox.Push(MessageForJob(j.ID, CoordinatorRestartNote))
+	}
 	for _, id := range restarted {
 		task := ""
 		if j, ok := c.jobs.Get(id); ok {

@@ -33,6 +33,7 @@ type wRig struct {
 	tokens    *agenttest.FakeTokens
 	recipes   *agenttest.FakeRecipes
 	clock     *agenttest.ManualClock
+	kept      *agenttest.FakeKept
 }
 
 func wRigWith(t *testing.T, workers bool) *wRig { return rigKeeping(t, workers, false) }
@@ -50,20 +51,29 @@ func rigWithWorktrees(t *testing.T, store *agenttest.MemStore, wt *agenttest.Fak
 }
 
 func rigFull(t *testing.T, workers, keep bool, store *agenttest.MemStore, wt *agenttest.FakeWorktrees) *wRig {
-	host := agenttest.NewFakeSessionHost().ManualTurns()
+	return rigBuild(t, workers, keep, store, wt, agenttest.NewFakeSessionHost().ManualTurns(), KeptAgents{})
+}
+
+// rigBuild: host may already run panes (agents kept from an earlier run); kept is what that
+// run saved (its coordinator token, when set, is this run's).
+func rigBuild(t *testing.T, workers, keep bool, store *agenttest.MemStore, wt *agenttest.FakeWorktrees, host *agenttest.FakeSessionHost, kept KeptAgents) *wRig {
 	clock := agenttest.ClockAt(1_000_000)
-	recipe := CoordinatorRecipe{Cwd: "/data/agent/workspace"}
+	token := "tok-coordinator"
+	if kept.CoordinatorToken != "" {
+		token = kept.CoordinatorToken
+	}
+	recipe := CoordinatorRecipe{Cwd: "/data/agent/workspace", Env: []EnvVar{{Key: "MASCOT_AGENT_TOKEN", Value: token}}, AdoptEarlier: kept.CoordinatorToken != ""}
 	notifier := &agenttest.RecordingNotifier{}
 	deps := Deps{
 		Host: NewAgentHost(host, clock, recipe), Voice: &agenttest.RecordingVoiceLink{}, Notifier: notifier,
 		Mascot: &agenttest.RecordingNotifier{}, Status: &agenttest.RecordingStatus{}, Launcher: &agenttest.FakeLauncher{},
-		Store: store, Clock: clock, IDs: &agenttest.SeqIds{},
+		Store: store, Clock: clock, IDs: &agenttest.SeqIds{}, Kept: &agenttest.FakeKept{},
 	}
-	r := &wRig{host: host, worktrees: wt, tokens: &agenttest.FakeTokens{}, recipes: &agenttest.FakeRecipes{}, clock: clock}
+	r := &wRig{host: host, worktrees: wt, tokens: &agenttest.FakeTokens{}, recipes: &agenttest.FakeRecipes{}, clock: clock, kept: deps.Kept.(*agenttest.FakeKept)}
 	settings := DefaultSettings()
 	settings.Workers = WorkerPolicy{Enabled: true, Max: 4, Kinds: []AgentKind{Claude, Codex}}
 	settings.KeepPanesOnQuit = keep
-	cfg := RuntimeConfig{Settings: settings}
+	cfg := RuntimeConfig{Settings: settings, Kept: kept}
 	var wd *WorkerDeps
 	if workers {
 		wd = &WorkerDeps{Worktrees: wt, Tokens: r.tokens, Recipes: r.recipes}

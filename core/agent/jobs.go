@@ -250,8 +250,9 @@ func (t *JobTable) Lines() []string {
 
 // RestoreJobTable rebuilds the table from jobs.jsonl at start. The last line per id wins;
 // unreadable lines are skipped. Jobs still open become Failed("app restarted") (returned so
-// the caller can outbox a line for each), and closed jobs older than 14 days are dropped.
-func RestoreJobTable(lines []string, now Millis) (*JobTable, []JobID) {
+// the caller can outbox a line for each) unless keepOpen (the coordinator was kept running over
+// the quit and still has them), and closed jobs older than 14 days are dropped.
+func RestoreJobTable(lines []string, now Millis, keepOpen bool) (*JobTable, []JobID) {
 	var order []JobID
 	latest := map[JobID]Job{}
 	for _, line := range lines {
@@ -271,19 +272,20 @@ func RestoreJobTable(lines []string, now Millis) (*JobTable, []JobID) {
 		if j.Workers == nil {
 			j.Workers = []WorkerRow{}
 		}
-		// No worker of an earlier run is tracked any more (its token died with that run).
+		// No worker of an earlier run is tracked any more (its token died with that run); a kept
+		// one's row is set running again when it is adopted.
 		for k := range j.Workers {
 			if j.Workers[k].Status.IsLive() {
 				j.Workers[k].Status = WorkerStopped
 			}
 		}
-		if j.Status.IsOpen() {
+		if j.Status.IsOpen() && !keepOpen {
 			reason := "app restarted"
 			j.Status = JobFailed
 			j.Reason = &reason
 			j.Updated = now
 			restarted = append(restarted, j.ID)
-		} else if satSub(now, j.Updated) > RetentionMs {
+		} else if !j.Status.IsOpen() && satSub(now, j.Updated) > RetentionMs {
 			continue
 		}
 		table.jobs = append(table.jobs, j)

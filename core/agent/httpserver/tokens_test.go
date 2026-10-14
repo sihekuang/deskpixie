@@ -58,3 +58,22 @@ func TestReissuingReplacesAndRevokingRemoves(t *testing.T) {
 		t.Fatal("revoked token still resolves")
 	}
 }
+
+// A token kept from an earlier run (agent.keepPanesOnQuit) resolves again once restored.
+func TestRestoringATokenResolvesItAndReplacesTheEarlierOne(t *testing.T) {
+	tk := NewTokens()
+	fresh := tk.Issue("coordinator")
+	tk.Restore("coordinator", "kept-token")
+	if id, ok := tk.Resolve("kept-token"); !ok || id != "coordinator" {
+		t.Fatalf("resolve = %q %v", id, ok)
+	}
+	if _, ok := tk.Resolve(fresh); ok {
+		t.Fatal("the earlier token still resolves")
+	}
+	if tok, ok := tk.Token("coordinator"); !ok || tok != "kept-token" {
+		t.Fatalf("token = %q %v", tok, ok)
+	}
+	if _, ok := tk.Token("nobody"); ok {
+		t.Fatal("nobody has a token")
+	}
+}
