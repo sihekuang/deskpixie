@@ -65,9 +65,17 @@ type Line struct {
 	// Token is the confirm word of a permission question (lets the outbox drop it once
 	// decided); nil otherwise.
 	Token *string
+	// Job and Worker: what the line is about (the updates bubble goes to that job's or worker's
+	// pane); zero when it is about no one job or worker.
+	Job    JobID
+	Worker string
 }
 
 func NewLine(kind LineKind, text string) Line { return Line{Text: text, Kind: kind} }
+
+func NewJobLine(kind LineKind, text string, job JobID) Line {
+	return Line{Text: text, Kind: kind, Job: job}
+}
 
 // Spoken is the text as the voice model hears it.
 func (l Line) Spoken() string { return l.Kind.Prefix() + l.Text }

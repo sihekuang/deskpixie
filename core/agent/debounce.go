@@ -45,6 +45,8 @@ type saidLine struct {
 type DueUpdate struct {
 	Job  JobID
 	Text string
+	// Worker: the one worker whose report this is ("" for several workers or progress).
+	Worker string
 	// Progress: Text is a progress phrase (narration), not worker reports.
 	Progress bool
 }
@@ -153,7 +155,11 @@ func (u *Updates) Due(now Millis, ready func(JobID) bool) []DueUpdate {
 			texts[i] = r.text
 			u.remember(job, r.text, now)
 		}
-		out = append(out, DueUpdate{Job: job, Text: combineReports(texts)})
+		due := DueUpdate{Job: job, Text: combineReports(texts)}
+		if len(h.reports) == 1 {
+			due.Worker = h.reports[0].worker
+		}
+		out = append(out, due)
 	}
 	return out
 }

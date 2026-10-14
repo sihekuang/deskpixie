@@ -600,7 +600,7 @@ func (c *AgentController) voiceOpened(fx *[]Effect) {
 	var digest []Line
 	for _, l := range c.outbox.Undelivered() {
 		if l.Token == nil || c.confirms.IsPendingToken(*l.Token) {
-			digest = append(digest, Line{Text: l.Text, Kind: l.Kind, Token: l.Token})
+			digest = append(digest, Line{Text: l.Text, Kind: l.Kind, Token: l.Token, Job: l.Job, Worker: l.Worker})
 		}
 	}
 	notice, records := c.outbox.Replay(c.confirms.IsPendingToken)
@@ -878,7 +878,7 @@ func (c *AgentController) failJobSaying(id JobID, reason, line string, now Milli
 	c.stopJobWorkers(id, fx)
 	c.forgetUpdates(id)
 	c.saveJob(id, fx)
-	c.deliverOpening(NewLine(LineReply, line), now, fx)
+	c.deliverOpening(NewJobLine(LineReply, line, id), now, fx)
 	*fx = append(*fx, Effect{Kind: EfCue, Cue: CueError})
 }
 
@@ -1068,12 +1068,12 @@ func (c *AgentController) onReply(id JobID, status SpokenStatus, text string, no
 		_, _ = c.jobs.Transition(id, JobWorking, now)
 		c.jobs.SetProgress(id, text, now)
 		c.saveJob(id, fx)
-		c.deliver(NewLine(LineReply, text), now, fx)
+		c.deliver(NewJobLine(LineReply, text, id), now, fx)
 	case SpokenQuestion:
 		_, _ = c.jobs.Transition(id, JobQuestion, now)
 		c.jobs.SetReply(id, text, now)
 		c.saveJob(id, fx)
-		c.deliverOpening(NewLine(LineQuestion, text), now, fx)
+		c.deliverOpening(NewJobLine(LineQuestion, text, id), now, fx)
 	case SpokenDone:
 		_, _ = c.jobs.Transition(id, JobDone, now)
 		c.jobs.SetReply(id, text, now)
@@ -1081,7 +1081,7 @@ func (c *AgentController) onReply(id JobID, status SpokenStatus, text string, no
 		c.forgetUpdates(id)
 		c.denyPendingFor(id, "The job ended.", fx)
 		c.stopJobWorkers(id, fx)
-		if c.deliverOpening(NewLine(LineReply, text), now, fx) {
+		if c.deliverOpening(NewJobLine(LineReply, text, id), now, fx) {
 			*fx = append(*fx, Effect{Kind: EfCue, Cue: CueHappy})
 		}
 	case SpokenFailed:
@@ -1090,7 +1090,7 @@ func (c *AgentController) onReply(id JobID, status SpokenStatus, text string, no
 		c.forgetUpdates(id)
 		c.denyPendingFor(id, "The job ended.", fx)
 		c.stopJobWorkers(id, fx)
-		c.deliverOpening(NewLine(LineReply, text), now, fx)
+		c.deliverOpening(NewJobLine(LineReply, text, id), now, fx)
 		*fx = append(*fx, Effect{Kind: EfCue, Cue: CueError})
 	}
 	c.syncHold(fx)
@@ -1141,7 +1141,11 @@ func (c *AgentController) onPermission(id RequestID, agent, toolName string, too
 		}
 	}
 	text := ConfirmQuestionLine(Describe(toolName, toolInput, label), token)
-	c.deliverOpening(Line{Text: text, Kind: LineQuestion, Token: &token}, now, fx)
+	q := Line{Text: text, Kind: LineQuestion, Token: &token, Job: job}
+	if agent != Coordinator {
+		q.Worker = agent
+	}
+	c.deliverOpening(q, now, fx)
 }
 
 func (c *AgentController) onUserSaid(text string, now Millis, fx *[]Effect) {
@@ -1209,7 +1213,9 @@ func (c *AgentController) flushUpdates(now Millis, fx *[]Effect) {
 	ready := func(job JobID) bool { return !c.voiceOpen || c.narrator.Ready(job, now) }
 	for _, u := range c.updates.Due(now, ready) {
 		if !u.Progress {
-			c.deliverUpdate(NewLine(LineInfo, u.Text), now, fx)
+			l := NewJobLine(LineInfo, u.Text, u.Job)
+			l.Worker = u.Worker
+			c.deliverUpdate(l, now, fx)
 			continue
 		}
 		if c.voiceOpen && c.router.Take(now) {
