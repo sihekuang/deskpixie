@@ -2,7 +2,7 @@
 
 package herdr_test
 
-// Opt-in live smokes against real Herdr 0.7.5, Claude Code (and optionally Codex) and git:
+// Opt-in live smokes against the installed Herdr (one of herdr.SupportedVersions), Claude Code (and optionally Codex) and git:
 // ports of ai-mascot crates/session-herdr/examples/agent_smoke.rs and worker_smoke.rs (D-543,
 // D-544). Run with:
 //

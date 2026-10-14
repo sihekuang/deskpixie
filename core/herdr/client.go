@@ -10,7 +10,7 @@ import (
 )
 
 // HerdrAgent is an agent as agent.list / agent.get / agent.start report it (shapes captured
-// from Herdr 0.7.5, protocol 17). Rust's Option<String> fields are "" when absent.
+// from Herdr 0.7.5, protocol 17; 0.9.x, protocol 22, only adds fields this ignores). Rust's Option<String> fields are "" when absent.
 type HerdrAgent struct {
 	Name   string
 	PaneID string

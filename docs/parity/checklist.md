@@ -195,7 +195,7 @@ Not in the sum: voice-openai (28 Rust tests, done in Phase 3; Go has 24 `Test` f
 | D-083 | PromptTimedOut arms a 60 s watchdog. Working or Blocked counts as a sign of life and clears it; Idle does not. If it … | ✅ | core/agent/controller.go | core/agent/controller_test.go (84) |  |
 | D-084 | `CoordinatorFailed`: | ✅ | core/agent/controller.go | core/agent/controller_test.go (84) |  |
 | D-085 | NotFound disables with "Agent: herdr not found". | ✅ | core/agent/controller.go | core/agent/controller_test.go (84) |  |
-| D-086 | VersionMismatch disables with "Agent: herdr version mismatch (update herdr)". | ✅ | core/agent/controller.go | core/agent/controller_test.go (84) |  |
+| D-086 | VersionMismatch disables with "Agent: herdr version mismatch (update herdr)". | ✅ | core/agent/controller.go | core/agent/controller_test.go (84) | #63: when the host says what the user has and which versions are supported, the line shows that instead |
 | D-087 | GaveUp disables with "Agent: stopped after repeated crashes". | ✅ | core/agent/controller.go | core/agent/controller_test.go (84) |  |
 | D-088 | Any other error sets the status "Agent: claude did not start", clears the inbox and fails open jobs ("the agent could… | ✅ | core/agent/controller.go | core/agent/controller_test.go (84) |  |
 | D-089 | Disabling fails every open job with "the agent stopped". The spoken line is "The agent stopped before finishing: {tas… | ✅ | core/agent/controller.go | core/agent/controller_test.go (84) |  |
@@ -498,7 +498,7 @@ Not in the sum: voice-openai (28 Rust tests, done in Phase 3; Go has 24 `Test` f
 | D-365 | Otherwise `HookEvent::Mcp` is sent and the server waits up to 150 s. | ✅ | core/agent/httpserver/mcp.go | core/agent/httpserver/mcp_test.go (12) |  |
 | D-366 | Results look like `{content:[{type:"text",text:<json or error>}], isError}`. Error texts: "The app did not answer." a… | ✅ | core/agent/httpserver/mcp.go | core/agent/httpserver/mcp_test.go (12) |  |
 | D-367 | Every response is one `application/json` body: no SSE and no Mcp-Session-Id. | ✅ | core/agent/httpserver/mcp.go | core/agent/httpserver/mcp_test.go (12) |  |
-| | **delegation / Herdr Unix socket protocol (protocol 17, Herdr 0.7.5)** | | | | |
+| | **delegation / Herdr Unix socket protocol (protocol 17, Herdr 0.7.5; protocol 22, Herdr 0.9.x since #63)** | | | | |
 | D-368 | Transport: one connection per request. The client writes one line, `{"id":"am_<n>","method":…,"params":…}\n`, and rea… | ✅ | core/herdr/{transport,client}.go | core/herdr/{transport,client}_test.go (via herdrtest fake server) |  |
 | D-369 | Client-side error codes: `socket_unavailable` (NotFound or ConnectionRefused), `socket_error`, `client_timeout` (defa… | ✅ | core/herdr/{transport,client}.go | core/herdr/{transport,client}_test.go (via herdrtest fake server) |  |
 | D-370 | Methods (`HerdrClient`): | ✅ | core/herdr/{transport,client}.go | core/herdr/{transport,client}_test.go (via herdrtest fake server) |  |

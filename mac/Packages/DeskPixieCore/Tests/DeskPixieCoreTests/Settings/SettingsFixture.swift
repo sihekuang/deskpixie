@@ -805,7 +805,7 @@ enum SettingsFixture {
   "path": "agent.sessionHost",
   "section": "Advanced",
   "label": "Session host",
-  "help": "The terminal multiplexer that runs the agent.",
+  "help": "The terminal multiplexer that runs the agent. Supported: Herdr 0.7.5 (protocol 17) or 0.9.x (protocol 22).",
   "kind": {
    "type": "choice",
    "options": [
@@ -847,7 +847,7 @@ enum SettingsFixture {
   "path": "agent.herdrPath",
   "section": "Advanced",
   "label": "Herdr program",
-  "help": "Empty finds herdr on PATH or in ~/.local/bin.",
+  "help": "Empty finds herdr on PATH or in ~/.local/bin, /opt/homebrew/bin or /usr/local/bin. Supported: Herdr 0.7.5 (protocol 17) or 0.9.x (protocol 22).",
   "kind": {
    "type": "path",
    "dir": false,
