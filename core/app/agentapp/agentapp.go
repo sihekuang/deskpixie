@@ -65,6 +65,11 @@ func PermissionTimeoutMs(secs uint64) agent.Millis {
 	return agent.Millis(min(max(secs, 1), limit) * 1000)
 }
 
+// UpdateQuietMs is notifications.debounceSecs in ms.
+func UpdateQuietMs(n settings.NotificationSettings) agent.Millis {
+	return agent.Millis(n.DebounceSecs) * 1000
+}
+
 // HostProblem is the tray status line when the configured session host can't be built (a
 // sticky setup disable).
 func HostProblem(err error) string {
@@ -84,7 +89,8 @@ func TerminalFailureStatus(err string) string {
 
 // Config is what Build needs. The zero test seams pick the real adapters.
 type Config struct {
-	Settings settings.AgentSettings
+	Settings      settings.AgentSettings
+	Notifications settings.NotificationSettings
 	// AppSupport is the app-data folder; Home the user's home folder.
 	AppSupport, Home string
 	Hooks            app.AgentHooks
@@ -132,7 +138,7 @@ func Factory(cfg settings.Config, appSupport string, hooks app.AgentHooks) app.A
 		log.Print("agent: no home dir; delegation unavailable")
 		return nil
 	}
-	a := Build(Config{Settings: cfg.Agent, AppSupport: appSupport, Home: home, Hooks: hooks})
+	a := Build(Config{Settings: cfg.Agent, Notifications: cfg.Notifications, AppSupport: appSupport, Home: home, Hooks: hooks})
 	if a == nil {
 		return nil
 	}
@@ -277,6 +283,7 @@ func Build(c Config) *Agent {
 			NotifyPerMinute:     int(max(s.NotifyPerMinute, 1)),
 			PermissionTimeoutMs: PermissionTimeoutMs(s.PermissionTimeoutSecs),
 			Narration:           s.Narration,
+			UpdateQuietMs:       UpdateQuietMs(c.Notifications),
 			KeepPanesOnQuit:     s.KeepPanesOnQuit,
 			Workers:             ws.Policy,
 			SpeakWorkerReports:  s.Workers.SpeakResults,

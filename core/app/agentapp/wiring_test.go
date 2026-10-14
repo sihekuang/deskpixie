@@ -557,3 +557,9 @@ func TestADoneReplyWhileClosedOpensAConversationThatSaysIt(t *testing.T) {
 		}
 	}
 }
+
+func TestTheUpdateQuietTimeIsTheDebounceSetting(t *testing.T) {
+	if UpdateQuietMs(settings.NotificationSettings{DebounceSecs: 7}) != 7_000 || UpdateQuietMs(settings.NotificationSettings{}) != 0 {
+		t.Fatal("debounceSecs is seconds, 0 stays 0")
+	}
+}

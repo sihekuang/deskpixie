@@ -334,3 +334,24 @@ func TestQuestionsAreNeverHeldByTheDebounceOrTheCap(t *testing.T) {
 		}
 	}
 }
+
+func TestTheQuietTimeIsASettingAndTheMaxHoldFollowsIt(t *testing.T) {
+	u := NewUpdatesWith(10_000)
+	u.AddReport(job(1), "w", "first", T0)
+	wantDue(t, u.Due(T0+9_999, always))
+	wantDue(t, u.Due(T0+10_000, always), DueUpdate{Job: job(1), Text: "first"})
+	// Keeps reporting every 5 s: still heard at 1.5× = 15 s.
+	u.AddReport(job(2), "w", "a", T0)
+	u.AddReport(job(2), "w", "b", T0+5_000)
+	u.AddReport(job(2), "w", "c", T0+10_000)
+	wantDue(t, u.Due(T0+15_000, always), DueUpdate{Job: job(2), Text: "c"})
+}
+
+func TestAZeroQuietTimeLetsEachUpdateOutAtOnce(t *testing.T) {
+	u := NewUpdatesWith(0)
+	u.AddReport(job(1), "w", "done", T0)
+	wantDue(t, u.Due(T0, always), DueUpdate{Job: job(1), Text: "done"})
+	if u.AddReport(job(1), "w", "done", T0+1) {
+		t.Fatal("dedupe still applies")
+	}
+}

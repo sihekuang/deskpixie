@@ -55,6 +55,9 @@ type Settings struct {
 	NotifyPerMinute     int
 	PermissionTimeoutMs Millis
 	Narration           bool
+	// UpdateQuietMs (`notifications.debounceSecs`): how long a job must be quiet before its
+	// updates are said (debounce.go).
+	UpdateQuietMs Millis
 	// KeepPanesOnQuit (`agent.keepPanesOnQuit`): leave the coordinator and workers running when
 	// the app quits.
 	KeepPanesOnQuit bool
@@ -71,7 +74,7 @@ type Settings struct {
 
 // DefaultSettings: 4 notifications a minute, 2-minute permission timeout, narration on.
 func DefaultSettings() Settings {
-	return Settings{NotifyPerMinute: 4, PermissionTimeoutMs: 120_000, Narration: true, Workers: DefaultWorkerPolicy()}
+	return Settings{NotifyPerMinute: 4, PermissionTimeoutMs: 120_000, Narration: true, UpdateQuietMs: UpdateQuietMs, Workers: DefaultWorkerPolicy()}
 }
 
 // WorkerPolicy is `agent.workers` (spec §12): whether the coordinator may start workers, how
@@ -345,7 +348,7 @@ func NewAgentController(settings Settings) *AgentController {
 		router:   NewRouter(settings.NotifyPerMinute),
 		confirms: NewConfirmations(settings.PermissionTimeoutMs),
 		narrator: NewNarrator(NarrateIntervalMs),
-		updates:  NewUpdates(),
+		updates:  NewUpdatesWith(settings.UpdateQuietMs),
 		settings: settings,
 		jobs:     NewJobTable(),
 		inbox:    NewInbox(),
