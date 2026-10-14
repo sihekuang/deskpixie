@@ -417,3 +417,11 @@ func TestNotificationFieldsAreInTheNotificationsSection(t *testing.T) {
 		}
 	}
 }
+
+func TestTheHerdrSettingsNameTheSupportedVersions(t *testing.T) {
+	for _, path := range []string{"agent.sessionHost", "agent.herdrPath"} {
+		if f := FieldByPath(path); !strings.Contains(f.Help, "Herdr 0.7.5 (protocol 17) or 0.9.x (protocol 22)") {
+			t.Fatalf("%s: %q", path, f.Help)
+		}
+	}
+}

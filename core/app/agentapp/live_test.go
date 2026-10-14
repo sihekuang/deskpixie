@@ -10,7 +10,8 @@ package agentapp_test
 // never the app's "deskpixie"), the hook server on a free loopback port (never 48217: the
 // running app holds it), temp app data and projects root. A trivial task is delegated through
 // the voice tool; the coordinator's Stop-hook reply must reach the voice loop as an injected
-// "Agent reply: …" containing "pong". Shutdown then denies anything pending, closes the panes
+// "Agent reply: Pong." (any case or punctuation); any other Agent reply (such as the failure
+// notice, which echoes the task) fails. Shutdown then denies anything pending, closes the panes
 // and deletes the MCP configs. The smoke session is stopped and deleted at the end.
 
 import (
@@ -53,6 +54,11 @@ func (v *liveVoice) all() []string {
 	return append([]string(nil), v.injected...)
 }
 
+// isPong: the reply is the word pong (any case, surrounding spaces and punctuation).
+func isPong(body string) bool {
+	return strings.ToLower(strings.Trim(body, " \t\n.!\"'")) == "pong"
+}
+
 func TestLiveDelegationEndToEnd(t *testing.T) {
 	sm := smoketest.Smoke(t)
 	tmp := smoketest.CanonicalTemp(t)
@@ -73,6 +79,8 @@ func TestLiveDelegationEndToEnd(t *testing.T) {
 	s.ProjectsRoot = filepath.Join(tmp, "projects")
 	s.Workers.Enabled = false
 	s.Warm = false
+	// The app keeps agent panes on quit by default; this smoke checks that Shutdown closes them.
+	s.KeepPanesOnQuit = false
 	haiku := "haiku"
 	s.Model = &haiku
 	if err := os.MkdirAll(s.ProjectsRoot, 0o755); err != nil {
@@ -134,27 +142,33 @@ func TestLiveDelegationEndToEnd(t *testing.T) {
 		t.Fatalf("delegate failed: %s", out.Output)
 	}
 
+	// Only the coordinator's own answer counts: an "Agent reply:" whose text is just "pong". Any
+	// other Agent reply (e.g. "The agent stopped before finishing: Reply with the word pong…"
+	// when the coordinator never started) fails at once; progress lines are ignored.
 	deadline := time.Now().Add(4 * time.Minute)
 	reply := ""
 	for reply == "" {
 		for _, text := range v.all() {
-			if strings.Contains(strings.ToLower(text), "pong") {
-				reply = text
+			body, ok := strings.CutPrefix(text, "Agent reply:")
+			if !ok {
+				continue
 			}
+			if !isPong(body) {
+				notesMu.Lock()
+				t.Fatalf("the voice loop got %q, not an Agent reply of pong; injected %q; notifications %q; tray %+v", text, v.all(), notes, a.Tray())
+			}
+			reply = text
 		}
 		if reply != "" {
 			break
 		}
 		if time.Now().After(deadline) {
 			notesMu.Lock()
-			t.Fatalf("no injected reply with pong within 4 minutes; injected %q; notifications %q; tray %+v", v.all(), notes, a.Tray())
+			t.Fatalf("no Agent reply with pong within 4 minutes; injected %q; notifications %q; tray %+v", v.all(), notes, a.Tray())
 		}
 		time.Sleep(time.Second)
 	}
 	t.Logf("ok   voice Inject: %q", reply)
-	if !strings.HasPrefix(reply, "Agent reply:") {
-		t.Errorf("injected text is not an Agent reply: %q", reply)
-	}
 
 	// Shutdown: deny pending permissions, close the panes, delete the MCP configs.
 	start := time.Now()

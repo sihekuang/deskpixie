@@ -358,7 +358,9 @@ const (
 type HostError struct {
 	Kind           HostErrorKind
 	Client, Server uint32 // HostVersionMismatch
-	Detail         string // NoAgent name, Timeout what, ExitedAtStart kind, Other text
+	// NoAgent name, Timeout what, ExitedAtStart kind, Other text; for VersionMismatch, what the
+	// user has and which versions are supported ("" if the host doesn't say).
+	Detail string
 }
 
 func (e HostError) Error() string {
@@ -366,7 +368,11 @@ func (e HostError) Error() string {
 	case HostNotFound:
 		return "herdr not found"
 	case HostVersionMismatch:
-		return fmt.Sprintf("herdr version mismatch (client protocol %d, server %d)", e.Client, e.Server)
+		msg := fmt.Sprintf("herdr version mismatch (client protocol %d, server %d)", e.Client, e.Server)
+		if e.Detail != "" {
+			msg += ": " + e.Detail
+		}
+		return msg
 	case HostNoAgent:
 		return "no agent named " + e.Detail
 	case HostTimeout:

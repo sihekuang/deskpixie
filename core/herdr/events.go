@@ -2,7 +2,7 @@ package herdr
 
 // Herdr's event stream → agent.PaneEvents for named agents, without replayed duplicates.
 //
-// Captured from Herdr 0.7.5: right after subscription_started the server replays its journal
+// Captured from Herdr 0.7.5 (0.9.x's events are a superset; SupportedVersions): right after subscription_started the server replays its journal
 // of global pane events (pane_created for panes that already exist, and closes from long ago:
 // command-center #57/#69/#70). Status changes arrive only for panes subscribed by id, so the
 // stream is re-subscribed whenever an agent starts.

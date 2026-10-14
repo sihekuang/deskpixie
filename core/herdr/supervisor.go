@@ -19,11 +19,16 @@ import (
 	"time"
 
 	"github.com/sihekuang/deskpixie/core/agent"
+	"github.com/sihekuang/deskpixie/core/herdr/compat"
 	"github.com/sihekuang/deskpixie/core/voice"
 )
 
-// Protocol is the socket protocol this adapter speaks (Herdr 0.7.5).
-const Protocol uint32 = 17
+// SupportedVersions is the Herdr versions this adapter speaks, as the user reads them:
+// Herdr 0.7.5 (protocol 17) or 0.9.x (protocol 22). The table is compat.Supported.
+const SupportedVersions = compat.SupportedVersions
+
+// SupportedProtocol: the adapter speaks socket protocol p (one of compat.Supported).
+func SupportedProtocol(p uint32) bool { return compat.IsSupported(p) }
 
 // Supervisor timing (verbatim from Rust): status poll while a server starts, and how long it
 // may take.
@@ -150,11 +155,14 @@ func FindHerdr(configured, pathVar, home string, exists func(string) bool) (stri
 	return "", false
 }
 
-// ServerStatus is `herdr status --json`. Nil pointers are absent (Rust's None).
+// ServerStatus is `herdr status --json`. Nil pointers are absent (Rust's None); the versions
+// are "" when absent.
 type ServerStatus struct {
 	Running        bool
 	ClientProtocol uint32
+	ClientVersion  string
 	ServerProtocol *uint32
+	ServerVersion  string
 	Compatible     *bool
 	Socket         string
 	Session        *string
@@ -172,7 +180,9 @@ func asU32(v any) (uint32, bool) {
 	return uint32(i), true
 }
 
-// ParseStatus reads `herdr status --json` (captured from 0.7.5).
+// ParseStatus reads `herdr status --json` (captured from 0.7.5 and 0.9.4: both carry
+// client.{version,protocol} and server.{running,version,protocol,compatible,socket,session};
+// 0.9.4 adds endpoint_compatible, restart_needed and more, which are not needed).
 func ParseStatus(text string) (ServerStatus, error) {
 	dec := json.NewDecoder(strings.NewReader(text))
 	dec.UseNumber()
@@ -188,7 +198,9 @@ func ParseStatus(text string) (ServerStatus, error) {
 	s.Running, _ = server["running"].(bool)
 	if client, ok := v["client"].(map[string]any); ok {
 		s.ClientProtocol, _ = asU32(client["protocol"])
+		s.ClientVersion, _ = client["version"].(string)
 	}
+	s.ServerVersion, _ = server["version"].(string)
 	if p, ok := asU32(server["protocol"]); ok {
 		s.ServerProtocol = &p
 	}
@@ -228,6 +240,8 @@ type Supervisor struct {
 	integrationOnce       sync.Once
 	integrationMissing    atomic.Bool
 	unknownProtocolLogged atomic.Bool
+	// protocol is the one the CLI and the running server agreed on (0 until then).
+	protocol atomic.Uint32
 }
 
 // NewSupervisor: env is ServerEnv(...); its HERDR_SESSION names the session (empty or
@@ -254,6 +268,11 @@ func (s *Supervisor) WithTiming(poll, startTimeout time.Duration) *Supervisor {
 }
 
 func (s *Supervisor) Bin() string { return s.bin }
+
+// Protocol is the socket protocol the CLI and the running server last agreed on (one of
+// compat.Supported), 0 before Ensure or Running found one. The host keys version-specific
+// behaviour on it.
+func (s *Supervisor) Protocol() uint32 { return s.protocol.Load() }
 
 // IntegrationMissing is true after Ensure found the Claude integration missing or outdated.
 // The app tells the user to run `herdr integration install claude`; we never do (it writes to
@@ -319,44 +338,78 @@ func (s *Supervisor) Status() (ServerStatus, error) {
 	return st, nil
 }
 
-func versionMismatch(server uint32) error {
-	return agent.HostError{Kind: agent.HostVersionMismatch, Client: Protocol, Server: server}
+// release is how a status names a Herdr: "0.9.4 (protocol 22)", or "protocol 22" without a
+// version.
+func release(version string, protocol uint32) string {
+	if version == "" {
+		return fmt.Sprintf("protocol %d", protocol)
+	}
+	return fmt.Sprintf("%s (protocol %d)", version, protocol)
 }
 
-// ready: running with our protocol? A running server that doesn't say whether it is
-// compatible is treated as running (a second server must never be started over it).
-func (s *Supervisor) ready(st ServerStatus) (bool, error) {
-	if !st.Running {
-		return false, nil
-	}
+// versionMismatch: the CLI and the server don't agree on a protocol this adapter speaks. Client
+// and Server are the protocols they report (Server 0 when there is none); Detail says what the
+// user has and which versions are supported, for the status line.
+func (s *Supervisor) versionMismatch(st ServerStatus) error {
 	server := uint32(0)
 	if st.ServerProtocol != nil {
 		server = *st.ServerProtocol
 	}
+	var detail string
+	switch {
+	case !SupportedProtocol(st.ClientProtocol):
+		detail = "you have herdr " + release(st.ClientVersion, st.ClientProtocol)
+	case SupportedProtocol(server):
+		// Both supported but different: the session still runs the server of another version
+		// (herdr was updated). Restarting it closes its panes, so that is the user's call.
+		detail = fmt.Sprintf("herdr is %s but session %s still runs %s: restart it with `herdr session stop %s`",
+			release(st.ClientVersion, st.ClientProtocol), s.session, release(st.ServerVersion, server), s.session)
+	default:
+		detail = fmt.Sprintf("herdr is %s but its server is %s",
+			release(st.ClientVersion, st.ClientProtocol), release(st.ServerVersion, server))
+	}
+	return agent.HostError{Kind: agent.HostVersionMismatch, Client: st.ClientProtocol, Server: server,
+		Detail: detail + "; DeskPixie supports " + SupportedVersions}
+}
+
+// ready: running with a protocol the CLI and the server agree on and this adapter speaks? (The
+// CLI's own protocol is checked first, by agreed.) A running server that doesn't say which
+// protocol it speaks is treated as the CLI's (a second server must never be started over it).
+func (s *Supervisor) ready(st ServerStatus) (bool, error) {
+	if !st.Running {
+		return false, nil
+	}
 	switch {
 	case st.Compatible != nil && !*st.Compatible:
-		return false, versionMismatch(server)
-	case st.Compatible != nil:
-		return true, nil
-	case st.ServerProtocol != nil && *st.ServerProtocol != Protocol:
-		return false, versionMismatch(server)
+		return false, s.versionMismatch(st)
+	case st.ServerProtocol != nil && *st.ServerProtocol != st.ClientProtocol:
+		return false, s.versionMismatch(st)
 	}
 	if st.ServerProtocol == nil && !s.unknownProtocolLogged.Swap(true) {
-		log.Printf("agent: herdr is running but reports no protocol; assuming compatible")
+		log.Printf("agent: herdr is running but reports no protocol; assuming the CLI's (%d)", st.ClientProtocol)
 	}
+	s.protocol.Store(st.ClientProtocol)
 	return true, nil
 }
 
-// Running is the socket of this session's server if it is running and speaks our protocol
-// (ok false when it isn't running). Never starts one (for calls like closing a pane, where no
-// server means nothing to do).
+// agreed: the CLI speaks a supported protocol (whether or not a server runs).
+func (s *Supervisor) agreed(st ServerStatus) error {
+	if !SupportedProtocol(st.ClientProtocol) {
+		return s.versionMismatch(st)
+	}
+	return nil
+}
+
+// Running is the socket of this session's server if it is running and speaks a supported
+// protocol its CLI agrees with (ok false when it isn't running). Never starts one (for calls
+// like closing a pane, where no server means nothing to do).
 func (s *Supervisor) Running(ctx context.Context) (string, bool, error) {
 	st, e := s.statusCall()
 	if e != nil {
 		return "", false, e.err
 	}
-	if st.ClientProtocol != Protocol {
-		return "", false, versionMismatch(st.ClientProtocol)
+	if err := s.agreed(st); err != nil {
+		return "", false, err
 	}
 	ok, err := s.ready(st)
 	if err != nil || !ok {
@@ -365,14 +418,15 @@ func (s *Supervisor) Running(ctx context.Context) (string, bool, error) {
 	return st.Socket, true, nil
 }
 
-// Ensure: the server for this session is running and speaks our protocol; returns its socket.
+// Ensure: the server for this session is running and speaks a supported protocol its CLI
+// agrees with; returns its socket.
 func (s *Supervisor) Ensure(ctx context.Context) (string, error) {
 	first, e := s.statusCall()
 	if e != nil {
 		return "", e.err
 	}
-	if first.ClientProtocol != Protocol {
-		return "", versionMismatch(first.ClientProtocol)
+	if err := s.agreed(first); err != nil {
+		return "", err
 	}
 	ok, err := s.ready(first)
 	if err != nil {

@@ -781,7 +781,12 @@ func (c *AgentController) coordinatorFailed(err HostError, now Millis, fx *[]Eff
 	case HostNotFound:
 		c.disable("Agent: herdr not found", now, fx)
 	case HostVersionMismatch:
-		c.disable("Agent: herdr version mismatch (update herdr)", now, fx)
+		if err.Detail == "" {
+			c.disable("Agent: herdr version mismatch (update herdr)", now, fx)
+		} else {
+			// What the user has and which versions are supported (herdr.SupportedVersions).
+			c.disable("Agent: herdr version mismatch: "+err.Detail, now, fx)
+		}
 	case HostGaveUp:
 		c.disable("Agent: stopped after repeated crashes", now, fx)
 	default:

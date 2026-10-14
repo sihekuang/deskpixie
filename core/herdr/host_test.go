@@ -35,8 +35,7 @@ func newTestHost(t *testing.T, server *herdrtest.FakeHerdr) *Host {
 func hostWithIntegration(t *testing.T, server *herdrtest.FakeHerdr, integration string) *Host {
 	t.Helper()
 	runner := newFakeRunner()
-	status := fmt.Sprintf(`{"client":{"protocol":17},"server":{"running":true,"protocol":17,"compatible":true,"socket":%q}}`, server.Socket)
-	runner.answer(hostBin+" status --json", runOK(status))
+	runner.answer(hostBin+" status --json", runOK(server.StatusJSON(server.Protocol())))
 	runner.answer(hostBin+" integration status", runOK(integration))
 	sup, err := NewSupervisor(hostBin, pairs("HERDR_SESSION", hostSession), runner)
 	if err != nil {
@@ -942,47 +941,94 @@ func TestReplacingALiveAgentOpensTheNewTabFirstAndReportsNoExit(t *testing.T) {
 }
 
 // claude --continue with nothing to continue exits during launch: detected, then gone. The
-// ready poll fails at once instead of waiting out the start timeout.
+// ready poll fails at once instead of waiting out the start timeout. Herdr 0.7.5 keeps the
+// pane's name without an agent; 0.9.x drops the name too (agent.get: agent_not_found).
 func TestAnAgentThatExitsWhileStartingFailsFast(t *testing.T) {
-	t.Parallel()
-	server := herdrtest.Start(t)
-	server.HoldPending()
-	h := newTestHost(t, server)
-	h.startTimeout = 10 * time.Second
-	began := time.Now()
-	res := startAsync(h, bg, spec("coordinator"))
-	// Detected after 50 ms, still launch_pending; then the process exits.
-	time.Sleep(300 * time.Millisecond)
-	server.Exit("w1:p1")
-	r := <-res
-	if !reflect.DeepEqual(r.err, hostErr(agent.HostExitedAtStart, "claude")) {
-		t.Fatalf("%#v", r.err)
-	}
-	if time.Since(began) >= 3*time.Second {
-		t.Fatal(time.Since(began))
-	}
-	if server.PaneCount() != 0 {
-		t.Fatal("its tab is closed")
+	for _, p := range []uint32{17, 22} {
+		t.Run(fmt.Sprint(p), func(t *testing.T) {
+			t.Parallel()
+			server := herdrtest.StartProtocol(t, p)
+			server.HoldPending()
+			h := newTestHost(t, server)
+			h.startTimeout = 10 * time.Second
+			began := time.Now()
+			res := startAsync(h, bg, spec("coordinator"))
+			// Detected after 50 ms, still launch_pending; then the process exits.
+			time.Sleep(300 * time.Millisecond)
+			server.Exit("w1:p1")
+			r := <-res
+			if !reflect.DeepEqual(r.err, hostErr(agent.HostExitedAtStart, "claude")) {
+				t.Fatalf("%#v", r.err)
+			}
+			if time.Since(began) >= 3*time.Second {
+				t.Fatal(time.Since(began))
+			}
+			if server.PaneCount() != 0 {
+				t.Fatal("its tab is closed")
+			}
+		})
 	}
 }
 
 // The same when the launch ends without the agent ever being detected (back at the shell).
 func TestALaunchThatEndsAtTheShellFailsFast(t *testing.T) {
-	t.Parallel()
-	server := herdrtest.Start(t)
-	server.ManualReady()
-	h := newTestHost(t, server)
-	h.startTimeout = 10 * time.Second
-	began := time.Now()
-	res := startAsync(h, bg, spec("coordinator"))
-	time.Sleep(300 * time.Millisecond)
-	server.Exit("w1:p1")
-	r := <-res
-	if !reflect.DeepEqual(r.err, hostErr(agent.HostExitedAtStart, "claude")) {
-		t.Fatalf("%#v", r.err)
+	for _, p := range []uint32{17, 22} {
+		t.Run(fmt.Sprint(p), func(t *testing.T) {
+			t.Parallel()
+			server := herdrtest.StartProtocol(t, p)
+			server.ManualReady()
+			h := newTestHost(t, server)
+			h.startTimeout = 10 * time.Second
+			began := time.Now()
+			res := startAsync(h, bg, spec("coordinator"))
+			time.Sleep(300 * time.Millisecond)
+			server.Exit("w1:p1")
+			r := <-res
+			if !reflect.DeepEqual(r.err, hostErr(agent.HostExitedAtStart, "claude")) {
+				t.Fatalf("%#v", r.err)
+			}
+			if time.Since(began) >= 3*time.Second {
+				t.Fatal(time.Since(began))
+			}
+		})
 	}
-	if time.Since(began) >= 3*time.Second {
-		t.Fatal(time.Since(began))
+}
+
+// Herdr 0.9.x keeps an agent launch_pending while it is blocked on a dialog (Claude Code's
+// folder trust), where 0.7.5 cleared launch_pending first: on 22 a detected, blocked agent
+// counts as started (its screen can be read and answered); on 17 the start still waits.
+func TestAnAgentBlockedOnADialogWhileLaunchingIsStartedOn22(t *testing.T) {
+	for _, c := range []struct {
+		p       uint32
+		started bool
+	}{{17, false}, {22, true}} {
+		t.Run(fmt.Sprint(c.p), func(t *testing.T) {
+			t.Parallel()
+			server := herdrtest.StartProtocol(t, c.p)
+			server.ManualReady()
+			server.HoldPending()
+			h := newTestHost(t, server)
+			h.startTimeout = 1500 * time.Millisecond
+			res := startAsync(h, bg, spec("coordinator"))
+			time.Sleep(200 * time.Millisecond)
+			server.BlockOnDialog("w1:p1")
+			r := <-res
+			if !c.started {
+				if !agent.IsHostError(r.err, agent.HostTimeout) {
+					t.Fatalf("%#v", r.err)
+				}
+				return
+			}
+			if r.err != nil || r.info.Status != agent.PaneBlocked {
+				t.Fatalf("%+v %#v", r.info, r.err)
+			}
+			if screen, err := h.Read(bg, "coordinator", 5); err != nil || screen == "" {
+				t.Fatalf("%q %v", screen, err)
+			}
+			if err := h.SendKeys(bg, "coordinator", []string{"Enter"}); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 
@@ -1239,3 +1285,106 @@ func TestAPaneBusyPastTheLimitFailsWithoutLeakingItsTab(t *testing.T) {
 
 // The Go host satisfies the agent seam.
 var _ agent.SessionHost = (*Host)(nil)
+
+// hostOn is a host whose CLI reports cli and whose fake server speaks the server's protocol
+// (status in that Herdr version's captured shape).
+func hostOn(t *testing.T, server *herdrtest.FakeHerdr, cli uint32) (*Host, *Supervisor) {
+	t.Helper()
+	runner := newFakeRunner()
+	runner.answer(hostBin+" status --json", runOK(server.StatusJSON(cli)))
+	runner.answer(hostBin+" integration status", runOK("claude: current (v7) (/x)"))
+	sup, err := NewSupervisor(hostBin, pairs("HERDR_SESSION", hostSession), runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := NewHost(hostSession, "/Users/x", sup.WithTiming(10*time.Millisecond, 100*time.Millisecond))
+	t.Cleanup(h.Shutdown)
+	return h, sup
+}
+
+// The adapter runs the SessionHost conformance suite, a read and a close against a fake server
+// of each supported Herdr version, and negotiates that version's protocol.
+func TestTheHostWorksOnEverySupportedProtocol(t *testing.T) {
+	for _, p := range []uint32{17, 22} {
+		t.Run(fmt.Sprint(p), func(t *testing.T) {
+			t.Parallel()
+			server := herdrtest.StartProtocol(t, p)
+			h, sup := hostOn(t, server, p)
+			steps, err := runConformance(h, spec("probe"), 3*time.Second, 300*time.Millisecond)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(steps) != 7 {
+				t.Fatal(steps)
+			}
+			if sup.Protocol() != p {
+				t.Fatalf("negotiated %d, want %d", sup.Protocol(), p)
+			}
+			mustStart(t, h, "coordinator")
+			if err := h.Prompt(bg, "coordinator", "hi"); err != nil {
+				t.Fatal(err)
+			}
+			if screen, err := h.Read(bg, "coordinator", 5); err != nil || !strings.Contains(screen, "❯ hi") {
+				t.Fatalf("%q %v", screen, err)
+			}
+			if err := h.Close(bg, "coordinator"); err != nil {
+				t.Fatal(err)
+			}
+			if server.PaneCount() != 0 {
+				t.Fatal(server.PaneCount())
+			}
+		})
+	}
+}
+
+// A CLI and server of different supported versions (or an unknown one) never get a workspace
+// or a tab: every call is a version mismatch naming the supported versions.
+func TestTheHostRefusesMismatchedVersions(t *testing.T) {
+	for _, c := range []struct{ cli, server uint32 }{{17, 22}, {22, 17}, {99, 99}} {
+		t.Run(fmt.Sprintf("cli%d-server%d", c.cli, c.server), func(t *testing.T) {
+			t.Parallel()
+			server := herdrtest.StartProtocol(t, c.server)
+			h, sup := hostOn(t, server, c.cli)
+			for _, err := range []error{h.EnsureSession(bg), func() error { _, err := h.StartAgent(bg, spec("coordinator")); return err }()} {
+				var he agent.HostError
+				if !errors.As(err, &he) || he.Kind != agent.HostVersionMismatch || he.Client != c.cli || he.Server != c.server {
+					t.Fatalf("%#v", err)
+				}
+				if !strings.Contains(err.Error(), SupportedVersions) {
+					t.Fatalf("%q does not name the supported versions", err)
+				}
+			}
+			if sup.Protocol() != 0 || len(server.Requests("workspace.create")) != 0 || server.PaneCount() != 0 {
+				t.Fatal("nothing may be done on a mismatched server")
+			}
+		})
+	}
+}
+
+// Herdr 0.9.x refuses a whole events.subscribe naming a pane that no longer exists
+// (pane_not_found); 0.7.5 accepted it. A pane gone without an event must not stop every
+// status event: it is reported exited once and the stream resubscribes without it.
+func TestASubscriptionRefusedForAGonePaneRecoversOnEveryProtocol(t *testing.T) {
+	for _, p := range []uint32{17, 22} {
+		t.Run(fmt.Sprint(p), func(t *testing.T) {
+			t.Parallel()
+			server := herdrtest.StartProtocol(t, p)
+			h := newTestHost(t, server)
+			events := h.Subscribe()
+			mustStart(t, h, "coordinator")
+			gone := mustStart(t, h, "second")
+			collect(events, 300*time.Millisecond)
+			server.Vanish(gone.Pane)
+			server.HangUp()
+			got := collect(events, BackoffMin+1600*time.Millisecond)
+			if count(got, exitedEv("second")) != 1 {
+				t.Fatalf("%+v", got)
+			}
+			if err := h.Prompt(bg, "coordinator", "hi"); err != nil {
+				t.Fatal(err)
+			}
+			got = collect(events, 600*time.Millisecond)
+			wantEvents(t, got, []agent.PaneEvent{st("coordinator", agent.PaneWorking), st("coordinator", agent.PaneIdle)}, "live after the refusal")
+		})
+	}
+}

@@ -484,6 +484,7 @@ func (h *Host) closeDefaultTab(ctx context.Context, client *Client, workspace st
 // (e.g. `claude --continue` with nothing to continue), so it fails now rather than at the
 // deadline.
 func (h *Host) pollReady(ctx context.Context, client *Client, spec agent.AgentSpec, pane string, deadline time.Time) (agent.AgentInfo, error) {
+	behavior := BehaviorFor(h.supervisor.Protocol())
 	launched := false
 	for {
 		a, err := client.GetAgent(ctx, spec.Name)
@@ -499,8 +500,8 @@ func (h *Host) pollReady(ctx context.Context, client *Client, spec agent.AgentSp
 				launched = launched || a.LaunchPending || a.Agent != ""
 			}
 			// Not while launch_pending: Herdr shows the agent idle a few seconds before it
-			// accepts prompts.
-			if a.Ready() {
+			// accepts prompts (but on 0.9.x a dialog keeps it launch_pending: Behavior).
+			if behavior.started(a) {
 				info, ok := a.Info()
 				if !ok {
 					return agent.AgentInfo{}, agent.HostError{Kind: agent.HostOther, Detail: "agent lost its name"}
@@ -508,6 +509,10 @@ func (h *Host) pollReady(ctx context.Context, client *Client, spec agent.AgentSp
 				return info, nil
 			}
 		case agent.IsHostError(err, agent.HostNoAgent):
+			if launched && behavior.ExitDropsName {
+				// Seen launching, now nameless: the process exited (0.9.x drops the name).
+				return agent.AgentInfo{}, agent.HostError{Kind: agent.HostExitedAtStart, Detail: spec.Kind.String()}
+			}
 		default:
 			if ctx.Err() != nil {
 				return agent.AgentInfo{}, ctx.Err()
@@ -770,6 +775,10 @@ func (h *Host) readStream(ctx context.Context, stream *eventStream, client *Clie
 			continue
 		}
 		if !started {
+			if h.dropGonePane(line) {
+				// Resubscribe at once without it.
+				return true
+			}
 			if len(line) > 200 {
 				line = line[:200]
 			}
@@ -789,6 +798,37 @@ func (h *Host) readStream(ctx context.Context, stream *eventStream, client *Clie
 			}
 		}
 	}
+}
+
+// dropGonePane: Herdr 0.9.x refuses a whole subscription that names a pane which no longer
+// exists ("pane_not_found", "pane <id> not found"); 0.7.5 accepted it. If refusal is that, for
+// a pane we track, the pane is gone: it is reported exited (once) and forgotten, so the next
+// subscribe leaves it out. False for any other refusal.
+func (h *Host) dropGonePane(refusal string) bool {
+	_, err := ParseResponse(refusal)
+	var e RPCError
+	if !errors.As(err, &e) || e.Code != "pane_not_found" {
+		return false
+	}
+	pane, ok := strings.CutPrefix(e.Message, "pane ")
+	if pane, ok = strings.CutSuffix(pane, " not found"); !ok {
+		return false
+	}
+	var ev agent.PaneEvent
+	var known, send bool
+	h.withAgents(func(a *Agents) {
+		if _, known = a.names[pane]; known {
+			ev, send = a.live(RawEvent{Kind: RawClosed, Pane: pane})
+		}
+	})
+	if !known {
+		return false
+	}
+	log.Printf("agent: herdr events: a tracked pane is gone; resubscribing without it")
+	if send {
+		h.broadcast(ev)
+	}
+	return true
 }
 
 type waitOutcome int

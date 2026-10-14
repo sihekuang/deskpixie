@@ -394,6 +394,11 @@ func TestHerdrMissingOrMismatchedTurnsDelegationOff(t *testing.T) {
 	c = ctl()
 	c.Step(CoordinatorFailedInput(HostError{Kind: HostVersionMismatch, Client: 17, Server: 18}), T0)
 	wantDisabled(t, c, "Agent: herdr version mismatch (update herdr)")
+	// The host says what the user has and which versions are supported: the status line shows it.
+	c = ctl()
+	c.Step(CoordinatorFailedInput(HostError{Kind: HostVersionMismatch, Client: 20, Server: 20,
+		Detail: "you have herdr 0.8.0 (protocol 20); DeskPixie supports Herdr 0.7.5 (protocol 17) or 0.9.x (protocol 22)"}), T0)
+	wantDisabled(t, c, "Agent: herdr version mismatch: you have herdr 0.8.0 (protocol 20); DeskPixie supports Herdr 0.7.5 (protocol 17) or 0.9.x (protocol 22)")
 }
 
 func TestRestartTurnsDelegationBackOn(t *testing.T) {

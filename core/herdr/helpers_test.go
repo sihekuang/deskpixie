@@ -15,7 +15,8 @@ import (
 	"github.com/sihekuang/deskpixie/core/agent"
 )
 
-// fixture reads a captured Herdr 0.7.5 shape from testdata (Rust: tests/fixtures).
+// fixture reads a captured Herdr shape from testdata (Rust: tests/fixtures): 0.7.5 (protocol
+// 17) unless the name says _22 (0.9.4).
 func fixture(t testing.TB, name string) string {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join("testdata", name))

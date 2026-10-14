@@ -1,4 +1,5 @@
-// Package herdr is agent.SessionHost over Herdr 0.7.5's Unix-socket API (protocol 17), plus
+// Package herdr is agent.SessionHost over Herdr's Unix-socket API (SupportedVersions: Herdr
+// 0.7.5, protocol 17, or 0.9.x, protocol 22), plus
 // the real agent.CommandRunner (port of ai-mascot crates/session-herdr). Mirrors
 // command-center's daemon/src/herdr (read-only reference).
 package herdr
