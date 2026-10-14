@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -668,5 +669,71 @@ func TestFindTmuxLooksInHomebrewAndUsrLocal(t *testing.T) {
 	}
 	if _, ok := FindTmux("/nope/tmux", "", exists); ok {
 		t.Fatal("a configured path that isn't there is not found")
+	}
+}
+
+func TestArgumentsEndingInASemicolonOrHoldingFormatsReachTmuxUnchanged(t *testing.T) {
+	for in, want := range map[string]string{
+		"plain": "plain", "a;b": "a;b", "end;": `end\;`, ";": `\;`, `x\;`: `x\\;`, "x;;": `x;\;`, "#H": "#H",
+	} {
+		if got := literalArg(in); got != want {
+			t.Errorf("literalArg(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if got := formatArg("PR #67 #{pane_id};"); got != `PR ##67 ##{pane_id}\;` {
+		t.Fatal(got)
+	}
+	r := newRig(t)
+	spec := claudeSpec("coordinator")
+	spec.Cwd = "/p/odd #H dir"
+	spec.Args = append(spec.Args, "--append-system-prompt", "be brief;")
+	spec.Env = append(spec.Env, agent.EnvVar{Key: "X", Value: "v;"})
+	spec.Tab = agent.TabLabel{Label: "fix #12;", Title: "title;"}
+	if _, err := r.h.StartAgent(bg, spec); err != nil {
+		t.Fatal(err)
+	}
+	p, _ := r.srv.PaneNamed("coordinator")
+	if p.Cwd != spec.Cwd || p.Argv[len(p.Argv)-1] != "be brief;" || p.Env[len(p.Env)-1] != "X=v;" ||
+		p.Title != "fix #12;" || p.Options["@deskpixie_label"] != "fix #12;" || p.Options["@deskpixie_title"] != "title;" {
+		t.Fatalf("%+v", p)
+	}
+	if err := r.h.Prompt(bg, "coordinator", "do it;"); err != nil {
+		t.Fatal(err)
+	}
+	p, _ = r.srv.PaneNamed("coordinator")
+	if !slices.Equal(p.Keys, []string{"-l:do it;", "Enter"}) {
+		t.Fatalf("%q", p.Keys)
+	}
+}
+
+func TestAPromptOfSeveralLinesIsPastedBracketedThenSubmitted(t *testing.T) {
+	r := newRig(t)
+	if _, err := r.h.StartAgent(bg, claudeSpec("coordinator")); err != nil {
+		t.Fatal(err)
+	}
+	brief := "New request from the user: hi;\r\n[ref job_1];"
+	if err := r.h.Prompt(bg, "coordinator", brief); err != nil {
+		t.Fatal(err)
+	}
+	p, _ := r.srv.PaneNamed("coordinator")
+	if !slices.Equal(p.Keys, []string{"bracketed-paste:New request from the user: hi;\n[ref job_1];", "Enter"}) {
+		t.Fatalf("%q", p.Keys)
+	}
+	if r.srv.Buffers() != 0 {
+		t.Fatal("the paste buffer was left behind")
+	}
+	// A long brief goes into the buffer in pieces.
+	long := strings.Repeat("line é\n", sendChunk)
+	before := len(r.run.CallsOf("set-buffer"))
+	if err := r.h.Prompt(bg, "coordinator", long); err != nil {
+		t.Fatal(err)
+	}
+	p, _ = r.srv.PaneNamed("coordinator")
+	if p.Keys[2] != "bracketed-paste:"+long || p.Keys[3] != "Enter" {
+		t.Fatal(len(p.Keys[2]))
+	}
+	sets := r.run.CallsOf("set-buffer")[before:]
+	if len(sets) < 3 || slices.Contains(sets[0], "-a") || !slices.Contains(sets[1], "-a") {
+		t.Fatalf("%d set-buffer calls", len(sets))
 	}
 }

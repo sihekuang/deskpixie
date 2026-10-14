@@ -64,7 +64,9 @@ type FakePane struct {
 	Options map[string]string
 	Env     []string
 	Argv    []string
-	Keys    []string // send-keys, one entry per key or literal text ("-l:" prefix)
+	// Keys: send-keys, one entry per key or literal text ("-l:" prefix), and pastes
+	// ("bracketed-paste:" or "paste:" prefix).
+	Keys []string
 }
 
 // FakeServer is a small in-memory tmux server speaking the commands Host uses, for
@@ -79,6 +81,7 @@ type FakeServer struct {
 	next     int
 	selected string
 	options  map[string]string
+	buffers  map[string]string
 	// OnStart, if set, sets a new pane's first screen from its argv (e.g. a ready prompt).
 	OnStart func(p *FakePane)
 	// OnKeys, if set, is told about keys sent to a live pane (after the server's lock is
@@ -86,7 +89,16 @@ type FakeServer struct {
 	OnKeys func(s *FakeServer, pane string, keys []string)
 }
 
-func NewFakeServer() *FakeServer { return &FakeServer{options: map[string]string{}} }
+func NewFakeServer() *FakeServer {
+	return &FakeServer{options: map[string]string{}, buffers: map[string]string{}}
+}
+
+// Buffers is how many paste buffers exist.
+func (s *FakeServer) Buffers() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.buffers)
+}
 
 // Runner is a FakeRunner backed by s.
 func (s *FakeServer) Runner() *FakeRunner { return &FakeRunner{Handle: s.Handle} }
@@ -222,8 +234,17 @@ func (s *FakeServer) Handle(args []string) (Output, error) {
 		stdout.WriteString(out.Stdout)
 		return out, err
 	}
+	// tmux's own reading of its argv: an argument ending in ";" ends the command (the ";" is
+	// dropped), except that a final "\;" stands for ";".
 	for _, a := range args[2:] {
-		if a == ";" {
+		if body, end := strings.CutSuffix(a, ";"); end {
+			if lit, escaped := strings.CutSuffix(body, `\`); escaped {
+				cmd = append(cmd, lit+";")
+				continue
+			}
+			if body != "" {
+				cmd = append(cmd, body)
+			}
 			if out, err := run(); err != nil || out.Code != 0 {
 				return out, err
 			}
@@ -331,7 +352,7 @@ func (s *FakeServer) one(cmd []string) (Output, error) {
 			return fail(noServer)
 		}
 		f, argv := flags(args, "tncFe")
-		p := s.newPane(first(f["n"]), first(f["c"]), f["e"], argv)
+		p := s.newPane(first(f["n"]), unformat(first(f["c"])), f["e"], argv)
 		s.panes = append(s.panes, p)
 		if s.OnStart != nil {
 			s.OnStart(p)
@@ -402,6 +423,50 @@ func (s *FakeServer) one(cmd []string) (Output, error) {
 			after = func() { hook(s, id, sent) }
 		}
 		return ok("")
+	case "set-buffer":
+		if !s.running {
+			return fail(noServer)
+		}
+		f, rest := flags(args, "bt")
+		if len(rest) != 1 {
+			return fail("no data specified")
+		}
+		b := first(f["b"])
+		if _, add := f["a"]; add {
+			s.buffers[b] += rest[0]
+		} else {
+			s.buffers[b] = rest[0]
+		}
+		return ok("")
+	case "paste-buffer":
+		if !s.running {
+			return fail(noServer)
+		}
+		f, _ := flags(args, "bts")
+		p := s.pane(first(f["t"]))
+		if p == nil {
+			return fail("can't find pane: " + first(f["t"]))
+		}
+		text, found := s.buffers[first(f["b"])]
+		if !found {
+			return fail("no buffer " + first(f["b"]))
+		}
+		if _, del := f["d"]; del {
+			delete(s.buffers, first(f["b"]))
+		}
+		if p.Dead {
+			return ok("")
+		}
+		prefix := "paste:"
+		if _, bracketed := f["p"]; bracketed {
+			prefix = "bracketed-paste:"
+		}
+		sent := []string{prefix + text}
+		p.Keys = append(p.Keys, sent...)
+		if hook, id := s.OnKeys, p.ID; hook != nil {
+			after = func() { hook(s, id, sent) }
+		}
+		return ok("")
 	case "kill-pane":
 		if !s.running {
 			return fail(noServer)
@@ -434,11 +499,14 @@ func (s *FakeServer) one(cmd []string) (Output, error) {
 		if p == nil {
 			return fail("can't find pane: " + first(f["t"]))
 		}
-		p.Title = first(f["T"])
+		p.Title = unformat(first(f["T"]))
 		return ok("")
 	}
 	return fail("unknown command: " + name)
 }
+
+// unformat is a format argument without formats: "##" is "#" (Host never sends others).
+func unformat(s string) string { return strings.ReplaceAll(s, "##", "#") }
 
 func first(v []string) string {
 	if len(v) == 0 {

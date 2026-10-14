@@ -29,6 +29,8 @@ const (
 	ScreenPoll = 500 * time.Millisecond
 	// ExitPoll is between two list-panes looking for exited agents.
 	ExitPoll = time.Second
+	// PasteSettle is between a pasted prompt and its Enter.
+	PasteSettle = 150 * time.Millisecond
 	// sendChunk is the most text one send-keys carries (tmux's command messages are bounded).
 	sendChunk = 2048
 )
@@ -93,6 +95,7 @@ type Host struct {
 	shutdown sync.Once
 
 	startTimeout, startPoll, screenPoll, exitPoll time.Duration
+	pasteSettle                                   time.Duration
 }
 
 var (
@@ -107,7 +110,8 @@ var (
 func NewHost(bin, session, home string, run Runner) *Host {
 	ctx, cancel := context.WithCancel(context.Background())
 	h := &Host{bin: bin, session: session, home: home, run: run, ctx: ctx, cancel: cancel, done: make(chan struct{}),
-		startTimeout: StartTimeout, startPoll: StartPoll, screenPoll: ScreenPoll, exitPoll: ExitPoll}
+		startTimeout: StartTimeout, startPoll: StartPoll, screenPoll: ScreenPoll, exitPoll: ExitPoll,
+		pasteSettle: PasteSettle}
 	h.det = NewDetector(h.broadcast)
 	return h
 }
@@ -324,13 +328,15 @@ func (h *Host) start(ctx context.Context, spec agent.AgentSpec, replace bool) (a
 	// The agent runs as argv (no shell, so nothing to quote), in its folder, with its env.
 	args := []string{"new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "=" + h.session + ":", "-n", spec.Name}
 	if spec.Cwd != "" {
-		args = append(args, "-c", spec.Cwd)
+		args = append(args, "-c", formatArg(spec.Cwd))
 	}
 	for _, e := range spec.Env {
-		args = append(args, "-e", e.Key+"="+e.Value)
+		args = append(args, "-e", literalArg(e.Key+"="+e.Value))
 	}
 	args = append(args, "--", spec.Kind.String())
-	args = append(args, spec.Args...)
+	for _, a := range spec.Args {
+		args = append(args, literalArg(a))
+	}
 	out, err := h.tmux(ctx, args...)
 	if err != nil {
 		return agent.AgentInfo{}, err
@@ -357,10 +363,8 @@ func (h *Host) start(ctx context.Context, spec agent.AgentSpec, replace bool) (a
 		_, _ = h.tmux(c, "kill-pane", "-t", pane)
 	}
 	label := cmp.Or(spec.Tab.Label, spec.Name)
-	if out, err := h.tmux(ctx, "set-option", "-w", "-t", pane, "@deskpixie_kind", spec.Kind.String(),
-		";", "set-option", "-w", "-t", pane, "@deskpixie_label", label,
-		";", "set-option", "-w", "-t", pane, "@deskpixie_title", spec.Tab.Title,
-		";", "select-pane", "-t", pane, "-T", label); err != nil || out.Code != 0 {
+	if out, err := h.tmux(ctx, append([]string{"set-option", "-w", "-t", pane, "@deskpixie_kind", spec.Kind.String(), ";"},
+		labelArgs(pane, label, spec.Tab.Title)...)...); err != nil || out.Code != 0 {
 		if err == nil {
 			err = failed("set-option", out)
 		}
@@ -450,18 +454,54 @@ func (h *Host) capture(ctx context.Context, pane string, history int) (string, e
 	return out.Stdout, nil
 }
 
-// Prompt types text into the agent literally (in chunks), then presses Enter.
+// Prompt types text into the agent, then presses Enter. One line is typed literally (in
+// chunks); text of several lines is pasted (bracketed paste: tmux's paste-buffer -p), since a
+// typed line feed would reach the agent as Ctrl-J, which a TUI may take as Enter.
 func (h *Host) Prompt(ctx context.Context, agentName, text string) error {
 	r, err := h.find(ctx, agentName, false)
 	if err != nil {
 		return err
 	}
-	for _, chunk := range chunks(text, sendChunk) {
-		if _, err := h.onPane(ctx, agentName, "send-keys", "send-keys", "-t", r.Pane, "-l", "--", chunk); err != nil {
-			return err
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	if strings.ContainsAny(text, "\r\n") {
+		err = h.paste(ctx, agentName, r.Pane, text)
+	} else {
+		for _, chunk := range chunks(text, sendChunk) {
+			if _, err = h.onPane(ctx, agentName, "send-keys", "send-keys", "-t", r.Pane, "-l", "--", literalArg(chunk)); err != nil {
+				break
+			}
+		}
+	}
+	if err != nil {
+		return err
+	}
+	// The agent reads a paste as one; Enter right behind it could join it.
+	if strings.ContainsAny(text, "\r\n") {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(h.pasteSettle):
 		}
 	}
 	_, err = h.onPane(ctx, agentName, "send-keys", "send-keys", "-t", r.Pane, "Enter")
+	return err
+}
+
+// paste puts text in a buffer of its own (in chunks: tmux's messages are bounded) and pastes it
+// into pane bracketed (the agent enabled bracketed paste, as Claude Code and Codex do: it then
+// takes the line breaks as text), deleting the buffer.
+func (h *Host) paste(ctx context.Context, agentName, pane, text string) error {
+	buf := "deskpixie-" + strings.TrimPrefix(pane, "%")
+	for i, chunk := range chunks(text, sendChunk) {
+		args := []string{"set-buffer", "-b", buf}
+		if i > 0 {
+			args = append(args, "-a")
+		}
+		if _, err := h.onPane(ctx, agentName, "set-buffer", append(args, "--", literalArg(chunk))...); err != nil {
+			return err
+		}
+	}
+	_, err := h.onPane(ctx, agentName, "paste-buffer", "paste-buffer", "-p", "-d", "-b", buf, "-t", pane)
 	return err
 }
 
@@ -620,13 +660,31 @@ func (h *Host) Relabel(ctx context.Context, agentName string, tab agent.TabLabel
 	if err != nil {
 		return err
 	}
-	label := cmp.Or(tab.Label, agentName)
-	_, err = h.onPane(ctx, agentName, "relabel",
-		"set-option", "-w", "-t", r.Pane, "@deskpixie_label", label,
-		";", "set-option", "-w", "-t", r.Pane, "@deskpixie_title", tab.Title,
-		";", "select-pane", "-t", r.Pane, "-T", label)
+	_, err = h.onPane(ctx, agentName, "relabel", labelArgs(r.Pane, cmp.Or(tab.Label, agentName), tab.Title)...)
 	return err
 }
+
+// labelArgs are the commands that show label and title on pane's window.
+func labelArgs(pane, label, title string) []string {
+	return []string{"set-option", "-w", "-t", pane, "@deskpixie_label", literalArg(label),
+		";", "set-option", "-w", "-t", pane, "@deskpixie_title", literalArg(title),
+		";", "select-pane", "-t", pane, "-T", formatArg(label)}
+}
+
+// literalArg is s as one tmux argument that arrives unchanged. tmux reads its own argv as
+// commands: an argument ending in ";" ends the command there (and loses the ";"), and "\;" at
+// the end stands for ";". So a final ";" is written "\;" (whatever precedes it). Nothing else
+// in an argument is special unless the command expands it as a format (formatArg).
+func literalArg(s string) string {
+	if strings.HasSuffix(s, ";") {
+		return s[:len(s)-1] + `\;`
+	}
+	return s
+}
+
+// formatArg is s as an argument tmux expands as a format (new-window -c, select-pane -T):
+// "#" doubled, so "#H" or "#{…}" stay text, then as literalArg.
+func formatArg(s string) string { return literalArg(strings.ReplaceAll(s, "#", "##")) }
 
 // ReportStatus is agent.StatusReporter: a Claude agent's own hook said its status.
 func (h *Host) ReportStatus(agentName string, status agent.PaneStatus) {
