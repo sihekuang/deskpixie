@@ -298,6 +298,7 @@ var Fields = []FieldSpec{
 	macOnly(spec("voice.outputDevice", SectionVoice, "Speaker", "Where Bit's voice plays. If it isn't connected, Bit uses the system default until it is.", choiceKind(SourceOutputDevices), ApplyLive)),
 	spec("voice.noisyRoom", SectionVoice, "Noisy room", "Bit ignores quieter voices in the background, like a TV or people nearby. Speak up a little to interrupt Bit. With OpenAI GPT-Live this only changes Bit's instructions.", boolKind, ApplyRestart),
 	spec("voice.liveBackendModel", SectionVoice, "Backend model (GPT-Live)", "Only for OpenAI GPT-Live: the model that runs Bit's tools while GPT-Live talks.", openChoice(Choices{Source: SourceStatic, Static: LiveBackendModels}), ApplyRestart),
+	spec("voice.handOffWhenUnsure", SectionVoice, "Hand off when Bit doesn't know", "When Bit can't answer a question or request itself, it hands it to the agent instead of saying it doesn't know.", boolKind, ApplyRestart),
 	spec("voice.idleTimeoutSecs", SectionVoice, "Silence timeout (seconds)", "A conversation ends after this much silence.", intKind(1, 600, false), ApplyRestart),
 	spec("voice.homeCity", SectionVoice, "Home city", "Where Bit checks the weather when you don't name a place, e.g. Portland, Oregon.", textKind(true), ApplyRestart),
 	spec("voice.personaPath", SectionVoice, "Persona file", "A Markdown file that replaces Bit's personality. Empty uses the built-in one.", pathKind(false, true), ApplyRestart),

@@ -38,7 +38,7 @@ func decodeArgs(raw json.RawMessage) map[string]any {
 // Delegate is the `delegate` tool.
 type Delegate struct{ H *AgentHandle }
 
-func (Delegate) Name() string { return "delegate" }
+func (Delegate) Name() string { return voice.DelegateTool }
 
 func (Delegate) Description() string {
 	return "Hand a task to the capable agent working in the background. This is the default for every " +

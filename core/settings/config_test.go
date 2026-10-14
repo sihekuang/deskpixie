@@ -469,3 +469,18 @@ func TestNotificationsBlockUsesCamelCase(t *testing.T) {
 		t.Fatal(j["notifications"])
 	}
 }
+
+func TestHandOffWhenUnsureIsOnByDefault(t *testing.T) {
+	if !Default().Voice.HandOffWhenUnsure {
+		t.Fatal("voice.handOffWhenUnsure defaults to true")
+	}
+	if v := mustJSON(t, Default())["voice"].(map[string]any)["handOffWhenUnsure"]; v != true {
+		t.Fatalf("handOffWhenUnsure in JSON: %v", v)
+	}
+	if !parseConfig(t, `{"voice":{"chimes":false}}`).Voice.HandOffWhenUnsure {
+		t.Fatal("a voice block without the key keeps the default")
+	}
+	if parseConfig(t, `{"voice":{"handOffWhenUnsure":false}}`).Voice.HandOffWhenUnsure {
+		t.Fatal("false is read")
+	}
+}

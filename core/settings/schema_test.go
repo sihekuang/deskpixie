@@ -451,3 +451,17 @@ func TestTheHerdrSettingsNameTheSupportedVersions(t *testing.T) {
 		}
 	}
 }
+
+func TestHandOffWhenUnsureField(t *testing.T) {
+	f := FieldByPath("voice.handOffWhenUnsure")
+	if f == nil {
+		t.Fatal("voice.handOffWhenUnsure has no field")
+	}
+	if f.Section != SectionVoice || f.Apply != ApplyRestart || f.Kind.Type != KindBool {
+		t.Fatalf("%+v", f)
+	}
+	if f.Label != "Hand off when Bit doesn't know" ||
+		f.Help != "When Bit can't answer a question or request itself, it hands it to the agent instead of saying it doesn't know." {
+		t.Fatalf("%q / %q", f.Label, f.Help)
+	}
+}

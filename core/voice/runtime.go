@@ -97,6 +97,12 @@ type connectResult struct {
 	err  error
 }
 
+// handOffResult is a finished hand-off (EfHandOff), tagged like toolResult.
+type handOffResult struct {
+	gen    uint64
+	notice Notice
+}
+
 // toolResult is a finished tool call, tagged with the conversation generation that invoked it.
 type toolResult struct {
 	gen     uint64
@@ -187,6 +193,7 @@ type Runtime struct {
 	micFailed chan AudioError
 	connected chan connectResult
 	toolDone  chan toolResult
+	handOffs  chan handOffResult
 	ctlNotify chan struct{}
 	ctlMu     sync.Mutex
 	ctlQueue  []control
@@ -245,6 +252,9 @@ func NewRuntime(m Model, c audio.Cleaner, cfg RuntimeConfig, emit func(UIEvent))
 	if CapabilitiesOf(m).OwnsTurnTaking {
 		cfg.Conversation.ProviderTurns = true
 	}
+	if _, ok := tools.Get(DelegateTool); !ok {
+		cfg.Conversation.HandOff = false // nothing to hand off to
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	r := &Runtime{
 		model:     m,
@@ -258,6 +268,7 @@ func NewRuntime(m Model, c audio.Cleaner, cfg RuntimeConfig, emit func(UIEvent))
 		micFailed: make(chan AudioError, 4),
 		connected: make(chan connectResult, 4),
 		toolDone:  make(chan toolResult, 16),
+		handOffs:  make(chan handOffResult, 4),
 		ctlNotify: make(chan struct{}, 1),
 		done:      make(chan struct{}),
 		exited:    make(chan struct{}),
@@ -502,6 +513,10 @@ func (r *Runtime) run() {
 			r.onConnected(c)
 		case t := <-r.toolDone:
 			r.onToolDone(t)
+		case h := <-r.handOffs:
+			if h.gen == r.gen {
+				r.input(HandOffDoneInput(h.notice))
+			}
 		case ev, ok := <-r.events:
 			if !ok {
 				r.session, r.events = nil, nil
@@ -736,7 +751,38 @@ func (r *Runtime) apply(fx Effect) {
 		r.send(Command{Kind: CmdInject, Text: fx.Text, Respond: true})
 	case EfSignal:
 		r.publish(fx.Signal)
+	case EfHandOff:
+		r.handOff(fx.Text, fx.Context)
 	}
+}
+
+// handOff delegates task through the delegate tool, as if the model had called it, and feeds
+// back the notice Bit then says (#71).
+func (r *Runtime) handOff(task, context string) {
+	gen := r.gen
+	deliver := func(n Notice) {
+		select {
+		case r.handOffs <- handOffResult{gen: gen, notice: n}:
+		case <-r.done:
+		}
+	}
+	tool, ok := r.tools.Get(DelegateTool)
+	if !ok {
+		go deliver(Notice{})
+		return
+	}
+	args := map[string]string{"task": task}
+	if context != "" {
+		args["context"] = context
+	}
+	raw, _ := json.Marshal(args)
+	ctx := r.ctx
+	go func() {
+		out := tool.Invoke(ctx, raw)
+		n, why := HandOffNotice(task, out.Output)
+		log.Printf("voice: Bit had no answer to a request: %s", why)
+		deliver(n)
+	}()
 }
 
 // invokeTool runs the tool on its own goroutine; the result comes back through toolDone,
