@@ -215,6 +215,32 @@ func TestACoordinatorLeftByAnEarlierRunIsReplacedWithContinue(t *testing.T) {
 	}
 }
 
+// A coordinator kept over a quit whose token this run restored (AdoptEarlier) is adopted as it
+// is: no replacement, no --continue, and later ensures leave it alone.
+func TestAKeptCoordinatorIsAdoptedWhenItsTokenWasRestored(t *testing.T) {
+	fake := agenttest.NewFakeSessionHost()
+	recipe := CoordinatorRecipe{Cwd: "/data/agent/workspace", Env: []EnvVar{{Key: "MASCOT_AGENT_TOKEN", Value: "kept"}}, AdoptEarlier: true}
+	h := NewAgentHost(fake, agenttest.ClockAt(1_000_000), recipe)
+	fake.StartAgent(bg, AgentSpec{Name: Coordinator, Kind: Claude, Cwd: "/data/agent/workspace", Env: recipe.Env})
+	wantEnsured(t, h, Ensured{Status: PaneIdle})
+	wantEnsured(t, h, Ensured{Status: PaneIdle})
+	if len(fake.Closed()) != 0 || len(fake.Starts()) != 1 {
+		t.Fatal(fake.Closed(), fake.Starts())
+	}
+	if h.Token() != "kept" {
+		t.Fatal(h.Token())
+	}
+}
+
+// With AdoptEarlier but no coordinator running (it exited while the app was down), the start
+// is today's first start: fresh.
+func TestAKeptCoordinatorThatIsGoneStartsFresh(t *testing.T) {
+	fake := agenttest.NewFakeSessionHost()
+	recipe := CoordinatorRecipe{Cwd: "/w", Env: []EnvVar{{Key: "MASCOT_AGENT_TOKEN", Value: "kept"}}, AdoptEarlier: true}
+	h := NewAgentHost(fake, agenttest.ClockAt(1_000_000), recipe)
+	wantEnsured(t, h, started(false))
+}
+
 // Any failed start with --continue (a timeout included) gives up on resuming: the next
 // attempt starts fresh. Only the "exited while starting" failure is retried at once.
 func TestAFailedReplacementStartsFreshNextTime(t *testing.T) {

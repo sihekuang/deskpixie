@@ -76,6 +76,8 @@ type Deps struct {
 	Store       Store
 	Clock       Clock
 	IDs         IdSource
+	// Kept saves what a quit with keepPanesOnQuit leaves running (nil: nothing is saved).
+	Kept KeptStore
 }
 
 // WorkerDeps are the worker adapters (spec §5.5), injected only when agent.workers.enabled.
@@ -96,6 +98,9 @@ type RuntimeConfig struct {
 	// Notice: a setup note that disables nothing (e.g. "Agent: workers off: …"), shown while
 	// nothing else is. "" = none.
 	Notice string
+	// Kept is what the last run left running (keepPanesOnQuit): its coordinator token (already
+	// the recipe's, with AdoptEarlier) keeps the open jobs open; its workers are adopted.
+	Kept KeptAgents
 }
 
 // hostOp is a call into the session host for the coordinator. They all go through one
@@ -165,9 +170,11 @@ type AgentHandle struct {
 
 	// left: live-worktrees lines left by a crash, re-checked when Run starts.
 	left []string
-	// rechecked is closed once the start-up re-check of worktrees left by a crash is done: no
-	// worker is admitted before.
-	rechecked    chan struct{}
+	// rechecked is closed once the start-up re-check of worktrees left by a crash (and the
+	// adoption of kept workers) is done: no worker is admitted before.
+	rechecked chan struct{}
+	// kept: workers the last run left running, adopted when Run starts.
+	kept         []KeptWorker
 	straysLogged atomic.Bool
 	// shuttingDown is set first thing in Shutdown: from then on inputs are ignored and host
 	// calls other than the final stops are skipped.
@@ -194,6 +201,7 @@ func NewRuntimeWithWorkers(deps Deps, cfg RuntimeConfig, workers *WorkerDeps) *A
 		closing:   map[string]bool{},
 		replies:   map[RequestID]chan<- Decision{},
 		rechecked: make(chan struct{}),
+		kept:      cfg.Kept.Workers,
 	}
 	jobs := deps.Store.Load(JobsFile)
 	// Worktrees of workers that were live when the app last ended without forgetting them (a
@@ -202,7 +210,8 @@ func NewRuntimeWithWorkers(deps Deps, cfg RuntimeConfig, workers *WorkerDeps) *A
 		h.left = deps.Store.Load(LiveWorktreesFile)
 	}
 	outbox := deps.Store.Load(OutboxFile)
-	h.Input(RestoredInput(jobs, outbox))
+	keptCoordinator := cfg.Kept.CoordinatorToken != ""
+	h.Input(RestoredInput(jobs, outbox, keptCoordinator))
 	if len(h.left) > 0 {
 		deps.Store.Rewrite(LiveWorktreesFile, []string{})
 	}
@@ -213,7 +222,8 @@ func NewRuntimeWithWorkers(deps Deps, cfg RuntimeConfig, workers *WorkerDeps) *A
 	if cfg.SetupProblem != "" {
 		h.Input(DisableInput(cfg.SetupProblem))
 	}
-	if cfg.Warm {
+	// A kept coordinator with open jobs is asked for their results again at once.
+	if cfg.Warm || (keptCoordinator && h.hasOpenJobs()) {
 		h.Input(EnsureCoordinatorInput())
 	}
 	return h
@@ -267,14 +277,74 @@ func (h *AgentHandle) Run(ctx context.Context) {
 	}
 }
 
-// recheck re-checks the worktrees left by a crash, then lets workers be admitted.
+// recheck re-checks the worktrees left by a crash and adopts the kept workers, then lets
+// workers be admitted.
 func (h *AgentHandle) recheck() {
 	if h.workers != nil {
 		for _, line := range h.left {
 			recheckLine(h.workers.Worktrees, line)
 		}
+		h.adoptKept()
 	}
 	close(h.rechecked)
+}
+
+func (h *AgentHandle) hasOpenJobs() bool {
+	h.ctlMu.Lock()
+	defer h.ctlMu.Unlock()
+	return len(h.ctl.jobs.Open()) > 0
+}
+
+// adoptKept adopts each worker the last run left running whose pane is still listed: its token
+// works again and the controller takes it back (or stops it, its job being over). One whose
+// pane is gone is dropped.
+func (h *AgentHandle) adoptKept() {
+	if len(h.kept) == 0 {
+		return
+	}
+	listed, err := within(h.ctx, ListLimit, h.deps.Host.Session().List)
+	if err != nil {
+		log.Printf("agent: couldn't list the session to adopt kept workers: %s", tag(err))
+		return
+	}
+	for _, kw := range h.kept {
+		name := kw.Plan.Name
+		i := slices.IndexFunc(listed, func(a AgentInfo) bool { return a.Name == name })
+		if i < 0 {
+			log.Printf("agent: kept worker %s is gone", name)
+			continue
+		}
+		// Before the controller briefs it, so its reply is accepted.
+		h.workers.Tokens.Restore(name, kw.Token)
+		h.withKnown(func(known map[string]repoSlug) { known[name] = repoSlug{kw.Plan.Repo, kw.Plan.Slug} })
+		if r := h.stepLocked(AdoptWorkerInput(kw.Plan, kw.Worktree, listed[i].Status)); r == nil || r.Err != "" {
+			h.workers.Tokens.Revoke(name)
+			h.withKnown(func(known map[string]repoSlug) { delete(known, name) })
+		}
+	}
+}
+
+// saveKept saves what this quit leaves running: the coordinator (if it ran) and the live
+// workers, with their tokens. Called before the quit forgets them.
+func (h *AgentHandle) saveKept() {
+	h.ctlMu.Lock()
+	running := h.ctl.coordinator != coordAbsent
+	live := h.ctl.LiveWorkers()
+	h.ctlMu.Unlock()
+	var kept KeptAgents
+	if running {
+		kept.CoordinatorToken = h.deps.Host.Token()
+	}
+	if h.workers != nil {
+		for _, w := range live {
+			if tok, ok := h.workers.Tokens.Token(w.Plan.Name); ok {
+				kept.Workers = append(kept.Workers, KeptWorker{Plan: w.Plan, Worktree: w.Worktree, Token: tok})
+			}
+		}
+	}
+	if err := h.deps.Kept.Save(kept); err != nil {
+		log.Printf("agent: couldn't save the kept agents: %v", err)
+	}
 }
 
 func (h *AgentHandle) quitting() bool { return h.shuttingDown.Load() }
@@ -414,6 +484,9 @@ func (h *AgentHandle) Shutdown() {
 	}
 	clear(h.lanes)
 	h.lanesMu.Unlock()
+	if h.keepPanes && h.deps.Kept != nil {
+		h.saveKept()
+	}
 	ctx, cancel := context.WithTimeout(h.ctx, ShutdownLimit)
 	defer cancel()
 	// Directly, not through the host-call goroutine (which may be stuck on a hung call). A

@@ -39,6 +39,31 @@ func (t *Tokens) Issue(identity string) string {
 	return token
 }
 
+// Restore makes token identity's again, replacing any earlier one: a token kept from an
+// earlier run for an agent left running over the quit (agent.keepPanesOnQuit).
+func (t *Tokens) Restore(identity, token string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for tok, id := range t.byToken {
+		if id == identity {
+			delete(t.byToken, tok)
+		}
+	}
+	t.byToken[token] = identity
+}
+
+// Token is identity's current token, if it has one.
+func (t *Tokens) Token(identity string) (string, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for tok, id := range t.byToken {
+		if id == identity {
+			return tok, true
+		}
+	}
+	return "", false
+}
+
 // Resolve says which agent holds bearer. It compares in constant time per candidate.
 func (t *Tokens) Resolve(bearer string) (string, bool) {
 	t.mu.Lock()
