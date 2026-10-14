@@ -87,6 +87,9 @@ type VoiceLink interface {
 	IsOpen() bool
 	Inject(notice Notice)
 	HoldOpen(on bool)
+	// Open starts a conversation as the hotkey does, only if Bit is at rest; false if it did
+	// nothing (a conversation starting, open or closing, an error showing, the mic unusable).
+	Open() bool
 }
 
 type Notifier interface {

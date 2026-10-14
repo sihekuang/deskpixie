@@ -84,6 +84,8 @@ func fmtEffect(e Effect) string {
 		return fmt.Sprintf("ForgetWorker(%s)", e.Name)
 	case EfLabel:
 		return fmt.Sprintf("Label(%q)", e.Tab.Label)
+	case EfOpenConversation:
+		return "OpenConversation"
 	}
 	return fmt.Sprintf("Effect(%d)", e.Kind)
 }
@@ -111,6 +113,7 @@ var (
 	eInterrupt = Effect{Kind: EfInterrupt}
 	eStopCoord = Effect{Kind: EfStopCoordinator}
 	eResetHost = Effect{Kind: EfResetHost}
+	eOpen      = Effect{Kind: EfOpenConversation}
 )
 
 func effectsEqual(a, b []Effect) bool {

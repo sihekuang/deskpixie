@@ -302,6 +302,7 @@ var Fields = []FieldSpec{
 	spec("agent.model", SectionAgent, "Agent model", "Claude Code's --model for the coordinator. Default lets Claude Code decide.", openChoice(Choices{Source: SourceStatic, Static: AgentModels, Null: true}), ApplyRestart),
 	spec("agent.warm", SectionAgent, "Start at launch", "Start the coordinator when the app starts, not on first use.", boolKind, ApplyRestart),
 	spec("agent.narration", SectionAgent, "Narration", "Bit says what the agent is doing.", boolKind, ApplyRestart),
+	spec("agent.openConversationForUpdates", SectionAgent, "Open a conversation for updates", "When a job finishes or fails, or the agent asks you something, while you're not talking to Bit, Bit starts a conversation to tell you and then listens for your answer.", boolKind, ApplyRestart),
 	spec("agent.holdOpenSecs", SectionAgent, "Hold open (seconds)", "How long a conversation stays open while a job runs.", intKind(0, 3600, false), ApplyRestart),
 	spec("agent.projectsRoot", SectionAgent, "Projects folder", "The folder whose repositories workers may use. It must be inside your home folder.", pathKind(true, false), ApplyRestart),
 	spec("agent.workers.enabled", SectionWorkers, "Workers", "Let the agent start worker agents in git worktrees.", boolKind, ApplyRestart),
