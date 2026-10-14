@@ -40,8 +40,10 @@ const (
 const (
 	memoryHeader = "Recent work with the agent (from its job records, oldest first; times are local). " +
 		"Use it as background so the user needn't repeat themselves; don't recite it unless asked. " +
+		"New requests and follow-ups still go to delegate. " +
 		"For anything else about earlier talks, call recall:"
-	notesHeader = "Recent work with the agent, in its own notes of its latest turns (oldest first):"
+	notesHeader = "Recent work with the agent, in its own notes of its latest turns (oldest first). " +
+		"Background only: new requests and follow-ups still go to delegate:"
 )
 
 // MemoryFacts is the session block: jobs (open first, then the most recently updated, within

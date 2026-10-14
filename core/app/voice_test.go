@@ -19,9 +19,11 @@ import (
 	"errors"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/sihekuang/deskpixie/core/agent"
 	"github.com/sihekuang/deskpixie/core/audio/denoise"
 	"github.com/sihekuang/deskpixie/core/settings"
 	"github.com/sihekuang/deskpixie/core/voice"
@@ -252,3 +254,17 @@ func TestAToolErrorIsReportedToTheModelInBand(t *testing.T) {
 }
 
 func alwaysOpen() bool { return true }
+
+// #57: every local tool is named in what Bit keeps and what delegate is not for, so nothing
+// else Bit could reach for competes with delegating.
+func TestEveryLocalToolIsOnTheKeepListAndOffTheDelegateList(t *testing.T) {
+	desc := agent.Delegate{}.Description()
+	for _, s := range LocalTools("", silentAlarm{}).Specs() {
+		if s.Name == "end_conversation" {
+			continue
+		}
+		if !strings.Contains(agent.DelegationPersona, s.Name) || !strings.Contains(desc, s.Name) {
+			t.Errorf("%s is missing from the delegation rules", s.Name)
+		}
+	}
+}

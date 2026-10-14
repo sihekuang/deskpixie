@@ -405,7 +405,7 @@ func TestTheTimeWeatherAndMathGoToTheLocalToolsNotTheAgent(t *testing.T) {
 	if !strings.Contains(DelegationPersona, "call get_time, get_weather or calculate") {
 		t.Fatal(DelegationPersona)
 	}
-	if d := (Delegate{}).Description(); !strings.Contains(d, "Not for the time, the weather or arithmetic") {
+	if d := (Delegate{}).Description(); !strings.Contains(d, "Not for the time, the weather, arithmetic, timers or music controls") {
 		t.Fatal(d)
 	}
 }
