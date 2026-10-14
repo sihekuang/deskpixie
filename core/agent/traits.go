@@ -8,7 +8,6 @@ import (
 // The seams of the delegation core (port of agent-core traits.rs). Core logic depends only on
 // these; adapters implement them. Rust's async methods take a context here.
 
-// SessionHost is a terminal multiplexer session holding the agents (Herdr now).
 // Focuser is a SessionHost that can bring an agent's tab to the front of the session, so a
 // terminal attached to it shows that agent (optional: Herdr has it).
 type Focuser interface {
@@ -22,6 +21,8 @@ type StatusReporter interface {
 	ReportStatus(agent string, status PaneStatus)
 }
 
+// SessionHost is a terminal multiplexer session holding the agents: Herdr or tmux, chosen by
+// agent.sessionHost through agentapp.SessionHosts.
 type SessionHost interface {
 	// Name is the registry name, e.g. "herdr".
 	Name() string
