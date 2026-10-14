@@ -450,7 +450,8 @@ public enum SettingsLayout {
     /// The rows a section has besides its fields.
     public enum Extra: Equatable, Sendable {
         case button(label: String, help: String, title: String, action: Action)
-        /// An API key's row: found or missing, never the key.
+        /// An API key's row: a secure field with Save / Remove, and where the key comes from;
+        /// never the key.
         case secret(id: SettingsSecretID, label: String, help: String)
     }
 
@@ -470,14 +471,31 @@ public enum SettingsLayout {
         }
     }
 
-    /// "Found", "Missing" or "Unknown" (the status could not be read).
+    /// "From environment", "From Keychain", "From .env" (or "Found" when the core names no
+    /// source), "Missing", or "Unknown" (the status could not be read).
     public static func secretText(_ secrets: SettingsSecrets?, _ id: SettingsSecretID) -> String {
         switch secrets?[id] {
-        case .found?: return "Found"
+        case .found?:
+            switch secrets?.source(id) {
+            case "env"?: return "From environment"
+            case "keychain"?: return "From Keychain"
+            case "dotenv"?: return "From .env"
+            default: return "Found"
+            }
         case .missing?: return "Missing"
         case nil: return "Unknown"
         }
     }
+
+    /// Save is enabled once something other than whitespace is typed.
+    public static func canSaveKey(_ typed: String) -> Bool {
+        !typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// The key row's error when the Keychain refuses a save.
+    public static let keySaveError = "Couldn't save to Keychain"
+    /// The key row's error when the Keychain refuses a remove.
+    public static let keyRemoveError = "Couldn't remove from Keychain"
 }
 
 /// The API keys the Voice tab reports, in order. Never the keys themselves.
@@ -500,6 +518,7 @@ public enum SettingsSecretID: String, CaseIterable, Sendable {
     }
 
     public var help: String {
-        "Set \(variable) in your environment or a .env file. Keys are never shown here."
+        "Type the key here to keep it in the Keychain (used first), or set \(variable) in your environment or a .env file. "
+            + "Keys are never shown here."
     }
 }

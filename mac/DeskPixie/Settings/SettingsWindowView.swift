@@ -233,11 +233,32 @@ struct SettingsTabView: View {
             }
         case .secret(let id, let label, let help):
             row(label: SettingsLayout.labelText(label)) {
-                Text(model.secretText(id))
-                    .accessibilityLabel(label)
-                    .accessibilityHint(help)
+                HStack(spacing: 6) {
+                    // Never shows a stored key: the field starts empty and clears after a save.
+                    SecureField("Paste key", text: Binding(get: { model.keyDraft(id) },
+                                                           set: { model.setKeyDraft(id, $0) }))
+                        .frame(width: 220)
+                        .onSubmit { model.saveKey(id) }
+                        .accessibilityLabel(label)
+                        .accessibilityHint(help)
+                    Button("Save") { model.saveKey(id) }
+                        .disabled(!model.canSaveKey(id))
+                        .help("Keeps this key in the Keychain.")
+                    if model.hasStoredKey(id) {
+                        Button("Remove") { model.removeKey(id) }
+                            .help("Deletes the key kept in the Keychain.")
+                    }
+                }
             } note: {
-                NoteText(text: help, isError: false)
+                VStack(alignment: .leading, spacing: 2) {
+                    if let error = model.keyError(id) {
+                        NoteText(text: error, isError: true)
+                    }
+                    Text(model.secretText(id))
+                        .font(.callout)
+                        .accessibilityLabel("\(label): \(model.secretText(id))")
+                    NoteText(text: help, isError: false)
+                }
             }
         }
     }

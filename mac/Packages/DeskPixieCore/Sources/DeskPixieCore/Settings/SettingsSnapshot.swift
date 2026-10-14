@@ -225,20 +225,42 @@ public enum SettingsKeyStatus: String, Codable, Sendable {
     case found, missing
 }
 
+/// Where each key comes from: "env", "keychain", "dotenv", or "" (missing).
+public struct SettingsKeySources: Codable, Equatable, Sendable {
+    public var openai: String?
+    public var gemini: String?
+
+    public init(openai: String?, gemini: String?) {
+        self.openai = openai
+        self.gemini = gemini
+    }
+}
+
 /// `settings.secrets`.
 public struct SettingsSecrets: Codable, Equatable, Sendable {
     public var openai: SettingsKeyStatus?
     public var gemini: SettingsKeyStatus?
+    /// Nil from a core that does not name sources.
+    public var sources: SettingsKeySources?
 
-    public init(openai: SettingsKeyStatus?, gemini: SettingsKeyStatus?) {
+    public init(openai: SettingsKeyStatus?, gemini: SettingsKeyStatus?, sources: SettingsKeySources? = nil) {
         self.openai = openai
         self.gemini = gemini
+        self.sources = sources
     }
 
     public subscript(id: SettingsSecretID) -> SettingsKeyStatus? {
         switch id {
         case .openAI: return openai
         case .gemini: return gemini
+        }
+    }
+
+    /// Where the key comes from ("env", "keychain", "dotenv"); nil or "" when unknown or missing.
+    public func source(_ id: SettingsSecretID) -> String? {
+        switch id {
+        case .openAI: return sources?.openai
+        case .gemini: return sources?.gemini
         }
     }
 }
