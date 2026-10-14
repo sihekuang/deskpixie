@@ -128,6 +128,10 @@ type TokenIssuer interface {
 	// Issue returns a fresh token for identity, replacing any earlier one.
 	Issue(identity string) string
 	Revoke(identity string)
+	// Restore makes a kept token identity's again (an agent left running over a quit).
+	Restore(identity, token string)
+	// Token is identity's current token, if it has one.
+	Token(identity string) (string, bool)
 }
 
 // WorkerRecipes says how each worker kind is launched: the files its CLI needs and its spec.

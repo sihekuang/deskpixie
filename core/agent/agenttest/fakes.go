@@ -797,11 +797,62 @@ func (w *FakeWorktrees) ForeignSlugs(string) []string {
 	return slices.Clone(w.foreign)
 }
 
-// FakeTokens issues `tok-<identity>` and records issues and revocations.
+// FakeKept records each kept-agents save.
+type FakeKept struct {
+	mu    sync.Mutex
+	saved []agent.KeptAgents
+}
+
+func (k *FakeKept) Save(kept agent.KeptAgents) error {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	k.saved = append(k.saved, kept)
+	return nil
+}
+
+func (k *FakeKept) Saved() []agent.KeptAgents {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return slices.Clone(k.saved)
+}
+
+// FakeTokens issues `tok-<identity>` and records issues, restores and revocations.
 type FakeTokens struct {
-	mu      sync.Mutex
-	issued  []string
-	revoked []string
+	mu       sync.Mutex
+	issued   []string
+	revoked  []string
+	restored map[string]string
+}
+
+func (t *FakeTokens) Restore(identity, token string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.restored == nil {
+		t.restored = map[string]string{}
+	}
+	t.restored[identity] = token
+}
+
+// Token is the restored token, else `tok-<identity>` once issued; none once revoked.
+func (t *FakeTokens) Token(identity string) (string, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if slices.Contains(t.revoked, identity) {
+		return "", false
+	}
+	if tok, ok := t.restored[identity]; ok {
+		return tok, true
+	}
+	if slices.Contains(t.issued, identity) {
+		return "tok-" + identity, true
+	}
+	return "", false
+}
+
+func (t *FakeTokens) Restored() map[string]string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return maps.Clone(t.restored)
 }
 
 func (t *FakeTokens) Issue(identity string) string {

@@ -477,7 +477,7 @@ func TestRestoreFailsOpenJobsAndOutboxesALine(t *testing.T) {
 		}
 	}
 	c := ctl()
-	fx := c.Step(RestoredInput(jobs, nil), T0+10)
+	fx := c.Step(RestoredInput(jobs, nil, false), T0+10)
 	if fx[0].Kind != EfRewrite || fx[0].File != JobsFile || len(fx[0].Lines) != 1 {
 		t.Fatalf("%s", fmtEffects(fx))
 	}
