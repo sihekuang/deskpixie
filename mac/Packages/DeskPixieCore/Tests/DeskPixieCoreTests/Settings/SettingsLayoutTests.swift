@@ -29,6 +29,11 @@ final class SettingsLayoutTests: XCTestCase {
                        ["face.smiling", "waveform", "sparkles", "person.2", "rectangle.on.rectangle", "gearshape.2"])
     }
 
+    func test_every_tab_has_its_own_tint_in_tab_order() {
+        XCTAssertEqual(L.tabs.map(\.tint), [.pink, .purple, .orange, .indigo, .teal, .gray])
+        XCTAssertEqual(Set(L.tabs.map(\.tint)).count, L.tabs.count, "Each sidebar tile reads at a glance")
+    }
+
     func test_every_field_has_a_tab_and_every_kind_maps_to_one_control() {
         let views = SettingsFixture.fields
         XCTAssertFalse(views.contains { $0.path == "position" || $0.path == "canvas.window" },

@@ -21,21 +21,28 @@ public enum SettingsLayout {
 
     // MARK: Tabs
 
-    /// One toolbar tab: a section, its title and its SF Symbol.
+    /// A sidebar tile's colour, named here so the package stays free of SwiftUI; the app maps
+    /// each case to the SwiftUI colour of the same name.
+    public enum TabTint: String, CaseIterable, Sendable {
+        case gray, red, purple, blue, orange, teal, green, mint, pink, indigo, cyan
+    }
+
+    /// One sidebar page: a section, its title, its SF Symbol and its tile colour.
     public struct Tab: Equatable, Sendable {
         public var section: SettingsSection
         public var title: String
         public var symbol: String
+        public var tint: TabTint
     }
 
-    /// The toolbar's tabs, in order.
+    /// The sidebar's pages, in order.
     public static let tabs: [Tab] = [
-        Tab(section: .mascot, title: "Mascot", symbol: "face.smiling"),
-        Tab(section: .voice, title: "Voice", symbol: "waveform"),
-        Tab(section: .agent, title: "Agent", symbol: "sparkles"),
-        Tab(section: .workers, title: "Workers", symbol: "person.2"),
-        Tab(section: .canvas, title: "Canvas", symbol: "rectangle.on.rectangle"),
-        Tab(section: .advanced, title: "Advanced", symbol: "gearshape.2"),
+        Tab(section: .mascot, title: "Mascot", symbol: "face.smiling", tint: .pink),
+        Tab(section: .voice, title: "Voice", symbol: "waveform", tint: .purple),
+        Tab(section: .agent, title: "Agent", symbol: "sparkles", tint: .orange),
+        Tab(section: .workers, title: "Workers", symbol: "person.2", tint: .indigo),
+        Tab(section: .canvas, title: "Canvas", symbol: "rectangle.on.rectangle", tint: .teal),
+        Tab(section: .advanced, title: "Advanced", symbol: "gearshape.2", tint: .gray),
     ]
 
     /// Whether `platforms` includes `platform`; nil means everywhere.
