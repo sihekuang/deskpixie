@@ -34,6 +34,7 @@ import (
 	"github.com/sihekuang/deskpixie/core/agent/agenttest"
 	agentfs "github.com/sihekuang/deskpixie/core/agent/fs"
 	"github.com/sihekuang/deskpixie/core/agent/httpserver"
+	"github.com/sihekuang/deskpixie/core/agent/proc"
 	"github.com/sihekuang/deskpixie/core/app/agentapp"
 	"github.com/sihekuang/deskpixie/core/herdr"
 	"github.com/sihekuang/deskpixie/core/herdr/smoketest"
@@ -739,8 +740,8 @@ func TestLiveWorkerSmoke(t *testing.T) {
 		IDs:      &agenttest.SeqIds{},
 	}
 	workerTrust := agentfs.NewClaudeTrustStore(claudeJSON, []string{projects})
-	worktrees := agentfs.NewGitWorktrees(projects, paths.Workspace, sm.Home, herdr.PatientRunner(agentapp.GitTimeout)).
-		WithCleanupRunner(herdr.PatientRunner(agentapp.GitCleanupTimeout))
+	worktrees := agentfs.NewGitWorktrees(projects, paths.Workspace, sm.Home, proc.PatientRunner(agentapp.GitTimeout)).
+		WithCleanupRunner(proc.PatientRunner(agentapp.GitCleanupTimeout))
 	// Smoke only: a Codex worker in demo (and only there) is trusted for its run.
 	extra := agentfs.CodexExtraArgs(func(r string) []string {
 		if r == repo {

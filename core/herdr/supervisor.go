@@ -11,16 +11,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/sihekuang/deskpixie/core/agent"
+	"github.com/sihekuang/deskpixie/core/agent/proc"
 	"github.com/sihekuang/deskpixie/core/herdr/compat"
-	"github.com/sihekuang/deskpixie/core/voice"
 )
 
 // SupportedVersions is the Herdr versions this adapter speaks, as the user reads them:
@@ -36,36 +34,6 @@ const (
 	SupervisorPoll         = 250 * time.Millisecond
 	SupervisorStartTimeout = 15 * time.Second
 )
-
-// Never passed to the server (every pane inherits its environment): agents run on the
-// subscription, never on an API key, and never think they are inside another Claude Code or
-// Herdr session. Every voice provider's key (OPENAI_API_KEY, GEMINI_API_KEY, …) is scrubbed
-// too, from voice's provider table (voice.KeyVars).
-var scrubExact = []string{"CLAUDECODE", "CLAUDE_PID", "CLAUDE_EFFORT"}
-
-// ANTHROPIC_* covers keys, tokens, base URLs, custom headers and ANTHROPIC_FOUNDRY_*;
-// CLAUDE_CODE_* covers CLAUDE_CODE_USE_{BEDROCK,VERTEX,FOUNDRY} and a parent session's ids;
-// HERDR_* covers HERDR_SOCKET_PATH, which would point the CLI at another session.
-var scrubPrefixes = []string{"ANTHROPIC_", "CLAUDE_CODE_", "HERDR_"}
-
-func scrubbed(v string) bool {
-	for _, k := range scrubExact {
-		if k == v {
-			return true
-		}
-	}
-	for _, k := range voice.KeyVars() {
-		if k == v {
-			return true
-		}
-	}
-	for _, p := range scrubPrefixes {
-		if strings.HasPrefix(v, p) {
-			return true
-		}
-	}
-	return false
-}
 
 // CheckSession: ^[a-z0-9][a-z0-9-]{0,47}$ and not Herdr's "default" session.
 func CheckSession(session string) error {
@@ -84,75 +52,19 @@ func CheckSession(session string) error {
 }
 
 // ServerEnv is the server's (and every CLI call's) exact environment: parent minus the
-// scrubbed keys, PATH (from parent) extended with the usual install dirs (a GUI app's PATH is
-// minimal), plus HERDR_SESSION; sorted. Rejects an empty or "default" session.
+// scrubbed keys (proc.Scrubbed), PATH (from parent) extended with the usual install dirs (a GUI
+// app's PATH is minimal), plus HERDR_SESSION; sorted. Rejects an empty or "default" session.
 func ServerEnv(parent []agent.EnvVar, session, home string) ([]agent.EnvVar, error) {
 	if err := CheckSession(session); err != nil {
 		return nil, err
 	}
-	path, hasPath := "", false
-	var out []agent.EnvVar
-	for _, e := range parent {
-		if e.Key == "PATH" {
-			path, hasPath = e.Value, true
-		} else if !scrubbed(e.Key) {
-			out = append(out, e)
-		}
-	}
-	if !hasPath {
-		path = "/usr/bin:/bin:/usr/sbin:/sbin"
-	}
-	out = append(out, agent.EnvVar{Key: "PATH", Value: extendedPath(path, home)},
-		agent.EnvVar{Key: "HERDR_SESSION", Value: session})
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Key != out[j].Key {
-			return out[i].Key < out[j].Key
-		}
-		return out[i].Value < out[j].Value
-	})
-	return out, nil
-}
-
-func extendedPath(current, home string) string {
-	dirs := strings.Split(current, ":")
-	for _, extra := range installDirs(home) {
-		found := false
-		for _, d := range dirs {
-			found = found || d == extra
-		}
-		if !found {
-			dirs = append(dirs, extra)
-		}
-	}
-	return strings.Join(dirs, ":")
-}
-
-// installDirs is where herdr and claude are usually installed, beyond a GUI app's minimal PATH.
-func installDirs(home string) []string {
-	return []string{filepath.Join(home, ".local/bin"), "/opt/homebrew/bin", "/usr/local/bin"}
+	return proc.ServerEnv(parent, home, nil, agent.EnvVar{Key: "HERDR_SESSION", Value: session}), nil
 }
 
 // FindHerdr: configured (agent.herdrPath, "" for none), else herdr on pathVar, else in the
 // install dirs ServerEnv adds (~/.local/bin, /opt/homebrew/bin, /usr/local/bin).
 func FindHerdr(configured, pathVar, home string, exists func(string) bool) (string, bool) {
-	if configured != "" {
-		return configured, exists(configured)
-	}
-	var candidates []string
-	for _, d := range strings.Split(pathVar, ":") {
-		if d != "" {
-			candidates = append(candidates, filepath.Join(d, "herdr"))
-		}
-	}
-	for _, d := range installDirs(home) {
-		candidates = append(candidates, filepath.Join(d, "herdr"))
-	}
-	for _, p := range candidates {
-		if exists(p) {
-			return p, true
-		}
-	}
-	return "", false
+	return proc.FindProgram("herdr", configured, pathVar, proc.InstallDirs(home), exists)
 }
 
 // ServerStatus is `herdr status --json`. Nil pointers are absent (Rust's None); the versions
@@ -284,7 +196,7 @@ func (s *Supervisor) IntegrationMissing() bool { return s.integrationMissing.Loa
 func runErrorToHost(err error) error {
 	msg := err.Error()
 	switch {
-	case strings.Contains(msg, "(os error 2)"):
+	case proc.IsNotFound(err):
 		return agent.HostError{Kind: agent.HostNotFound}
 	case strings.Contains(msg, "timed out"):
 		return agent.HostError{Kind: agent.HostTimeout, Detail: "herdr did not answer"}
