@@ -41,13 +41,15 @@ release: project
 		build
 	@$(MAKE) --no-print-directory verify-release
 
-# Structural checks on the Release app (no launch): signature, bundled dylibs and resources,
-# every @rpath dependency resolvable inside Contents/Frameworks, audio-input entitlement.
+# Structural checks on the Release app (no launch): signature, bundled dylibs and resources
+# (the app icon included), every @rpath dependency resolvable inside Contents/Frameworks,
+# audio-input entitlement.
 verify-release:
 	@set -e; APP="$(RELEASE_APP)"; test -d "$$APP"; \
 	codesign --verify --deep --strict --verbose=2 "$$APP"; \
 	for f in Frameworks/libdeskpixie.dylib Frameworks/libdf.dylib \
-		Resources/DeepFilterNet3.tar.gz Resources/design-system Resources/mascots; do \
+		Resources/DeepFilterNet3.tar.gz Resources/design-system Resources/mascots \
+		Resources/Assets.car Resources/AppIcon.icns; do \
 		test -e "$$APP/Contents/$$f" || { echo "error: missing Contents/$$f" >&2; exit 1; }; \
 	done; \
 	otool -l "$$APP/Contents/MacOS/DeskPixie" | grep -q '@executable_path/../Frameworks' \
