@@ -312,3 +312,23 @@ func TestStoppingSendsEscapeThenCloses(t *testing.T) {
 		}
 	})
 }
+
+// ResumeLast: with no coordinator running, the first start resumes the workspace's last
+// conversation (--continue); with nothing to continue it starts fresh in the same attempt.
+func TestResumeLastResumesTheLastConversationOnTheFirstStart(t *testing.T) {
+	recipe := CoordinatorRecipe{Cwd: "/data/agent/workspace", ResumeLast: true}
+	fake := agenttest.NewFakeSessionHost()
+	h := NewAgentHost(fake, agenttest.ClockAt(1_000_000), recipe)
+	wantEnsured(t, h, started(true))
+	if lastArg(fake.Starts()[0]) != "--continue" {
+		t.Fatal(fake.Starts()[0].Args)
+	}
+
+	fake = agenttest.NewFakeSessionHost()
+	fake.FailContinue(true)
+	h = NewAgentHost(fake, agenttest.ClockAt(1_000_000), recipe)
+	wantEnsured(t, h, started(false))
+	if spec := fake.Starts()[len(fake.Starts())-1]; slices.Contains(spec.Args, "--continue") {
+		t.Fatal(spec.Args)
+	}
+}

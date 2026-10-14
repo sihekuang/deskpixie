@@ -249,6 +249,7 @@ func Build(c Config) *Agent {
 		Env:  []agent.EnvVar{{Key: "MASCOT_AGENT_TOKEN", Value: coordinatorToken}},
 		// A coordinator found running is the kept one: adopted as it is.
 		AdoptEarlier: kept.CoordinatorToken != "",
+		ResumeLast:   true,
 	}
 	deps := agent.Deps{
 		Host:        agent.NewAgentHost(session, c.Clock, recipe),

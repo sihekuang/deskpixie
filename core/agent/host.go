@@ -33,6 +33,9 @@ type CoordinatorRecipe struct {
 	// AdoptEarlier: Env's token was kept from the run before (agent.keepPanesOnQuit), so a
 	// coordinator found running from that run still holds it and is adopted as it is.
 	AdoptEarlier bool
+	// ResumeLast: with no coordinator running, the first start resumes the workspace's last
+	// conversation (--continue) instead of starting a blank one.
+	ResumeLast bool
 }
 
 // Ensured is EnsureCoordinator's result: Started false is Rust's Running(Status) (it was
@@ -61,7 +64,10 @@ type AgentHost struct {
 }
 
 func NewAgentHost(host SessionHost, clock Clock, recipe CoordinatorRecipe) *AgentHost {
-	return &AgentHost{host: host, clock: clock, recipe: recipe, ensuring: make(chan struct{}, 1)}
+	h := &AgentHost{host: host, clock: clock, recipe: recipe, ensuring: make(chan struct{}, 1)}
+	// A failed start with --continue gives this up, as for an adopted coordinator.
+	h.resumeEarlierRun.Store(recipe.ResumeLast)
+	return h
 }
 
 // Token is the coordinator's bearer token (its recipe's MASCOT_AGENT_TOKEN), "" if none.
