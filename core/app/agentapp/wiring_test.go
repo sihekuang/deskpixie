@@ -395,6 +395,7 @@ func TestWarmStartsTheCoordinatorNow(t *testing.T) {
 // down and the hook server closed.
 func TestShutdownDeniesStopsPanesClearsMcpAndShutsTheHostDown(t *testing.T) {
 	f := newFixture(t, func(c *Config) {
+		c.Settings.KeepPanesOnQuit = false
 		c.Settings.Workers = settings.WorkerSettings{Enabled: true, Max: 2, Kinds: []string{"claude"}}
 		c.Settings.ProjectsRoot = "~/code"
 		_ = os.MkdirAll(filepath.Join(c.Home, "code"), 0o755)
@@ -476,5 +477,37 @@ func TestTheTerminalStartsInTheProjectsFolder(t *testing.T) {
 	want, _ := filepath.EvalSymlinks(filepath.Join(f.home, "code"))
 	if got := f.launcher.Attaches()[0].Dir; got != want {
 		t.Fatalf("%q, want %q", got, want)
+	}
+}
+
+// keepPanesOnQuit (the default): the quit leaves the coordinator running and saves its token;
+// the next start adopts it with that token instead of replacing it.
+func TestAQuitKeepsTheCoordinatorAndTheNextStartAdoptsIt(t *testing.T) {
+	f := newFixture(t, nil)
+	f.agent.Menu("agent:open")
+	waitFor(t, "the coordinator", func() bool { return len(f.host.Starts()) == 1 })
+	token := f.coordinatorToken(t)
+	f.agent.Shutdown()
+	if slices.Contains(f.host.Closed(), agent.Coordinator) {
+		t.Fatal("the coordinator pane was stopped")
+	}
+	path := NewPaths(f.data).Kept()
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal("no kept file:", err)
+	}
+	next := newFixture(t, func(c *Config) {
+		c.AppSupport = f.data
+		c.Hosts = map[string]HostFactory{"herdr": func(HostDeps) (agent.SessionHost, error) { return f.host, nil }}
+	})
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("the kept file is read once:", err)
+	}
+	next.agent.Menu("agent:open")
+	time.Sleep(200 * time.Millisecond)
+	if len(f.host.Starts()) != 1 || len(f.host.Closed()) != 0 {
+		t.Fatal("adopted, not replaced:", f.host.Starts(), f.host.Closed())
+	}
+	if s, _ := next.post(t, "/hooks/stop", token, map[string]any{"hook_event_name": "Stop", "last_assistant_message": "hi"}); s == 401 {
+		t.Fatal("the kept token is refused")
 	}
 }

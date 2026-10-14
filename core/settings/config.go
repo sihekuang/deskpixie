@@ -128,7 +128,9 @@ func Default() Config {
 			Enabled: true, SessionHost: "herdr", Session: "deskpixie", Terminal: "warp",
 			Port: 48217, HoldOpenSecs: 180, PermissionTimeoutSecs: 120, NotifyPerMinute: 4,
 			Narration: true, ProjectsRoot: "~/Documents/Projects",
-			Workers: WorkerSettings{Max: 4, Kinds: []string{"claude", "codex"}},
+			// Handed-off work keeps running when the app quits; the next start adopts it.
+			KeepPanesOnQuit: true,
+			Workers:         WorkerSettings{Max: 4, Kinds: []string{"claude", "codex"}},
 		},
 	}
 }

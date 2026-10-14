@@ -217,8 +217,22 @@ func Build(c Config) *Agent {
 		termFactory = c.Terminals["warp"]
 	}
 
+	// What the last quit left running (keepPanesOnQuit): read once, whatever the setting is now.
+	kept := LoadKept(paths.Kept())
+	if !s.KeepPanesOnQuit {
+		kept = agent.KeptAgents{}
+	}
+	if !workersOn {
+		kept.Workers = nil
+	}
 	tokens := httpserver.NewTokens()
-	coordinatorToken := tokens.Issue(agent.Coordinator)
+	coordinatorToken := kept.CoordinatorToken
+	if coordinatorToken != "" {
+		// The kept coordinator's hooks and MCP calls still carry it.
+		tokens.Restore(agent.Coordinator, coordinatorToken)
+	} else {
+		coordinatorToken = tokens.Issue(agent.Coordinator)
+	}
 	if workersOn {
 		if err := WriteCoordinatorMcp(paths, s.Port, coordinatorToken); err != nil {
 			log.Printf("agent: cannot write the coordinator's MCP config: %v", err)
@@ -233,6 +247,8 @@ func Build(c Config) *Agent {
 		Cwd:  paths.Workspace,
 		Args: CoordinatorArgs(paths, model, workersOn),
 		Env:  []agent.EnvVar{{Key: "MASCOT_AGENT_TOKEN", Value: coordinatorToken}},
+		// A coordinator found running is the kept one: adopted as it is.
+		AdoptEarlier: kept.CoordinatorToken != "",
 	}
 	deps := agent.Deps{
 		Host:        agent.NewAgentHost(session, c.Clock, recipe),
@@ -245,6 +261,7 @@ func Build(c Config) *Agent {
 		Store:       NewJsonlStore(paths.Root),
 		Clock:       c.Clock,
 		IDs:         c.IDs,
+		Kept:        KeptFile(paths.Kept()),
 	}
 	// Exactly 127.0.0.1 (the hook server refuses any non-loopback listener). Bound before the
 	// runtime is built, so a busy port is known before a warm start could launch anything.
@@ -266,6 +283,7 @@ func Build(c Config) *Agent {
 		// Stepped before the warm start: a disabled app never starts the coordinator.
 		SetupProblem: problem,
 		Notice:       ws.Notice,
+		Kept:         kept,
 	}
 	var workerDeps *agent.WorkerDeps
 	if workersOn {

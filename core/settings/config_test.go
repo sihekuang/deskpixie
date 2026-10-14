@@ -243,7 +243,7 @@ func TestAgentDefaultsMatchTheSpec(t *testing.T) {
 	// DeskPixie rename (spec §6): the default session is "deskpixie", not "ai-mascot".
 	want := map[string]any{
 		"enabled": true, "sessionHost": "herdr", "session": "deskpixie", "terminal": "warp",
-		"herdrPath": nil, "model": nil, "warm": false, "port": float64(48217), "keepPanesOnQuit": false,
+		"herdrPath": nil, "model": nil, "warm": false, "port": float64(48217), "keepPanesOnQuit": true,
 		"holdOpenSecs": float64(180), "permissionTimeoutSecs": float64(120), "notifyPerMinute": float64(4), "narration": true,
 		"projectsRoot": "~/Documents/Projects",
 		"workers":      map[string]any{"enabled": false, "max": float64(4), "kinds": []any{"claude", "codex"}},
