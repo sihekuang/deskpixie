@@ -262,6 +262,11 @@ func (c *Client) Prompt(ctx context.Context, target, text string) error {
 	return err
 }
 
+func (c *Client) Focus(ctx context.Context, target string) error {
+	_, err := c.call(ctx, "agent.focus", target, map[string]any{"target": target})
+	return err
+}
+
 func (c *Client) SendKeys(ctx context.Context, target string, keys []string) error {
 	_, err := c.call(ctx, "agent.send_keys", target, map[string]any{"target": target, "keys": nonNil(keys)})
 	return err

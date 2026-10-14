@@ -41,17 +41,18 @@ type Delegate struct{ H *AgentHandle }
 func (Delegate) Name() string { return "delegate" }
 
 func (Delegate) Description() string {
-	return "Hand a task to the capable agent working in the background: research, facts to check, live " +
-		"information (news, prices, scores), files, code, repositories, charts, diagrams or pages. Not for " +
-		"the time, the weather or arithmetic: get_time, get_weather and calculate answer those at once. " +
-		"Call this BEFORE saying you will hand something off. Returns at once with a job id; the result " +
-		"arrives later as an \"Agent reply:\" line."
+	return "Hand a task to the capable agent working in the background. Use it for any real work: research, " +
+		"facts to check, live information (news, prices, scores), the user's projects, files, code, " +
+		"repositories, writing, summaries, charts, diagrams or pages. Not for the time, the weather or " +
+		"arithmetic: get_time, get_weather and calculate answer those at once. The agent does not hear the " +
+		"conversation, so the task and context must stand on their own. Call this BEFORE saying you will " +
+		"hand something off. Returns at once with a job id; the result arrives later as an \"Agent reply:\" line."
 }
 
 func (Delegate) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{` +
 		`"task":{"type":"string","description":"What the user wants done, in their words."},` +
-		`"context":{"type":"string","description":"Anything else from the conversation the agent needs."}},` +
+		`"context":{"type":"string","description":"Everything from the conversation the agent needs, since it cannot hear it: what pronouns refer to, names, numbers, choices, earlier Agent replies."}},` +
 		`"required":["task"],"additionalProperties":false}`)
 }
 
@@ -65,7 +66,11 @@ func (d Delegate) Invoke(_ context.Context, raw json.RawMessage) voice.ToolOutco
 	if err != nil {
 		return toolError(err)
 	}
-	return toolReply(map[string]any{"job_id": id.String(), "status": "delegated"})
+	out := toolReply(map[string]any{"job_id": id.String(), "status": "delegated"})
+	// Work: Bit says it handed it off, then goes idle; the result comes back on its own. A fact
+	// check stays open so Bit can answer it aloud.
+	out.EndAfterReply = !strings.HasPrefix(task, "Check:")
+	return out
 }
 
 // Jobs is the `jobs` tool: what the agent's jobs are doing, or cancel one. One tool for both

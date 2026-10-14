@@ -106,7 +106,7 @@ func Catalog(role Role) []map[string]any {
 			},
 			{
 				"name":        "stop_worker",
-				"description": "Stop a worker: it is interrupted and its terminal closes. Its worktree and branch are kept.",
+				"description": "Stop a worker: it is interrupted and its terminal closes. Its worktree and branch are kept. Call it as soon as a worker's done report checks out and you have nothing more for it.",
 				"inputSchema": objectSchema(stringProps([2]string{"name", "The worker's name."}), "name"),
 			},
 			{

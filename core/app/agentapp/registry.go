@@ -153,6 +153,14 @@ func (c *IntegrationCheck) List(ctx context.Context) ([]agent.AgentInfo, error) 
 func (c *IntegrationCheck) Subscribe() <-chan agent.PaneEvent { return c.inner.Subscribe() }
 func (c *IntegrationCheck) AttachCommand() []string           { return c.inner.AttachCommand() }
 
+// Focus passes through to the wrapped host, if it can focus.
+func (c *IntegrationCheck) Focus(ctx context.Context, name string) error {
+	if f, ok := c.inner.(agent.Focuser); ok {
+		return f.Focus(ctx, name)
+	}
+	return nil
+}
+
 // Shutdown stops the wrapped host (herdr.Host's event pump), if it has one.
 func (c *IntegrationCheck) Shutdown() { shutdownHost(c.inner) }
 

@@ -73,6 +73,7 @@ type Input struct {
 	Event        Event   // InModel
 	CallID       string  // InToolDone
 	End          bool    // InToolDone
+	EndAfter     bool    // InToolDone: end once the reply that uses the result has played
 	PlaybackIdle bool    // InTick
 	Failure      Failure // InFailed
 	Notice       Notice  // InInject
@@ -83,6 +84,12 @@ func HotkeyInput() Input        { return Input{Kind: InHotkey} }
 func ModelInput(ev Event) Input { return Input{Kind: InModel, Event: ev} }
 func ToolDoneInput(callID string, end bool) Input {
 	return Input{Kind: InToolDone, CallID: callID, End: end}
+}
+
+// ToolDoneAfterReplyInput: CallID finished and asked for one more reply (e.g. "On it, I'll let
+// you know"), after which the conversation ends.
+func ToolDoneAfterReplyInput(callID string) Input {
+	return Input{Kind: InToolDone, CallID: callID, EndAfter: true}
 }
 func TickInput(playbackIdle bool) Input { return Input{Kind: InTick, PlaybackIdle: playbackIdle} }
 func FailedInput(f Failure) Input       { return Input{Kind: InFailed, Failure: f} }
@@ -311,6 +318,10 @@ func (c *Conversation) Step(in Input, now time.Time) []Effect {
 					c.ending = true
 				}
 			} else {
+				if in.EndAfter && thisTurn && !(c.phase == PhaseListening && c.silenceSince.IsZero()) {
+					// Ends once the reply below has played; the user talking cancels it.
+					c.ending = true
+				}
 				// The adapter asks the model for a reply that uses the result.
 				c.turnReplySeen = false
 				if c.phase == PhaseThinking {

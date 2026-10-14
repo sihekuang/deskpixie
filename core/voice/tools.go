@@ -19,6 +19,9 @@ type ToolOutcome struct {
 	Output json.RawMessage
 	// EndConversation: end the conversation once the current reply has finished playing.
 	EndConversation bool
+	// EndAfterReply: the model still replies to the result; the conversation ends once that
+	// reply has finished playing (the user talking first cancels it).
+	EndAfterReply bool
 }
 
 // Tool is something the model can call. Invoke runs on its own goroutine and may take long
