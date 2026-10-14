@@ -131,3 +131,90 @@ func TestSecretsReportsFoundOrMissing(t *testing.T) {
 		t.Fatal("Has")
 	}
 }
+
+// --- Keychain values (#59): environment → Keychain → .env ---
+
+func writeDotenv(t *testing.T, text string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), ".env")
+	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestKeychainValuesSitBetweenTheEnvironmentAndDotenv(t *testing.T) {
+	path := writeDotenv(t, "OPENAI_API_KEY=sk-fake-file\nGEMINI_API_KEY=g-fake-file\n")
+	src := NewEnvSecretsWithLookup([]string{path}, func(name string) (string, bool) {
+		return "sk-fake-env", name == "OPENAI_API_KEY"
+	})
+	src.SetKeychain(map[string]string{"OPENAI_API_KEY": "sk-fake-kc", "GEMINI_API_KEY": "g-fake-kc"})
+	if k, ok := src.APIKey("openai-realtime"); !ok || k.Expose() != "sk-fake-env" {
+		t.Fatalf("env should beat keychain, got %q", k.Expose())
+	}
+	if k, ok := src.APIKey("gemini-live"); !ok || k.Expose() != "g-fake-kc" {
+		t.Fatalf("keychain should beat .env, got %q", k.Expose())
+	}
+	if got := src.Source("openai-realtime"); got != SourceEnv {
+		t.Fatal(got)
+	}
+	if got := src.Source("gemini-live"); got != SourceKeychain {
+		t.Fatal(got)
+	}
+	src.SetKeychain(nil)
+	if k, _ := src.APIKey("gemini-live"); k.Expose() != "g-fake-file" {
+		t.Fatalf(".env after keychain cleared, got %q", k.Expose())
+	}
+	if got := src.Source("gemini-live"); got != SourceDotenv {
+		t.Fatal(got)
+	}
+}
+
+func TestBlankKeychainValuesCountAsMissing(t *testing.T) {
+	path := writeDotenv(t, "GEMINI_API_KEY=g-fake-file\n")
+	src := NewEnvSecretsWithLookup([]string{path}, noEnv)
+	src.SetKeychain(map[string]string{"OPENAI_API_KEY": "   ", "GEMINI_API_KEY": ""})
+	if _, ok := src.APIKey("openai-realtime"); ok {
+		t.Fatal("blank keychain value counted")
+	}
+	if src.Source("openai-realtime") != SourceNone {
+		t.Fatal("missing key has a source")
+	}
+	if k, _ := src.APIKey("gemini-live"); k.Expose() != "g-fake-file" {
+		t.Fatal("blank keychain value hid the .env one")
+	}
+}
+
+func TestSetKeychainReplacesTheSetAndIgnoresUnknownVariables(t *testing.T) {
+	src := NewEnvSecretsWithLookup(nil, noEnv)
+	src.SetKeychain(map[string]string{"OPENAI_API_KEY": "sk-fake-1", "PATH": "/evil"})
+	if k, ok := src.APIKey("openai-realtime"); !ok || k.Expose() != "sk-fake-1" {
+		t.Fatal("keychain value not used")
+	}
+	src.SetKeychain(map[string]string{"GEMINI_API_KEY": " g-fake-2 "})
+	if _, ok := src.APIKey("openai-realtime"); ok {
+		t.Fatal("old value survived a replace")
+	}
+	if k, _ := src.APIKey("gemini-live"); k.Expose() != "g-fake-2" {
+		t.Fatalf("got %q", k.Expose())
+	}
+	if _, ok := src.APIKey("someone-else"); ok {
+		t.Fatal("unknown provider got a key")
+	}
+}
+
+func TestKeychainValuesAreSafeForConcurrentUse(t *testing.T) {
+	src := NewEnvSecretsWithLookup(nil, noEnv)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range 200 {
+			src.SetKeychain(map[string]string{"OPENAI_API_KEY": "sk-fake"})
+		}
+	}()
+	for range 200 {
+		src.APIKey("openai-realtime")
+		src.Source("openai-realtime")
+	}
+	<-done
+}
