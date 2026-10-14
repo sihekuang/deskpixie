@@ -70,6 +70,9 @@ type VoiceSettings struct {
 	InputDevice      *string `json:"inputDevice"`
 	OutputDevice     *string `json:"outputDevice"`
 	HomeCity         *string `json:"homeCity"`
+	// ShortTermMemory: Bit remembers recent conversations (kept locally for a few hours) and
+	// is reminded of them when a conversation starts.
+	ShortTermMemory bool `json:"shortTermMemory"`
 }
 
 // CanvasSettings is the canvas block.
@@ -124,6 +127,7 @@ func Default() Config {
 		Voice: VoiceSettings{
 			Provider: "openai-realtime", Audio: "macos-vpio", Model: "gpt-realtime", Voice: "marin",
 			Chimes: true, IdleTimeoutSecs: 7, NoiseModel: "hush", LiveBackendModel: "gpt-6-luna",
+			ShortTermMemory: true,
 		},
 		Canvas: CanvasSettings{AutoOpen: true, Keep: 50},
 		Agent: AgentSettings{
