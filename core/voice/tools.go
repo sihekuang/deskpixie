@@ -19,6 +19,9 @@ type ToolOutcome struct {
 	Output json.RawMessage
 	// EndConversation: end the conversation once the current reply has finished playing.
 	EndConversation bool
+	// EndAfterReply: the model still replies to the result; the conversation ends once that
+	// reply has finished playing (the user talking first cancels it).
+	EndAfterReply bool
 }
 
 // Tool is something the model can call. Invoke runs on its own goroutine and may take long
@@ -80,9 +83,8 @@ type EndConversation struct{}
 func (EndConversation) Name() string { return EndConversationTool }
 
 func (EndConversation) Description() string {
-	return "End the voice conversation. Call it when the user clearly signals they are done " +
-		"(e.g. \"thanks, that's all\", \"bye\"), after a short goodbye, or right after you have " +
-		"handed work off and the user has nothing more to say, after your acknowledgement."
+	return "End the voice conversation. Call only when the user clearly signals they are done " +
+		"(e.g. \"thanks, that's all\", \"bye\"). Say a short goodbye before calling it."
 }
 
 func (EndConversation) Parameters() json.RawMessage {

@@ -394,8 +394,8 @@ func TestThePersonaOffloadsWorkToTheAgentByDefault(t *testing.T) {
 		"The agent does not hear this conversation.",
 		"One delegate call per independent task.",
 		"If you think you can't do it yourself, that is the signal to delegate",
-		"Then go idle if the user doesn't need to say anything more: call end_conversation",
-		"stay after \"Let me check that.\"",
+		"The app goes idle once that sentence has played",
+		"ask it before you call delegate",
 	} {
 		if !strings.Contains(DelegationPersona, phrase) {
 			t.Fatal(phrase)
@@ -404,6 +404,21 @@ func TestThePersonaOffloadsWorkToTheAgentByDefault(t *testing.T) {
 	if d := (Delegate{}).Description(); !strings.Contains(d, "the task and context must stand on their own") {
 		t.Fatal(d)
 	}
+}
+
+func TestDelegateEndsTheConversationAfterTheAcknowledgementButNotForAFactCheck(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRig(t)
+		if out := (Delegate{H: r.h}).Invoke(context.Background(), json.RawMessage(`{"task":"summarise the open issues"}`)); !out.EndAfterReply {
+			t.Fatal("work: the conversation should end after the acknowledgement")
+		}
+		if out := (Delegate{H: r.h}).Invoke(context.Background(), json.RawMessage(`{"task":"Check: who won the game?"}`)); out.EndAfterReply {
+			t.Fatal("a fact check stays open so Bit can answer aloud")
+		}
+		if out := (Delegate{H: r.h}).Invoke(context.Background(), json.RawMessage(`{"task":"  "}`)); out.EndAfterReply {
+			t.Fatal("a refused delegate does not end the conversation")
+		}
+	})
 }
 
 func TestAnswerJobSendsTheUsersAnswerToTheWaitingJob(t *testing.T) {

@@ -711,3 +711,36 @@ func TestConversationConfigDefaults(t *testing.T) {
 		t.Fatalf("%+v", fx)
 	}
 }
+
+// A tool that ends after the reply (delegate): the acknowledgement plays, then the conversation
+// ends, unless the user starts talking first. Not a ported case.
+func TestEndAfterReply(t *testing.T) {
+	t.Run("end_after_reply_plays_the_acknowledgement_then_ends", func(t *testing.T) {
+		now := t0()
+		c := thinking(now)
+		model(c, evResponseCreated, now)
+		model(c, evToolCall("c1", "delegate"), now)
+		empty(t, model(c, evResponseDone, now))
+		empty(t, c.Step(ToolDoneAfterReplyInput("c1"), now), "waits for the acknowledgement")
+		phase(t, c, PhaseThinking)
+		model(c, evResponseCreated, now)
+		model(c, evAudio(frame()), now)
+		empty(t, model(c, evResponseDone, now))
+		empty(t, tick(c, false, ms(now, 300)), "acknowledgement still playing")
+		eq(t, tick(c, true, ms(now, 600)), ended()...)
+	})
+	t.Run("end_after_reply_is_cancelled_when_the_user_talks", func(t *testing.T) {
+		now := t0()
+		c := thinking(now)
+		model(c, evResponseCreated, now)
+		model(c, evToolCall("c1", "delegate"), now)
+		model(c, evResponseDone, now)
+		c.Step(ToolDoneAfterReplyInput("c1"), now)
+		model(c, evResponseCreated, now)
+		model(c, evAudio(frame()), now)
+		model(c, evSpeechStarted, now)
+		model(c, evResponseDone, now)
+		tick(c, true, ms(now, 600))
+		phase(t, c, PhaseListening)
+	})
+}

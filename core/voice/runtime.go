@@ -528,6 +528,10 @@ func (r *Runtime) onToolDone(t toolResult) {
 		out = json.RawMessage("null")
 	}
 	r.send(Command{Kind: CmdToolResult, CallID: t.callID, Output: out, Respond: !t.outcome.EndConversation})
+	if t.outcome.EndAfterReply && !t.outcome.EndConversation {
+		r.input(ToolDoneAfterReplyInput(t.callID))
+		return
+	}
 	r.input(ToolDoneInput(t.callID, t.outcome.EndConversation))
 }
 

@@ -66,7 +66,11 @@ func (d Delegate) Invoke(_ context.Context, raw json.RawMessage) voice.ToolOutco
 	if err != nil {
 		return toolError(err)
 	}
-	return toolReply(map[string]any{"job_id": id.String(), "status": "delegated"})
+	out := toolReply(map[string]any{"job_id": id.String(), "status": "delegated"})
+	// Work: Bit says it handed it off, then goes idle; the result comes back on its own. A fact
+	// check stays open so Bit can answer it aloud.
+	out.EndAfterReply = !strings.HasPrefix(task, "Check:")
+	return out
 }
 
 // Jobs is the `jobs` tool: what the agent's jobs are doing, or cancel one. One tool for both
