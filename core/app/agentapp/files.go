@@ -46,6 +46,85 @@ var HookTimeouts = []HookTimeout{{"Stop", 5}, {"PermissionRequest", 125}, {"Post
 // narrated).
 var WorkerHookTimeouts = []HookTimeout{{"Stop", 5}, {"PermissionRequest", 125}}
 
+// StateHookTimeouts are the status hooks a Claude agent also gets on a session host that
+// detects no status itself (tmux): UserPromptSubmit says working, Stop (a second hook, after
+// the one carrying the reply) idle, Notification blocked; all post to /hooks/state.
+var StateHookTimeouts = []HookTimeout{{"UserPromptSubmit", 5}, {"Stop", 5}, {"Notification", 5}}
+
+// stateNotifications are the Notification types that mean the agent waits on the owner: a
+// permission prompt or an MCP elicitation, not Claude's "still waiting for your input" reminder
+// (that one comes after Stop, while the agent is idle).
+const stateNotifications = "permission_prompt|elicitation_dialog"
+
+// WithStateHooks adds the StateHookTimeouts hooks to a rendered settings file (its port is
+// the one the file's hooks already use).
+func WithStateHooks(text string) (string, error) {
+	dec := json.NewDecoder(strings.NewReader(text))
+	dec.UseNumber()
+	var v map[string]any
+	if err := dec.Decode(&v); err != nil {
+		return "", fmt.Errorf("not JSON: %v", err)
+	}
+	hooks, ok := v["hooks"].(map[string]any)
+	if !ok {
+		return "", errors.New("no hooks")
+	}
+	stop, _ := get(v, "hooks", "Stop", 0, "hooks", 0, "url").(string)
+	base, ok := strings.CutSuffix(stop, "/stop")
+	if !ok {
+		return "", errors.New("no Stop hook")
+	}
+	for _, h := range StateHookTimeouts {
+		group := map[string]any{"hooks": []any{map[string]any{
+			"type":           "http",
+			"url":            base + "/state",
+			"timeout":        json.Number(strconv.FormatUint(h.Secs, 10)),
+			"headers":        map[string]any{"Authorization": "Bearer $MASCOT_AGENT_TOKEN"},
+			"allowedEnvVars": []any{"MASCOT_AGENT_TOKEN"},
+		}}}
+		if h.Event == "Notification" {
+			group["matcher"] = stateNotifications
+		}
+		groups, _ := hooks[h.Event].([]any)
+		hooks[h.Event] = append(groups, group)
+	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(v); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
+}
+
+// ValidateStateHooks: each StateHookTimeouts event has an http hook to this port's
+// /hooks/state that carries the bearer only by env reference.
+func ValidateStateHooks(text string, port uint16) error {
+	var v any
+	if err := json.Unmarshal([]byte(text), &v); err != nil {
+		return fmt.Errorf("not JSON: %v", err)
+	}
+	url := fmt.Sprintf("http://127.0.0.1:%d/hooks/state", port)
+	for _, h := range StateHookTimeouts {
+		found := false
+		groups, _ := get(v, "hooks", h.Event).([]any)
+		for _, g := range groups {
+			list, _ := get(g, "hooks").([]any)
+			for _, item := range list {
+				hook, _ := item.(map[string]any)
+				env, _ := hook["allowedEnvVars"].([]any)
+				found = found || (hook["type"] == "http" && hook["url"] == url &&
+					get(hook, "headers", "Authorization") == "Bearer $MASCOT_AGENT_TOKEN" && len(env) == 1 && env[0] == "MASCOT_AGENT_TOKEN")
+			}
+		}
+		if !found {
+			return fmt.Errorf("no %s state hook", h.Event)
+		}
+	}
+	return nil
+}
+
 // Paths are the agent's files under the app-data folder.
 type Paths struct {
 	// Root is <app_data>/agent: jobs.jsonl, outbox.jsonl, the settings files.
@@ -196,9 +275,15 @@ func writeIfChanged(path, text string) error {
 	return nil
 }
 
-// Install creates the folders and (re)writes CLAUDE.md and both settings files when they
-// differ. projectsRoot is set when workers are on.
+// Install is InstallFor without the state hooks (Herdr).
 func Install(paths Paths, port uint16, projectsRoot string) error {
+	return InstallFor(paths, port, projectsRoot, false)
+}
+
+// InstallFor creates the folders and (re)writes CLAUDE.md and both settings files when they
+// differ. projectsRoot is set when workers are on. stateHooks adds the status hooks
+// (WithStateHooks) for a session host that detects no status itself (tmux).
+func InstallFor(paths Paths, port uint16, projectsRoot string, stateHooks bool) error {
 	for _, dir := range []string{paths.Root, paths.Workspace, paths.Canvas} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("%s: %w", dir, err)
@@ -207,18 +292,33 @@ func Install(paths Paths, port uint16, projectsRoot string) error {
 	if err := writeIfChanged(filepath.Join(paths.Workspace, "CLAUDE.md"), RenderClaudeMd(paths.Canvas, projectsRoot)); err != nil {
 		return err
 	}
-	coordinator := RenderSettings(port)
-	if err := ValidateSettings(coordinator, port, HookTimeouts); err != nil {
-		return err
+	for _, f := range []struct {
+		path  string
+		text  string
+		hooks []HookTimeout
+	}{
+		{paths.Settings, RenderSettings(port), HookTimeouts},
+		{paths.WorkerSettings, RenderWorkerSettings(port), WorkerHookTimeouts},
+	} {
+		text, hooks := f.text, f.hooks
+		if stateHooks {
+			var err error
+			if text, err = WithStateHooks(text); err != nil {
+				return err
+			}
+			hooks = append(slices.Clone(hooks), StateHookTimeouts...)
+			if err := ValidateStateHooks(text, port); err != nil {
+				return err
+			}
+		}
+		if err := ValidateSettings(text, port, hooks); err != nil {
+			return err
+		}
+		if err := writeIfChanged(f.path, text); err != nil {
+			return err
+		}
 	}
-	if err := writeIfChanged(paths.Settings, coordinator); err != nil {
-		return err
-	}
-	worker := RenderWorkerSettings(port)
-	if err := ValidateSettings(worker, port, WorkerHookTimeouts); err != nil {
-		return err
-	}
-	return writeIfChanged(paths.WorkerSettings, worker)
+	return nil
 }
 
 // CoordinatorArgs are Claude Code's arguments for the coordinator (AgentHost adds --continue

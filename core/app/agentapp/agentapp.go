@@ -190,7 +190,8 @@ func Build(c Config) *Agent {
 	// A workers problem turns only workers off (a tray notice): the coordinator still works solo.
 	ws := SetupWorkers(s.Workers, s.ProjectsRoot, c.Home)
 	workersOn := ws.Policy.Enabled
-	if err := Install(paths, s.Port, ws.Root); err != nil {
+	// tmux detects no agent status: Claude agents report theirs through hooks.
+	if err := InstallFor(paths, s.Port, ws.Root, s.SessionHost == "tmux"); err != nil {
 		log.Printf("agent: invalid settings: %v", err)
 		setProblem("Agent: invalid settings (see log)")
 	}
