@@ -15,10 +15,11 @@ type Registrar interface {
 	Register(method string, fn func(args json.RawMessage) (any, error))
 }
 
-// SecretSource says which API keys exist. P14 adapts the voice env secrets to it.
+// SecretSource says where each API key comes from; it never hands out a key.
 type SecretSource interface {
-	// APIKey is the key for a provider registry name ("openai-realtime", "gemini-live").
-	APIKey(provider string) (string, bool)
+	// Source names where the key for a provider registry name ("openai-realtime",
+	// "gemini-live") comes from: "env", "keychain" or "dotenv"; "" when there is none.
+	Source(provider string) string
 }
 
 // KeyStatus is found or missing; never the key.
@@ -29,24 +30,35 @@ const (
 	KeyMissing KeyStatus = "missing"
 )
 
-// Secrets is which API keys exist.
-type Secrets struct {
-	OpenAI KeyStatus `json:"openai"`
-	Gemini KeyStatus `json:"gemini"`
+// KeySources is where each key comes from: "env", "keychain", "dotenv", or "" (missing).
+type KeySources struct {
+	OpenAI string `json:"openai"`
+	Gemini string `json:"gemini"`
 }
 
-// SecretStatus is found or missing per provider; a nil source has none.
+// Secrets is which API keys exist and where they come from.
+type Secrets struct {
+	OpenAI  KeyStatus  `json:"openai"`
+	Gemini  KeyStatus  `json:"gemini"`
+	Sources KeySources `json:"sources"`
+}
+
+// SecretStatus is found or missing, and the source, per provider; a nil source has none.
 func SecretStatus(src SecretSource) Secrets {
-	status := func(provider string) KeyStatus {
+	source := func(provider string) string {
 		if src == nil {
+			return ""
+		}
+		return src.Source(provider)
+	}
+	status := func(s string) KeyStatus {
+		if s == "" {
 			return KeyMissing
 		}
-		if _, ok := src.APIKey(provider); ok {
-			return KeyFound
-		}
-		return KeyMissing
+		return KeyFound
 	}
-	return Secrets{OpenAI: status(ProviderOpenAI), Gemini: status(ProviderGemini)}
+	o, g := source(ProviderOpenAI), source(ProviderGemini)
+	return Secrets{OpenAI: status(o), Gemini: status(g), Sources: KeySources{OpenAI: o, Gemini: g}}
 }
 
 // RevealCommand is how each platform shows a file in its file manager.

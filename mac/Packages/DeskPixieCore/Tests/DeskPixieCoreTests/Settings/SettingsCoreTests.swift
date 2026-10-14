@@ -203,6 +203,26 @@ final class SettingsCoreTests: XCTestCase {
         XCTAssertEqual(L.secretText(nil, .openAI), "Unknown")
     }
 
+    func test_key_status_names_the_source() throws {
+        func text(_ source: String) throws -> String {
+            let json = #"{"openai":"found","gemini":"missing","sources":{"openai":"\#(source)","gemini":""}}"#
+            return L.secretText(try JSONDecoder().decode(SettingsSecrets.self, from: Data(json.utf8)), .openAI)
+        }
+        XCTAssertEqual(try text("env"), "From environment")
+        XCTAssertEqual(try text("keychain"), "From Keychain")
+        XCTAssertEqual(try text("dotenv"), "From .env")
+        XCTAssertEqual(try text(""), "Found", "an older core names no source")
+        let s = try JSONDecoder().decode(SettingsSecrets.self, from: Data(#"{"openai":"found","gemini":"missing"}"#.utf8))
+        XCTAssertEqual(L.secretText(s, .openAI), "Found")
+        XCTAssertEqual(L.secretText(s, .gemini), "Missing")
+    }
+
+    func test_a_key_can_be_saved_only_when_something_is_typed() {
+        XCTAssertFalse(L.canSaveKey(""))
+        XCTAssertFalse(L.canSaveKey("  \n\t"))
+        XCTAssertTrue(L.canSaveKey(" sk-fake "))
+    }
+
     @MainActor
     func test_clearing_one_field_leaves_the_others() throws {
         let client = FakeSettingsClient()

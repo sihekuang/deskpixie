@@ -61,6 +61,12 @@ final class FakeSettingsClient: SettingsClient {
         calls.append("settings.restart")
     }
 
+    var keychainPushes: [[String: String]] = []
+    func setKeychain(_ values: [String: String]) throws {
+        calls.append("secrets.keychain")
+        keychainPushes.append(values)
+    }
+
     private static func setting(_ tree: JSONValue, _ keys: [String], _ value: JSONValue) -> JSONValue {
         guard let key = keys.first else { return value }
         guard case .object(var o) = tree else { return tree }
@@ -260,6 +266,7 @@ final class SettingsModelTests: XCTestCase {
             func secrets() throws -> SettingsSecrets { throw DeskPixieEngineError.notInitialized }
             func openFile() throws {}
             func restart() throws {}
+            func setKeychain(_ values: [String: String]) throws {}
         }
         let m = SettingsModel(client: Failing())
         m.load()
@@ -267,4 +274,76 @@ final class SettingsModelTests: XCTestCase {
         XCTAssertEqual(m.loadError, "unknown method settings.snapshot")
         XCTAssertEqual(m.secretText(.openAI), "Unknown")
     }
+
+    // MARK: API keys (#59)
+
+    func test_saving_a_key_stores_it_pushes_the_set_and_rereads_the_status() {
+        let store = FakeKeyStore()
+        model.keyStore = store
+        model.load()
+        XCTAssertFalse(model.canSaveKey(.openAI))
+        model.setKeyDraft(.openAI, "  sk-fake-typed ")
+        XCTAssertTrue(model.canSaveKey(.openAI))
+        client.secretsResult = SettingsSecrets(openai: .found, gemini: .missing,
+                                               sources: SettingsKeySources(openai: "keychain", gemini: ""))
+        client.calls = []
+        model.saveKey(.openAI)
+        XCTAssertEqual(store.items, ["OPENAI_API_KEY": "sk-fake-typed"])
+        XCTAssertEqual(client.keychainPushes.last, ["OPENAI_API_KEY": "sk-fake-typed"])
+        XCTAssertEqual(client.calls, ["secrets.keychain", "settings.secrets"])
+        XCTAssertEqual(model.keyDraft(.openAI), "", "the field never keeps the key")
+        XCTAssertTrue(model.hasStoredKey(.openAI))
+        XCTAssertFalse(model.hasStoredKey(.gemini))
+        XCTAssertNil(model.keyError(.openAI))
+        XCTAssertEqual(model.secretText(.openAI), "From Keychain")
+    }
+
+    func test_a_failed_save_says_so_and_pushes_nothing() {
+        let store = FakeKeyStore()
+        store.saveThrows = true
+        model.keyStore = store
+        model.setKeyDraft(.gemini, "g-fake")
+        client.calls = []
+        model.saveKey(.gemini)
+        XCTAssertEqual(model.keyError(.gemini), "Couldn't save to Keychain")
+        XCTAssertTrue(client.keychainPushes.isEmpty)
+        XCTAssertFalse(client.calls.contains("secrets.keychain"))
+        XCTAssertEqual(model.keyDraft(.gemini), "g-fake", "the typed key stays to retry")
+    }
+
+    func test_blank_input_saves_nothing() {
+        let store = FakeKeyStore()
+        model.keyStore = store
+        model.setKeyDraft(.openAI, "   ")
+        model.saveKey(.openAI)
+        XCTAssertTrue(store.items.isEmpty)
+        XCTAssertTrue(client.keychainPushes.isEmpty)
+    }
+
+    func test_removing_a_key_deletes_it_and_pushes_the_rest() {
+        let store = FakeKeyStore()
+        store.items = ["OPENAI_API_KEY": "sk-fake-a", "GEMINI_API_KEY": "g-fake-b"]
+        model.keyStore = store
+        model.load()
+        XCTAssertTrue(model.hasStoredKey(.openAI))
+        model.removeKey(.openAI)
+        XCTAssertEqual(store.items, ["GEMINI_API_KEY": "g-fake-b"])
+        XCTAssertEqual(client.keychainPushes.last, ["GEMINI_API_KEY": "g-fake-b"])
+        XCTAssertFalse(model.hasStoredKey(.openAI))
+    }
+}
+
+/// An in-memory `APIKeyStore`.
+final class FakeKeyStore: APIKeyStore {
+    var items: [String: String] = [:]
+    var saveThrows = false
+    struct Failed: Error {}
+
+    func read(_ variable: String) throws -> String? { items[variable] }
+    func contains(_ variable: String) -> Bool { items[variable] != nil }
+    func save(_ variable: String, _ value: String) throws {
+        if saveThrows { throw Failed() }
+        items[variable] = value
+    }
+    func delete(_ variable: String) throws { items[variable] = nil }
 }

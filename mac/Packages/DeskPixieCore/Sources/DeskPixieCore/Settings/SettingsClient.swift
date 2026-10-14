@@ -10,6 +10,9 @@ public protocol SettingsClient {
     func set(_ field: String, _ value: JSONValue) throws -> SettingsSnapshot
     /// `settings.secrets`: found or missing per provider.
     func secrets() throws -> SettingsSecrets
+    /// `secrets.keychain {values}`: the keys stored in the Keychain (variable → key), replacing
+    /// the set the core holds. Never logged.
+    func setKeychain(_ values: [String: String]) throws
     /// `settings.openFile`: shows settings.json in Finder.
     func openFile() throws
     /// `settings.restart`: quits and relaunches.
@@ -41,6 +44,14 @@ public struct EngineSettingsClient: SettingsClient, Sendable {
 
     public func secrets() throws -> SettingsSecrets {
         try engine.call("settings.secrets", as: SettingsSecrets.self)
+    }
+
+    private struct KeychainArgs: Encodable {
+        let values: [String: String]
+    }
+
+    public func setKeychain(_ values: [String: String]) throws {
+        _ = try engine.call("secrets.keychain", KeychainArgs(values: values))
     }
 
     public func openFile() throws {

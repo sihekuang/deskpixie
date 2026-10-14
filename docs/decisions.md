@@ -45,3 +45,14 @@
 **Decision:** The bubble skips its pop when a fullscreen app is in front (menu bar hidden) but does not detect Focus / Do Not Disturb.
 **Trigger:** Spec §4 asks for badge-only during Focus; the only API, INFocusStatusCenter, needs the Communication Notifications entitlement and a permission prompt.
 **Basis:** Planning ruling; revisit if Focus suppression is wanted enough to add the entitlement.
+
+## 2026-10-14 — API keys entered in Settings: Keychain, looked up after the environment
+**Decision:** Keys typed into Settings are stored in the macOS Keychain (service "DeskPixie", account = the variable name, e.g. OPENAI_API_KEY). Lookup order: process environment → Keychain → .env files.
+**Trigger:** #59; the user did not answer the two design questions and set the goal to finish the discussed features.
+**Basis:** Storage: existing project convention — docs/specs/2026-10-13-deskpixie-port-design.md §Secrets row ("Keychain, service \"DeskPixie\", as Howl does", Phase 4). Environment first: unanimous practice that an environment variable overrides stored credentials:
+- GitHub CLI, `gh help environment`: GH_TOKEN/GITHUB_TOKEN "take precedence over previously stored credentials" — https://cli.github.com/manual/gh_help_environment
+- AWS CLI, "Configuration and credential file settings — precedence": environment variables before the shared credentials file — https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-files.html
+- Google Cloud, Application Default Credentials: GOOGLE_APPLICATION_CREDENTIALS checked before the gcloud-stored credentials — https://cloud.google.com/docs/authentication/application-default-credentials
+Keychain before .env is a ruling (no source settles it): a key typed into the app is the most deliberate, recent choice; .env still works when no key was typed. Easy to flip if wrong.
+
+**Update (same day):** the user confirmed Keychain storage and set the order to Keychain → environment → .env ("what the user sees goes first"), with Settings always naming the source in use. This supersedes the environment-first order above.

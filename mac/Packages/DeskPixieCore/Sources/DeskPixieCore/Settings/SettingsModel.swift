@@ -28,6 +28,15 @@ public final class SettingsModel {
     /// The hotkey field being recorded, if any.
     public var recordingPath: String?
 
+    /// Where typed API keys are stored (the app sets the Keychain); nil = keys can't be typed.
+    @ObservationIgnored public var keyStore: APIKeyStore?
+    /// Key being typed per row; cleared once saved, so the field never shows a stored key.
+    public private(set) var keyDrafts: [SettingsSecretID: String] = [:]
+    /// The row's Keychain error ("Couldn't save to Keychain").
+    public private(set) var keyErrors: [SettingsSecretID: String] = [:]
+    /// Rows with a key in the store (they offer Remove).
+    public private(set) var storedKeys: Set<SettingsSecretID> = []
+
     /// Binds a combo with the app's global hotkey before it is saved. Returns false when the
     /// shortcut can't be had (another app holds it, or the key can't be named). The app
     /// supplies it (see `DeskPixieApp`); when nil the combo is saved without binding.
@@ -48,13 +57,18 @@ public final class SettingsModel {
     /// The window opened: read the snapshot and the key status.
     public func load() {
         fetch { try client.snapshot() }
-        secrets = try? client.secrets()
+        readKeyStatus()
     }
 
     /// The window became key: pick up hand edits and a key added to `.env`.
     public func focusGained() {
         fetch { try client.reload() }
+        readKeyStatus()
+    }
+
+    private func readKeyStatus() {
         secrets = try? client.secrets()
+        storedKeys = Set(SettingsSecretID.allCases.filter { keyStore?.contains($0.variable) ?? false })
     }
 
     /// The core said settings changed (`settings.changed` event: tray write or hand edit).
@@ -119,6 +133,55 @@ public final class SettingsModel {
     }
 
     public func secretText(_ id: SettingsSecretID) -> String { SettingsLayout.secretText(secrets, id) }
+
+    // MARK: API keys
+
+    public func keyDraft(_ id: SettingsSecretID) -> String { keyDrafts[id] ?? "" }
+    public func setKeyDraft(_ id: SettingsSecretID, _ text: String) { keyDrafts[id] = text }
+    public func canSaveKey(_ id: SettingsSecretID) -> Bool { keyStore != nil && SettingsLayout.canSaveKey(keyDraft(id)) }
+    public func hasStoredKey(_ id: SettingsSecretID) -> Bool { storedKeys.contains(id) }
+    public func keyError(_ id: SettingsSecretID) -> String? { keyErrors[id] }
+
+    /// Save: stores the typed key (trimmed), then hands the core the stored set and re-reads the
+    /// status. A Keychain failure is the row's error and nothing is pushed; the typed key stays.
+    public func saveKey(_ id: SettingsSecretID) {
+        guard let keyStore, canSaveKey(id) else { return }
+        let key = keyDraft(id).trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            try keyStore.save(id.variable, key)
+        } catch {
+            Self.log.error("keychain save \(id.variable, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+            keyErrors[id] = SettingsLayout.keySaveError
+            return
+        }
+        keyDrafts[id] = nil
+        keyErrors[id] = nil
+        pushKeys()
+    }
+
+    /// Remove: deletes the stored key, then hands the core what is left and re-reads the status.
+    public func removeKey(_ id: SettingsSecretID) {
+        guard let keyStore else { return }
+        do {
+            try keyStore.delete(id.variable)
+        } catch {
+            Self.log.error("keychain delete \(id.variable, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+            keyErrors[id] = SettingsLayout.keyRemoveError
+            return
+        }
+        keyErrors[id] = nil
+        pushKeys()
+    }
+
+    private func pushKeys() {
+        guard let keyStore else { return }
+        do {
+            try client.setKeychain(keyStore.values(for: SettingsSecretID.allCases.map(\.variable)))
+        } catch {
+            notice = "Couldn't update the API keys: \(Self.describe(error))"
+        }
+        readKeyStatus()
+    }
 
     // MARK: Committing
 

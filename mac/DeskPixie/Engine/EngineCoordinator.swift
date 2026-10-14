@@ -93,6 +93,7 @@ final class EngineCoordinator {
         hotkeys.platform = platform
 
         if configured {
+            pushKeychainKeys()
             let mascotSettings = snapshot.flatMap(MascotSettings.fromSnapshot) ?? .defaults
             if let m = MascotController.load(engine: engine, settings: mascotSettings) {
                 mascot = m
@@ -114,6 +115,21 @@ final class EngineCoordinator {
         startupFinished = true
         startPolling()
         if configured { startAudio(retryForHotkey: false) }
+    }
+
+    /// Hands the core the API keys kept in the Keychain (`secrets.keychain`), off main: a
+    /// Keychain read can block on an access prompt. Queued before any conversation can start a
+    /// worker call; the voice loop reads keys on each connect.
+    private func pushKeychainKeys() {
+        let client = EngineSettingsClient(engine: engine)
+        worker.async {
+            let values = KeychainSecrets().values(for: SettingsSecretID.allCases.map(\.variable))
+            do {
+                try client.setKeychain(values)
+            } catch {
+                Self.log.error("secrets.keychain: \(String(describing: error), privacy: .public)")
+            }
+        }
     }
 
     func shutdown() {

@@ -20,32 +20,30 @@ import (
 	"errors"
 	"reflect"
 	"sort"
-	"strings"
 	"sync"
 	"testing"
 )
 
-// keys is the API keys present, by provider registry name.
+// keys is where each provider's API key comes from, by provider registry name.
 type keys map[string]string
 
-func (k keys) APIKey(provider string) (string, bool) {
-	v, ok := k[provider]
-	return v, ok
-}
+func (k keys) Source(provider string) string { return k[provider] }
 
-func TestSecretsReportFoundOrMissingAndNeverTheValue(t *testing.T) {
-	if got := SecretStatus(keys{"openai-realtime": "sk-test-123"}); got != (Secrets{OpenAI: KeyFound, Gemini: KeyMissing}) {
+func TestSecretsReportFoundOrMissingAndTheSource(t *testing.T) {
+	want := Secrets{OpenAI: KeyFound, Gemini: KeyMissing, Sources: KeySources{OpenAI: "keychain"}}
+	if got := SecretStatus(keys{"openai-realtime": "keychain"}); got != want {
 		t.Fatal(got)
 	}
-	if got := SecretStatus(keys{"gemini-live": "AIza-test-456"}); got != (Secrets{OpenAI: KeyMissing, Gemini: KeyFound}) {
+	want = Secrets{OpenAI: KeyMissing, Gemini: KeyFound, Sources: KeySources{Gemini: "dotenv"}}
+	if got := SecretStatus(keys{"gemini-live": "dotenv"}); got != want {
 		t.Fatal(got)
 	}
-	if got := mustJSON(t, SecretStatus(keys{})); !reflect.DeepEqual(got, map[string]any{"openai": "missing", "gemini": "missing"}) {
+	want0 := map[string]any{"openai": "missing", "gemini": "missing", "sources": map[string]any{"openai": "", "gemini": ""}}
+	if got := mustJSON(t, SecretStatus(keys{})); !reflect.DeepEqual(got, want0) {
 		t.Fatal(got)
 	}
-	both := keys{"openai-realtime": "sk-test-123", "gemini-live": "AIza-test-456"}
-	b, _ := json.Marshal(SecretStatus(both))
-	if string(b) != `{"openai":"found","gemini":"found"}` {
+	b, _ := json.Marshal(SecretStatus(keys{"openai-realtime": "env", "gemini-live": "keychain"}))
+	if string(b) != `{"openai":"found","gemini":"found","sources":{"openai":"env","gemini":"keychain"}}` {
 		t.Fatal(string(b))
 	}
 	if SecretStatus(nil) != (Secrets{OpenAI: KeyMissing, Gemini: KeyMissing}) {
@@ -106,7 +104,7 @@ func newAPIFixture(t *testing.T) *apiFixture {
 		Store:        f.store,
 		Applier:      f.rec,
 		Env:          func() Env { return base },
-		Secrets:      keys{"openai-realtime": "sk-secret"},
+		Secrets:      keys{"openai-realtime": "env"},
 		SettingsPath: "/data/settings.json",
 		Platform:     Macos,
 		Restart:      func() { f.restarts++ },
@@ -239,12 +237,9 @@ func TestRegisteredMethodsSpeakTheContract(t *testing.T) {
 	}
 
 	sec := r.call(t, "settings.secrets", `{}`)
-	if !reflect.DeepEqual(sec, map[string]any{"openai": "found", "gemini": "missing"}) {
+	wantSec := map[string]any{"openai": "found", "gemini": "missing", "sources": map[string]any{"openai": "env", "gemini": ""}}
+	if !reflect.DeepEqual(sec, wantSec) {
 		t.Fatal(sec)
-	}
-	b, _ := json.Marshal(sec)
-	if strings.Contains(string(b), "sk-secret") {
-		t.Fatal("never the key")
 	}
 
 	r.call(t, "settings.choices", `{"field":"voice.inputDevice","choices":[{"value":"USB-1","label":"Yeti"}]}`)

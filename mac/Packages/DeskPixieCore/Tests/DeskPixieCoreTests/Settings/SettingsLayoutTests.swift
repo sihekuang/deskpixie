@@ -326,9 +326,9 @@ final class SettingsLayoutTests: XCTestCase {
         XCTAssertEqual(a2, .openFile)
         XCTAssertEqual(L.extras(.voice), [
             .secret(id: .openAI, label: "OpenAI key",
-                    help: "Set OPENAI_API_KEY in your environment or a .env file. Keys are never shown here."),
+                    help: "Type the key here to keep it in the Keychain (used first), or set OPENAI_API_KEY in your environment or a .env file. Keys are never shown here."),
             .secret(id: .gemini, label: "Gemini key",
-                    help: "Set GEMINI_API_KEY in your environment or a .env file. Keys are never shown here."),
+                    help: "Type the key here to keep it in the Keychain (used first), or set GEMINI_API_KEY in your environment or a .env file. Keys are never shown here."),
         ])
         XCTAssertTrue(L.extras(.workers).isEmpty)
         let s = SettingsSecrets(openai: .found, gemini: .missing)

@@ -1,12 +1,14 @@
 package voice
 
-// API keys from the environment, falling back to .env files. Never logs values.
+// API keys from the Keychain values handed over by the app (a key typed in Settings wins),
+// then the environment, then .env files. Never logs values.
 // Port of ai-mascot crates/voice-core/src/env_secrets.rs (+ the SecretSource trait).
 
 import (
 	"os"
 	"slices"
 	"strings"
+	"sync"
 )
 
 // SecretSource finds a provider's API key.
@@ -42,10 +44,23 @@ func KeyVars() []string {
 	return out
 }
 
-// EnvSecrets looks in the process environment first, then in each .env file in order.
+// Where a key came from, for the Settings status ("" = no key).
+const (
+	SourceNone     = ""
+	SourceEnv      = "env"
+	SourceKeychain = "keychain"
+	SourceDotenv   = "dotenv"
+)
+
+// EnvSecrets looks in the Keychain values the app handed over (SetKeychain) first, then in
+// the process environment, then in each .env file in order. Every lookup reads afresh, so a
+// changed key applies to the next connect.
 type EnvSecrets struct {
 	dotenvPaths []string
 	env         func(string) (string, bool)
+
+	mu       sync.RWMutex
+	keychain map[string]string // variable → value; only known provider variables
 }
 
 // NewEnvSecrets reads the real environment, then dotenvPaths.
@@ -58,14 +73,47 @@ func NewEnvSecretsWithLookup(dotenvPaths []string, env func(string) (string, boo
 	return &EnvSecrets{dotenvPaths: dotenvPaths, env: env}
 }
 
+// SetKeychain replaces the Keychain values (variable → key). Variables that are not a
+// provider's key variable are ignored; blank values count as missing.
+func (s *EnvSecrets) SetKeychain(values map[string]string) {
+	known := KeyVars()
+	next := map[string]string{}
+	for k, v := range values {
+		if v = strings.TrimSpace(v); v != "" && slices.Contains(known, k) {
+			next[k] = v
+		}
+	}
+	s.mu.Lock()
+	s.keychain = next
+	s.mu.Unlock()
+}
+
 // APIKey implements SecretSource. Blank values count as missing.
 func (s *EnvSecrets) APIKey(provider string) (Secret, bool) {
+	k, src := s.lookup(provider)
+	return k, src != SourceNone
+}
+
+// Source names where provider's key comes from: SourceEnv, SourceKeychain, SourceDotenv, or
+// SourceNone when there is none. Never the key.
+func (s *EnvSecrets) Source(provider string) string {
+	_, src := s.lookup(provider)
+	return src
+}
+
+func (s *EnvSecrets) lookup(provider string) (Secret, string) {
 	name, ok := VarFor(provider)
 	if !ok {
-		return Secret{}, false
+		return Secret{}, SourceNone
+	}
+	s.mu.RLock()
+	kc, ok := s.keychain[name]
+	s.mu.RUnlock()
+	if ok {
+		return NewSecret(kc), SourceKeychain
 	}
 	if v, ok := s.env(name); ok && strings.TrimSpace(v) != "" {
-		return NewSecret(strings.TrimSpace(v)), true
+		return NewSecret(strings.TrimSpace(v)), SourceEnv
 	}
 	for _, p := range s.dotenvPaths {
 		b, err := os.ReadFile(p)
@@ -85,11 +133,11 @@ func (s *EnvSecrets) APIKey(provider string) (Secret, bool) {
 		}
 		// Like Rust: the first file that defines the variable decides, even if blank.
 		if strings.TrimSpace(v) == "" {
-			return Secret{}, false
+			return Secret{}, SourceNone
 		}
-		return NewSecret(strings.TrimSpace(v)), true
+		return NewSecret(strings.TrimSpace(v)), SourceDotenv
 	}
-	return Secret{}, false
+	return Secret{}, SourceNone
 }
 
 // KeyHint implements SecretSource.

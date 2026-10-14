@@ -71,7 +71,8 @@ type Deps struct {
 	Emit func(kind string, event []byte)
 	// Providers is the voice provider registry; nil = Providers().
 	Providers map[string]ModelFactory
-	// Secrets finds API keys; nil = env, then .env in the cwd and AppSupport.
+	// Secrets finds API keys; nil = Keychain values (secrets.keychain), then env, then .env in
+	// the cwd and AppSupport.
 	Secrets voice.SecretSource
 	// Run starts a program without waiting (open the pages folder, reveal settings.json).
 	Run func(program string, args ...string) error
@@ -846,14 +847,24 @@ func (a *App) settingsEnv(p settings.Platform) settings.Env {
 	}}
 }
 
-// secretStatus adapts the voice secrets to the settings window's found/missing rows; the key
-// itself never leaves the voice package.
+// secretStatus adapts the voice secrets to the settings window's key rows (found/missing and
+// where from); the key itself never leaves the voice package.
 type secretStatus struct{ s voice.SecretSource }
 
-func (s secretStatus) APIKey(provider string) (string, bool) {
-	_, ok := s.s.APIKey(provider)
-	return "", ok
+func (s secretStatus) Source(provider string) string {
+	if named, ok := s.s.(interface{ Source(string) string }); ok {
+		return named.Source(provider)
+	}
+	// A source that can't say where its keys come from (tests, embedders) counts as the
+	// environment.
+	if _, ok := s.s.APIKey(provider); ok {
+		return voice.SourceEnv
+	}
+	return voice.SourceNone
 }
+
+// keychainSink takes the Keychain values the app read (voice.EnvSecrets).
+type keychainSink interface{ SetKeychain(map[string]string) }
 
 // applier is the settings Applier: a Live change takes the same path as the tray
 // (Rust settings/live.rs AppApplier). It runs under the settings API lock.
@@ -1019,6 +1030,23 @@ func (a *App) Register(r Registrar) {
 		}
 		a.hotkeyFailed(in.Combo)
 		return struct{}{}, nil
+	})
+	// secrets.keychain {"values": {VAR: key}}: the API keys stored in the Keychain, read by the
+	// app at startup and after each save/remove. Replaces the previous set; the next connect
+	// uses them. Never logged.
+	r.Register("secrets.keychain", func(args json.RawMessage) (any, error) {
+		var in struct {
+			Values map[string]string `json:"values"`
+		}
+		if err := decodeArgs("secrets.keychain", args, &in); err != nil {
+			return nil, err
+		}
+		sink, ok := a.deps.Secrets.(keychainSink)
+		if !ok {
+			return nil, errors.New("secrets.keychain: this secret source takes no Keychain values")
+		}
+		sink.SetKeychain(in.Values)
+		return nil, nil
 	})
 	r.Register("app.state", func(json.RawMessage) (any, error) { return a.State(), nil })
 	r.Register("app.action", func(args json.RawMessage) (any, error) {
