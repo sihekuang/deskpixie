@@ -833,6 +833,20 @@ func (h *Host) SendKeys(ctx context.Context, agentName string, keys []string) er
 	return client.SendKeys(ctx, agentName, keys)
 }
 
+var _ agent.Focuser = (*Host)(nil)
+
+// Focus brings agentName's tab to the front of the session.
+func (h *Host) Focus(ctx context.Context, agentName string) error {
+	client, err := h.runningClient(ctx)
+	if err != nil {
+		return err
+	}
+	if client == nil {
+		return agent.ErrNoAgent(agentName)
+	}
+	return client.Focus(ctx, agentName)
+}
+
 func (h *Host) Read(ctx context.Context, agentName string, lines uint16) (string, error) {
 	client, _, err := h.client(ctx)
 	if err != nil {

@@ -286,6 +286,26 @@ func TestOpenTerminalEnsuresTheSessionStartsTheCoordinatorAndAttaches(t *testing
 	})
 }
 
+func TestTheCoordinatorIsFocusedWhenItStartsAndWhenTheTerminalOpens(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRig(t)
+		if err := r.h.OpenTerminal(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		settle()
+		if got := r.host.Focused(); !reflect.DeepEqual(got, []string{Coordinator}) {
+			t.Fatalf("started by the click: focused once it is up: %v", got)
+		}
+		if err := r.h.OpenTerminal(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		settle()
+		if got := r.host.Focused(); !reflect.DeepEqual(got, []string{Coordinator, Coordinator}) {
+			t.Fatalf("already running: focused before the terminal attaches: %v", got)
+		}
+	})
+}
+
 func TestOpenTerminalReportsHerdrMissing(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		r := newRig(t)

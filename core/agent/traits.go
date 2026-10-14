@@ -9,6 +9,12 @@ import (
 // these; adapters implement them. Rust's async methods take a context here.
 
 // SessionHost is a terminal multiplexer session holding the agents (Herdr now).
+// Focuser is a SessionHost that can bring an agent's tab to the front of the session, so a
+// terminal attached to it shows that agent (optional: Herdr has it).
+type Focuser interface {
+	Focus(ctx context.Context, agent string) error
+}
+
 type SessionHost interface {
 	// Name is the registry name, e.g. "herdr".
 	Name() string

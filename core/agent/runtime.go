@@ -394,6 +394,8 @@ func (h *AgentHandle) OpenTerminal(ctx context.Context) error {
 		return err
 	}
 	h.Input(EnsureCoordinatorInput())
+	// A coordinator already running is brought to the front; one being started is focused when it is up.
+	focusQuietly(ctx, h.deps.Host.Session(), Coordinator)
 	return h.deps.Launcher.Open(Attach{Argv: h.deps.Host.AttachCommand(), Dir: h.deps.TerminalDir})
 }
 

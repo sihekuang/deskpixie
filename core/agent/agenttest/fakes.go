@@ -56,6 +56,7 @@ type hostState struct {
 	starts        []agent.AgentSpec
 	prompts       []Prompt
 	keys          []Keys
+	focused       []string
 	closed        []string
 	subscribers   []chan agent.PaneEvent
 	failEnsure    error
@@ -162,6 +163,23 @@ func (f *FakeSessionHost) Prompts() (out []Prompt) {
 func (f *FakeSessionHost) Keys() (out []Keys) {
 	f.with(func(s *hostState) { out = slices.Clone(s.keys) })
 	return
+}
+
+// Focused lists the agents focused, in order.
+func (f *FakeSessionHost) Focused() (out []string) {
+	f.with(func(s *hostState) { out = slices.Clone(s.focused) })
+	return
+}
+
+// Focus is agent.Focuser: a missing agent is an error, as in Herdr.
+func (f *FakeSessionHost) Focus(_ context.Context, name string) error {
+	var err error
+	f.with(func(s *hostState) {
+		if err = known(s, name); err == nil {
+			s.focused = append(s.focused, name)
+		}
+	})
+	return err
 }
 
 func (f *FakeSessionHost) Closed() (out []string) {

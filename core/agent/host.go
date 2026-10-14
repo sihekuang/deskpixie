@@ -126,6 +126,9 @@ func (h *AgentHost) EnsureCoordinator(ctx context.Context) (Ensured, error) {
 	if err != nil {
 		return Ensured{}, err
 	}
+	// Its tab opens in the background: bring it to the front, so a terminal attached to the
+	// session (the click that started it, or one already open) shows the coordinator.
+	focusQuietly(ctx, h.host, Coordinator)
 	h.startedBefore.Store(true)
 	if startedBefore {
 		h.mu.Lock()
@@ -177,3 +180,12 @@ func (h *AgentHost) StopCoordinator(ctx context.Context) error {
 
 // AttachCommand is the argv that attaches a terminal to the session.
 func (h *AgentHost) AttachCommand() []string { return h.host.AttachCommand() }
+
+// focusQuietly focuses agent if the host can; a failure only means the tab stays where it is.
+func focusQuietly(ctx context.Context, host SessionHost, agent string) {
+	if f, ok := host.(Focuser); ok {
+		if err := f.Focus(ctx, agent); err != nil && !IsHostError(err, HostNoAgent) {
+			log.Printf("agent: could not focus %s: %v", agent, err)
+		}
+	}
+}
