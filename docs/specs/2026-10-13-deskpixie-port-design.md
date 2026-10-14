@@ -165,6 +165,23 @@ Go → Swift: playback audio and UI events, as callbacks.
 
 **Decided 2026-10-13 (D5): native Swift.** The packs (`mascot.json` + `sheet.png`) are unchanged. `player-core.js` (frame stepping, bob, mouth overlay, click/double-click/drag gestures) is ported to Swift with its tests, and drawn with Core Animation layers (nearest-neighbour scaling) in a borderless, transparent NSPanel. Click-through-where-empty uses the sheet's alpha under the cursor; the proximity fade and the 60 Hz cursor poll are borrowed from oled-saver-macos (`BallPhysics.proximityOpacity`, MIT, same author).
 
+### 4.4 Voice prompts: Bit hands work to the coordinator
+
+The voice prompts are ported word for word, not rewritten. The source is ai-mascot after [#101](https://github.com/sihekuang/ai-mascot/pull/101):
+- `crates/voice-core/assets/persona.md` → `core/voice/assets/persona.md` (Phase 3)
+- `crates/agent-core/assets/delegation.md` and the `delegate` tool's description and parameters in `crates/agent-core/src/tools.rs` → the Go agent package (Phase 5)
+
+**The rule they carry.** Bit is the voice; the coordinator does the work. Bit offloads as much as it can, but not everything.
+- **Delegated:** anything that needs more than what Bit already knows or what was said in the conversation. That includes research, files, code, the user's projects, tasks, messages and documents, drafting, summarising, comparing, and visuals. When Bit is unsure, it delegates.
+- **Kept by Bit:** small talk, feelings, jokes and opinions; simple, stable common knowledge; repeating what the user just said; one clarifying question; ending the conversation; the job tools (`job_status`, `cancel_job`, `answer_job`). Handing these off would only add delay.
+- **How Bit hands off** (taken from DeepSeek Harness's `subagent` tool guidance):
+  - The task and context stand on their own, since the coordinator can't hear the conversation.
+  - Each independent task is its own `delegate` call.
+  - A follow-up to earlier work is new work.
+  - Bit doesn't poll a running job.
+
+**Tests.** Port the Rust tests that pin prompt strings along with the prompts (`runtime_tests.rs`: tool names, "Check: ", "Let me check that.", "weather", "Never tell the user to check"; `persona.rs`: "Bit", "end_conversation"). Any later change to the rule is made in one place first and copied over, never edited in both.
+
 ## 5. Phases
 
 Each phase ends with a working app and its own spec → plan → review cycle. **Phase 1 is in flight. Nothing from Phase 2 onward has started.**

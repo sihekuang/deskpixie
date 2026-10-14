@@ -15,3 +15,7 @@
 ## 2026-10-13 — Minimal code review
 **Decision:** No per-task reviewer; tests + build gate each task, one light whole-branch check per phase.
 **Basis:** User's choice.
+
+## 2026-10-13 — Bit offloads work to the coordinator by default
+**Decision:** The voice agent delegates anything that needs more than what it knows or what was said, and delegates when unsure. It keeps small talk, simple facts, one clarifying question, ending the conversation and the job tools. Delegated tasks stand on their own. Changed in ai-mascot (#101) and ported word for word (spec §4.4).
+**Basis:** User's choice; handoff mechanics follow DeepSeek Harness's `subagent` tool guidance (github.com/deepseek-ai/deepseek-harness).
