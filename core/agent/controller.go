@@ -312,6 +312,10 @@ type AgentController struct {
 	injected []injectedNotice
 	shutDown bool
 	workers  *Workers
+	// coordStatus: the coordinator pane's latest status.
+	coordStatus PaneStatus
+	// watch: liveness of the open working jobs (liveness.go).
+	watch map[JobID]*liveness
 }
 
 func NewAgentController(settings Settings) *AgentController {
@@ -648,6 +652,7 @@ func (c *AgentController) flush(now Millis, fx *[]Effect) {
 }
 
 func (c *AgentController) onCoordinatorStatus(status PaneStatus, now Millis, fx *[]Effect) {
+	c.coordStatus = status
 	idle := status == PaneIdle || status == PaneDone
 	switch {
 	case idle && c.watchdog != nil:
@@ -1069,6 +1074,7 @@ func (c *AgentController) narrate(phrase string, fx *[]Effect) {
 func (c *AgentController) tick(now Millis, fx *[]Effect) {
 	c.tickInbox(now, fx)
 	c.tickWorkers(now, fx)
+	c.tickLiveness(now, fx)
 	for _, p := range c.confirms.Expire(now) {
 		*fx = append(*fx, decideEffect(p.ID, Deny("No answer from the user.")))
 		c.resumeJob(p.Job, now, fx)

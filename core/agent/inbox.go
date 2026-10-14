@@ -84,6 +84,11 @@ func (i *Inbox) InFlightRefs() []JobID {
 	return out
 }
 
+// Queued: a message about job is waiting to be sent.
+func (i *Inbox) Queued(job JobID) bool {
+	return slices.ContainsFunc(i.queue, func(m Message) bool { return m.refersTo(job) })
+}
+
 func (i *Inbox) Carries(job JobID) bool {
 	return slices.ContainsFunc(i.inFlight, func(m Message) bool { return m.refersTo(job) })
 }
