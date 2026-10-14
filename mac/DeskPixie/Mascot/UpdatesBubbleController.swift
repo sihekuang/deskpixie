@@ -37,8 +37,6 @@ final class UpdatesBubbleController {
 
     private var timer: Timer?
     private var pointerInside = false
-    /// Bit's proximity-fade opacity, which the bubble follows unless the pointer is on it.
-    private var mascotOpacity: CGFloat = 1
     /// Counts `updates` events, so a slower `agent.updates` read never overwrites a newer list.
     private var eventsApplied = 0
 
@@ -50,10 +48,6 @@ final class UpdatesBubbleController {
         hosting = BubbleHostingView(rootView: AnyView(EmptyView()))
         panel.contentView = hosting
         mascot.onFrameChange = { [weak self] _ in self?.layout() }
-        mascot.onOpacityChange = { [weak self] opacity in
-            self?.mascotOpacity = opacity
-            self?.updateAlpha()
-        }
         timer = Timer.scheduledTimer(withTimeInterval: Self.pollInterval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.poll() }
         }
@@ -234,9 +228,10 @@ final class UpdatesBubbleController {
         }
     }
 
-    /// Bit's fade, except at full opacity while the pointer is on the bubble.
+    /// Always opaque: the bubble doesn't follow Bit's proximity fade, or the badge would vanish
+    /// exactly when the pointer comes to open it. It still hides whenever Bit is hidden.
     private func updateAlpha() {
-        let alpha = pointerInside ? 1 : mascotOpacity
+        let alpha: CGFloat = 1
         if panel.alphaValue != alpha { panel.alphaValue = alpha }
     }
 

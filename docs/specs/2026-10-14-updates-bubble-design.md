@@ -60,7 +60,7 @@ permission token is no longer pending are left out (the same filter `Replay` use
 | Update during a conversation | No bubble; it is spoken as today. |
 | A question is decided elsewhere | It drops from the list; badge count goes down. |
 | App restart | Undelivered lines persist (outbox.jsonl); badge restored at launch, no pop. |
-| Bit faded (proximity) or hidden | Bubble and badge follow Bit's alpha/visibility; a pop while hidden becomes badge-only. |
+| Bit faded (proximity) or hidden | The bubble stays opaque through proximity fade (else the badge vanishes as you reach for it); it hides when Bit is hidden, and a pop while hidden becomes badge-only. |
 | Bit dragged / repositioned | Bubble follows; it sits on the side of Bit with room, flipping near a screen edge. |
 | Fullscreen app frontmost, or Focus / Do Not Disturb on | Badge only, no pop. |
 | `openConversationForUpdates` on | Takes effect on restart (ApplyRestart): the core sends no bubble updates; Bit speaks them. |
