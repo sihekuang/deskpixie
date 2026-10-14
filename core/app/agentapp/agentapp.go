@@ -279,6 +279,7 @@ func Build(c Config) *Agent {
 			Narration:           s.Narration,
 			KeepPanesOnQuit:     s.KeepPanesOnQuit,
 			Workers:             ws.Policy,
+			SpeakWorkerReports:  s.Workers.SpeakResults,
 		},
 		Warm: s.Warm,
 		// Stepped before the warm start: a disabled app never starts the coordinator.

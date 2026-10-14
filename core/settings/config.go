@@ -112,6 +112,9 @@ type WorkerSettings struct {
 	Enabled bool     `json:"enabled"`
 	Max     uint64   `json:"max"`
 	Kinds   []string `json:"kinds"`
+	// SpeakResults: Bit says a worker's own done/failed/blocked report as soon as it comes
+	// (off by default: a feature flag).
+	SpeakResults bool `json:"speakResults"`
 }
 
 // Default is the config with every default (spec: inventory "settings.json schema").

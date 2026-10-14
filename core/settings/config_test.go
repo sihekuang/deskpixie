@@ -246,7 +246,7 @@ func TestAgentDefaultsMatchTheSpec(t *testing.T) {
 		"herdrPath": nil, "model": nil, "warm": false, "port": float64(48217), "keepPanesOnQuit": true,
 		"holdOpenSecs": float64(180), "permissionTimeoutSecs": float64(120), "notifyPerMinute": float64(4), "narration": true,
 		"projectsRoot": "~/Documents/Projects",
-		"workers":      map[string]any{"enabled": false, "max": float64(4), "kinds": []any{"claude", "codex"}},
+		"workers":      map[string]any{"enabled": false, "max": float64(4), "kinds": []any{"claude", "codex"}, "speakResults": false},
 	}
 	if !reflect.DeepEqual(j["agent"], want) {
 		t.Fatalf("%v", j["agent"])

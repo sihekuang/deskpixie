@@ -305,10 +305,14 @@ func (c *AgentController) report(agent, line string, now Millis, fx *[]Effect) e
 
 // sayForWorker tells the user a worker's own report right away, by the same route as the
 // coordinator's replies (spoken in an open conversation, else a notification and the outbox).
+// Only with agent.workers.speakResults on (off: just as before, the coordinator alone hears it).
 // The coordinator still gets the report and gives its own, checked reply. Called after report
 // accepted it, so the job is open; a worker being stopped (its job ended or the coordinator
 // stopped it) is not spoken for: the coordinator has already moved on.
 func (c *AgentController) sayForWorker(agent string, line func(who string) string, now Millis, fx *[]Effect) {
+	if !c.settings.SpeakWorkerReports {
+		return
+	}
 	w := c.workers.Get(agent)
 	if w == nil || w.StopRequested || c.shutDown {
 		return

@@ -60,6 +60,9 @@ type Settings struct {
 	KeepPanesOnQuit bool
 	// Workers is `agent.workers`.
 	Workers WorkerPolicy
+	// SpeakWorkerReports (`agent.workers.speakResults`, a feature flag, off by default): a
+	// worker's report_result and report_blocked are also said to the user at once.
+	SpeakWorkerReports bool
 }
 
 // DefaultSettings: 4 notifications a minute, 2-minute permission timeout, narration on.

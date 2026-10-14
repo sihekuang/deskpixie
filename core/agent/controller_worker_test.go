@@ -620,8 +620,30 @@ func TestAWorkerThatStartsWorkingIsNotChecked(t *testing.T) {
 	}
 }
 
-func TestAResultIsSpokenToTheUserAtOnceAndStillReachesTheCoordinator(t *testing.T) {
+// speakingCtl: wctl with agent.workers.speakResults on.
+func speakingCtl() *AgentController {
+	s := workerSettings()
+	s.SpeakWorkerReports = true
+	return wctlWith(s)
+}
+
+func TestWithSpeakResultsOffAReportIsOnlyForwarded(t *testing.T) {
 	c := wctl()
+	running(t, c)
+	c.Step(voiceOpened(), T0)
+	call := McpCall{Kind: CallReportResult, Outcome: OutcomeDone, Summary: "Fixed the flaky test", Evidence: "x"}
+	v, err, fx := mcp(t, c, workerName, call, T0)
+	wantToolOK(t, v, err, map[string]any{"ok": true})
+	_, _, more := mcp(t, c, workerName, McpCall{Kind: CallReportBlocked, Reason: "stuck"}, T0)
+	if fx = append(fx, more...); anyKind(fx, EfInject, EfNotify, EfChime) {
+		t.Fatal(fmtEffects(fx))
+	}
+	fx = coordinatorTurnEnds(c, T0+10)
+	wantPrompts(t, fx, fmt.Sprintf("Worker focus-upload reports done: \"Fixed the flaky test\" Evidence: \"x\"\n[ref %s]\n\nWorker focus-upload reports blocked: \"stuck\"\n[ref %s]", job(1), job(1)))
+}
+
+func TestAResultIsSpokenToTheUserAtOnceAndStillReachesTheCoordinator(t *testing.T) {
+	c := speakingCtl()
 	running(t, c)
 	c.Step(voiceOpened(), T0)
 	call := McpCall{Kind: CallReportResult, Outcome: OutcomeDone, Summary: "Fixed the flaky test", Evidence: "go test passed; commit abc123"}
@@ -633,7 +655,7 @@ func TestAResultIsSpokenToTheUserAtOnceAndStillReachesTheCoordinator(t *testing.
 }
 
 func TestAFailedResultIsSpokenAsTheWorkersOwnWord(t *testing.T) {
-	c := wctl()
+	c := speakingCtl()
 	running(t, c)
 	c.Step(voiceOpened(), T0)
 	call := McpCall{Kind: CallReportResult, Outcome: OutcomeFailed, Summary: "The test needs a network", Evidence: "none given"}
@@ -642,7 +664,7 @@ func TestAFailedResultIsSpokenAsTheWorkersOwnWord(t *testing.T) {
 }
 
 func TestABlockIsSpokenToo(t *testing.T) {
-	c := wctl()
+	c := speakingCtl()
 	running(t, c)
 	c.Step(voiceOpened(), T0)
 	_, _, fx := mcp(t, c, workerName, McpCall{Kind: CallReportBlocked, Reason: "I need a login for the staging server"}, T0)
@@ -650,7 +672,7 @@ func TestABlockIsSpokenToo(t *testing.T) {
 }
 
 func TestAResultWithTheConversationClosedIsANotificationAndOutboxed(t *testing.T) {
-	c := wctl()
+	c := speakingCtl()
 	running(t, c)
 	call := McpCall{Kind: CallReportResult, Outcome: OutcomeDone, Summary: "Fixed the flaky test", Evidence: "x"}
 	_, _, fx := mcp(t, c, workerName, call, T0)
@@ -661,7 +683,7 @@ func TestAResultWithTheConversationClosedIsANotificationAndOutboxed(t *testing.T
 }
 
 func TestAStoppedWorkersResultIsNotSpokenButStillForwarded(t *testing.T) {
-	c := wctl()
+	c := speakingCtl()
 	running(t, c)
 	c.Step(voiceOpened(), T0)
 	mcp(t, c, Coordinator, McpCall{Kind: CallStopWorker, Name: workerName}, T0)
@@ -676,7 +698,7 @@ func TestAStoppedWorkersResultIsNotSpokenButStillForwarded(t *testing.T) {
 }
 
 func TestAResultAfterTheJobEndedIsNotSpoken(t *testing.T) {
-	c := wctl()
+	c := speakingCtl()
 	running(t, c)
 	c.Step(voiceOpened(), T0)
 	c.Step(CancelInput(job(1)), T0)
