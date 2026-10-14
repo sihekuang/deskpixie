@@ -289,6 +289,7 @@ type AgentController struct {
 	memories    *MemoryLog
 	confirms    *Confirmations
 	narrator    *Narrator
+	updates     *Updates
 	voiceOpen   bool
 	coordinator coordinatorState
 	blocked     optMs
@@ -335,6 +336,7 @@ func NewAgentController(settings Settings) *AgentController {
 		router:   NewRouter(settings.NotifyPerMinute),
 		confirms: NewConfirmations(settings.PermissionTimeoutMs),
 		narrator: NewNarrator(NarrateIntervalMs),
+		updates:  NewUpdates(),
 		settings: settings,
 		jobs:     NewJobTable(),
 		inbox:    NewInbox(),
@@ -463,7 +465,7 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 		case voice.SigOpened:
 			c.voiceOpened(&fx)
 		case voice.SigClosed:
-			c.voiceOpen = false
+			c.conversationClosed(now, &fx)
 			for _, n := range in.Voice.Undelivered {
 				c.reroute(n, now, &fx)
 			}
@@ -471,7 +473,7 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 			c.onUserSaid(in.Voice.Text, now, &fx)
 		}
 	case InInjectBounced:
-		c.voiceOpen = false
+		c.conversationClosed(now, &fx)
 		c.reroute(in.Notice, now, &fx)
 	case InDisable:
 		c.setupDisabled = in.StatusLine
@@ -641,7 +643,7 @@ func (c *AgentController) cancel(id JobID, now Millis, fx *[]Effect) {
 		return
 	}
 	c.saveJob(id, fx)
-	c.narrator.Forget(id)
+	c.forgetUpdates(id)
 	c.denyPendingFor(id, "The user cancelled the job.", fx)
 	c.stopJobWorkers(id, fx)
 	interrupted := c.inbox.Carries(id)
@@ -857,7 +859,7 @@ func (c *AgentController) failJobSaying(id JobID, reason, line string, now Milli
 	}
 	c.denyPendingFor(id, "The job ended.", fx)
 	c.stopJobWorkers(id, fx)
-	c.narrator.Forget(id)
+	c.forgetUpdates(id)
 	c.saveJob(id, fx)
 	c.deliver(NewLine(LineReply, line), now, fx)
 	*fx = append(*fx, Effect{Kind: EfCue, Cue: CueError})
@@ -1035,6 +1037,8 @@ func (c *AgentController) onReferencedStop(blocks []Spoken, now Millis, fx *[]Ef
 }
 
 func (c *AgentController) onReply(id JobID, status SpokenStatus, text string, now Millis, fx *[]Effect) {
+	// The coordinator's checked reply supersedes the job's worker lines still held.
+	c.updates.Supersede(id)
 	// A missing status means working while the job has live workers, otherwise done.
 	if status == SpokenNone {
 		status = SpokenDone
@@ -1057,7 +1061,7 @@ func (c *AgentController) onReply(id JobID, status SpokenStatus, text string, no
 		_, _ = c.jobs.Transition(id, JobDone, now)
 		c.jobs.SetReply(id, text, now)
 		c.saveJob(id, fx)
-		c.narrator.Forget(id)
+		c.forgetUpdates(id)
 		c.denyPendingFor(id, "The job ended.", fx)
 		c.stopJobWorkers(id, fx)
 		if c.deliver(NewLine(LineReply, text), now, fx) {
@@ -1066,7 +1070,7 @@ func (c *AgentController) onReply(id JobID, status SpokenStatus, text string, no
 	case SpokenFailed:
 		_, _ = c.jobs.Fail(id, text, now)
 		c.saveJob(id, fx)
-		c.narrator.Forget(id)
+		c.forgetUpdates(id)
 		c.denyPendingFor(id, "The job ended.", fx)
 		c.stopJobWorkers(id, fx)
 		c.deliver(NewLine(LineReply, text), now, fx)
@@ -1168,8 +1172,56 @@ func (c *AgentController) onPostTool(toolName string, toolInput any, now Millis,
 	job := refs[0]
 	c.jobs.SetProgress(job, phrase, now)
 	c.saveJob(job, fx)
-	if c.settings.Narration && c.voiceOpen && c.narrator.Allow(job, now) {
-		c.narrate(phrase, fx)
+	c.holdProgress(job, phrase, now)
+}
+
+// holdProgress holds a job's progress phrase for narration (open conversation only): said once
+// the job is quiet, at most once per NarrateIntervalMs, unless a report or reply beats it.
+func (c *AgentController) holdProgress(job JobID, phrase string, now Millis) {
+	if c.settings.Narration && c.voiceOpen && phrase != "" {
+		c.updates.AddProgress(job, phrase, now)
+	}
+}
+
+// flushUpdates says the jobs' coalesced updates that are due: reports by RouteUpdate, progress
+// as narration if the conversation is still open and the cap has a slot (else it is dropped).
+func (c *AgentController) flushUpdates(now Millis, fx *[]Effect) {
+	if c.shutDown {
+		return
+	}
+	ready := func(job JobID) bool { return !c.voiceOpen || c.narrator.Ready(job, now) }
+	for _, u := range c.updates.Due(now, ready) {
+		if !u.Progress {
+			c.deliverUpdate(NewLine(LineInfo, u.Text), now, fx)
+			continue
+		}
+		if c.voiceOpen && c.router.Take(now) {
+			c.narrator.Allow(u.Job, now)
+			c.narrate(u.Text, fx)
+		}
+	}
+}
+
+// deliverUpdate routes an update line under the cap in both conversation states.
+func (c *AgentController) deliverUpdate(line Line, now Millis, fx *[]Effect) {
+	for _, d := range c.router.RouteUpdate(c.voiceOpen, line, now) {
+		if d.Kind == DeliverInject {
+			c.remember(d.Notice, []Line{line})
+		}
+		c.applyDelivery(d, now, fx)
+	}
+}
+
+func (c *AgentController) forgetUpdates(job JobID) {
+	c.narrator.Forget(job)
+	c.updates.Supersede(job)
+}
+
+// conversationClosed: updates the cap held for the conversation go to the outbox.
+func (c *AgentController) conversationClosed(now Millis, fx *[]Effect) {
+	c.voiceOpen = false
+	for _, d := range c.router.ConversationClosed() {
+		c.applyDelivery(d, now, fx)
 	}
 }
 
@@ -1189,7 +1241,11 @@ func (c *AgentController) tick(now Millis, fx *[]Effect) {
 		c.resumeJob(p.Job, now, fx)
 		c.deliver(NewLine(LineInfo, "Agent: denied after two minutes with no answer."), now, fx)
 	}
-	for _, d := range c.router.Tick(now) {
+	c.flushUpdates(now, fx)
+	for _, d := range c.router.Tick(c.voiceOpen, now) {
+		if d.Kind == DeliverInject {
+			c.remember(d.Notice, d.Lines)
+		}
 		c.applyDelivery(d, now, fx)
 	}
 	blockedLong := c.blocked.set && satSub(now, c.blocked.v) >= BlockedGraceMs

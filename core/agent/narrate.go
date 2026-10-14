@@ -72,3 +72,9 @@ func (n *Narrator) Allow(job JobID, now Millis) bool {
 }
 
 func (n *Narrator) Forget(job JobID) { delete(n.last, job) }
+
+// Ready is whether job could be narrated now (Allow without remembering it).
+func (n *Narrator) Ready(job JobID, now Millis) bool {
+	t, ok := n.last[job]
+	return !ok || satSub(now, t) >= n.interval
+}

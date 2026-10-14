@@ -62,13 +62,13 @@ func TestTheCapIsFourAMinuteThenOneCollapsedLine(t *testing.T) {
 			t.Fatal("still outboxed")
 		}
 	}
-	if len(r.Tick(59_999)) != 0 {
+	if len(r.Tick(false, 59_999)) != 0 {
 		t.Fatal("no slot yet")
 	}
-	if got := notifies(r.Tick(60_000)); !reflect.DeepEqual(got, []string{"3 more updates"}) {
+	if got := notifies(r.Tick(false, 60_000)); !reflect.DeepEqual(got, []string{"3 more updates"}) {
 		t.Fatal(got)
 	}
-	if len(r.Tick(60_001)) != 0 {
+	if len(r.Tick(false, 60_001)) != 0 {
 		t.Fatal("collapsed only once")
 	}
 }
@@ -103,7 +103,7 @@ func TestOpeningAConversationForgetsTheCollapsedCount(t *testing.T) {
 	r.Route(false, reply("a"), 0)
 	r.Route(false, reply("b"), 1)
 	r.ConversationOpened()
-	if len(r.Tick(60_000)) != 0 {
+	if len(r.Tick(false, 60_000)) != 0 {
 		t.Fatal("tick")
 	}
 }
@@ -112,7 +112,7 @@ func TestOneSuppressedLineSaysUpdateSingular(t *testing.T) {
 	r := NewRouter(1)
 	r.Route(false, reply("a"), 0)
 	r.Route(false, reply("b"), 1)
-	if got := notifies(r.Tick(60_000)); !reflect.DeepEqual(got, []string{"1 more update"}) {
+	if got := notifies(r.Tick(false, 60_000)); !reflect.DeepEqual(got, []string{"1 more update"}) {
 		t.Fatal(got)
 	}
 }
