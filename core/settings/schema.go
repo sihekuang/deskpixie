@@ -297,7 +297,6 @@ var Fields = []FieldSpec{
 	spec("voice.idleTimeoutSecs", SectionVoice, "Silence timeout (seconds)", "A conversation ends after this much silence.", intKind(1, 600, false), ApplyRestart),
 	spec("voice.homeCity", SectionVoice, "Home city", "Where Bit checks the weather when you don't name a place, e.g. Portland, Oregon.", textKind(true), ApplyRestart),
 	spec("voice.personaPath", SectionVoice, "Persona file", "A Markdown file that replaces Bit's personality. Empty uses the built-in one.", pathKind(false, true), ApplyRestart),
-	spec("voice.shortTermMemory", SectionVoice, "Remember recent conversations", "Bit keeps a short record of your last few hours of talk, including work handed to the agent, so you needn't repeat yourself. It stays on this Mac and older talk is forgotten. Say \"forget our recent conversations\" to clear it.", boolKind, ApplyRestart),
 	spec("agent.enabled", SectionAgent, "Delegation", "Let Bit hand work to a Claude Code agent.", boolKind, ApplyRestart),
 	spec("agent.terminal", SectionAgent, "Terminal", "Where the agent session opens when you click Bit.", choiceKind(SourceTerminals), ApplyRestart),
 	spec("agent.model", SectionAgent, "Agent model", "Claude Code's --model for the coordinator. Default lets Claude Code decide.", openChoice(Choices{Source: SourceStatic, Static: AgentModels, Null: true}), ApplyRestart),

@@ -11,3 +11,9 @@ func TestDelegationPersonaIsEmbedded(t *testing.T) {
 		t.Fatal(DelegationPersona)
 	}
 }
+
+func TestTheDelegationPersonaUsesTheAgentAsBitsMemory(t *testing.T) {
+	if !strings.Contains(DelegationPersona, "call recall") || !strings.Contains(DelegationPersona, "Recent work with the agent") {
+		t.Fatal(DelegationPersona)
+	}
+}

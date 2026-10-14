@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -419,5 +420,31 @@ func TestTopLevelKeysAreCaseSensitive(t *testing.T) {
 	}
 	if _, ok := c.Extra["Scale"]; !ok {
 		t.Fatal("kept as unknown")
+	}
+}
+
+// voice.shortTermMemory was removed (Bit's memory now comes from the coordinator): a settings
+// file that still has it loads with every other setting kept, and the next save drops it.
+func TestTheRemovedShortTermMemoryKeyIsIgnored(t *testing.T) {
+	p := tmpFile(t)
+	os.WriteFile(p, []byte(`{"pack":"blob","voice":{"provider":"gemini-live","shortTermMemory":true,"chimes":false}}`), 0o644)
+	c, err := LoadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Pack != "blob" || c.Voice.Provider != "gemini-live" || c.Voice.Chimes {
+		t.Fatalf("%+v", c)
+	}
+	if err := c.Save(p); err != nil {
+		t.Fatal(err)
+	}
+	text, _ := os.ReadFile(p)
+	if strings.Contains(string(text), "shortTermMemory") {
+		t.Fatal(string(text))
+	}
+	for _, f := range Fields {
+		if f.Path == "voice.shortTermMemory" {
+			t.Fatal("still in the settings schema")
+		}
 	}
 }

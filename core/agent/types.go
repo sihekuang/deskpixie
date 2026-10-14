@@ -130,6 +130,8 @@ type Job struct {
 	LastProgress *string `json:"last_progress"`
 	// Reason says why it failed (e.g. "app restarted").
 	Reason *string `json:"reason"`
+	// Reply is the coordinator's last spoken reply or question for it (Bit's memory of the job).
+	Reply *string `json:"reply,omitempty"`
 	// Workers started for this job, oldest first.
 	Workers []WorkerRow `json:"workers"`
 }
@@ -145,7 +147,7 @@ func (j Job) MarshalJSON() ([]byte, error) {
 }
 
 // UnmarshalJSON requires the fields serde requires (id, task, status, created, updated);
-// last_progress, reason and workers default.
+// last_progress, reason, reply and workers default.
 func (j *Job) UnmarshalJSON(b []byte) error {
 	var raw struct {
 		ID           *JobID      `json:"id"`
@@ -155,6 +157,7 @@ func (j *Job) UnmarshalJSON(b []byte) error {
 		Updated      *Millis     `json:"updated"`
 		LastProgress *string     `json:"last_progress"`
 		Reason       *string     `json:"reason"`
+		Reply        *string     `json:"reply"`
 		Workers      []WorkerRow `json:"workers"`
 	}
 	if err := json.Unmarshal(b, &raw); err != nil {
@@ -164,7 +167,7 @@ func (j *Job) UnmarshalJSON(b []byte) error {
 		return errors.New("job: missing field")
 	}
 	*j = Job{ID: *raw.ID, Task: *raw.Task, Status: *raw.Status, Created: *raw.Created, Updated: *raw.Updated,
-		LastProgress: raw.LastProgress, Reason: raw.Reason, Workers: raw.Workers}
+		LastProgress: raw.LastProgress, Reason: raw.Reason, Reply: raw.Reply, Workers: raw.Workers}
 	return nil
 }
 
