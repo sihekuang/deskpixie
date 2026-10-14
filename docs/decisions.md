@@ -17,5 +17,5 @@
 **Basis:** User's choice.
 
 ## 2026-10-13 — Bit offloads work to the coordinator by default
-**Decision:** The voice agent delegates anything that needs more than what it knows or what was said, and delegates when unsure. It keeps small talk, simple facts, one clarifying question, ending the conversation and the job tools. Delegated tasks stand on their own. Changed in ai-mascot (#101) and ported word for word (spec §4.4).
+**Decision:** The voice agent delegates anything that needs more than what it knows or what was said, and delegates when unsure. It keeps small talk, simple facts, one clarifying question, ending the conversation and the job tools. Delegated tasks stand on their own. DeskPixie owns these prompts (`core/voice/assets/persona.md`, `core/agent/assets/delegation.md`, spec §4.4); ai-mascot's copies are not updated.
 **Basis:** User's choice; handoff mechanics follow DeepSeek Harness's `subagent` tool guidance (github.com/deepseek-ai/deepseek-harness).

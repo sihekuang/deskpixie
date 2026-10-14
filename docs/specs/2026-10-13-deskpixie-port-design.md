@@ -167,11 +167,15 @@ Go → Swift: playback audio and UI events, as callbacks.
 
 ### 4.4 Voice prompts: Bit hands work to the coordinator
 
-The voice prompts are ported word for word, not rewritten. The source is ai-mascot after [#101](https://github.com/sihekuang/ai-mascot/pull/101):
-- `crates/voice-core/assets/persona.md` → `core/voice/assets/persona.md` (Phase 3)
-- `crates/agent-core/assets/delegation.md` and the `delegate` tool's description and parameters in `crates/agent-core/src/tools.rs` → the Go agent package (Phase 5)
+DeskPixie owns its voice prompts. They started as ai-mascot's and were rewritten here; ai-mascot's copies are not kept in sync.
+- `core/voice/assets/persona.md`: who Bit is. Embedded in Phase 3.
+- `core/agent/assets/delegation.md`: when and how Bit hands work off. Embedded in Phase 5, appended to the persona when the agent is on.
+- The `delegate` tool text (Phase 5, `core/agent`):
+  - description: "Hand a task to the capable agent working in the background. Use it for any real work: research, facts to check, live information (time, weather, news, prices), the user's projects, files, code, repositories, writing, summaries, charts, diagrams or pages. The agent does not hear the conversation, so the task and context must stand on their own. Call this BEFORE saying you will hand something off. Returns at once with a job id; the result arrives later as an "Agent reply:" line."
+  - `task`: "What the user wants done, in their words." (required)
+  - `context`: "Everything from the conversation the agent needs, since it cannot hear it: what pronouns refer to, names, numbers, choices, earlier Agent replies."
 
-**The rule they carry.** Bit is the voice; the coordinator does the work. Bit offloads as much as it can, but not everything.
+**The rule.** Bit is the voice; the coordinator does the work. Bit offloads as much as it can, but not everything.
 - **Delegated:** anything that needs more than what Bit already knows or what was said in the conversation. That includes research, files, code, the user's projects, tasks, messages and documents, drafting, summarising, comparing, and visuals. When Bit is unsure, it delegates.
 - **Kept by Bit:** small talk, feelings, jokes and opinions; simple, stable common knowledge; repeating what the user just said; one clarifying question; ending the conversation; the job tools (`job_status`, `cancel_job`, `answer_job`). Handing these off would only add delay.
 - **How Bit hands off** (taken from DeepSeek Harness's `subagent` tool guidance):
@@ -180,7 +184,10 @@ The voice prompts are ported word for word, not rewritten. The source is ai-masc
   - A follow-up to earlier work is new work.
   - Bit doesn't poll a running job.
 
-**Tests.** Port the Rust tests that pin prompt strings along with the prompts (`runtime_tests.rs`: tool names, "Check: ", "Let me check that.", "weather", "Never tell the user to check"; `persona.rs`: "Bit", "end_conversation"). Any later change to the rule is made in one place first and copied over, never edited in both.
+**Tests.** Each embedding package checks the phrases the behaviour depends on:
+- persona: "Bit", "end_conversation"
+- delegation: every tool name, "Agent reply:", "Agent question:", "confirm", "Check: ", "Let me check that.", "weather", "Never tell the user to check"
+- the `delegate` description: "live information"
 
 ## 5. Phases
 

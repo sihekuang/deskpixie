@@ -131,7 +131,7 @@ docs/go-no-go.md
 ### Task 2: Voice types + persona  (issue #7)
 
 **Files:**
-- Create: `core/voice/types.go`, `core/voice/persona.go`, `core/voice/assets/persona.md`
+- Create: `core/voice/types.go`, `core/voice/persona.go` (`core/voice/assets/persona.md` already exists)
 - Test: `core/voice/persona_test.go`
 
 **Interfaces:**
@@ -160,8 +160,7 @@ docs/go-no-go.md
   func DefaultPersona() string                       // embedded assets/persona.md
   func Instructions(personaPath string) string        // file contents, or DefaultPersona() when empty/unreadable/blank
   ```
-- [ ] **Step 1:** Copy the persona: `git -C ~/Documents/Projects/ai-moscot show origin/main:crates/voice-core/assets/persona.md > core/voice/assets/persona.md`
-  Run `git -C ~/Documents/Projects/ai-moscot fetch` first, and check that [ai-mascot#101](https://github.com/sihekuang/ai-mascot/pull/101) (Bit hands work to the coordinator) has merged. Until it has, this copies the old "Bigger tasks" text. See spec §4.4.
+- [ ] **Step 1:** The persona is already in the repo at `core/voice/assets/persona.md` (spec §4.4). Use it as is; don't copy ai-mascot's.
 - [ ] **Step 2: Failing tests:**
   ```go
   func TestDefaultPersonaIsBit(t *testing.T) { if !strings.Contains(DefaultPersona(), "You are Bit") { t.Fatal() } }
