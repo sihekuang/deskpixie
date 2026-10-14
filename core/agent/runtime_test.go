@@ -141,6 +141,10 @@ func TestDelegateStartsTheCoordinatorAndPromptsIt(t *testing.T) {
 		if !slices.Equal(r.host.Prompts(), want) {
 			t.Fatal(r.host.Prompts())
 		}
+		// Its tab shows the request it is working on.
+		if got := r.host.Labels(); !slices.Equal(got, []string{"coordinator: coordinator · summarise the open issues"}) {
+			t.Fatal(got)
+		}
 		if !slices.Equal(r.voice.Calls(), []agenttest.VoiceCall{agenttest.HoldOpenCall(true)}) {
 			t.Fatal(r.voice.Calls())
 		}

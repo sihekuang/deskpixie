@@ -8,6 +8,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net"
 	"os"
 	"path/filepath"
@@ -39,7 +40,14 @@ type pane struct {
 	launched bool
 	// pending: launch_pending, from agent.start until the agent accepts prompts.
 	pending bool
+	// label is the pane's tab label; title and tokens its reported metadata.
+	label  string
+	title  string
+	tokens map[string]string
 }
+
+// tabOf is the id of pane id's tab (each tab here holds one pane).
+func tabOf(id string) string { return id + "-tab" }
 
 type subscriber struct {
 	q     []string
@@ -66,8 +74,10 @@ type FakeHerdr struct {
 	// Socket is the server's Unix socket path.
 	Socket string
 
-	mu          sync.Mutex
-	workspaces  [][2]string // (id, label)
+	mu         sync.Mutex
+	workspaces [][2]string // (id, label)
+	// defaultTabs: the empty tab "1" each workspace.create opens, by tab id (value: workspace).
+	defaultTabs map[string]string
 	panes       map[string]*pane
 	journal     []string
 	subscribers []*subscriber
@@ -127,7 +137,7 @@ func StartAt(socket string) (*FakeHerdr, error) {
 	if err != nil {
 		return nil, err
 	}
-	f := &FakeHerdr{Socket: socket, panes: map[string]*pane{}, listener: l, conns: map[net.Conn]bool{}, closed: make(chan struct{})}
+	f := &FakeHerdr{Socket: socket, panes: map[string]*pane{}, defaultTabs: map[string]string{}, listener: l, conns: map[net.Conn]bool{}, closed: make(chan struct{})}
 	go func() {
 		for {
 			c, err := l.Accept()
@@ -310,6 +320,7 @@ func (f *FakeHerdr) Ready(paneID string) {
 func (f *FakeHerdr) DropWorkspaces() {
 	f.mu.Lock()
 	f.workspaces = nil
+	clear(f.defaultTabs)
 	f.mu.Unlock()
 }
 
@@ -545,7 +556,7 @@ func agentJSON(id string, p *pane) map[string]any {
 		name = p.name
 	}
 	v := map[string]any{"name": name, "agent_status": p.status, "workspace_id": p.workspace,
-		"tab_id": id + "-tab", "pane_id": id, "focused": false, "cwd": p.cwd, "revision": 1}
+		"tab_id": tabOf(id), "pane_id": id, "focused": false, "cwd": p.cwd, "revision": 1}
 	if p.detected {
 		v["agent"] = "claude"
 		if !p.pending {
@@ -554,6 +565,12 @@ func agentJSON(id string, p *pane) map[string]any {
 	}
 	if p.pending {
 		v["launch_pending"] = true
+	}
+	if p.title != "" {
+		v["title"] = p.title
+	}
+	if len(p.tokens) > 0 {
+		v["tokens"] = maps.Clone(p.tokens)
 	}
 	return v
 }
@@ -604,7 +621,12 @@ func (f *FakeHerdr) handle(method string, p map[string]any) (result any, code, m
 	case "workspace.create":
 		id := fmt.Sprintf("w%d", len(f.workspaces)+1)
 		f.workspaces = append(f.workspaces, [2]string{id, str("label")})
-		return map[string]any{"type": "workspace_created", "workspace": map[string]any{"workspace_id": id}}, "", ""
+		// Like Herdr, the workspace opens with an empty tab "1".
+		tab := id + ":t1"
+		f.defaultTabs[tab] = id
+		return map[string]any{"type": "workspace_created", "workspace": map[string]any{"workspace_id": id},
+			"tab":       map[string]any{"tab_id": tab, "workspace_id": id, "label": "1"},
+			"root_pane": map[string]any{"pane_id": id + ":p0", "tab_id": tab}}, "", ""
 	case "tab.create":
 		ws := str("workspace_id")
 		found := false
@@ -622,11 +644,56 @@ func (f *FakeHerdr) handle(method string, p map[string]any) (result any, code, m
 				break
 			}
 		}
-		f.panes[id] = &pane{workspace: ws, status: "unknown", cwd: str("cwd")}
+		f.panes[id] = &pane{workspace: ws, status: "unknown", cwd: str("cwd"), label: str("label")}
 		line := eventLine(map[string]any{"data": map[string]any{"pane": map[string]any{"pane_id": id, "workspace_id": ws}, "type": "pane_created"}, "event": "pane_created"})
 		f.journal = append(f.journal, line)
 		f.emit(line, "")
-		return map[string]any{"type": "tab_created", "root_pane": map[string]any{"pane_id": id}}, "", ""
+		return map[string]any{"type": "tab_created", "tab": map[string]any{"tab_id": tabOf(id), "workspace_id": ws, "label": str("label")},
+			"root_pane": map[string]any{"pane_id": id, "tab_id": tabOf(id)}}, "", ""
+	case "tab.rename":
+		id, ok := f.paneOfTab(str("tab_id"))
+		if !ok {
+			return nil, "tab_not_found", fmt.Sprintf("tab %s not found", str("tab_id"))
+		}
+		if id != "" {
+			f.panes[id].label = str("label")
+		}
+		return map[string]any{"type": "tab_info", "tab": map[string]any{"tab_id": str("tab_id"), "label": str("label")}}, "", ""
+	case "tab.close":
+		tab := str("tab_id")
+		id, ok := f.paneOfTab(tab)
+		if !ok {
+			return nil, "tab_not_found", fmt.Sprintf("tab %s not found", tab)
+		}
+		if id == "" {
+			delete(f.defaultTabs, tab)
+		} else {
+			f.closePane(id)
+		}
+		return map[string]any{"type": "ok"}, "", ""
+	case "pane.report_metadata":
+		pn, ok := f.panes[str("pane_id")]
+		if !ok {
+			return nil, "pane_not_found", str("pane_id")
+		}
+		if b, _ := p["clear_title"].(bool); b {
+			pn.title = ""
+		}
+		if t, ok := p["title"].(string); ok {
+			pn.title = cut(t)
+		}
+		toks, _ := p["tokens"].(map[string]any)
+		for k, v := range toks {
+			if pn.tokens == nil {
+				pn.tokens = map[string]string{}
+			}
+			if v, ok := v.(string); ok {
+				pn.tokens[k] = cut(v)
+			} else {
+				delete(pn.tokens, k)
+			}
+		}
+		return map[string]any{"type": "ok"}, "", ""
 	case "agent.start":
 		paneID, name := str("pane_id"), str("name")
 		if f.failAgentStart {
@@ -708,19 +775,77 @@ func (f *FakeHerdr) handle(method string, p map[string]any) (result any, code, m
 			f.failCloses--
 			return nil, "close_failed", fmt.Sprintf("could not close %s", id)
 		}
-		pn, ok := f.panes[id]
-		if !ok {
+		if _, ok := f.panes[id]; !ok {
 			return nil, "pane_not_found", id
 		}
-		delete(f.panes, id)
-		line := eventLine(map[string]any{"data": map[string]any{"pane_id": id, "type": "pane_closed", "workspace_id": pn.workspace}, "event": "pane_closed"})
-		f.journal = append(f.journal, line)
-		if f.holdCloses {
-			f.held = append(f.held, line)
-		} else {
-			f.emit(line, "")
-		}
+		f.closePane(id)
 		return map[string]any{"type": "ok"}, "", ""
 	}
 	return nil, "unknown_method", method
+}
+
+// closePane closes the pane (and its tab) and reports pane_closed.
+func (f *FakeHerdr) closePane(id string) {
+	pn := f.panes[id]
+	delete(f.panes, id)
+	line := eventLine(map[string]any{"data": map[string]any{"pane_id": id, "type": "pane_closed", "workspace_id": pn.workspace}, "event": "pane_closed"})
+	f.journal = append(f.journal, line)
+	if f.holdCloses {
+		f.held = append(f.held, line)
+	} else {
+		f.emit(line, "")
+	}
+}
+
+// paneOfTab is the pane in tab ("" for a workspace's empty default tab); false if no such tab.
+func (f *FakeHerdr) paneOfTab(tab string) (string, bool) {
+	if _, ok := f.defaultTabs[tab]; ok {
+		return "", true
+	}
+	for id := range f.panes {
+		if tabOf(id) == tab {
+			return id, true
+		}
+	}
+	return "", false
+}
+
+// cut is s cut to what Herdr 0.7.x keeps of a metadata value (80 runes).
+func cut(s string) string {
+	r := []rune(s)
+	return string(r[:min(len(r), 80)])
+}
+
+// Tabs are the tab labels, the default tabs ("1") first, then by pane id.
+func (f *FakeHerdr) Tabs() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []string
+	for range f.defaultTabs {
+		out = append(out, "1")
+	}
+	for _, id := range f.sortedPaneIDs() {
+		out = append(out, f.panes[id].label)
+	}
+	return out
+}
+
+// TabLabel is the label of the tab of the agent named name ("" if none).
+func (f *FakeHerdr) TabLabel(name string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if id, code, _ := f.find(name); code == "" {
+		return f.panes[id].label
+	}
+	return ""
+}
+
+// Metadata is the title and tokens reported for the agent named name's pane.
+func (f *FakeHerdr) Metadata(name string) (string, map[string]string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if id, code, _ := f.find(name); code == "" {
+		return f.panes[id].title, maps.Clone(f.panes[id].tokens)
+	}
+	return "", nil
 }

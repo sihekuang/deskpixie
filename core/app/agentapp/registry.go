@@ -161,6 +161,14 @@ func (c *IntegrationCheck) Focus(ctx context.Context, name string) error {
 	return nil
 }
 
+// Relabel passes through to the wrapped host, if it can relabel tabs.
+func (c *IntegrationCheck) Relabel(ctx context.Context, name string, tab agent.TabLabel) error {
+	if l, ok := c.inner.(agent.Labeler); ok {
+		return l.Relabel(ctx, name, tab)
+	}
+	return nil
+}
+
 // Shutdown stops the wrapped host (herdr.Host's event pump), if it has one.
 func (c *IntegrationCheck) Shutdown() { shutdownHost(c.inner) }
 

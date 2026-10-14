@@ -235,6 +235,7 @@ const (
 	EfStopWorker      // Name: Escape, then close the pane after a grace (answered with InWorkerClosed)
 	EfReadWorker      // Name: read the worker's screen (answered with InWorkerScreen)
 	EfForgetWorker    // Name: the worker is gone: revoke its token and delete its launch files
+	EfLabel           // Tab: relabel the coordinator's tab (its current request, or idle)
 )
 
 // Effect is one thing the caller must do, in order. Err set (non-empty) is the Err branch of
@@ -255,6 +256,7 @@ type Effect struct {
 	Value    any
 	Err      string
 	Name     string
+	Tab      TabLabel
 }
 
 type coordinatorState int
@@ -319,6 +321,10 @@ type AgentController struct {
 	coordStatus PaneStatus
 	// watch: liveness of the open working jobs (liveness.go).
 	watch map[JobID]*liveness
+	// coordJob: the job the coordinator was last prompted about (its tab shows it while open).
+	coordJob JobID
+	// coordTab: the coordinator tab's label as last emitted ("" = not since it came up).
+	coordTab string
 }
 
 func NewAgentController(settings Settings) *AgentController {
@@ -515,7 +521,29 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 	case InWorkerPromptFailed:
 		c.workerSendFailed(in.Name, in.Text, now, &fx)
 	}
+	c.syncCoordTab(&fx)
 	return fx
+}
+
+// syncCoordTab relabels the coordinator's tab when its current request changed: the job it was
+// last prompted about while that is open, else the newest open job, else idle.
+func (c *AgentController) syncCoordTab(fx *[]Effect) {
+	if c.coordinator != coordUp || c.shutDown {
+		c.coordTab = ""
+		return
+	}
+	var job *Job
+	if j, ok := c.jobs.Get(c.coordJob); ok && j.Status.IsOpen() {
+		job = &j
+	} else if open := c.jobs.Open(); len(open) > 0 {
+		job = &open[len(open)-1]
+	}
+	tab := CoordinatorTab(job)
+	key := tab.Label + "\x00" + tab.Meta["job"]
+	if key != c.coordTab {
+		c.coordTab = key
+		*fx = append(*fx, Effect{Kind: EfLabel, Tab: tab})
+	}
 }
 
 func logEffect(text string) Effect { return Effect{Kind: EfLog, Text: text} }
@@ -644,6 +672,9 @@ func (c *AgentController) flush(now Millis, fx *[]Effect) {
 		c.idleWaitAt = optMs{}
 		c.awaitingStop = true
 		for _, r := range prompt.Refs {
+			if c.jobs.IsOpen(r) {
+				c.coordJob = r
+			}
 			if j, ok := c.jobs.Get(r); ok && j.Status == JobDelegated {
 				if _, err := c.jobs.Transition(r, JobWorking, now); err == nil {
 					c.saveJob(r, fx)

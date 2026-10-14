@@ -14,6 +14,7 @@ import (
 type HerdrAgent struct {
 	Name   string
 	PaneID string
+	TabID  string
 	// Agent is the detected agent ("claude"). "" while the agent is launching (LaunchPending)
 	// and once its process has exited, though the pane and its name stay.
 	Agent  string
@@ -48,6 +49,7 @@ func parseAgentMap(v map[string]any) (HerdrAgent, bool) {
 	return HerdrAgent{
 		Name:             s("name"),
 		PaneID:           pane,
+		TabID:            s("tab_id"),
 		Agent:            s("agent"),
 		Status:           agent.ParsePaneStatus(status),
 		Cwd:              s("cwd"),
@@ -177,21 +179,23 @@ func (c *Client) Workspaces(ctx context.Context) ([]Workspace, error) {
 }
 
 // CreateWorkspace makes a new workspace (a fresh server has none, and tab.create needs one);
-// returns its id.
-func (c *Client) CreateWorkspace(ctx context.Context, label, cwd string) (string, error) {
+// returns its id and the id of the empty tab Herdr opens in it ("1"; "" if not reported).
+func (c *Client) CreateWorkspace(ctx context.Context, label, cwd string) (string, string, error) {
 	r, err := c.call(ctx, "workspace.create", "", map[string]any{"label": label, "cwd": cwd, "focus": false})
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	id, ok := pointerStr(r, "workspace", "workspace_id")
 	if !ok {
-		return "", shapeErr("workspace.create")
+		return "", "", shapeErr("workspace.create")
 	}
-	return id, nil
+	tab, _ := pointerStr(r, "tab", "tab_id")
+	return id, tab, nil
 }
 
-// CreateTab makes a new tab with env set for its shell; returns its root pane id.
-func (c *Client) CreateTab(ctx context.Context, workspaceID, label, cwd string, env []agent.EnvVar) (string, error) {
+// CreateTab makes a new tab with env set for its shell; returns its root pane id and its tab
+// id ("" if not reported).
+func (c *Client) CreateTab(ctx context.Context, workspaceID, label, cwd string, env []agent.EnvVar) (string, string, error) {
 	m := map[string]any{}
 	for _, e := range env {
 		m[e.Key] = e.Value
@@ -199,13 +203,65 @@ func (c *Client) CreateTab(ctx context.Context, workspaceID, label, cwd string, 
 	params := map[string]any{"workspace_id": workspaceID, "label": label, "cwd": cwd, "env": m, "focus": false}
 	r, err := c.call(ctx, "tab.create", label, params)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	id, ok := pointerStr(r, "root_pane", "pane_id")
 	if !ok {
-		return "", shapeErr("tab.create")
+		return "", "", shapeErr("tab.create")
 	}
-	return id, nil
+	tab, _ := pointerStr(r, "tab", "tab_id")
+	return id, tab, nil
+}
+
+// RenameTab sets a tab's label (Herdr keeps labels of any length).
+func (c *Client) RenameTab(ctx context.Context, tabID, label string) error {
+	_, err := c.call(ctx, "tab.rename", tabID, map[string]any{"tab_id": tabID, "label": label})
+	return err
+}
+
+func (c *Client) CloseTab(ctx context.Context, tabID string) error {
+	_, err := c.call(ctx, "tab.close", tabID, map[string]any{"tab_id": tabID})
+	return err
+}
+
+// MetadataSource is the source DeskPixie reports pane metadata as.
+const MetadataSource = "deskpixie"
+
+// MetaValueRunes is the longest title or token value Herdr keeps (0.7.x cuts the rest).
+const MetaValueRunes = 80
+
+// ReportMetadata sets the pane's display-only title (title "" clears it) and tokens (a value ""
+// clears that token). Herdr keeps at most 16 tokens, names `[A-Za-z0-9_-]{1,32}`, values of up
+// to MetaValueRunes.
+func (c *Client) ReportMetadata(ctx context.Context, paneID, title string, tokens map[string]string) error {
+	params := map[string]any{"pane_id": paneID, "source": MetadataSource}
+	if title == "" {
+		params["clear_title"] = true
+	} else {
+		params["title"] = cutRunes(title, MetaValueRunes)
+	}
+	if len(tokens) > 0 {
+		t := map[string]any{}
+		for k, v := range tokens {
+			if v == "" {
+				t[k] = nil
+			} else {
+				t[k] = cutRunes(v, MetaValueRunes)
+			}
+		}
+		params["tokens"] = t
+	}
+	_, err := c.call(ctx, "pane.report_metadata", paneID, params)
+	return err
+}
+
+// cutRunes is s cut to at most n runes ("…" last when cut), so Herdr never splits it itself.
+func cutRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n-1]) + "…"
 }
 
 func nonNil(xs []string) []string {

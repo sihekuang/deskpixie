@@ -10,6 +10,7 @@ package herdr
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -54,6 +55,9 @@ type liveConn struct {
 	client    *Client
 	socket    string
 	workspace string
+	// defaultTab: the empty tab Herdr opened with the workspace we created ("1"), closed once
+	// the first agent's tab is up ("" = none, or already closed).
+	defaultTab string
 }
 
 // Host implements agent.SessionHost over Herdr (registry name "herdr").
@@ -194,7 +198,7 @@ func (h *Host) attach(ctx context.Context, socket string) error {
 	if err != nil {
 		return err
 	}
-	workspace := ""
+	workspace, defaultTab := "", ""
 	for _, w := range workspaces {
 		if w.Label == h.session {
 			workspace = w.ID
@@ -202,7 +206,7 @@ func (h *Host) attach(ctx context.Context, socket string) error {
 		}
 	}
 	if workspace == "" {
-		if workspace, err = client.CreateWorkspace(ctx, h.session, h.home); err != nil {
+		if workspace, defaultTab, err = client.CreateWorkspace(ctx, h.session, h.home); err != nil {
 			return err
 		}
 	}
@@ -212,7 +216,7 @@ func (h *Host) attach(ctx context.Context, socket string) error {
 	}
 	h.remember(list)
 	h.startPump(socket, client)
-	h.live = &liveConn{client: client, socket: socket, workspace: workspace}
+	h.live = &liveConn{client: client, socket: socket, workspace: workspace, defaultTab: defaultTab}
 	return nil
 }
 
@@ -327,28 +331,32 @@ func (t newTab) abandon(ctx context.Context) {
 // the error variant (messages may carry paths or names).
 func closeQuietly(ctx context.Context, client *Client, pane string) {
 	err := client.ClosePane(ctx, pane)
-	if err == nil {
+	if err == nil || agent.IsHostError(err, agent.HostNoAgent) {
 		return
 	}
-	tag := "Other"
+	log.Printf("agent: herdr: closing an unstarted tab failed (%s)", errTag(err))
+}
+
+// errTag is err's variant only (messages may carry paths or names).
+func errTag(err error) string {
 	var he agent.HostError
 	if errors.As(err, &he) {
 		switch he.Kind {
 		case agent.HostNoAgent:
-			return
+			return "NoAgent"
 		case agent.HostNotFound:
-			tag = "NotFound"
+			return "NotFound"
 		case agent.HostVersionMismatch:
-			tag = "VersionMismatch"
+			return "VersionMismatch"
 		case agent.HostTimeout:
-			tag = "Timeout"
+			return "Timeout"
 		case agent.HostGaveUp:
-			tag = "GaveUp"
+			return "GaveUp"
 		case agent.HostExitedAtStart:
-			tag = "ExitedAtStart"
+			return "ExitedAtStart"
 		}
 	}
-	log.Printf("agent: herdr: closing an unstarted tab failed (%s)", tag)
+	return "Other"
 }
 
 // start is StartAgent, or with replaceLive ReplaceAgent. A pane left by an earlier agent of
@@ -371,14 +379,15 @@ func (h *Host) start(ctx context.Context, spec agent.AgentSpec, replaceLive bool
 	default:
 		return agent.AgentInfo{}, err
 	}
-	pane, err := client.CreateTab(ctx, workspace, spec.Name, spec.Cwd, spec.Env)
+	label := cmp.Or(spec.Tab.Label, spec.Name)
+	pane, _, err := client.CreateTab(ctx, workspace, label, spec.Cwd, spec.Env)
 	if err != nil && IsWorkspaceNotFound(err) {
 		// The server restarted and lost our workspace: resolve it again and retry once.
 		h.forgetLive()
 		if client, workspace, err = h.client(ctx); err != nil {
 			return agent.AgentInfo{}, err
 		}
-		pane, err = client.CreateTab(ctx, workspace, spec.Name, spec.Cwd, spec.Env)
+		pane, _, err = client.CreateTab(ctx, workspace, label, spec.Cwd, spec.Env)
 	}
 	if err != nil {
 		return agent.AgentInfo{}, err
@@ -444,7 +453,30 @@ func (h *Host) start(ctx context.Context, spec agent.AgentSpec, replaceLive bool
 		tab.abandon(ctx)
 		return agent.AgentInfo{}, err
 	}
+	if spec.Tab.Title != "" || len(spec.Tab.Meta) > 0 {
+		if err := client.ReportMetadata(ctx, pane, spec.Tab.Title, spec.Tab.Meta); err != nil {
+			log.Printf("agent: herdr: could not set %s's tab metadata: %s", spec.Name, errTag(err))
+		}
+	}
+	h.closeDefaultTab(ctx, client, workspace)
 	return info, nil
+}
+
+// closeDefaultTab closes the empty tab Herdr opened with our workspace, once an agent's tab is
+// up beside it (closing a workspace's last tab would close the workspace).
+func (h *Host) closeDefaultTab(ctx context.Context, client *Client, workspace string) {
+	h.liveMu.Lock()
+	tab := ""
+	if h.live != nil && h.live.workspace == workspace {
+		tab, h.live.defaultTab = h.live.defaultTab, ""
+	}
+	h.liveMu.Unlock()
+	if tab == "" {
+		return
+	}
+	if err := client.CloseTab(context.WithoutCancel(ctx), tab); err != nil && !otherWithPrefix(err, "tab_not_found:") {
+		log.Printf("agent: herdr: could not close the workspace's empty tab: %s", errTag(err))
+	}
 }
 
 // pollReady polls agent.get until the new agent is ready. Seen launching or detected on our
@@ -790,6 +822,30 @@ func (h *Host) nextLine(ctx context.Context, stream *eventStream, timerC <-chan 
 
 // Name is the registry name.
 func (h *Host) Name() string { return "herdr" }
+
+var _ agent.Labeler = (*Host)(nil)
+
+// Relabel renames agentName's tab and sets its pane title and metadata. With no server running
+// there is no tab to relabel (and none is started).
+func (h *Host) Relabel(ctx context.Context, agentName string, tab agent.TabLabel) error {
+	client, err := h.runningClient(ctx)
+	if err != nil {
+		return err
+	}
+	if client == nil {
+		return agent.ErrNoAgent(agentName)
+	}
+	a, err := client.GetAgent(ctx, agentName)
+	if err != nil {
+		return err
+	}
+	if a.TabID != "" {
+		if err := client.RenameTab(ctx, a.TabID, cmp.Or(tab.Label, agentName)); err != nil {
+			return err
+		}
+	}
+	return client.ReportMetadata(ctx, a.PaneID, tab.Title, tab.Meta)
+}
 
 func (h *Host) EnsureSession(ctx context.Context) error {
 	socket, err := h.supervisor.Ensure(ctx)

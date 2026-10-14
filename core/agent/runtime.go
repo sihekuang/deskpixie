@@ -112,12 +112,14 @@ const (
 	opStart hostOpKind = iota
 	opPrompt
 	opInterrupt
-	opStop // Escape, then close the pane
+	opStop    // Escape, then close the pane
+	opRelabel // tab: the coordinator's tab label
 )
 
 type hostOp struct {
 	kind hostOpKind
 	text string
+	tab  TabLabel
 }
 
 // mainItem is one thing for the main loop: an effect to carry out or a hook event.
@@ -665,6 +667,8 @@ func (h *AgentHandle) runOpInner(ctx context.Context, op hostOp) {
 		if err := host.StopCoordinator(ctx); err != nil {
 			log.Printf("agent: stopping the coordinator failed: %s", tag(err))
 		}
+	case opRelabel:
+		relabelQuietly(ctx, host.Session(), Coordinator, op.tab)
 	}
 }
 
@@ -970,6 +974,7 @@ func (h *AgentHandle) launchWorker(ctx context.Context, w WorkerDeps, plan Worke
 	if h.quitting() {
 		return "", 0, errQuitting
 	}
+	prepared.Spec.Tab = WorkerTab(plan)
 	session := h.deps.Host.Session()
 	began := time.Now()
 	info, err := session.StartAgent(ctx, prepared.Spec)
@@ -1167,6 +1172,8 @@ func (h *AgentHandle) apply(e Effect) {
 		d.Status.SetStatus(e.Text)
 	case EfStopCoordinator:
 		h.queueOp(hostOp{kind: opStop})
+	case EfLabel:
+		h.queueOp(hostOp{kind: opRelabel, tab: e.Tab})
 	case EfResetHost:
 		d.Host.Reset()
 	case EfLog:
