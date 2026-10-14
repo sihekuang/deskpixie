@@ -124,10 +124,10 @@ func Catalog(role Role) []map[string]any {
 		},
 		{
 			"name":        "report_result",
-			"description": "Report the outcome of your task when you finish: done or failed, a summary and the evidence (tests run, the commit), each at most 35 words.",
+			"description": "Report the outcome of your task when you finish: done or failed, a summary and the evidence (tests run, the commit), each at most 35 words. The summary is spoken aloud to the user at once as your own report: write it as one or two plain spoken sentences, with no paths, code or links.",
 			"inputSchema": objectSchema(map[string]any{
 				"outcome":  map[string]any{"type": "string", "enum": []string{"done", "failed"}},
-				"summary":  map[string]any{"type": "string", "description": "What you did or why it failed, at most 35 words."},
+				"summary":  map[string]any{"type": "string", "description": "What you did or why it failed, at most 35 words, as plain speech: it is read aloud to the user."},
 				"evidence": map[string]any{"type": "string", "description": "Proof: tests run and their result, the commit, at most 35 words."},
 			}, "outcome", "summary", "evidence"),
 		},
@@ -141,8 +141,8 @@ func Catalog(role Role) []map[string]any {
 		},
 		{
 			"name":        "report_blocked",
-			"description": "Report that you cannot continue and why, at most 35 words.",
-			"inputSchema": objectSchema(stringProps([2]string{"reason", "Why you are blocked, at most 35 words."}), "reason"),
+			"description": "Report that you cannot continue and why, at most 35 words. The reason is spoken aloud to the user: write it as plain speech, with no paths, code or links.",
+			"inputSchema": objectSchema(stringProps([2]string{"reason", "Why you are blocked, at most 35 words, as plain speech."}), "reason"),
 		},
 	}
 }
@@ -356,6 +356,59 @@ func Plain(text string, maxChars int) string {
 // ResultLine is `Worker <name> reports done: "<summary>" Evidence: "<evidence>"`.
 func ResultLine(name string, outcome Outcome, summary, evidence string) string {
 	return fmt.Sprintf("Worker %s reports %s: \"%s\" Evidence: \"%s\"", name, outcome, summary, evidence)
+}
+
+// WorkerWho names a worker for the user: "The fix login worker in focus".
+func WorkerWho(plan WorkerPlan) string {
+	work := strings.ReplaceAll(plan.Slug, "-", " ")
+	if work == "" {
+		return "A worker in " + plan.RepoName
+	}
+	return fmt.Sprintf("The %s worker in %s", work, plan.RepoName)
+}
+
+// WorkerResultSpoken is a worker's report_result as Bit says it to the user at once, clearly
+// the worker's own word, not a checked result: "<who> says it's done: <summary>." /
+// "<who> couldn't finish: <summary>."
+func WorkerResultSpoken(who string, outcome Outcome, summary string) string {
+	if outcome == OutcomeFailed {
+		return workerSpoken(who+" couldn't finish", summary)
+	}
+	return workerSpoken(who+" says it's done", summary)
+}
+
+// WorkerBlockedSpoken is a worker's report_blocked as Bit says it: "<who> is stuck: <reason>."
+func WorkerBlockedSpoken(who, reason string) string {
+	return workerSpoken(who+" is stuck", reason)
+}
+
+// workerSpoken is `<head>: <text>.` made speakable: quoted (defanged, capped), links dropped,
+// paths cut to their file name, then capped like a <spoken> block (2 sentences, 35 words).
+func workerSpoken(head, text string) string {
+	var words []string
+	for _, w := range strings.Fields(Quote(text, MaxReportWords)) {
+		lower := strings.ToLower(w)
+		switch {
+		case strings.Contains(lower, "://") || strings.HasPrefix(lower, "www."):
+			continue
+		case strings.ContainsAny(w, "/\\"):
+			trail := strings.TrimLeft(strings.TrimRight(w, ".,;:!?)"), "(")
+			name, ok := pathFileName(strings.ReplaceAll(trail, "\\", "/"))
+			if !ok {
+				continue
+			}
+			w = name + w[len(strings.TrimRight(w, ".,;:!?)")):]
+		}
+		words = append(words, w)
+	}
+	body := strings.Join(words, " ")
+	if body == "" {
+		return Cap(head + ".")
+	}
+	if last, _ := utf8.DecodeLastRuneInString(body); !strings.ContainsRune(".!?…", last) {
+		body += "."
+	}
+	return Cap(head + ": " + body)
 }
 
 // WorkerQuestionLine is `Worker <name> asks: "<question>" Options: "a" | "b". Answer with message_worker.`

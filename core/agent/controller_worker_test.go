@@ -619,3 +619,70 @@ func TestAWorkerThatStartsWorkingIsNotChecked(t *testing.T) {
 		t.Fatalf("%s", fmtEffects(fx))
 	}
 }
+
+func TestAResultIsSpokenToTheUserAtOnceAndStillReachesTheCoordinator(t *testing.T) {
+	c := wctl()
+	running(t, c)
+	c.Step(voiceOpened(), T0)
+	call := McpCall{Kind: CallReportResult, Outcome: OutcomeDone, Summary: "Fixed the flaky test", Evidence: "go test passed; commit abc123"}
+	v, err, fx := mcp(t, c, workerName, call, T0)
+	wantToolOK(t, v, err, map[string]any{"ok": true})
+	wantContains(t, fx, eInject("The upload worker in focus says it's done: Fixed the flaky test."))
+	fx = coordinatorTurnEnds(c, T0+10)
+	wantPrompts(t, fx, fmt.Sprintf("Worker focus-upload reports done: \"Fixed the flaky test\" Evidence: \"go test passed; commit abc123\"\n[ref %s]", job(1)))
+}
+
+func TestAFailedResultIsSpokenAsTheWorkersOwnWord(t *testing.T) {
+	c := wctl()
+	running(t, c)
+	c.Step(voiceOpened(), T0)
+	call := McpCall{Kind: CallReportResult, Outcome: OutcomeFailed, Summary: "The test needs a network", Evidence: "none given"}
+	_, _, fx := mcp(t, c, workerName, call, T0)
+	wantContains(t, fx, eInject("The upload worker in focus couldn't finish: The test needs a network."))
+}
+
+func TestABlockIsSpokenToo(t *testing.T) {
+	c := wctl()
+	running(t, c)
+	c.Step(voiceOpened(), T0)
+	_, _, fx := mcp(t, c, workerName, McpCall{Kind: CallReportBlocked, Reason: "I need a login for the staging server"}, T0)
+	wantContains(t, fx, eInject("The upload worker in focus is stuck: I need a login for the staging server."))
+}
+
+func TestAResultWithTheConversationClosedIsANotificationAndOutboxed(t *testing.T) {
+	c := wctl()
+	running(t, c)
+	call := McpCall{Kind: CallReportResult, Outcome: OutcomeDone, Summary: "Fixed the flaky test", Evidence: "x"}
+	_, _, fx := mcp(t, c, workerName, call, T0)
+	wantContains(t, fx, eNotify("The upload worker in focus says it's done: Fixed the flaky test."))
+	if !anyKind(fx, EfAppend) || anyKind(fx, EfInject) {
+		t.Fatal(fmtEffects(fx))
+	}
+}
+
+func TestAStoppedWorkersResultIsNotSpokenButStillForwarded(t *testing.T) {
+	c := wctl()
+	running(t, c)
+	c.Step(voiceOpened(), T0)
+	mcp(t, c, Coordinator, McpCall{Kind: CallStopWorker, Name: workerName}, T0)
+	call := McpCall{Kind: CallReportResult, Outcome: OutcomeDone, Summary: "Fixed the flaky test", Evidence: "x"}
+	v, err, fx := mcp(t, c, workerName, call, T0)
+	wantToolOK(t, v, err, map[string]any{"ok": true})
+	if anyKind(fx, EfInject, EfNotify) {
+		t.Fatal(fmtEffects(fx))
+	}
+	fx = coordinatorTurnEnds(c, T0+10)
+	wantPrompts(t, fx, fmt.Sprintf("Worker focus-upload reports done: \"Fixed the flaky test\" Evidence: \"x\"\n[ref %s]", job(1)))
+}
+
+func TestAResultAfterTheJobEndedIsNotSpoken(t *testing.T) {
+	c := wctl()
+	running(t, c)
+	c.Step(voiceOpened(), T0)
+	c.Step(CancelInput(job(1)), T0)
+	_, err, fx := mcp(t, c, workerName, McpCall{Kind: CallReportResult, Outcome: OutcomeDone, Summary: "done", Evidence: "x"}, T0)
+	wantToolErr(t, err, "Your job has ended; stop working.")
+	if anyKind(fx, EfInject, EfNotify) {
+		t.Fatal(fmtEffects(fx))
+	}
+}
