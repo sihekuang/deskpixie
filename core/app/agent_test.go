@@ -174,3 +174,32 @@ func TestANilAgentLeavesTheMenuHidden(t *testing.T) {
 	h.action("agent:open") // a logged no-op
 	h.call("mascot.click", nil)
 }
+
+// rememberingAgent is an agent whose coordinator side gives each voice session a context block.
+type rememberingAgent struct {
+	fakeAgent
+	facts string
+}
+
+func (r *rememberingAgent) Facts() string { return r.facts }
+
+func TestEachVoiceSessionGetsTheAgentsRecentWork(t *testing.T) {
+	a := &App{agent: &rememberingAgent{facts: "Recent work with the agent:\n- [9:00 AM] done: count issues."}}
+	got := a.sessionFacts("Leeds").Facts()
+	local := strings.Index(got, "Leeds")
+	recent := strings.Index(got, "\n\nRecent work with the agent:\n- [9:00 AM] done: count issues.")
+	if local < 0 || recent < local {
+		t.Fatal(got)
+	}
+	// Nothing to remember adds nothing; no agent, only the local facts.
+	a.agent.(*rememberingAgent).facts = "  "
+	if got := a.sessionFacts("Leeds").Facts(); strings.Contains(got, "Recent work") || strings.HasSuffix(got, "\n") {
+		t.Fatal(got)
+	}
+	if got := (&App{}).sessionFacts("Leeds").Facts(); !strings.Contains(got, "Leeds") || strings.Contains(got, "Recent work") {
+		t.Fatal(got)
+	}
+	if got := (&App{agent: &fakeAgent{}}).sessionFacts("Leeds").Facts(); strings.Contains(got, "Recent work") {
+		t.Fatal(got)
+	}
+}

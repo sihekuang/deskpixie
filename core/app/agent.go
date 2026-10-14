@@ -46,5 +46,11 @@ type Agent interface {
 	Shutdown()
 }
 
+// AgentFacts is an Agent that also gives each voice session a context block (its recent jobs),
+// so Bit picks up where it left off without a memory of its own.
+type AgentFacts interface {
+	Facts() string
+}
+
 // AgentFactory builds the agent from settings; nil when agent.enabled is false.
 type AgentFactory func(cfg settings.Config, appSupport string, hooks AgentHooks) Agent

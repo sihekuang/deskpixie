@@ -54,7 +54,7 @@ func (RandomIDs) JobID() agent.JobID {
 
 // DelegationTools are the voice tools over one handle.
 func DelegationTools(h *agent.AgentHandle) []voice.Tool {
-	return []voice.Tool{agent.Delegate{H: h}, agent.Jobs{H: h}, agent.AnswerJob{H: h}}
+	return []voice.Tool{agent.Delegate{H: h}, agent.Jobs{H: h}, agent.AnswerJob{H: h}, agent.Recall{H: h}}
 }
 
 // PermissionTimeoutMs is agent.permissionTimeoutSecs in ms, kept under the hook server's own
@@ -311,6 +311,9 @@ func (a *Agent) Addr() string { return a.addr }
 
 func (a *Agent) Tools() []voice.Tool { return DelegationTools(a.handle) }
 func (a *Agent) Persona() string     { return agent.DelegationPersona }
+
+// Facts is Bit's memory for each voice session: the coordinator's recent jobs (app.AgentFacts).
+func (a *Agent) Facts() string { return a.handle.Facts() }
 
 // Tray is Tray ▸ Agent: the open jobs, the runtime's status line and the standing hint.
 func (a *Agent) Tray() app.AgentTray {

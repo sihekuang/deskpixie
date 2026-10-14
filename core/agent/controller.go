@@ -346,6 +346,9 @@ func (c *AgentController) isDisabled() bool { _, off := c.Disabled(); return off
 
 func (c *AgentController) Snapshot(now Millis) []JobView { return c.jobs.Snapshot(now) }
 
+// RecentJobs are the open jobs and those updated since `since`, oldest first (Bit's memory).
+func (c *AgentController) RecentJobs(since Millis) []Job { return c.jobs.Recent(since) }
+
 func (c *AgentController) OpenJobs() []JobID {
 	var out []JobID
 	for _, j := range c.jobs.Open() {
@@ -946,10 +949,12 @@ func (c *AgentController) onReply(id JobID, status SpokenStatus, text string, no
 		c.deliver(NewLine(LineReply, text), now, fx)
 	case SpokenQuestion:
 		_, _ = c.jobs.Transition(id, JobQuestion, now)
+		c.jobs.SetReply(id, text, now)
 		c.saveJob(id, fx)
 		c.deliver(NewLine(LineQuestion, text), now, fx)
 	case SpokenDone:
 		_, _ = c.jobs.Transition(id, JobDone, now)
+		c.jobs.SetReply(id, text, now)
 		c.saveJob(id, fx)
 		c.narrator.Forget(id)
 		c.denyPendingFor(id, "The job ended.", fx)

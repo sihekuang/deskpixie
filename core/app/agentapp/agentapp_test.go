@@ -33,7 +33,7 @@ func TestJobIdsAreRandomAndWellFormed(t *testing.T) {
 	}
 }
 
-func TestAllFourDelegationToolsAreRegistered(t *testing.T) {
+func TestTheDelegationToolsAndRecallAreRegistered(t *testing.T) {
 	clock := agenttest.ClockAt(1)
 	deps := agent.Deps{
 		Host:     agent.NewAgentHost(agenttest.NewFakeSessionHost(), clock, agent.CoordinatorRecipe{Cwd: "/w"}),
@@ -51,7 +51,7 @@ func TestAllFourDelegationToolsAreRegistered(t *testing.T) {
 	for _, tool := range DelegationTools(h) {
 		names = append(names, tool.Name())
 	}
-	if !reflect.DeepEqual(names, []string{"delegate", "jobs", "answer_job"}) {
+	if !reflect.DeepEqual(names, []string{"delegate", "jobs", "answer_job", "recall"}) {
 		t.Fatal(names)
 	}
 }

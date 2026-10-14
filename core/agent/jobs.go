@@ -132,6 +132,26 @@ func (t *JobTable) SetProgress(id JobID, phrase string, now Millis) {
 	}
 }
 
+// SetReply records the coordinator's spoken reply or question for a job, open or not (a reply
+// can close it).
+func (t *JobTable) SetReply(id JobID, text string, now Millis) {
+	if j := t.find(id); j != nil {
+		j.Reply = &text
+		j.Updated = now
+	}
+}
+
+// Recent are the open jobs and the jobs updated since `since`, oldest first.
+func (t *JobTable) Recent(since Millis) []Job {
+	var out []Job
+	for _, j := range t.jobs {
+		if j.Status.IsOpen() || j.Updated >= since {
+			out = append(out, cloneJob(j))
+		}
+	}
+	return out
+}
+
 // Snapshot is `jobs` status: open jobs first (oldest first), then the 5 most recently closed.
 func (t *JobTable) Snapshot(now Millis) []JobView {
 	view := func(j Job) JobView {

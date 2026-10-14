@@ -81,9 +81,6 @@ type RuntimeConfig struct {
 	// OnMicSent, when set, is called on the runtime goroutine right after Session.Send
 	// returns for a mic frame, with the time PushMic was given for it. For latency metrics.
 	OnMicSent func(capturedAt time.Time)
-	// OnInject, when set, is called on the runtime goroutine with each notice as it is
-	// actually given to the model (not when it is queued or bounced back undelivered).
-	OnInject func(text string)
 
 	// playHook sees every enqueue (n samples) and flush of the playback queue (tests).
 	playHook func(n int, flush bool)
@@ -713,9 +710,6 @@ func (r *Runtime) apply(fx Effect) {
 		r.emit(UIEvent{Kind: "status", Text: fx.Status})
 	case EfInject:
 		r.send(Command{Kind: CmdInject, Text: fx.Text, Respond: true})
-		if r.cfg.OnInject != nil {
-			r.cfg.OnInject(fx.Text)
-		}
 	case EfSignal:
 		r.publish(fx.Signal)
 	}
