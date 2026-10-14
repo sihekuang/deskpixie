@@ -5,8 +5,10 @@ API of [DeepFilterNet](https://github.com/Rikorose/DeepFilterNet) (MIT OR Apache
 `v0.5.6` (the version ai-mascot's Rust code used).
 
 - `include/deep_filter.h` is committed (cbindgen output for v0.5.6).
-- `lib/libdf.dylib` and `models/DeepFilterNet3.tar.gz` are **not** committed; fetch them with
-  `make -C core libdf`.
+- `lib/libdf.dylib` (arm64, 16 MB) and `models/DeepFilterNet3.tar.gz` (8 MB) are **committed**,
+  as Howl vendors them, so CI and fresh clones build the noise filter without a Rust toolchain.
+  Provenance and checksums are in `VERSION.md`. `make -C core libdf` re-copies them from Howl
+  (to refresh or upgrade them).
 
 The Go code opens `libdf.dylib` with `dlopen` (not a link-time dependency), looking at
 `@rpath/libdf.dylib`, `@loader_path/libdf.dylib`, then `libdf.dylib`; `DESKPIXIE_LIBDF=<path>`
@@ -14,7 +16,7 @@ overrides. If it cannot be opened, the filter logs why once and passes audio thr
 
 ## Getting libdf
 
-### From Howl (what `make libdf` does)
+### From Howl (what `make libdf` does; how the committed copy was made)
 
 Howl (`~/Documents/Projects/voice-keyboard`) vendors a v0.5.6 arm64 build at
 `core/third_party/deepfilter/{lib/macos-arm64/libdf.dylib,models/DeepFilterNet3.tar.gz}`.

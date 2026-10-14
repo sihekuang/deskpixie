@@ -1,3 +1,2 @@
-# Fetched by `make -C core libdf`; not committed (16 MB + 8 MB).
-lib/
-models/
+# Vendored libdf v0.5.6 (see VERSION.md). The root .gitignore ignores *.dylib; keep this one.
+!lib/libdf.dylib

@@ -15,3 +15,11 @@
 ## 2026-10-13 — Minimal code review
 **Decision:** No per-task reviewer; tests + build gate each task, one light whole-branch check per phase.
 **Basis:** User's choice.
+
+## 2026-10-13 — Build pipeline shape and libdf in CI
+**Decision:** Two GitHub Actions workflows on `macos-15` (arm64): `ci.yml` (pull requests and pushes to main: Go + Swift tests, unsigned/ad-hoc Release build, `.app.zip` artifact, no secrets) and `release.yml` mirroring ai-mascot's (`v*` tag → Developer ID sign, notarize, staple, `.dmg` + `.app.zip`, GitHub Release; manual dispatch from main → signed smoke build, not notarized), using the same secret names and a `release` environment. libdf v0.5.6 (`libdf.dylib` + `DeepFilterNet3.tar.gz`) is vendored in git under `core/audio/denoise/libdf/`, as Howl vendors it, so CI builds the noise filter without a Rust toolchain.
+**Trigger:** User asked for a build pipeline that generates builds.
+**Basis:** Existing project convention.
+**Sources:**
+- ai-mascot `.github/workflows/release.yml` (origin/main 33dcf70): tag/dispatch triggers, temp keychain, notarytool, dmg signing, artifact names, `release` environment.
+- Howl `core/third_party/deepfilter/` (libdf v0.5.6 committed, 16 MB + 7.6 MB) and its `build.yml`.

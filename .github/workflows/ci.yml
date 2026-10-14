@@ -1,0 +1,101 @@
+name: CI
+
+# Every pull request, every push to main, and manual dispatch: Go + Swift tests, then an
+# ad-hoc signed Release build uploaded as DeskPixie-<branch> (DeskPixie-<ver>-arm64.app.zip).
+# No secrets: signing, notarization and GitHub Releases live in release.yml.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Cancel an in-flight run when a newer commit lands on the same PR or branch.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  HOMEBREW_NO_AUTO_UPDATE: "1"
+  HOMEBREW_NO_INSTALL_CLEANUP: "1"
+
+jobs:
+  build:
+    name: Test and build
+    # arm64 runner: libdeskpixie (cgo) and the vendored libdf are arm64 only.
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+
+      # The app is developed against current Xcode (Swift 6 strict concurrency); use the newest
+      # stable Xcode on the image rather than the image default.
+      - name: Select Xcode
+        run: |
+          set -euo pipefail
+          XCODE=$(printf '%s\n' /Applications/Xcode_*.app | grep -viE 'beta|release_candidate|_rc' | sort -V | tail -1)
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
+          swift --version
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: core/go.mod
+          cache: true
+          cache-dependency-path: core/go.sum
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Resolve version
+        id: ver
+        run: |
+          set -euo pipefail
+          REF="${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
+          echo "version=0.0.0-ci.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "ref_slug=${REF//\//-}" >> "$GITHUB_OUTPUT"
+
+      # Offline tests only: the live tests (real APIs, herdr, say) are behind -tags live, and
+      # the real-audio-hardware Swift test is behind DESKPIXIE_REAL_AUDIO=1.
+      - name: Go vet
+        working-directory: core
+        run: go vet ./...
+
+      - name: Go tests
+        working-directory: core
+        run: go test -race ./...
+
+      # libdf is vendored, so the real-model noise filter tests run too.
+      - name: Go noise filter tests (libdf)
+        working-directory: core
+        run: go test -race -tags deepfilter ./audio/denoise/
+
+      - name: Swift tests
+        working-directory: mac/Packages/DeskPixieCore
+        run: swift test
+
+      - name: Build Release app (ad-hoc)
+        run: make -C mac release VERSION="${{ steps.ver.outputs.version }}" BUILD_NUMBER="${{ github.run_number }}"
+
+      - name: Package
+        id: pack
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          ZIP="out/DeskPixie-$VERSION-arm64.app.zip"
+          ditto -c -k --keepParent --sequesterRsrc mac/build/Build/Products/Release/DeskPixie.app "$ZIP"
+          ls -lh out
+          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: DeskPixie-${{ steps.ver.outputs.ref_slug }}
+          path: ${{ steps.pack.outputs.zip }}
+          if-no-files-found: error
+          retention-days: 14
