@@ -884,8 +884,8 @@ func (ap applier) Apply(field string, cfg settings.Config) error {
 		if f := a.packPayload(cfg.Scale); f != nil {
 			a.emit("pack", f)
 		}
-	case settings.RouteReadEachTick:
-		// Swift's proximity loop keeps its own copy: tell it to re-read.
+	case settings.RouteReadEachTick, settings.RouteNotifications:
+		// Swift's proximity loop and the updates bubble keep their own copy: tell them to re-read.
 		a.emit("settings.changed", nil)
 	case settings.RouteAutoOpen:
 		if a.canvas == nil {
