@@ -25,7 +25,7 @@ public struct SettingsPlatform: RawRepresentable, Codable, Hashable, Sendable {
 
 /// A Settings window tab.
 public enum SettingsSection: String, Codable, Sendable, CaseIterable {
-    case mascot = "Mascot"
+    case pixie = "Pixie"
     case voice = "Voice"
     case agent = "Agent"
     case workers = "Workers"

@@ -23,29 +23,29 @@ let testPackJSON = #"""
 // swiftlint:disable:next force_try
 let testPack: Pack = try! JSONDecoder().decode(Pack.self, from: Data(testPackJSON.utf8))
 
-final class MascotPlayerTests: XCTestCase {
+final class PixiePlayerTests: XCTestCase {
     private let pack = testPack
 
-    private func run(_ p: MascotPlayer, _ n: Int) -> MascotPlayer {
+    private func run(_ p: PixiePlayer, _ n: Int) -> PixiePlayer {
         var p = p
         for _ in 0..<n { p = p.stepped(pack: pack) }
         return p
     }
 
-    private func player(_ state: String, frame: Int = 0, tick: Int = 0) -> MascotPlayer {
-        var p = MascotPlayer(state: state)
+    private func player(_ state: String, frame: Int = 0, tick: Int = 0) -> PixiePlayer {
+        var p = PixiePlayer(state: state)
         p.frame = frame
         p.tick = tick
         return p
     }
 
     func testLoopingStateWrapsToFrame0() {
-        let p = run(MascotPlayer(), 3)
+        let p = run(PixiePlayer(), 3)
         XCTAssertEqual(p, player("idle", frame: 0, tick: 3))
     }
 
     func testNonLoopingStatePlaysOnceThenReturnsToIdle() {
-        var p = MascotPlayer().setting("happy", pack: pack)
+        var p = PixiePlayer().setting("happy", pack: pack)
         p = run(p, 2)
         XCTAssertEqual(p.state, "happy")
         XCTAssertEqual(p.frame, 2)
@@ -55,17 +55,17 @@ final class MascotPlayerTests: XCTestCase {
     }
 
     func testSetStateIgnoresUnknownStates() {
-        let p = MascotPlayer()
+        let p = PixiePlayer()
         XCTAssertEqual(p.setting("dancing", pack: pack), p)
     }
 
     func testSetStateToTheCurrentStateDoesNotRestartTheLoop() {
-        let p = run(MascotPlayer(), 2)
+        let p = run(PixiePlayer(), 2)
         XCTAssertEqual(p.setting("idle", pack: pack), p)
     }
 
     func testSetStateSwitchesImmediatelyStartingAtFrame0() {
-        let p = run(MascotPlayer(), 2).setting("listening", pack: pack)
+        let p = run(PixiePlayer(), 2).setting("listening", pack: pack)
         XCTAssertEqual(p.state, "listening")
         XCTAssertEqual(p.frame, 0)
     }
@@ -84,15 +84,15 @@ final class MascotPlayerTests: XCTestCase {
     }
 
     func testMouthRectPicksTheLevelColumnInTheMouthRow() {
-        XCTAssertEqual(MascotPlayer.mouthRect(level: 2, pack: pack), CGRect(x: 64, y: 160, width: 8, height: 5))
+        XCTAssertEqual(PixiePlayer.mouthRect(level: 2, pack: pack), CGRect(x: 64, y: 160, width: 8, height: 5))
     }
 
     func testMouthLevelIsClampedToTheAvailableLevels() {
-        XCTAssertEqual(MascotPlayer.mouthRect(level: 9, pack: pack).minX, 96)
-        XCTAssertEqual(MascotPlayer.mouthRect(level: -3, pack: pack).minX, 0)
+        XCTAssertEqual(PixiePlayer.mouthRect(level: 9, pack: pack).minX, 96)
+        XCTAssertEqual(PixiePlayer.mouthRect(level: -3, pack: pack).minX, 0)
         // JS also checks NaN → 0; Swift levels are Int, so the extreme values stand in for it.
-        XCTAssertEqual(MascotPlayer.mouthRect(level: Int.min, pack: pack).minX, 0)
-        XCTAssertEqual(MascotPlayer.mouthRect(level: Int.max, pack: pack).minX, 96)
+        XCTAssertEqual(PixiePlayer.mouthRect(level: Int.min, pack: pack).minX, 0)
+        XCTAssertEqual(PixiePlayer.mouthRect(level: Int.max, pack: pack).minX, 96)
     }
 
     func testMouthPosFollowsFaceDy() {

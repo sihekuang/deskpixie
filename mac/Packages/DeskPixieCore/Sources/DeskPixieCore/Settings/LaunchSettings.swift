@@ -1,6 +1,6 @@
 import Foundation
 
-/// What the app reads from `settings.snapshot` at launch, outside the mascot's own values:
+/// What the app reads from `settings.snapshot` at launch, outside the pixie's own values:
 /// the hotkey to bind and the audio devices to pin.
 public struct LaunchSettings: Equatable, Sendable {
     /// config.rs default.

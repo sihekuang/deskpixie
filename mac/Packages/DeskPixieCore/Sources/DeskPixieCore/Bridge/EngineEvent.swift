@@ -3,10 +3,10 @@ import Foundation
 /// What `dp_configure` gets: only paths (P14a). Everything else (model, voice, pack, keys…)
 /// the core reads from settings.json and env/.env itself.
 public struct EngineConfig: Codable, Sendable, Equatable {
-    /// `~/Library/Application Support/com.sihekuang.deskpixie` (settings.json, mascots/, canvas/…).
+    /// `~/Library/Application Support/com.sihekuang.deskpixie` (settings.json, pixies/, canvas/…).
     public var appSupport: String
-    /// The app's bundled packs (`Contents/Resources/mascots`).
-    public var bundledMascots: String
+    /// The app's bundled packs (`Contents/Resources/pixies`).
+    public var bundledPixies: String
     /// The bundled canvas design system (`Contents/Resources/design-system`).
     public var designSystem: String
     /// `Contents/Resources/DeepFilterNet3.tar.gz`, or "" when the build has no libdf.
@@ -16,10 +16,10 @@ public struct EngineConfig: Codable, Sendable, Equatable {
     /// JSON decoding drops unknown keys). Drop once P14a has landed.
     public var packRoots: [String]?
 
-    public init(appSupport: String, bundledMascots: String, designSystem: String, dfn3ModelPath: String,
+    public init(appSupport: String, bundledPixies: String, designSystem: String, dfn3ModelPath: String,
                 platform: String = "macos", packRoots: [String]? = nil) {
         self.appSupport = appSupport
-        self.bundledMascots = bundledMascots
+        self.bundledPixies = bundledPixies
         self.designSystem = designSystem
         self.dfn3ModelPath = dfn3ModelPath
         self.platform = platform
@@ -31,13 +31,13 @@ public struct EngineConfig: Codable, Sendable, Equatable {
     public static func forBundle(resources: URL, appSupport: URL,
                                  exists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) })
         -> EngineConfig {
-        let mascots = resources.appendingPathComponent("mascots", isDirectory: true).path
+        let pixies = resources.appendingPathComponent("pixies", isDirectory: true).path
         let model = resources.appendingPathComponent("DeepFilterNet3.tar.gz").path
         return EngineConfig(appSupport: appSupport.path,
-                            bundledMascots: mascots,
+                            bundledPixies: pixies,
                             designSystem: resources.appendingPathComponent("design-system", isDirectory: true).path,
                             dfn3ModelPath: exists(model) ? model : "",
-                            packRoots: [mascots, appSupport.appendingPathComponent("mascots", isDirectory: true).path])
+                            packRoots: [pixies, appSupport.appendingPathComponent("pixies", isDirectory: true).path])
     }
 }
 
@@ -69,7 +69,7 @@ public enum EngineEvent: Sendable, Equatable {
     /// Re-read `app.state` and rebuild the tray menu.
     case tray
     case pack(PackEvent)
-    /// Move the mascot panel (logical top-left); both nil = the default spot.
+    /// Move the pixie panel (logical top-left); both nil = the default spot.
     case position(x: Double?, y: Double?)
     case hotkey(combo: String)
     /// Audio device UIDs to pin for the next start (nil = system default).

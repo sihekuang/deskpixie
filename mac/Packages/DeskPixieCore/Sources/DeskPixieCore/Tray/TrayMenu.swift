@@ -94,7 +94,7 @@ public enum TrayMenu {
         }
     }
 
-    /// Mascot states in display order (mascot-pack `STATE_NAMES`).
+    /// Pixie states in display order (mascot-pack `STATE_NAMES`).
     public static let stateNames = ["idle", "listening", "thinking", "delegating", "happy", "error"]
     /// Size presets: label, integer scale.
     public static let sizes: [(label: String, scale: Int)] = [("Small", 4), ("Medium", 6), ("Large", 8), ("Huge", 12)]
@@ -177,7 +177,7 @@ public enum TrayMenu {
             items.append(.action(Row(id: "reset-position", title: "Reset position")))
             items.append(.action(Row(id: "fade", title: "Proximity fade", checked: s.fade)))
             if !s.packs.isEmpty {
-                items.append(.submenu(title: "Mascot", enabled: true, items: s.packs.map {
+                items.append(.submenu(title: "Pixie", enabled: true, items: s.packs.map {
                     .action(Row(id: "pack:\($0.id)", title: $0.name, checked: $0.id == s.pack))
                 }))
             }

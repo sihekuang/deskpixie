@@ -3,7 +3,7 @@ import DeskPixieCore
 import Foundation
 import os
 
-/// Wires the Go engine to the mascot, the tray, the hotkey, the audio I/O, notifications,
+/// Wires the Go engine to the pixie, the tray, the hotkey, the audio I/O, notifications,
 /// the canvas window and the settings window, and drains engine events on the main actor
 /// every 30 ms (Howl's poll pattern). Every event kind of the plan's shared contract is
 /// handled in `handle(_:)`.
@@ -30,7 +30,7 @@ final class EngineCoordinator {
     private let notifier = Notifier()
     private lazy var canvas = CanvasWindowController(engine: engine, worker: worker)
 
-    private(set) var mascot: MascotController?
+    private(set) var pixie: PixieController?
     /// The updates bubble beside Bit, and the presence that holds its pops (both once Bit is up).
     private var bubble: UpdatesBubbleController?
     private var presence: PresenceMonitor?
@@ -66,7 +66,7 @@ final class EngineCoordinator {
     // MARK: Lifecycle
 
     /// Returns at once: the tray shows "Starting…" while the core starts in the background;
-    /// the mascot, hotkey and audio come up in `finishStart` back on the main actor.
+    /// the pixie, hotkey and audio come up in `finishStart` back on the main actor.
     func start() {
         startup.onPhase = { [weak self] phase in self?.appState.startup = phase }
         let engine = engine
@@ -81,7 +81,7 @@ final class EngineCoordinator {
     private func finishStart(_ result: StartupResult) {
         if let error = result.configureError {
             appState.engineError = "Engine error: \(error)"
-            appState.mascotState = "error"
+            appState.pixieState = "error"
         } else {
             configured = true
         }
@@ -94,14 +94,14 @@ final class EngineCoordinator {
 
         if configured {
             pushKeychainKeys()
-            let mascotSettings = snapshot.flatMap(MascotSettings.fromSnapshot) ?? .defaults
-            if let m = MascotController.load(engine: engine, settings: mascotSettings) {
-                mascot = m
+            let pixieSettings = snapshot.flatMap(PixieSettings.fromSnapshot) ?? .defaults
+            if let m = PixieController.load(engine: engine, settings: pixieSettings) {
+                pixie = m
                 m.onDoubleClick = { [weak self] in self?.talk() }
                 m.show()
-                startBubble(mascot: m, settings: snapshot.flatMap(BubbleSettingsValues.fromSnapshot) ?? .defaults)
+                startBubble(pixie: m, settings: snapshot.flatMap(BubbleSettingsValues.fromSnapshot) ?? .defaults)
             } else {
-                appState.engineError = "Could not load the mascot pack"
+                appState.engineError = "Could not load the pixie pack"
             }
         }
 
@@ -142,7 +142,7 @@ final class EngineCoordinator {
         voiceIO.stop()
         presence?.stop()
         bubble?.stop()
-        mascot?.stop()
+        pixie?.stop()
         // Quitting while the core is still starting: dp_configure may be blocked on another
         // thread; tearing the core down under it is unsafe, and there is nothing to save.
         guard startupFinished else { return }
@@ -221,7 +221,7 @@ final class EngineCoordinator {
                     }
                 }
                 guard let self else { return }
-                if id == "fade" { self.applyMascotSettings() }
+                if id == "fade" { self.applyPixieSettings() }
                 self.refreshTray()
             }
         }
@@ -370,10 +370,10 @@ final class EngineCoordinator {
     private func handle(_ ev: EngineEvent) {
         switch ev {
         case .state(let s):
-            mascot?.setState(s)
-            appState.mascotState = s
+            pixie?.setState(s)
+            appState.pixieState = s
         case .mouth(let level):
-            mascot?.setMouth(level)
+            pixie?.setMouth(level)
         case .mic(let start):
             voiceIO.setMicEnabled(start)
             Self.log.info("mic \(start ? "on" : "off", privacy: .public)")
@@ -391,12 +391,12 @@ final class EngineCoordinator {
         case .restart:
             relaunch()
         case .pack(let p):
-            mascot?.applyPack(p)
+            pixie?.applyPack(p)
         case .position(let x, let y):
-            mascot?.moveTo(x: x, y: y)
+            pixie?.moveTo(x: x, y: y)
         case .settingsChanged:
-            // The mascot follows proximityFade.{enabled,radius}; the open Settings window re-reads.
-            applyMascotSettings()
+            // The pixie follows proximityFade.{enabled,radius}; the open Settings window re-reads.
+            applyPixieSettings()
             SettingsHub.shared?.refresh()
         case .hotkey(let combo):
             hotkeyChanged(combo)
@@ -413,9 +413,9 @@ final class EngineCoordinator {
 
     // MARK: Helpers
 
-    /// Reads the mascot's settings (`position`, `scale`, `proximityFade`) off main and applies
+    /// Reads the pixie's settings (`position`, `scale`, `proximityFade`) off main and applies
     /// them; config.rs defaults while the core does not serve them.
-    private func applyMascotSettings() {
+    private func applyPixieSettings() {
         let engine = engine, worker = worker
         Task { @MainActor [weak self] in
             let snapshot: Data?? = await worker.run {
@@ -426,9 +426,9 @@ final class EngineCoordinator {
                     return nil
                 }
             }
-            // nil: the worker closed (quitting); leave the mascot alone.
+            // nil: the worker closed (quitting); leave the pixie alone.
             guard let snapshot else { return }
-            self?.mascot?.apply(settings: snapshot.flatMap(MascotSettings.fromSnapshot) ?? .defaults)
+            self?.pixie?.apply(settings: snapshot.flatMap(PixieSettings.fromSnapshot) ?? .defaults)
             self?.applyBubbleSettings(snapshot.flatMap(BubbleSettingsValues.fromSnapshot) ?? .defaults)
         }
     }
@@ -441,8 +441,8 @@ final class EngineCoordinator {
 
     /// Creates the updates bubble beside Bit and the presence monitor. Away/back goes to the
     /// bubble (held pops) and to the core (`presence.set`: no chime, no conversation by Bit).
-    private func startBubble(mascot m: MascotController, settings: BubbleSettingsValues) {
-        let b = UpdatesBubbleController(engine: engine, worker: worker, mascot: m)
+    private func startBubble(pixie m: PixieController, settings: BubbleSettingsValues) {
+        let b = UpdatesBubbleController(engine: engine, worker: worker, pixie: m)
         b.onTalk = { [weak self] in self?.talk() }
         bubble = b
         let p = PresenceMonitor()
@@ -461,16 +461,16 @@ final class EngineCoordinator {
         }
     }
 
-    /// The `dp_configure` payload: paths only (P14a). Creates the user's data and pack folders.
-    /// Runs off main (inside the startup work).
+    /// The `dp_configure` payload: paths only (P14a). Creates the user's data folder; the core
+    /// makes its `pixies/` pack folder (moving a pre-#68 `mascots/` there first, so it must not
+    /// exist before the core starts). Runs off main (inside the startup work).
     nonisolated static func engineConfig() -> EngineConfig {
         let support = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/com.sihekuang.deskpixie", isDirectory: true)
-        let userPacks = support.appendingPathComponent("mascots", isDirectory: true)
         do {
-            try FileManager.default.createDirectory(at: userPacks, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
         } catch {
-            log.error("cannot create \(userPacks.path, privacy: .public): \(String(describing: error), privacy: .public)")
+            log.error("cannot create \(support.path, privacy: .public): \(String(describing: error), privacy: .public)")
         }
         let resources = Bundle.main.resourceURL ?? Bundle.main.bundleURL
         return EngineConfig.forBundle(resources: resources, appSupport: support)

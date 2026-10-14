@@ -48,7 +48,7 @@ verify-release:
 	@set -e; APP="$(RELEASE_APP)"; test -d "$$APP"; \
 	codesign --verify --deep --strict --verbose=2 "$$APP"; \
 	for f in Frameworks/libdeskpixie.dylib Frameworks/libdf.dylib \
-		Resources/DeepFilterNet3.tar.gz Resources/design-system Resources/mascots \
+		Resources/DeepFilterNet3.tar.gz Resources/design-system Resources/pixies \
 		Resources/Assets.car Resources/AppIcon.icns; do \
 		test -e "$$APP/Contents/$$f" || { echo "error: missing Contents/$$f" >&2; exit 1; }; \
 	done; \

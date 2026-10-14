@@ -1,7 +1,7 @@
 import CoreGraphics
 
 /// The 60 Hz cursor poll's decision (actions.rs `spawn_proximity`, V-031), extracted from
-/// MascotController: the mascot panel ignores the mouse wherever no frame of Bit ever draws
+/// PixieController: the pixie panel ignores the mouse wherever no frame of Bit ever draws
 /// (the hit mask already is the union of every frame, mouth level, face offset and bob), but
 /// never during a press or drag; and the proximity fade's target opacity.
 public enum ClickThrough {

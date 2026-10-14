@@ -65,7 +65,7 @@ public enum Layout {
         return CGPoint(x: m.x + m.w - size.width - 40, y: m.y + m.h - size.height - 80)
     }
 
-    /// Where the mascot window opens. A saved position stays as long as the window's centre is
+    /// Where the pixie window opens. A saved position stays as long as the window's centre is
     /// on a connected display's frame (over the Dock or the menu bar counts: the user put Bit
     /// there). One left on an unplugged display is pulled fully into the nearest work area.
     public static func restorePosition(_ saved: CGPoint?, size: CGSize, displays: LayoutDisplays) -> CGPoint {

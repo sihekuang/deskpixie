@@ -29,8 +29,8 @@ targets:
         excludes:
           - "Info.plist"
           - "DeskPixie.entitlements"
-      # Folder reference: copied as Contents/Resources/mascots (first pack root).
-      - path: ../mascots
+      # Folder reference: copied as Contents/Resources/pixies (first pack root).
+      - path: ../pixies
         type: folder
         buildPhase: resources
       # Folder reference: Contents/Resources/design-system (canvas /ds/ pages, CANVAS.md,

@@ -6,7 +6,7 @@ final class PackDecodingTests: XCTestCase {
     func testDecodesTheResolvedBitPackPayload() throws {
         let url = try XCTUnwrap(Bundle.module.url(forResource: "bit-pack", withExtension: "json", subdirectory: "Fixtures"))
         let payload = try XCTUnwrap(PackPayload.decode(try Data(contentsOf: url)))
-        XCTAssertEqual(payload.sheetPath, "/abs/mascots/bit/sheet.png")
+        XCTAssertEqual(payload.sheetPath, "/abs/pixies/bit/sheet.png")
         let p = payload.pack
         XCTAssertEqual(p.name, "Bit")
         XCTAssertEqual(p.cell, [32, 32])

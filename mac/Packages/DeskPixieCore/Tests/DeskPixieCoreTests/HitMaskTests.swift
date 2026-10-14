@@ -3,7 +3,7 @@ import XCTest
 @testable import DeskPixieCore
 
 /// The `pack` event's hit mask (P6 format: cell w×h, row-major, LSB-first bitset, base64) and
-/// the click-through test built on it. Fixtures: `bit-sheet.png` (mascots/bit) and
+/// the click-through test built on it. Fixtures: `bit-sheet.png` (pixies/bit) and
 /// `bit-hitmask.txt`, the Go core's `packs.HitMaskBase64` for that pack.
 final class HitMaskTests: XCTestCase {
     private func fixture(_ name: String, _ ext: String) throws -> URL {

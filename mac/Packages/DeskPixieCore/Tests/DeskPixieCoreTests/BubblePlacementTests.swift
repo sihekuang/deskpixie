@@ -8,14 +8,14 @@ final class BubblePlacementTests: XCTestCase {
     private let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
 
     func testPrefersTheRightOfBitTopAligned() {
-        let (f, side) = BubblePlacement.frame(mascot: CGRect(x: 100, y: 100, width: 64, height: 64),
+        let (f, side) = BubblePlacement.frame(pixie: CGRect(x: 100, y: 100, width: 64, height: 64),
                                               bubble: bubble, screen: screen)
         XCTAssertEqual(side, .right)
         XCTAssertEqual(f, CGRect(x: 172, y: 100, width: 240, height: 120))
     }
 
     func testFlipsLeftNearTheRightEdge() {
-        let (f, side) = BubblePlacement.frame(mascot: CGRect(x: 1360, y: 100, width: 64, height: 64),
+        let (f, side) = BubblePlacement.frame(pixie: CGRect(x: 1360, y: 100, width: 64, height: 64),
                                               bubble: bubble, screen: screen)
         XCTAssertEqual(side, .left)
         XCTAssertEqual(f.minX, 1360 - 8 - 240)
@@ -23,18 +23,18 @@ final class BubblePlacementTests: XCTestCase {
     }
 
     func testClampsIntoTheScreenVertically() {
-        let (f, _) = BubblePlacement.frame(mascot: CGRect(x: 100, y: 840, width: 64, height: 64),
+        let (f, _) = BubblePlacement.frame(pixie: CGRect(x: 100, y: 840, width: 64, height: 64),
                                            bubble: bubble, screen: screen)
         XCTAssertEqual(f.minY, 780)
         XCTAssertLessThanOrEqual(f.maxY, screen.maxY)
-        let (top, _) = BubblePlacement.frame(mascot: CGRect(x: 100, y: -30, width: 64, height: 64),
+        let (top, _) = BubblePlacement.frame(pixie: CGRect(x: 100, y: -30, width: 64, height: 64),
                                              bubble: bubble, screen: screen)
         XCTAssertEqual(top.minY, 0, "Bit partly above the top edge: the bubble stays on screen")
     }
 
     func testWorksOnASecondScreenWithAnOffsetOrigin() {
         let second = CGRect(x: 1440, y: -200, width: 1920, height: 1080)
-        let (f, side) = BubblePlacement.frame(mascot: CGRect(x: 3300, y: -200, width: 64, height: 64),
+        let (f, side) = BubblePlacement.frame(pixie: CGRect(x: 3300, y: -200, width: 64, height: 64),
                                               bubble: bubble, screen: second)
         XCTAssertEqual(side, .left)
         XCTAssertTrue(second.contains(f), "\(f)")
@@ -54,8 +54,8 @@ final class BubblePlacementTests: XCTestCase {
 
     func testAtTheDefaultSpotTheBadgeAndTheBubbleAreOnTheSameSide() {
         let w = bubble.width
-        let (b, badgeSide) = BubblePlacement.frame(mascot: bitAtDefault, bubble: badge, screen: screen, sideWidth: w)
-        let (f, bubbleSide) = BubblePlacement.frame(mascot: bitAtDefault, bubble: bubble, screen: screen, sideWidth: w)
+        let (b, badgeSide) = BubblePlacement.frame(pixie: bitAtDefault, bubble: badge, screen: screen, sideWidth: w)
+        let (f, bubbleSide) = BubblePlacement.frame(pixie: bitAtDefault, bubble: bubble, screen: screen, sideWidth: w)
         XCTAssertEqual(badgeSide, .left)
         XCTAssertEqual(bubbleSide, .left)
         XCTAssertTrue(f.contains(b), "the open bubble covers the badge it opened from: \(f) \(b)")
@@ -65,8 +65,8 @@ final class BubblePlacementTests: XCTestCase {
 
     func testOnTheRightTheBubbleAlsoCoversTheBadge() {
         let bit = CGRect(x: 100, y: 100, width: 64, height: 64)
-        let (b, s1) = BubblePlacement.frame(mascot: bit, bubble: badge, screen: screen, sideWidth: bubble.width)
-        let (f, s2) = BubblePlacement.frame(mascot: bit, bubble: bubble, screen: screen, sideWidth: bubble.width)
+        let (b, s1) = BubblePlacement.frame(pixie: bit, bubble: badge, screen: screen, sideWidth: bubble.width)
+        let (f, s2) = BubblePlacement.frame(pixie: bit, bubble: bubble, screen: screen, sideWidth: bubble.width)
         XCTAssertEqual(s1, .right); XCTAssertEqual(s2, .right)
         XCTAssertEqual(b.minX, 172)
         XCTAssertTrue(f.contains(b))
@@ -74,8 +74,8 @@ final class BubblePlacementTests: XCTestCase {
 
     func testNearTheBottomTheClampedBubbleStillCoversTheBadge() {
         let bit = CGRect(x: 1336, y: 860, width: 64, height: 64)
-        let (b, _) = BubblePlacement.frame(mascot: bit, bubble: badge, screen: screen, sideWidth: bubble.width)
-        let (f, _) = BubblePlacement.frame(mascot: bit, bubble: bubble, screen: screen, sideWidth: bubble.width)
+        let (b, _) = BubblePlacement.frame(pixie: bit, bubble: badge, screen: screen, sideWidth: bubble.width)
+        let (f, _) = BubblePlacement.frame(pixie: bit, bubble: bubble, screen: screen, sideWidth: bubble.width)
         XCTAssertTrue(f.contains(b), "\(f) \(b)")
     }
 }

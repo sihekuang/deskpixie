@@ -1,6 +1,6 @@
 import Foundation
 
-/// A resolved mascot pack: the JSON shape of ai-mascot's `ResolvedPack` (crates/mascot-pack
+/// A resolved pixie pack: the JSON shape of ai-mascot's `ResolvedPack` (crates/mascot-pack
 /// resolve.rs), which the Go core emits in `dp_pack_json`. A resolved pack always carries
 /// every field; the decoder still applies the resolver's defaults (loop/bob true, faceDy all
 /// zeros, bob {px 0, frames 1}) so an unresolved manifest decodes to the same value.

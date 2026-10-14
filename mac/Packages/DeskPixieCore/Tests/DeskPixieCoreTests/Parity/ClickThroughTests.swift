@@ -3,7 +3,7 @@ import XCTest
 @testable import DeskPixieCore
 
 /// V-031: the 60 Hz cursor poll's decision (actions.rs `spawn_proximity`), extracted from
-/// MascotController: click-through wherever Bit never draws, never mid-press or mid-drag, and
+/// PixieController: click-through wherever Bit never draws, never mid-press or mid-drag, and
 /// the proximity fade target.
 final class ClickThroughTests: XCTestCase {
     private func fixture(_ name: String, _ ext: String) throws -> URL {

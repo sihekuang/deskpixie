@@ -121,7 +121,7 @@ final class CanvasProtocolTests: XCTestCase {
     }
 
     func testOtherWebviewsAreRefused() {
-        XCTAssertEqual(respond("/ds/tokens.css", label: "mascot").status, 403)
+        XCTAssertEqual(respond("/ds/tokens.css", label: "pixie").status, 403)
     }
 
     func testOnlyGetAndHeadAreAllowed() {
