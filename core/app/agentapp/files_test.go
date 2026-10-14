@@ -301,3 +301,11 @@ func readFile(t *testing.T, p string) string {
 	}
 	return string(b)
 }
+
+func TestTheCoordinatorClosesAWorkerOnceItsWorkIsDone(t *testing.T) {
+	for _, phrase := range []string{"Close a worker as soon as its work is done", "call `stop_worker` right away", "the same `name`"} {
+		if !strings.Contains(RepoWorkWorkers, phrase) {
+			t.Fatal(phrase)
+		}
+	}
+}
