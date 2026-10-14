@@ -609,6 +609,24 @@ func (r *RecordingStatus) Lines() []string {
 	return slices.Clone(r.lines)
 }
 
+// RecordingUpdates records every list sent to the updates bubble.
+type RecordingUpdates struct {
+	mu    sync.Mutex
+	lists [][]agent.UpdateItem
+}
+
+func (r *RecordingUpdates) Updates(items []agent.UpdateItem) {
+	r.mu.Lock()
+	r.lists = append(r.lists, items)
+	r.mu.Unlock()
+}
+
+func (r *RecordingUpdates) Lists() [][]agent.UpdateItem {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.lists)
+}
+
 // ---------- store, clock, ids, trust ----------
 
 // MemStore keeps line files in memory. The zero value is ready to use; copies share nothing,

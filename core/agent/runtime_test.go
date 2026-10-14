@@ -28,6 +28,7 @@ type rtRig struct {
 	alerts   *agenttest.RecordingNotifier
 	status   *agenttest.RecordingStatus
 	launcher *agenttest.FakeLauncher
+	updates  *agenttest.RecordingUpdates
 	store    *agenttest.MemStore
 	clock    *agenttest.ManualClock
 }
@@ -41,7 +42,7 @@ func build(t *testing.T, store *agenttest.MemStore, cfg RuntimeConfig, wrap func
 	clock := agenttest.ClockAt(1_000_000)
 	recipe := CoordinatorRecipe{Cwd: "/data/agent/workspace"}
 	r := &rtRig{host: host, voice: &agenttest.RecordingVoiceLink{}, alerts: &agenttest.RecordingNotifier{},
-		status: &agenttest.RecordingStatus{}, launcher: &agenttest.FakeLauncher{}, store: store, clock: clock}
+		status: &agenttest.RecordingStatus{}, launcher: &agenttest.FakeLauncher{}, updates: &agenttest.RecordingUpdates{}, store: store, clock: clock}
 	var session SessionHost = host
 	if wrap != nil {
 		session = wrap(host)
@@ -52,6 +53,7 @@ func build(t *testing.T, store *agenttest.MemStore, cfg RuntimeConfig, wrap func
 	deps := Deps{
 		Host: NewAgentHost(session, clock, recipe), Voice: r.voice, Notifier: r.alerts, Mascot: r.alerts,
 		Status: r.status, Launcher: launch, TerminalDir: "/home/me/Projects", Store: store, Clock: clock, IDs: &agenttest.SeqIds{},
+		Updates: r.updates,
 	}
 	r.h = NewRuntime(deps, cfg)
 	go r.h.Run(t.Context())
@@ -913,6 +915,86 @@ func TestAfterAStopTheNextPromptWaitsForTheSettle(t *testing.T) {
 		time.Sleep(2 * time.Second)
 		if len(r.host.Prompts()) != 2 {
 			t.Fatal(r.host.Prompts())
+		}
+	})
+}
+
+func TestTheUpdatesBubbleGetsTheListAtStartAndWhenALineIsOutboxed(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRig(t)
+		settle()
+		lists := r.updates.Lists()
+		if len(lists) != 1 || lists[0] == nil || len(lists[0]) != 0 {
+			t.Fatalf("the start sends an empty list: %+v", lists)
+		}
+		delegate(t, r, "count issues")
+		settle()
+		stopHook(r, `<spoken ref="job_000000000001" status="done">There are 12.</spoken>`)
+		settle()
+		lists = r.updates.Lists()
+		last := lists[len(lists)-1]
+		if len(lists) != 2 || len(last) != 1 || last[0].Text != "There are 12." || last[0].Job != JobIDFromBits(1) {
+			t.Fatalf("%+v", lists)
+		}
+		r.h.UpdatesSeen([]uint64{last[0].ID})
+		settle()
+		if lists = r.updates.Lists(); len(lists) != 3 || len(lists[2]) != 0 {
+			t.Fatalf("seen lines leave the list: %+v", lists)
+		}
+	})
+}
+
+func TestAwayHoldsTheChime(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRig(t)
+		r.h.SetAway(true)
+		delegate(t, r, "count issues")
+		settle()
+		stopHook(r, `<spoken ref="job_000000000001" status="done">There are 12.</spoken>`)
+		settle()
+		want := []agenttest.Alert{agenttest.NotifyAlert("Bit", "There are 12."), agenttest.CueAlert(CueHappy)}
+		if !slices.Equal(r.alerts.Alerts(), want) {
+			t.Fatal(r.alerts.Alerts())
+		}
+	})
+}
+
+func TestFocusJobFocusesTheCoordinatorWithoutALiveWorkerAndAttaches(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRig(t)
+		if err := r.h.FocusJob(context.Background(), JobIDFromBits(1), ""); err != nil {
+			t.Fatal(err)
+		}
+		settle()
+		if len(r.host.Starts()) != 0 || len(r.host.Focused()) != 0 {
+			t.Fatal("a click on a bubble line does not start the coordinator:", r.host.Starts(), r.host.Focused())
+		}
+		delegate(t, r, "count issues")
+		settle()
+		before := len(r.host.Focused())
+		if err := r.h.FocusJob(context.Background(), JobIDFromBits(1), "gone"); err != nil {
+			t.Fatal(err)
+		}
+		settle()
+		if got := r.host.Focused(); len(got) != before+1 || got[before] != Coordinator {
+			t.Fatal(got)
+		}
+		attach := Attach{Argv: []string{"fake-herdr", "session", "attach", "test"}, Dir: "/home/me/Projects"}
+		if !reflect.DeepEqual(r.launcher.Attaches(), []Attach{attach, attach}) {
+			t.Fatal(r.launcher.Attaches())
+		}
+	})
+}
+
+func TestFocusJobReportsHerdrMissing(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRig(t)
+		r.host.FailEnsure(HostError{Kind: HostNotFound})
+		if err := r.h.FocusJob(context.Background(), "", ""); err == nil || err.Error() != "herdr not found" {
+			t.Fatal(err)
+		}
+		if len(r.launcher.Opened()) != 0 {
+			t.Fatal(r.launcher.Opened())
 		}
 	})
 }

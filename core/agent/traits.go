@@ -101,6 +101,12 @@ type MascotCue interface {
 	Cue(cue Cue)
 }
 
+// UpdatesSink is the updates bubble: it gets the unheard lines whenever they change (an empty
+// list, never nil, for none).
+type UpdatesSink interface {
+	Updates(items []UpdateItem)
+}
+
 // StatusSink is the tray's one-line agent status, e.g. "Agent: herdr not found"; "" clears it.
 type StatusSink interface {
 	SetStatus(line string)

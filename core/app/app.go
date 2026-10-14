@@ -215,6 +215,7 @@ func New(d Deps) (*App, error) {
 			FlashError:  a.FlashError,
 			RefreshTray: a.pushTray,
 			Notify:      func(title, body string) { a.emit("notify", map[string]any{"title": title, "body": body}) },
+			Updates:     func(items any) { a.emit("updates", map[string]any{"lines": items}) },
 		})
 	}
 	a.buildVoice(cfg)
@@ -1061,6 +1062,43 @@ func (a *App) Register(r Registrar) {
 		}
 		a.save(func(c *settings.Config) { c.Canvas.Window = &g })
 		a.emit("settings.changed", nil)
+		return struct{}{}, nil
+	})
+	r.Register("agent.updatesSeen", func(args json.RawMessage) (any, error) {
+		var in struct {
+			IDs []uint64 `json:"ids"`
+		}
+		if err := decodeArgs("agent.updatesSeen", args, &in); err != nil {
+			return nil, err
+		}
+		if a.agent != nil {
+			a.agent.UpdatesSeen(in.IDs)
+		}
+		return struct{}{}, nil
+	})
+	r.Register("agent.focusJob", func(args json.RawMessage) (any, error) {
+		var in struct {
+			Job    string `json:"job"`
+			Worker string `json:"worker"`
+		}
+		if err := decodeArgs("agent.focusJob", args, &in); err != nil {
+			return nil, err
+		}
+		if a.agent != nil {
+			a.agent.FocusJob(in.Job, in.Worker)
+		}
+		return struct{}{}, nil
+	})
+	r.Register("presence.set", func(args json.RawMessage) (any, error) {
+		var in struct {
+			Away bool `json:"away"`
+		}
+		if err := decodeArgs("presence.set", args, &in); err != nil {
+			return nil, err
+		}
+		if a.agent != nil {
+			a.agent.SetAway(in.Away)
+		}
 		return struct{}{}, nil
 	})
 	r.Register("audio.deviceChanged", func(json.RawMessage) (any, error) {

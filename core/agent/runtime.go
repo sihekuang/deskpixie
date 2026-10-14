@@ -78,6 +78,8 @@ type Deps struct {
 	IDs         IdSource
 	// Kept saves what a quit with keepPanesOnQuit leaves running (nil: nothing is saved).
 	Kept KeptStore
+	// Updates gets the updates bubble's list (nil: ignored).
+	Updates UpdatesSink
 }
 
 // WorkerDeps are the worker adapters (spec §5.5), injected only when agent.workers.enabled.
@@ -470,6 +472,25 @@ func (h *AgentHandle) OpenTerminal(ctx context.Context) error {
 	h.Input(EnsureCoordinatorInput())
 	// A coordinator already running is brought to the front; one being started is focused when it is up.
 	focusQuietly(ctx, h.deps.Host.Session(), Coordinator)
+	return h.deps.Launcher.Open(Attach{Argv: h.deps.Host.AttachCommand(), Dir: h.deps.TerminalDir})
+}
+
+// UpdatesSeen: the bubble showed these lines long enough to count as heard.
+func (h *AgentHandle) UpdatesSeen(ids []uint64) { h.Input(UpdatesSeenInput(ids)) }
+
+// SetAway: the shell's presence (screen locked, displays asleep or idle).
+func (h *AgentHandle) SetAway(away bool) { h.Input(PresenceInput(away)) }
+
+// FocusJob is a click on a bubble line: bring that job's pane (FocusTarget) to the front, then
+// attach a terminal. Unlike OpenTerminal it does not start the coordinator.
+func (h *AgentHandle) FocusJob(ctx context.Context, job JobID, worker string) error {
+	if err := h.deps.Host.Session().EnsureSession(ctx); err != nil {
+		return err
+	}
+	h.ctlMu.Lock()
+	target := h.ctl.FocusTarget(job, worker)
+	h.ctlMu.Unlock()
+	focusQuietly(ctx, h.deps.Host.Session(), target)
 	return h.deps.Launcher.Open(Attach{Argv: h.deps.Host.AttachCommand(), Dir: h.deps.TerminalDir})
 }
 
@@ -1152,6 +1173,10 @@ func (h *AgentHandle) apply(e Effect) {
 		}
 	case EfHoldOpen:
 		d.Voice.HoldOpen(e.Hold)
+	case EfUpdates:
+		if d.Updates != nil {
+			d.Updates.Updates(e.Value.([]UpdateItem))
+		}
 	case EfOpenConversation:
 		if !d.Voice.Open() {
 			h.Input(OpenRefusedInput())

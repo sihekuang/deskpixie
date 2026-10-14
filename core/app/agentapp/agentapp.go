@@ -269,6 +269,7 @@ func Build(c Config) *Agent {
 		Clock:       c.Clock,
 		IDs:         c.IDs,
 		Kept:        KeptFile(paths.Kept()),
+		Updates:     updatesSink{c.Hooks},
 	}
 	// Exactly 127.0.0.1 (the hook server refuses any non-loopback listener). Bound before the
 	// runtime is built, so a busy port is known before a warm start could launch anything.
@@ -391,6 +392,26 @@ func (a *Agent) OpenTerminal() {
 	a.wg.Go(func() {
 		if err := a.handle.OpenTerminal(a.ctx); err != nil {
 			log.Printf("agent: open terminal: %v", err)
+			a.setStatus(TerminalFailureStatus(err.Error()))
+		}
+	})
+}
+
+// UpdatesSeen: the updates bubble showed these lines long enough to count as heard.
+func (a *Agent) UpdatesSeen(ids []uint64) { a.handle.UpdatesSeen(ids) }
+
+// SetAway is the shell's presence (screen locked, displays asleep or idle).
+func (a *Agent) SetAway(away bool) { a.handle.SetAway(away) }
+
+// FocusJob is a click on a bubble line (async): that job's pane in a terminal. A failure becomes
+// the tray status line, as for OpenTerminal.
+func (a *Agent) FocusJob(job, worker string) {
+	if a.ctx.Err() != nil {
+		return // quitting
+	}
+	a.wg.Go(func() {
+		if err := a.handle.FocusJob(a.ctx, agent.JobID(job), worker); err != nil {
+			log.Printf("agent: focus job: %v", err)
 			a.setStatus(TerminalFailureStatus(err.Error()))
 		}
 	})
