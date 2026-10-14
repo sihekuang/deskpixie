@@ -61,3 +61,5 @@ Keychain before .env is a ruling (no source settles it): a key typed into the ap
 **Decision:** Under tmux, Claude agents report working/idle/blocked through Claude Code hooks to DeskPixie's hook server; Codex status is read from the screen with the existing busy/ready markers; exits come from tmux pane state.
 **Trigger:** #64; tmux has no agent-status events. The owner hadn't yet approved the proposed design; the active goal says to keep working without pausing.
 **Basis:** Ruling. Hooks are exact for Claude (Herdr's own Claude integration uses hooks the same way); Codex has no hooks, and its screen markers are already used by the controller. Revisit if the owner prefers screen-only detection.
+
+**Update (same day):** the owner reviewed and approved the tmux design, including hook-based Claude status.

@@ -1,6 +1,6 @@
 # tmux as a session host — #64
 
-Status: proposed design, implementation started under the "finish features" goal (ruling in
+Status: approved by the owner 2026-10-14 (was a ruling in
 docs/decisions.md); the owner can redirect. · 2026-10-14
 
 ## Goal
