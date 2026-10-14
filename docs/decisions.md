@@ -27,3 +27,7 @@
 ## 2026-10-13 — Bit offloads work to the coordinator by default
 **Decision:** The voice agent delegates anything that needs more than what it knows, what was said and its local tools (time, weather, math), and delegates when unsure. It keeps small talk, simple facts, one clarifying question, ending the conversation and the job tools. Delegated tasks stand on their own (the coordinator can't hear the conversation); independent requests are separate delegate calls; follow-ups are new work; Bit doesn't poll running jobs.
 **Basis:** User's choice; handoff mechanics follow DeepSeek Harness's `subagent` tool guidance (github.com/deepseek-ai/deepseek-harness).
+
+## 2026-10-13 — Keep agents running when the app quits
+**Decision:** `agent.keepPanesOnQuit` defaults to on. A quit saves the coordinator's and live workers' tokens and plans to a private `agent/kept.json`; the next start restores the tokens, adopts the still-running coordinator (no replace, no `--continue`) and workers, keeps their jobs open, and asks them to re-send results lost while the app was down (spec `docs/superpowers/specs/2026-10-13-keep-agents-on-quit.md`).
+**Basis:** User's choice.
