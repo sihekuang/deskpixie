@@ -71,6 +71,9 @@ type VoiceSettings struct {
 	InputDevice      *string `json:"inputDevice"`
 	OutputDevice     *string `json:"outputDevice"`
 	HomeCity         *string `json:"homeCity"`
+	// HandOffWhenUnsure: when Bit answers a request with "I don't know" and calls no tool, the
+	// app hands the request to the agent itself (#71).
+	HandOffWhenUnsure bool `json:"handOffWhenUnsure"`
 }
 
 // NotificationSettings is the notifications block: how agent updates reach you.
@@ -151,6 +154,7 @@ func Default() Config {
 		Voice: VoiceSettings{
 			Provider: "openai-realtime", Audio: "macos-vpio", Model: "gpt-realtime", Voice: "marin",
 			Chimes: true, IdleTimeoutSecs: 7, NoiseModel: "hush", LiveBackendModel: "gpt-6-luna",
+			HandOffWhenUnsure: true,
 		},
 		Canvas:        CanvasSettings{AutoOpen: true, Keep: 50},
 		Notifications: NotificationSettings{DebounceSecs: 20, Bubble: BubbleSettings{Enabled: true, PopSecs: 6, Lines: 5}, AwayAfterMins: 5},

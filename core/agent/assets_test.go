@@ -87,3 +87,12 @@ func TestTheRecentWorkBlockSendsNewRequestsToDelegate(t *testing.T) {
 		}
 	}
 }
+
+// #71: the app's hand-off notices are explained to Bit.
+func TestTheDelegationPersonaExplainsHandOffNotices(t *testing.T) {
+	for _, prefix := range []string{voice.HandedOffPrefix, voice.CantHandOffPrefix} {
+		if !strings.Contains(DelegationPersona, `Lines starting "`+strings.TrimSuffix(prefix, " ")+`"`) {
+			t.Errorf("the delegation persona doesn't explain %q lines", prefix)
+		}
+	}
+}

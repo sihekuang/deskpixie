@@ -63,3 +63,7 @@ Keychain before .env is a ruling (no source settles it): a key typed into the ap
 **Basis:** Ruling. Hooks are exact for Claude (Herdr's own Claude integration uses hooks the same way); Codex has no hooks, and its screen markers are already used by the controller. Revisit if the owner prefers screen-only detection.
 
 **Update (same day):** the owner reviewed and approved the tmux design, including hook-based Claude status.
+
+## 2026-10-14 — Hand off when Bit doesn't know (#71)
+**Decision:** A safety net in the shared conversation layer (core/voice, so every provider gets it): when Bit's reply to a user turn is a non-answer ("I don't know", "I'm not sure", "I can't check…", "I don't have access…"), no tool was called in that turn, and the user's words were a question or request (not small talk, thanks, a goodbye or a question about Bit itself), the runtime calls the delegate tool with the user's words (earlier turns as context) and Bit is told "Agent: handed off: <task>". If delegation is off, Bit is told "Agent: can't hand off: delegation is off (<status>)." and says why. Once per turn, 1.5 s after the reply (late transcripts and late tool calls still count), never while ending. English-only, conservative phrase matchers. Setting `voice.handOffWhenUnsure`, on by default, applies on restart.
+**Basis:** Owner-approved design on issue #71.
