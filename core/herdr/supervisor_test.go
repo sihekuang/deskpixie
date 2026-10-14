@@ -1,6 +1,8 @@
 package herdr
 
 import (
+	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -19,7 +21,7 @@ const (
 )
 
 func notRunning(t *testing.T) string {
-	s := fixture(t, "status_running.json")
+	s := fixture(t, "status_running_17.json")
 	s = strings.Replace(s, `"running":true`, `"running":false`, 1)
 	return strings.Replace(s, `"compatible":true`, `"compatible":null`, 1)
 }
@@ -176,21 +178,47 @@ func TestOnlyAMissingProgramIsNotFound(t *testing.T) {
 	}
 }
 
+// protocols are the supported protocols with their captured `herdr status --json` fixtures
+// (testdata/status_running_<protocol>.json; 17 from Herdr 0.7.5, 22 from 0.9.4).
+var protocols = []struct {
+	protocol uint32
+	version  string
+}{{17, "0.7.5"}, {22, "0.9.4"}}
+
+func runningFixture(t *testing.T, protocol uint32) string {
+	return fixture(t, fmt.Sprintf("status_running_%d.json", protocol))
+}
+
 func TestStatusJSONParses(t *testing.T) {
-	s, err := ParseStatus(fixture(t, "status_running.json"))
+	for _, p := range protocols {
+		s, err := ParseStatus(runningFixture(t, p.protocol))
+		if err != nil {
+			t.Fatal(err)
+		}
+		proto, compat, session := p.protocol, true, supSession
+		want := ServerStatus{
+			Running:        true,
+			ClientProtocol: p.protocol,
+			ClientVersion:  p.version,
+			ServerProtocol: &proto,
+			ServerVersion:  p.version,
+			Compatible:     &compat,
+			Socket:         "/Users/daniel/.config/herdr/sessions/plan-probe-11827/herdr.sock",
+			Session:        &session,
+		}
+		if !reflect.DeepEqual(s, want) {
+			t.Fatalf("protocol %d: %+v", p.protocol, s)
+		}
+	}
+}
+
+// 0.9.4 reports a stopped server with null version and protocol (and more fields 0.7.5 lacks).
+func TestAStoppedServerParsesOnProtocol22(t *testing.T) {
+	s, err := ParseStatus(fixture(t, "status_not_running_22.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	proto, compat, session := uint32(17), true, supSession
-	want := ServerStatus{
-		Running:        true,
-		ClientProtocol: 17,
-		ServerProtocol: &proto,
-		Compatible:     &compat,
-		Socket:         "/Users/daniel/.config/herdr/sessions/plan-probe-11827/herdr.sock",
-		Session:        &session,
-	}
-	if !reflect.DeepEqual(s, want) {
+	if s.Running || s.ServerProtocol != nil || s.Compatible != nil || s.ServerVersion != "" || s.ClientProtocol != 22 || s.ClientVersion != "0.9.4" {
 		t.Fatalf("%+v", s)
 	}
 }
@@ -214,12 +242,25 @@ func ranInstall(r *fakeRunner) bool {
 }
 
 func TestARunningCompatibleServerIsUsedAsIs(t *testing.T) {
+	for _, p := range protocols {
+		t.Run(fmt.Sprint(p.protocol), func(t *testing.T) { runningServerUsedAsIs(t, p.protocol) })
+	}
+}
+
+func runningServerUsedAsIs(t *testing.T, protocol uint32) {
 	r := newFakeRunner()
-	r.answer(statusCmd(), runOK(fixture(t, "status_running.json")))
+	r.answer(statusCmd(), runOK(runningFixture(t, protocol)))
 	integrationCurrent(t, r)
-	socket, err := supervisorFor(t, r).Ensure(bg)
+	s := supervisorFor(t, r)
+	if s.Protocol() != 0 {
+		t.Fatal("nothing negotiated yet")
+	}
+	socket, err := s.Ensure(bg)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if s.Protocol() != protocol {
+		t.Fatalf("negotiated %d, want %d", s.Protocol(), protocol)
 	}
 	if !strings.HasSuffix(socket, "herdr.sock") {
 		t.Fatal(socket)
@@ -268,7 +309,7 @@ func TestEmptyAndDefaultSessionsAreRefused(t *testing.T) {
 
 func TestAServerOfAnotherSessionIsRefused(t *testing.T) {
 	r := newFakeRunner()
-	r.answer(statusCmd(), runOK(strings.ReplaceAll(fixture(t, "status_running.json"), supSession, "default")))
+	r.answer(statusCmd(), runOK(strings.ReplaceAll(fixture(t, "status_running_17.json"), supSession, "default")))
 	_, err := supervisorFor(t, r).Ensure(bg)
 	if !agent.IsHostError(err, agent.HostOther) || !strings.Contains(err.Error(), "expected") {
 		t.Fatalf("%#v", err)
@@ -280,7 +321,7 @@ func TestAServerOfAnotherSessionIsRefused(t *testing.T) {
 
 func TestARunningServerWithUnknownCompatibilityIsNotStartedAgain(t *testing.T) {
 	r := newFakeRunner()
-	r.answer(statusCmd(), runOK(strings.Replace(fixture(t, "status_running.json"), `"compatible":true`, `"compatible":null`, 1)))
+	r.answer(statusCmd(), runOK(strings.Replace(fixture(t, "status_running_17.json"), `"compatible":true`, `"compatible":null`, 1)))
 	integrationCurrent(t, r)
 	if _, err := supervisorFor(t, r).Ensure(bg); err != nil {
 		t.Fatal(err)
@@ -303,25 +344,35 @@ func TestSessionNamesFollowTheAllowlist(t *testing.T) {
 	}
 }
 
-func mismatch(client, server uint32) error {
-	return agent.HostError{Kind: agent.HostVersionMismatch, Client: client, Server: server}
+// wantMismatch: err is a version mismatch between the CLI's and the server's protocols whose
+// message names the supported versions and each of mentions (what the user has).
+func wantMismatch(t *testing.T, err error, client, server uint32, mentions ...string) {
+	t.Helper()
+	var he agent.HostError
+	if !errors.As(err, &he) || he.Kind != agent.HostVersionMismatch || he.Client != client || he.Server != server {
+		t.Fatalf("want a mismatch (client %d, server %d): %#v", client, server, err)
+	}
+	for _, m := range append([]string{SupportedVersions}, mentions...) {
+		if !strings.Contains(he.Error(), m) || !strings.Contains(he.Detail, m) {
+			t.Fatalf("%q does not mention %q", he.Error(), m)
+		}
+	}
 }
 
 func TestUnknownCompatibilityOnAnotherProtocolIsAMismatch(t *testing.T) {
 	r := newFakeRunner()
-	j := strings.Replace(fixture(t, "status_running.json"), `"compatible":true`, `"compatible":null`, 1)
+	j := strings.Replace(fixture(t, "status_running_17.json"), `"compatible":true`, `"compatible":null`, 1)
 	j = strings.Replace(j, `"protocol":17,"capabilities"`, `"protocol":18,"capabilities"`, 1)
 	r.answer(statusCmd(), runOK(j))
-	if _, err := supervisorFor(t, r).Ensure(bg); !reflect.DeepEqual(err, mismatch(17, 18)) {
-		t.Fatalf("%#v", err)
-	}
+	_, err := supervisorFor(t, r).Ensure(bg)
+	wantMismatch(t, err, 17, 18, "0.7.5 (protocol 17)", "protocol 18")
 }
 
 func TestNonJSONStatusWhileStartingIsRetried(t *testing.T) {
 	r := newFakeRunner()
 	r.answer(statusCmd(), runOK(notRunning(t)))
 	r.answer(statusCmd(), runOK("expected value at line 1"))
-	r.answer(statusCmd(), runOK(fixture(t, "status_running.json")))
+	r.answer(statusCmd(), runOK(fixture(t, "status_running_17.json")))
 	integrationCurrent(t, r)
 	if _, err := supervisorFor(t, r).Ensure(bg); err != nil {
 		t.Fatal(err)
@@ -330,7 +381,7 @@ func TestNonJSONStatusWhileStartingIsRetried(t *testing.T) {
 
 func TestAMissingIntegrationIsFlaggedNeverInstalled(t *testing.T) {
 	r := newFakeRunner()
-	r.answer(statusCmd(), runOK(fixture(t, "status_running.json")))
+	r.answer(statusCmd(), runOK(fixture(t, "status_running_17.json")))
 	r.answer(supBin+" integration status", runOK("claude: not installed (/x)"))
 	s := supervisorFor(t, r)
 	if _, err := s.Ensure(bg); err != nil {
@@ -348,7 +399,7 @@ func TestAnAbsentServerIsStartedDetachedAndWaitedFor(t *testing.T) {
 	r := newFakeRunner()
 	r.answer(statusCmd(), runOK(notRunning(t)))
 	r.answer(statusCmd(), runOK(notRunning(t)))
-	r.answer(statusCmd(), runOK(fixture(t, "status_running.json")))
+	r.answer(statusCmd(), runOK(fixture(t, "status_running_17.json")))
 	r.answer(supBin+" integration status", runOK("claude: not installed (/x)"))
 	if _, err := supervisorFor(t, r).Ensure(bg); err != nil {
 		t.Fatal(err)
@@ -381,12 +432,11 @@ func TestAServerThatNeverComesUpTimesOut(t *testing.T) {
 
 func TestAnIncompatibleServerIsAVersionMismatchAndIsLeftAlone(t *testing.T) {
 	r := newFakeRunner()
-	j := strings.Replace(fixture(t, "status_running.json"), `"compatible":true`, `"compatible":false`, 1)
+	j := strings.Replace(fixture(t, "status_running_17.json"), `"compatible":true`, `"compatible":false`, 1)
 	j = strings.Replace(j, `"protocol":17,"capabilities"`, `"protocol":18,"capabilities"`, 1)
 	r.answer(statusCmd(), runOK(j))
-	if _, err := supervisorFor(t, r).Ensure(bg); !reflect.DeepEqual(err, mismatch(17, 18)) {
-		t.Fatalf("%#v", err)
-	}
+	_, err := supervisorFor(t, r).Ensure(bg)
+	wantMismatch(t, err, 17, 18, "0.7.5 (protocol 17)", "protocol 18")
 	if r.spawnedCount() != 0 {
 		t.Fatal("spawned")
 	}
@@ -394,10 +444,9 @@ func TestAnIncompatibleServerIsAVersionMismatchAndIsLeftAlone(t *testing.T) {
 
 func TestAClientOnAnotherProtocolIsAVersionMismatch(t *testing.T) {
 	r := newFakeRunner()
-	r.answer(statusCmd(), runOK(strings.Replace(fixture(t, "status_running.json"), `"protocol":17,"binary"`, `"protocol":18,"binary"`, 1)))
-	if _, err := supervisorFor(t, r).Ensure(bg); !reflect.DeepEqual(err, mismatch(17, 18)) {
-		t.Fatalf("%#v", err)
-	}
+	r.answer(statusCmd(), runOK(strings.Replace(fixture(t, "status_running_17.json"), `"protocol":17,"binary"`, `"protocol":18,"binary"`, 1)))
+	_, err := supervisorFor(t, r).Ensure(bg)
+	wantMismatch(t, err, 18, 17, "0.7.5 (protocol 18)")
 }
 
 func TestAMissingBinaryIsNotFound(t *testing.T) {
@@ -405,5 +454,115 @@ func TestAMissingBinaryIsNotFound(t *testing.T) {
 	r.answer(statusCmd(), runErr(supBin+": No such file or directory (os error 2)"))
 	if _, err := supervisorFor(t, r).Ensure(bg); !reflect.DeepEqual(err, agent.HostError{Kind: agent.HostNotFound}) {
 		t.Fatalf("%#v", err)
+	}
+}
+
+// serverOn is the protocol-17 fixture with its server swapped for another version's.
+func serverOn(t *testing.T, client uint32, server uint32, version string, compatible string) string {
+	j := runningFixture(t, client)
+	cv := map[uint32]string{17: "0.7.5", 22: "0.9.4"}[client]
+	j = strings.Replace(j, fmt.Sprintf(`"version":%q,"protocol":%d,"capabilities"`, cv, client),
+		fmt.Sprintf(`"version":%q,"protocol":%d,"capabilities"`, version, server), 1)
+	return strings.Replace(j, `"compatible":true`, `"compatible":`+compatible, 1)
+}
+
+// The supported versions' CLI and server must agree: a 0.7.5 CLI with a 0.9.x server is a
+// mismatch naming both and the supported versions, and the server is left alone.
+func TestACLIOn17WithAServerOn22IsAMismatch(t *testing.T) {
+	for _, compatible := range []string{"false", "null", "true"} {
+		r := newFakeRunner()
+		r.answer(statusCmd(), runOK(serverOn(t, 17, 22, "0.9.4", compatible)))
+		_, err := supervisorFor(t, r).Ensure(bg)
+		wantMismatch(t, err, 17, 22, "0.7.5 (protocol 17)", "0.9.4 (protocol 22)")
+		if r.spawnedCount() != 0 {
+			t.Fatal("spawned")
+		}
+	}
+}
+
+// After upgrading herdr, the session's old server keeps running: the message says to restart
+// that session.
+func TestACLIOn22WithAnOldServerOn17SaysToRestartTheSession(t *testing.T) {
+	r := newFakeRunner()
+	r.answer(statusCmd(), runOK(serverOn(t, 22, 17, "0.7.5", "false")))
+	s := supervisorFor(t, r)
+	_, err := s.Ensure(bg)
+	wantMismatch(t, err, 22, 17, "0.9.4 (protocol 22)", "0.7.5 (protocol 17)", "herdr session stop "+supSession)
+	if s.Protocol() != 0 {
+		t.Fatal("nothing negotiated")
+	}
+	if _, _, err := s.Running(bg); err == nil {
+		t.Fatal("Running must refuse it too")
+	}
+}
+
+// A Herdr this adapter does not know (protocol 99), even one agreeing with itself, is a
+// mismatch naming what the user has and what is supported.
+func TestAnUnknownProtocolIsAMismatch(t *testing.T) {
+	r := newFakeRunner()
+	j := strings.ReplaceAll(runningFixture(t, 22), `"protocol":22`, `"protocol":99`)
+	j = strings.ReplaceAll(j, `"version":"0.9.4"`, `"version":"1.2.0"`)
+	r.answer(statusCmd(), runOK(j))
+	_, err := supervisorFor(t, r).Ensure(bg)
+	wantMismatch(t, err, 99, 99, "1.2.0 (protocol 99)")
+	if r.spawnedCount() != 0 {
+		t.Fatal("spawned")
+	}
+
+	// Not running: the CLI alone decides, and nothing is started.
+	r = newFakeRunner()
+	j = strings.ReplaceAll(fixture(t, "status_not_running_22.json"), `"protocol":22`, `"protocol":99`)
+	r.answer(statusCmd(), runOK(j))
+	_, err = supervisorFor(t, r).Ensure(bg)
+	wantMismatch(t, err, 99, 0, "0.9.4 (protocol 99)")
+	if r.spawnedCount() != 0 {
+		t.Fatal("spawned")
+	}
+}
+
+// A 0.9.x session that isn't running is started and negotiates protocol 22.
+func TestAnAbsentServerOn22IsStartedAndNegotiated(t *testing.T) {
+	r := newFakeRunner()
+	r.answer(statusCmd(), runOK(fixture(t, "status_not_running_22.json")))
+	r.answer(statusCmd(), runOK(runningFixture(t, 22)))
+	integrationCurrent(t, r)
+	s := supervisorFor(t, r)
+	if _, err := s.Ensure(bg); err != nil {
+		t.Fatal(err)
+	}
+	if r.spawnedCount() != 1 || s.Protocol() != 22 {
+		t.Fatalf("spawned %d, protocol %d", r.spawnedCount(), s.Protocol())
+	}
+}
+
+func TestRunningNegotiatesEachProtocol(t *testing.T) {
+	for _, p := range protocols {
+		r := newFakeRunner()
+		r.answer(statusCmd(), runOK(runningFixture(t, p.protocol)))
+		s := supervisorFor(t, r)
+		socket, ok, err := s.Running(bg)
+		if err != nil || !ok || !strings.HasSuffix(socket, "herdr.sock") {
+			t.Fatalf("protocol %d: %q %v %v", p.protocol, socket, ok, err)
+		}
+		if s.Protocol() != p.protocol {
+			t.Fatalf("negotiated %d, want %d", s.Protocol(), p.protocol)
+		}
+	}
+}
+
+// 0.9.4 says the v7 hook is outdated (v10 is current): flagged, never installed.
+func TestAnOutdatedIntegrationOn22IsFlagged(t *testing.T) {
+	if ClaudeIntegrationCurrent(fixture(t, "integration_status_outdated_22.txt")) {
+		t.Fatal("outdated is not current")
+	}
+	r := newFakeRunner()
+	r.answer(statusCmd(), runOK(runningFixture(t, 22)))
+	r.answer(supBin+" integration status", runOK(fixture(t, "integration_status_outdated_22.txt")))
+	s := supervisorFor(t, r)
+	if _, err := s.Ensure(bg); err != nil {
+		t.Fatal(err)
+	}
+	if !s.IntegrationMissing() || ranInstall(r) {
+		t.Fatal("flagged, never installed")
 	}
 }

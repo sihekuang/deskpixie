@@ -1,0 +1,4 @@
+pi: not installed (/Users/daniel/.pi/agent/extensions/herdr-agent-state.ts)
+omp: not installed (/Users/daniel/.omp/agent/extensions/herdr-omp-agent-state.ts)
+claude: outdated (v7 < v10) (/Users/daniel/.claude/hooks/herdr-agent-state.sh)
+codex: not installed (/Users/daniel/.codex/herdr-agent-state.sh)

@@ -113,3 +113,14 @@ func TestPaneStatusUsesHerdrNames(t *testing.T) {
 		t.Fatal("not ready")
 	}
 }
+
+func TestAVersionMismatchSaysWhatTheHostReported(t *testing.T) {
+	plain := HostError{Kind: HostVersionMismatch, Client: 17, Server: 18}
+	if plain.Error() != "herdr version mismatch (client protocol 17, server 18)" {
+		t.Fatal(plain.Error())
+	}
+	told := HostError{Kind: HostVersionMismatch, Client: 20, Server: 0, Detail: "you have herdr 0.8.0 (protocol 20)"}
+	if told.Error() != "herdr version mismatch (client protocol 20, server 0): you have herdr 0.8.0 (protocol 20)" {
+		t.Fatal(told.Error())
+	}
+}

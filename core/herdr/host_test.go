@@ -35,8 +35,7 @@ func newTestHost(t *testing.T, server *herdrtest.FakeHerdr) *Host {
 func hostWithIntegration(t *testing.T, server *herdrtest.FakeHerdr, integration string) *Host {
 	t.Helper()
 	runner := newFakeRunner()
-	status := fmt.Sprintf(`{"client":{"protocol":17},"server":{"running":true,"protocol":17,"compatible":true,"socket":%q}}`, server.Socket)
-	runner.answer(hostBin+" status --json", runOK(status))
+	runner.answer(hostBin+" status --json", runOK(server.StatusJSON(server.Protocol())))
 	runner.answer(hostBin+" integration status", runOK(integration))
 	sup, err := NewSupervisor(hostBin, pairs("HERDR_SESSION", hostSession), runner)
 	if err != nil {
@@ -1239,3 +1238,78 @@ func TestAPaneBusyPastTheLimitFailsWithoutLeakingItsTab(t *testing.T) {
 
 // The Go host satisfies the agent seam.
 var _ agent.SessionHost = (*Host)(nil)
+
+// hostOn is a host whose CLI reports cli and whose fake server speaks the server's protocol
+// (status in that Herdr version's captured shape).
+func hostOn(t *testing.T, server *herdrtest.FakeHerdr, cli uint32) (*Host, *Supervisor) {
+	t.Helper()
+	runner := newFakeRunner()
+	runner.answer(hostBin+" status --json", runOK(server.StatusJSON(cli)))
+	runner.answer(hostBin+" integration status", runOK("claude: current (v7) (/x)"))
+	sup, err := NewSupervisor(hostBin, pairs("HERDR_SESSION", hostSession), runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := NewHost(hostSession, "/Users/x", sup.WithTiming(10*time.Millisecond, 100*time.Millisecond))
+	t.Cleanup(h.Shutdown)
+	return h, sup
+}
+
+// The adapter runs the SessionHost conformance suite, a read and a close against a fake server
+// of each supported Herdr version, and negotiates that version's protocol.
+func TestTheHostWorksOnEverySupportedProtocol(t *testing.T) {
+	for _, p := range []uint32{17, 22} {
+		t.Run(fmt.Sprint(p), func(t *testing.T) {
+			t.Parallel()
+			server := herdrtest.StartProtocol(t, p)
+			h, sup := hostOn(t, server, p)
+			steps, err := runConformance(h, spec("probe"), 3*time.Second, 300*time.Millisecond)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(steps) != 7 {
+				t.Fatal(steps)
+			}
+			if sup.Protocol() != p {
+				t.Fatalf("negotiated %d, want %d", sup.Protocol(), p)
+			}
+			mustStart(t, h, "coordinator")
+			if err := h.Prompt(bg, "coordinator", "hi"); err != nil {
+				t.Fatal(err)
+			}
+			if screen, err := h.Read(bg, "coordinator", 5); err != nil || !strings.Contains(screen, "❯ hi") {
+				t.Fatalf("%q %v", screen, err)
+			}
+			if err := h.Close(bg, "coordinator"); err != nil {
+				t.Fatal(err)
+			}
+			if server.PaneCount() != 0 {
+				t.Fatal(server.PaneCount())
+			}
+		})
+	}
+}
+
+// A CLI and server of different supported versions (or an unknown one) never get a workspace
+// or a tab: every call is a version mismatch naming the supported versions.
+func TestTheHostRefusesMismatchedVersions(t *testing.T) {
+	for _, c := range []struct{ cli, server uint32 }{{17, 22}, {22, 17}, {99, 99}} {
+		t.Run(fmt.Sprintf("cli%d-server%d", c.cli, c.server), func(t *testing.T) {
+			t.Parallel()
+			server := herdrtest.StartProtocol(t, c.server)
+			h, sup := hostOn(t, server, c.cli)
+			for _, err := range []error{h.EnsureSession(bg), func() error { _, err := h.StartAgent(bg, spec("coordinator")); return err }()} {
+				var he agent.HostError
+				if !errors.As(err, &he) || he.Kind != agent.HostVersionMismatch || he.Client != c.cli || he.Server != c.server {
+					t.Fatalf("%#v", err)
+				}
+				if !strings.Contains(err.Error(), SupportedVersions) {
+					t.Fatalf("%q does not name the supported versions", err)
+				}
+			}
+			if sup.Protocol() != 0 || len(server.Requests("workspace.create")) != 0 || server.PaneCount() != 0 {
+				t.Fatal("nothing may be done on a mismatched server")
+			}
+		})
+	}
+}

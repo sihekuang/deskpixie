@@ -1,6 +1,6 @@
-// Package herdrtest is a fake Herdr 0.7.5 on a Unix socket (port of session-herdr's
-// fake_server.rs), for offline tests of the real transport, client, event pump and
-// herdr.Host. It replays its journal of global pane events on every subscribe, like the real
+// Package herdrtest is a fake Herdr on a Unix socket (port of session-herdr's fake_server.rs),
+// speaking protocol 17 (Herdr 0.7.5) or 22 (0.9.x), for offline tests of the real transport,
+// client, event pump and herdr.Host. It replays its journal of global pane events on every subscribe, like the real
 // server (command-center #57/#69/#70), and reuses freed pane ids. It never runs herdr.
 package herdrtest
 
@@ -73,6 +73,8 @@ type request struct {
 type FakeHerdr struct {
 	// Socket is the server's Unix socket path.
 	Socket string
+	// protocol is the socket protocol it speaks (17: Herdr 0.7.5, 22: 0.9.4 shapes).
+	protocol uint32
 
 	mu         sync.Mutex
 	workspaces [][2]string // (id, label)
@@ -131,13 +133,59 @@ func Start(tb testing.TB) *FakeHerdr {
 	return f
 }
 
-// StartAt listens on socket.
+// StartProtocol is Start speaking protocol (17: Herdr 0.7.5, 22: 0.9.x; any other is reported
+// as is, with 0.9.4's shapes).
+func StartProtocol(tb testing.TB, protocol uint32) *FakeHerdr {
+	f := Start(tb)
+	f.mu.Lock()
+	f.protocol = protocol
+	f.mu.Unlock()
+	return f
+}
+
+// Protocol is the socket protocol the server speaks.
+func (f *FakeHerdr) Protocol() uint32 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.protocol
+}
+
+// releases are the versions the fake reports per protocol (as `herdr status --json` does).
+var releases = map[uint32]string{17: "0.7.5", 22: "0.9.4", 99: "1.2.0"}
+
+func release(p uint32) string {
+	if r, ok := releases[p]; ok {
+		return r
+	}
+	return fmt.Sprintf("0.0.%d", p)
+}
+
+// StatusJSON is `herdr status --json` for a CLI speaking client while this server runs, in the
+// captured shape of that CLI's version (0.7.5 for 17; 0.9.4, with its extra fields, otherwise).
+// compatible is whether the two protocols match.
+func (f *FakeHerdr) StatusJSON(client uint32) string {
+	server := f.Protocol()
+	cli := map[string]any{"version": release(client), "channel": "stable", "protocol": client, "binary": "/x/herdr", "session": "deskpixie"}
+	srv := map[string]any{"status": "running", "running": true, "version": release(server), "protocol": server,
+		"capabilities": map[string]any{"live_handoff": true, "detached_server_daemon": false},
+		"compatible": client == server, "socket": f.Socket, "session": "deskpixie", "restart_needed": false}
+	if client != 17 {
+		cli["endpoint_protocol_generation"] = 1
+		cli["endpoint_capabilities"] = []string{"surface_interest", "health_check"}
+		srv["endpoint_compatible"] = client == server
+		srv["server_binary_stale"] = false
+	}
+	b, _ := json.Marshal(map[string]any{"client": cli, "server": srv, "update": map[string]any{"restart_needed": false}})
+	return string(b)
+}
+
+// StartAt listens on socket (protocol 17).
 func StartAt(socket string) (*FakeHerdr, error) {
 	l, err := net.Listen("unix", socket)
 	if err != nil {
 		return nil, err
 	}
-	f := &FakeHerdr{Socket: socket, panes: map[string]*pane{}, defaultTabs: map[string]string{}, listener: l, conns: map[net.Conn]bool{}, closed: make(chan struct{})}
+	f := &FakeHerdr{Socket: socket, protocol: 17, panes: map[string]*pane{}, defaultTabs: map[string]string{}, listener: l, conns: map[net.Conn]bool{}, closed: make(chan struct{})}
 	go func() {
 		for {
 			c, err := l.Accept()
@@ -546,10 +594,22 @@ func (f *FakeHerdr) setStatus(paneID, status string) {
 	f.emit(line, paneID)
 }
 
-// agentJSON is the captured shapes: a detected agent carries "agent": "claude"; a launching
+// agentJSON is the captured shapes (0.9.x adds terminal_id, display_agent, state_change_seq and
+// completion_seq, which the adapter ignores): a detected agent carries "agent": "claude"; a launching
 // one has no agent field and launch_pending: true; then it is detected (agent, idle) but still
 // launch_pending with no interactive_ready, then ready; an exited one keeps its pane and name
 // but loses the agent field.
+func (f *FakeHerdr) agentJSON(id string, p *pane) map[string]any {
+	v := agentJSON(id, p)
+	if f.protocol != 17 {
+		v["terminal_id"] = "term_" + id
+		v["display_agent"] = v["agent"]
+		v["state_change_seq"] = 1
+		v["completion_seq"] = nil
+	}
+	return v
+}
+
 func agentJSON(id string, p *pane) map[string]any {
 	var name any
 	if p.named {
@@ -714,7 +774,7 @@ func (f *FakeHerdr) handle(method string, p map[string]any) (result any, code, m
 		}
 		pn.name, pn.named, pn.pending = name, true, true
 		// Like Herdr: the launch is pending, the agent is detected a little later.
-		a := agentJSON(paneID, pn)
+		a := f.agentJSON(paneID, pn)
 		if !f.manualReady {
 			time.AfterFunc(ReadyAfter, func() { f.Ready(paneID) })
 		}
@@ -724,14 +784,14 @@ func (f *FakeHerdr) handle(method string, p map[string]any) (result any, code, m
 		if code != "" {
 			return nil, code, msg
 		}
-		return map[string]any{"type": "agent_info", "agent": agentJSON(id, f.panes[id])}, "", ""
+		return map[string]any{"type": "agent_info", "agent": f.agentJSON(id, f.panes[id])}, "", ""
 	case "agent.list":
 		// A launching agent is not listed until it is detected.
 		list := []any{}
 		for _, id := range f.sortedPaneIDs() {
 			q := f.panes[id]
 			if q.named && (q.launched || f.listLaunching) {
-				list = append(list, agentJSON(id, q))
+				list = append(list, f.agentJSON(id, q))
 			}
 		}
 		return map[string]any{"type": "agent_list", "agents": list}, "", ""
