@@ -17,7 +17,10 @@ chosen by `agent.sessionHost` = `tmux`. Herdr stays the default and is unchanged
 - Start: `new-window -d -n <name> -c <cwd> -e K=V … -- <kind> <args…>` (no shell typing, so no
   quoting problems). Pane ids (`%N`) are not reused within a server, so CloseExact is a plain
   id check.
-- Prompt: `send-keys -l -- <text>` then `send-keys Enter`. Keys: `send-keys Escape|Enter`.
+- Prompt: `send-keys -l -- <text>` then `send-keys Enter`; text of several lines is pasted
+  bracketed instead (`set-buffer` in chunks + `paste-buffer -p -d`), then Enter. Arguments
+  ending in `;` are written `…\;` (tmux reads its argv as commands), and `#` is doubled where
+  tmux expands formats (`-c`, `select-pane -T`). Keys: `send-keys Escape|Enter`.
 - Read: `capture-pane -p -J -t <pane> -S -<lines>` (plain text; no `-e`, so no ANSI).
 - Focus: `select-window`; Relabel: `rename-window` is NOT used (names are identities) — the
   label goes in the pane title (`select-pane -T`) and the window's `@deskpixie_label` option.
