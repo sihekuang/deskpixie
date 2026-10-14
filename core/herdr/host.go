@@ -484,6 +484,7 @@ func (h *Host) closeDefaultTab(ctx context.Context, client *Client, workspace st
 // (e.g. `claude --continue` with nothing to continue), so it fails now rather than at the
 // deadline.
 func (h *Host) pollReady(ctx context.Context, client *Client, spec agent.AgentSpec, pane string, deadline time.Time) (agent.AgentInfo, error) {
+	behavior := BehaviorFor(h.supervisor.Protocol())
 	launched := false
 	for {
 		a, err := client.GetAgent(ctx, spec.Name)
@@ -499,8 +500,8 @@ func (h *Host) pollReady(ctx context.Context, client *Client, spec agent.AgentSp
 				launched = launched || a.LaunchPending || a.Agent != ""
 			}
 			// Not while launch_pending: Herdr shows the agent idle a few seconds before it
-			// accepts prompts.
-			if a.Ready() {
+			// accepts prompts (but on 0.9.x a dialog keeps it launch_pending: Behavior).
+			if behavior.started(a) {
 				info, ok := a.Info()
 				if !ok {
 					return agent.AgentInfo{}, agent.HostError{Kind: agent.HostOther, Detail: "agent lost its name"}
@@ -508,6 +509,10 @@ func (h *Host) pollReady(ctx context.Context, client *Client, spec agent.AgentSp
 				return info, nil
 			}
 		case agent.IsHostError(err, agent.HostNoAgent):
+			if launched && behavior.ExitDropsName {
+				// Seen launching, now nameless: the process exited (0.9.x drops the name).
+				return agent.AgentInfo{}, agent.HostError{Kind: agent.HostExitedAtStart, Detail: spec.Kind.String()}
+			}
 		default:
 			if ctx.Err() != nil {
 				return agent.AgentInfo{}, ctx.Err()

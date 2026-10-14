@@ -168,7 +168,7 @@ func (f *FakeHerdr) StatusJSON(client uint32) string {
 	cli := map[string]any{"version": release(client), "channel": "stable", "protocol": client, "binary": "/x/herdr", "session": "deskpixie"}
 	srv := map[string]any{"status": "running", "running": true, "version": release(server), "protocol": server,
 		"capabilities": map[string]any{"live_handoff": true, "detached_server_daemon": false},
-		"compatible": client == server, "socket": f.Socket, "session": "deskpixie", "restart_needed": false}
+		"compatible":   client == server, "socket": f.Socket, "session": "deskpixie", "restart_needed": false}
 	if client != 17 {
 		cli["endpoint_protocol_generation"] = 1
 		cli["endpoint_capabilities"] = []string{"surface_interest", "health_check"}
@@ -324,14 +324,17 @@ func eventLine(v map[string]any) string {
 	return string(b)
 }
 
-// Exit kills the agent process: its pane (and name) stays, without an agent, and reports
-// pane_exited.
+// Exit kills the agent process: its pane stays, without an agent, and reports pane_exited.
+// Herdr 0.7.5 keeps the pane's name; 0.9.x drops it (agent.get: agent_not_found).
 func (f *FakeHerdr) Exit(paneID string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	p, ok := f.panes[paneID]
 	if !ok {
 		return
+	}
+	if f.protocol != 17 {
+		p.named = false
 	}
 	p.detected = false
 	p.pending = false
@@ -362,6 +365,22 @@ func (f *FakeHerdr) Ready(paneID string) {
 	if !f.holdPending {
 		time.AfterFunc(LaunchWindow, func() { f.FinishLaunch(paneID) })
 	}
+}
+
+// BlockOnDialog: the launching agent on paneID is detected and blocked on a dialog (e.g.
+// Claude Code's folder trust), still launch_pending (as 0.9.x reports it); its status event is
+// sent. FinishLaunch ends the launch.
+func (f *FakeHerdr) BlockOnDialog(paneID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	p, ok := f.panes[paneID]
+	if !ok || !p.named {
+		return
+	}
+	p.detected = true
+	p.launched = true
+	p.pending = true
+	f.setStatus(paneID, "blocked")
 }
 
 // DropWorkspaces: the server forgets its workspaces (it restarted).
@@ -654,13 +673,14 @@ func (f *FakeHerdr) find(target string) (string, string, string) {
 	return "", "agent_not_found", fmt.Sprintf("agent target %s not found", target)
 }
 
-// active is find, refusing an agent still launch_pending like Herdr 0.7.5 does.
-func (f *FakeHerdr) active(target string) (string, string, string) {
+// active is find, refusing an agent still launch_pending like Herdr 0.7.5 does (0.9.x reads
+// its screen and takes keys then: screenOnly).
+func (f *FakeHerdr) active(target string, screenOnly bool) (string, string, string) {
 	id, code, msg := f.find(target)
 	if code != "" {
 		return id, code, msg
 	}
-	if f.panes[id].pending {
+	if f.panes[id].pending && !(screenOnly && f.protocol != 17) {
 		return "", "agent_not_ready", fmt.Sprintf("agent %s is not an active named agent", target)
 	}
 	return id, "", ""
@@ -796,7 +816,7 @@ func (f *FakeHerdr) handle(method string, p map[string]any) (result any, code, m
 		}
 		return map[string]any{"type": "agent_list", "agents": list}, "", ""
 	case "agent.prompt":
-		id, code, msg := f.active(str("target"))
+		id, code, msg := f.active(str("target"), false)
 		if code != "" {
 			return nil, code, msg
 		}
@@ -809,7 +829,7 @@ func (f *FakeHerdr) handle(method string, p map[string]any) (result any, code, m
 		}
 		return map[string]any{"type": "agent_prompted"}, "", ""
 	case "agent.send_keys":
-		id, code, msg := f.active(str("target"))
+		id, code, msg := f.active(str("target"), true)
 		if code != "" {
 			return nil, code, msg
 		}
@@ -819,7 +839,7 @@ func (f *FakeHerdr) handle(method string, p map[string]any) (result any, code, m
 		}
 		return map[string]any{"type": "ok"}, "", ""
 	case "agent.read":
-		id, code, msg := f.active(str("target"))
+		id, code, msg := f.active(str("target"), true)
 		if code != "" {
 			return nil, code, msg
 		}

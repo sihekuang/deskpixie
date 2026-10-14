@@ -941,47 +941,94 @@ func TestReplacingALiveAgentOpensTheNewTabFirstAndReportsNoExit(t *testing.T) {
 }
 
 // claude --continue with nothing to continue exits during launch: detected, then gone. The
-// ready poll fails at once instead of waiting out the start timeout.
+// ready poll fails at once instead of waiting out the start timeout. Herdr 0.7.5 keeps the
+// pane's name without an agent; 0.9.x drops the name too (agent.get: agent_not_found).
 func TestAnAgentThatExitsWhileStartingFailsFast(t *testing.T) {
-	t.Parallel()
-	server := herdrtest.Start(t)
-	server.HoldPending()
-	h := newTestHost(t, server)
-	h.startTimeout = 10 * time.Second
-	began := time.Now()
-	res := startAsync(h, bg, spec("coordinator"))
-	// Detected after 50 ms, still launch_pending; then the process exits.
-	time.Sleep(300 * time.Millisecond)
-	server.Exit("w1:p1")
-	r := <-res
-	if !reflect.DeepEqual(r.err, hostErr(agent.HostExitedAtStart, "claude")) {
-		t.Fatalf("%#v", r.err)
-	}
-	if time.Since(began) >= 3*time.Second {
-		t.Fatal(time.Since(began))
-	}
-	if server.PaneCount() != 0 {
-		t.Fatal("its tab is closed")
+	for _, p := range []uint32{17, 22} {
+		t.Run(fmt.Sprint(p), func(t *testing.T) {
+			t.Parallel()
+			server := herdrtest.StartProtocol(t, p)
+			server.HoldPending()
+			h := newTestHost(t, server)
+			h.startTimeout = 10 * time.Second
+			began := time.Now()
+			res := startAsync(h, bg, spec("coordinator"))
+			// Detected after 50 ms, still launch_pending; then the process exits.
+			time.Sleep(300 * time.Millisecond)
+			server.Exit("w1:p1")
+			r := <-res
+			if !reflect.DeepEqual(r.err, hostErr(agent.HostExitedAtStart, "claude")) {
+				t.Fatalf("%#v", r.err)
+			}
+			if time.Since(began) >= 3*time.Second {
+				t.Fatal(time.Since(began))
+			}
+			if server.PaneCount() != 0 {
+				t.Fatal("its tab is closed")
+			}
+		})
 	}
 }
 
 // The same when the launch ends without the agent ever being detected (back at the shell).
 func TestALaunchThatEndsAtTheShellFailsFast(t *testing.T) {
-	t.Parallel()
-	server := herdrtest.Start(t)
-	server.ManualReady()
-	h := newTestHost(t, server)
-	h.startTimeout = 10 * time.Second
-	began := time.Now()
-	res := startAsync(h, bg, spec("coordinator"))
-	time.Sleep(300 * time.Millisecond)
-	server.Exit("w1:p1")
-	r := <-res
-	if !reflect.DeepEqual(r.err, hostErr(agent.HostExitedAtStart, "claude")) {
-		t.Fatalf("%#v", r.err)
+	for _, p := range []uint32{17, 22} {
+		t.Run(fmt.Sprint(p), func(t *testing.T) {
+			t.Parallel()
+			server := herdrtest.StartProtocol(t, p)
+			server.ManualReady()
+			h := newTestHost(t, server)
+			h.startTimeout = 10 * time.Second
+			began := time.Now()
+			res := startAsync(h, bg, spec("coordinator"))
+			time.Sleep(300 * time.Millisecond)
+			server.Exit("w1:p1")
+			r := <-res
+			if !reflect.DeepEqual(r.err, hostErr(agent.HostExitedAtStart, "claude")) {
+				t.Fatalf("%#v", r.err)
+			}
+			if time.Since(began) >= 3*time.Second {
+				t.Fatal(time.Since(began))
+			}
+		})
 	}
-	if time.Since(began) >= 3*time.Second {
-		t.Fatal(time.Since(began))
+}
+
+// Herdr 0.9.x keeps an agent launch_pending while it is blocked on a dialog (Claude Code's
+// folder trust), where 0.7.5 cleared launch_pending first: on 22 a detected, blocked agent
+// counts as started (its screen can be read and answered); on 17 the start still waits.
+func TestAnAgentBlockedOnADialogWhileLaunchingIsStartedOn22(t *testing.T) {
+	for _, c := range []struct {
+		p       uint32
+		started bool
+	}{{17, false}, {22, true}} {
+		t.Run(fmt.Sprint(c.p), func(t *testing.T) {
+			t.Parallel()
+			server := herdrtest.StartProtocol(t, c.p)
+			server.ManualReady()
+			server.HoldPending()
+			h := newTestHost(t, server)
+			h.startTimeout = 1500 * time.Millisecond
+			res := startAsync(h, bg, spec("coordinator"))
+			time.Sleep(200 * time.Millisecond)
+			server.BlockOnDialog("w1:p1")
+			r := <-res
+			if !c.started {
+				if !agent.IsHostError(r.err, agent.HostTimeout) {
+					t.Fatalf("%#v", r.err)
+				}
+				return
+			}
+			if r.err != nil || r.info.Status != agent.PaneBlocked {
+				t.Fatalf("%+v %#v", r.info, r.err)
+			}
+			if screen, err := h.Read(bg, "coordinator", 5); err != nil || screen == "" {
+				t.Fatalf("%q %v", screen, err)
+			}
+			if err := h.SendKeys(bg, "coordinator", []string{"Enter"}); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 

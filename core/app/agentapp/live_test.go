@@ -79,6 +79,8 @@ func TestLiveDelegationEndToEnd(t *testing.T) {
 	s.ProjectsRoot = filepath.Join(tmp, "projects")
 	s.Workers.Enabled = false
 	s.Warm = false
+	// The app keeps agent panes on quit by default; this smoke checks that Shutdown closes them.
+	s.KeepPanesOnQuit = false
 	haiku := "haiku"
 	s.Model = &haiku
 	if err := os.MkdirAll(s.ProjectsRoot, 0o755); err != nil {
