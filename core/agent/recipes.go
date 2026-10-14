@@ -265,7 +265,7 @@ func WorkerName(repoDir, hint, task string, taken []string) (string, string, boo
 // WorkerBrief is the first prompt a worker gets: its rules and its task (it sees nothing else).
 // Rename (spec §6): "the DeskPixie coordinator"; #68: the branch prefix is `pixie/`.
 func WorkerBrief(repo, slug, task string) string {
-	return "You are a worker for the DeskPixie coordinator. You are in a git worktree of " + repo + ", on branch " + BranchPrefix + slug + ".\n" +
+	return "You are a worker for the DeskPixie coordinator. You are in a git worktree of " + repo + ", on its own branch (" + BranchPrefix + slug + ", or " + LegacyBranchPrefix + slug + " for a worktree from before the rename).\n" +
 		"\n" +
 		"Rules:\n" +
 		"- Work only in this worktree. Commit your work on this branch when it is ready. Never push, publish or deploy.\n" +
