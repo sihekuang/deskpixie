@@ -147,6 +147,8 @@ type Input struct {
 	// Keep (InRestored): the coordinator was kept running over the quit (agent.keepPanesOnQuit).
 	Keep bool
 	Plan WorkerPlan
+	// Memories (InRestored): memories.jsonl's lines.
+	Memories []string
 }
 
 // RestoredInput: keep says the coordinator was kept running over the quit: its open jobs stay
@@ -282,6 +284,7 @@ type AgentController struct {
 	inbox       *Inbox
 	router      *Router
 	outbox      *Outbox
+	memories    *MemoryLog
 	confirms    *Confirmations
 	narrator    *Narrator
 	voiceOpen   bool
@@ -330,6 +333,7 @@ func NewAgentController(settings Settings) *AgentController {
 		jobs:     NewJobTable(),
 		inbox:    NewInbox(),
 		outbox:   NewOutbox(),
+		memories: NewMemoryLog(),
 		workers:  NewWorkers(),
 	}
 }
@@ -348,6 +352,9 @@ func (c *AgentController) Snapshot(now Millis) []JobView { return c.jobs.Snapsho
 
 // RecentJobs are the open jobs and those updated since `since`, oldest first (Bit's memory).
 func (c *AgentController) RecentJobs(since Millis) []Job { return c.jobs.Recent(since) }
+
+// RecentMemories are the newest n memories, oldest first.
+func (c *AgentController) RecentMemories(n int) []Memory { return c.memories.Recent(n) }
 
 func (c *AgentController) OpenJobs() []JobID {
 	var out []JobID
@@ -390,6 +397,8 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 	switch in.Kind {
 	case InRestored:
 		c.restore(in.Jobs, in.Outbox, in.Keep, now, &fx)
+		c.memories = RestoreMemoryLog(in.Memories)
+		fx = append(fx, Effect{Kind: EfRewrite, File: MemoriesFile, Lines: c.memories.Lines()})
 	case InDelegate:
 		c.delegate(in.Job, in.Task, in.Context, now, &fx)
 	case InCancel:
@@ -837,7 +846,11 @@ func (c *AgentController) onStop(message string, now Millis, fx *[]Effect) {
 	c.promptFailures = 0
 	c.watchdog = nil
 	c.settleAt = someMs(now + StopSettleMs)
+	memory, memoryRef, hasMemory := ParseMemory(message)
+	message = StripMemory(message)
+	tokens := c.pendingTokens()
 	blocks := ParseSpoken(message)
+	c.rememberTurn(message, blocks, answered, memory, memoryRef, hasMemory, tokens, now, fx)
 	refless := true
 	for _, b := range blocks {
 		if b.Reference != nil {
@@ -850,6 +863,63 @@ func (c *AgentController) onStop(message string, now Millis, fx *[]Effect) {
 		c.onReferencedStop(blocks, now, fx)
 	}
 	c.flush(now, fx)
+}
+
+// rememberTurn keeps exactly one memory of a finished coordinator turn: its <memory> block, or
+// else one made from what it said and the task of the job it was about.
+func (c *AgentController) rememberTurn(message string, blocks []Spoken, answered []JobID, memory string, memoryRef *string,
+	hasMemory bool, tokens []string, now Millis, fx *[]Effect) {
+	known := func(ref *string) (JobID, bool) {
+		if ref == nil {
+			return "", false
+		}
+		id, ok := ParseJobID(*ref)
+		if !ok {
+			return "", false
+		}
+		_, ok = c.jobs.Get(id)
+		return id, ok
+	}
+	m := Memory{At: now, Source: MemorySourceCoordinator}
+	if id, ok := known(memoryRef); ok {
+		m.Job = &id
+	}
+	if !hasMemory {
+		m.Source = MemorySourceFallback
+		for _, b := range blocks {
+			if id, ok := known(b.Reference); ok {
+				m.Job = &id
+				break
+			}
+		}
+		if m.Job == nil && len(answered) > 0 {
+			m.Job = &answered[0]
+		}
+		var said []string
+		for _, b := range blocks {
+			said = append(said, b.Text)
+		}
+		if len(blocks) == 0 {
+			said = append(said, SpokenFallback(message))
+		}
+		task := ""
+		if m.Job != nil {
+			if j, ok := c.jobs.Get(*m.Job); ok {
+				task = strings.TrimPrefix(j.Task, RecallPrefix)
+			}
+		}
+		memory = FallbackMemory(task, strings.Join(said, " "))
+	}
+	// A confirm word must never outlive its question.
+	m.Text = CapMemory(maskPendingTokens(memory, tokens))
+	if m.Text == "" {
+		m.Text = noReplyMemory
+	}
+	if line, trimmed := c.memories.Add(m); trimmed {
+		*fx = append(*fx, Effect{Kind: EfRewrite, File: MemoriesFile, Lines: c.memories.Lines()})
+	} else {
+		*fx = append(*fx, Effect{Kind: EfAppend, File: MemoriesFile, Line: line})
+	}
 }
 
 // onUnreferencedStop handles a reply with no <spoken> block, or only ref-less ones; the last

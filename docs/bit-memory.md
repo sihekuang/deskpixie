@@ -11,7 +11,7 @@ two ways. Both exist only when delegation is on (`agent.enabled`).
   last spoken reply or question (`Job.Reply`, new field in `agent/jobs.jsonl`), the failure
   reason, or the latest progress. Open jobs always, closed ones updated in the last 24 h
   (`MemoryWindowMs`), at most 10 (`MemoryMaxJobs`), each line cut to 300 characters, the block
-  capped at 2000 characters (~500 tokens; open jobs first, then the newest). Recall questions
+  capped as below (open jobs first, then the newest). Recall questions
   are left out. Jobs themselves are kept 14 days (`RetentionMs`) as before.
 - **`recall` voice tool** (`agent.Recall`): when the user refers to something the conversation
   and the block don't cover, Bit asks the coordinator with a short question. It goes the
@@ -20,6 +20,20 @@ two ways. Both exist only when delegation is on (`agent.enabled`).
   with `status="done"`. The conversation stays open (like a `Check:` fact) and the answer
   arrives as an ordinary "Agent reply:" line. It is as fast as the coordinator's next turn: if
   the coordinator is busy, the question waits for that turn to end.
+- **Per-turn memories** (`core/agent/memories.go`): every finished coordinator turn, with or
+  without a job ref, leaves exactly one memory in `agent/memories.jsonl`. The coordinator writes
+  it as a `<memory ref="job_…">…</memory>` block next to its `<spoken>` blocks (rule in
+  `coordinator.md`); it is parsed in `onStop`, stripped before anything is spoken, and masked
+  for pending confirm words. A turn without one gets a fallback from the job's task and the
+  turn's spoken text (or the reply's first sentences). A block was chosen over an MCP
+  `remember` tool because it arrives in the same Stop message as the turn it describes: no
+  correlation, nothing lost if the MCP server is down, and exactly one per turn is simple.
+  - **Limits, enforced on write and again on load:** cleaned like `<spoken>`, one sentence,
+    at most 25 words (`MemoryMaxWords`) and 200 bytes (`MemoryMaxBytes`), cut on a word with
+    "…". At most 200 kept (`MemoryMaxKept`), oldest trimmed; survives restarts.
+  - The session block adds up to 10 of the newest after the jobs (a fallback memory of a job
+    already listed is skipped), the whole block capped at 2600 characters (~650 tokens; jobs
+    at most 1500). A `recall` request carries the newest 30 to the coordinator.
 
 `persona.md` and `delegation.md` tell Bit to use these rather than ask the user to repeat
 context.

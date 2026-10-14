@@ -211,7 +211,9 @@ func NewRuntimeWithWorkers(deps Deps, cfg RuntimeConfig, workers *WorkerDeps) *A
 	}
 	outbox := deps.Store.Load(OutboxFile)
 	keptCoordinator := cfg.Kept.CoordinatorToken != ""
-	h.Input(RestoredInput(jobs, outbox, keptCoordinator))
+	restored := RestoredInput(jobs, outbox, keptCoordinator)
+	restored.Memories = deps.Store.Load(MemoriesFile)
+	h.Input(restored)
 	if len(h.left) > 0 {
 		deps.Store.Rewrite(LiveWorktreesFile, []string{})
 	}

@@ -2,13 +2,15 @@ package agent
 
 // Bit's memory comes from the coordinator side: Bit keeps no record of its own. Each voice
 // session (every connect, any provider) gets a compact "Recent work with the agent" block built
-// from the job table (task, status, the coordinator's last reply or progress), and the `recall`
-// tool asks the coordinator itself about earlier talks, through the delegate path.
+// from the job table (task, status, the coordinator's last reply or progress) and the
+// coordinator's per-turn memories (memories.go), and the `recall` tool asks the coordinator
+// itself about earlier talks, through the delegate path, with its newest memories attached.
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -23,20 +25,31 @@ const (
 	MemoryMaxJobs = 10
 	// MemoryEntryChars: each job's line is cut to this many characters.
 	MemoryEntryChars = 300
-	// MemoryBudgetChars bounds the block (~4 characters a token, so ~500 tokens).
-	MemoryBudgetChars = 2000
+	// MemoryJobsBudgetChars bounds the jobs part of the block.
+	MemoryJobsBudgetChars = 1500
+	// MemoryMaxNotes: at most this many of the coordinator's memories follow the jobs.
+	MemoryMaxNotes = 10
+	// MemoryBudgetChars bounds the whole block (~4 characters a token, so ~650 tokens).
+	MemoryBudgetChars = 2600
+	// RecallNotes: this many of the newest memories go with a recall question.
+	RecallNotes = 30
 	// RecallPrefix marks a recall question in the job's task (and to the coordinator).
 	RecallPrefix = "Recall: "
 )
 
-const memoryHeader = "Recent work with the agent (from its job records, oldest first; times are local). " +
-	"Use it as background so the user needn't repeat themselves; don't recite it unless asked. " +
-	"For anything else about earlier talks, call recall:"
+const (
+	memoryHeader = "Recent work with the agent (from its job records, oldest first; times are local). " +
+		"Use it as background so the user needn't repeat themselves; don't recite it unless asked. " +
+		"For anything else about earlier talks, call recall:"
+	notesHeader = "Recent work with the agent, in its own notes of its latest turns (oldest first):"
+)
 
-// MemoryFacts is the session block for jobs (oldest first): open jobs first, then the most
-// recently updated, within MemoryMaxJobs and MemoryBudgetChars, listed oldest first; "" when
-// there is nothing. Recall questions are left out.
-func MemoryFacts(jobs []Job, now Millis, loc *time.Location) string {
+// MemoryFacts is the session block: jobs (open first, then the most recently updated, within
+// MemoryMaxJobs and MemoryJobsBudgetChars) and then the newest memories (at most
+// MemoryMaxNotes, skipping fallback memories of a job already listed), the whole within
+// MemoryBudgetChars, each list oldest first; "" when there is nothing. Recall questions are left
+// out of the jobs.
+func MemoryFacts(jobs []Job, memories []Memory, now Millis, loc *time.Location) string {
 	var open, closed []Job
 	for _, j := range jobs {
 		switch {
@@ -48,13 +61,15 @@ func MemoryFacts(jobs []Job, now Millis, loc *time.Location) string {
 		}
 	}
 	// Open jobs win the budget, then the newest closed ones.
-	var picked []Job
+	keep := map[JobID]bool{}
 	used := utf8.RuneCountInString(memoryHeader)
+	picked := 0
 	take := func(j Job) {
 		n := utf8.RuneCountInString(memoryLine(j, now, loc)) + 1
-		if len(picked) < MemoryMaxJobs && used+n <= MemoryBudgetChars {
+		if picked < MemoryMaxJobs && used+n <= MemoryJobsBudgetChars {
 			used += n
-			picked = append(picked, j)
+			picked++
+			keep[j.ID] = true
 		}
 	}
 	for _, j := range open {
@@ -63,21 +78,45 @@ func MemoryFacts(jobs []Job, now Millis, loc *time.Location) string {
 	for k := len(closed) - 1; k >= 0; k-- {
 		take(closed[k])
 	}
-	if len(picked) == 0 {
-		return ""
-	}
-	// Back in the order they were delegated.
-	keep := map[JobID]bool{}
-	for _, j := range picked {
-		keep[j.ID] = true
-	}
-	var lines []string
-	for _, j := range jobs {
-		if keep[j.ID] {
-			lines = append(lines, memoryLine(j, now, loc))
+	var sections []string
+	if picked > 0 {
+		// Back in the order they were delegated.
+		lines := []string{memoryHeader}
+		for _, j := range jobs {
+			if keep[j.ID] {
+				lines = append(lines, memoryLine(j, now, loc))
+			}
 		}
+		sections = append(sections, strings.Join(lines, "\n"))
+	} else {
+		used = 0
 	}
-	return memoryHeader + "\n" + strings.Join(lines, "\n")
+	// Then the newest notes, in what is left.
+	used += utf8.RuneCountInString(notesHeader) + 2
+	var notes []string
+	for k := len(memories) - 1; k >= 0 && len(notes) < MemoryMaxNotes; k-- {
+		m := memories[k]
+		if m.Source == MemorySourceFallback && m.Job != nil && keep[*m.Job] {
+			continue
+		}
+		line := noteLine(m, now, loc)
+		n := utf8.RuneCountInString(line) + 1
+		if used+n > MemoryBudgetChars {
+			break
+		}
+		used += n
+		notes = append(notes, line)
+	}
+	if len(notes) > 0 {
+		slices.Reverse(notes)
+		sections = append(sections, notesHeader+"\n"+strings.Join(notes, "\n"))
+	}
+	return strings.Join(sections, "\n\n")
+}
+
+// noteLine is "- [3:04 PM] <memory>".
+func noteLine(m Memory, now Millis, loc *time.Location) string {
+	return fmt.Sprintf("- [%s] %s", memoryStamp(m.At, now, loc), m.Text)
 }
 
 // memoryLine is "- [3:04 PM] done: <task>. Reply: <reply>", cut to MemoryEntryChars.
@@ -123,13 +162,35 @@ func (h *AgentHandle) Facts() string {
 	}
 	h.ctlMu.Lock()
 	jobs := h.ctl.RecentJobs(since)
+	memories := h.ctl.RecentMemories(MemoryMaxNotes + MemoryMaxJobs)
 	h.ctlMu.Unlock()
-	return MemoryFacts(jobs, now, time.Local)
+	return MemoryFacts(jobs, memories, now, time.Local)
+}
+
+// recallContext is what goes with a recall question: what it is, and the newest memories, so
+// the answer holds even if the coordinator's own conversation was lost.
+func (h *AgentHandle) recallContext() string {
+	now := h.deps.Clock.NowMs()
+	h.ctlMu.Lock()
+	memories := h.ctl.RecentMemories(RecallNotes)
+	h.ctlMu.Unlock()
+	if len(memories) == 0 {
+		return recallContext
+	}
+	lines := []string{recallContext, "Your saved memories of recent turns (oldest first):"}
+	for _, m := range memories {
+		line := noteLine(m, now, time.Local)
+		if m.Job != nil {
+			line += " [" + string(*m.Job) + "]"
+		}
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // recallContext tells the coordinator a recall is a question about the past, not work.
 const recallContext = "This is a context question from Bit, not a task: answer it from what you remember of " +
-	"earlier requests and conversations with the user (and your notes or job history if needed). Don't " +
+	"earlier requests and conversations with the user (and your saved memories below or job history if needed). Don't " +
 	"start any work. Reply at once with status done, in one or two sentences; if you don't know, say so."
 
 // Recall is the `recall` tool: Bit asks the coordinator about earlier talks. It goes the
@@ -156,7 +217,7 @@ func (r Recall) Invoke(_ context.Context, raw json.RawMessage) voice.ToolOutcome
 	if question == "" {
 		return toolReply(map[string]any{"error": "question is required"})
 	}
-	id, err := r.H.Delegate(RecallPrefix+question, recallContext)
+	id, err := r.H.Delegate(RecallPrefix+question, r.H.recallContext())
 	if err != nil {
 		return toolError(err)
 	}

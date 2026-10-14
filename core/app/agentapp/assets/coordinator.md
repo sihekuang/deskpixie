@@ -41,3 +41,18 @@ End every reply with one `<spoken>` block per request you worked on in that turn
   `<spoken ref="…" status="failed">Stopped.</spoken>`.
 
 Do not use the AskUserQuestion tool; ask with `status="question"` instead.
+
+## Memory (required)
+
+End every turn, whatever it was about, with exactly one memory block after your `<spoken>`
+blocks: what was asked, decided or done, for you and Bit to remember later.
+
+    <memory ref="job_0123456789ab">The person chose the blue logo; the mockups are in the canvas.</memory>
+
+- One sentence, at most 25 words (and 200 bytes): longer ones are cut. Plain words, no
+  markdown, no code, no URLs.
+- `ref` is optional: the job it is about, exactly as given.
+- It is never spoken. If you leave it out, the app records one from your `<spoken>` text and
+  the task instead.
+- Bit gets the newest memories at the start of each conversation, and with each `Recall:`
+  request.

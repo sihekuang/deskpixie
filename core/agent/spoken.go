@@ -128,15 +128,18 @@ func SpokenFallback(message string) string {
 }
 
 // findOpenTag finds `<spoken` followed by whitespace or `>` (so `<spokenword>` doesn't count).
-func findOpenTag(s string) (int, bool) {
+func findOpenTag(s string) (int, bool) { return findTag(s, "<spoken") }
+
+// findTag finds open (e.g. `<spoken`) followed by whitespace or `>`.
+func findTag(s, open string) (int, bool) {
 	from := 0
 	for {
-		i := strings.Index(s[from:], "<spoken")
+		i := strings.Index(s[from:], open)
 		if i < 0 {
 			return 0, false
 		}
 		at := from + i
-		c, size := utf8.DecodeRuneInString(s[at+len("<spoken"):])
+		c, size := utf8.DecodeRuneInString(s[at+len(open):])
 		if size > 0 && (c == '>' || unicode.IsSpace(c)) {
 			return at, true
 		}

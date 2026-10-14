@@ -33,7 +33,7 @@ func TestMemoryFactsListsJobsWithTheirLastReply(t *testing.T) {
 	failed.Reason = strp("the agent stopped")
 	working := memJob(3, "draft the newsletter", JobWorking, memNow-60_000)
 	working.LastProgress = strp("Writing the intro.")
-	got := MemoryFacts([]Job{done, failed, working}, memNow, time.UTC)
+	got := MemoryFacts([]Job{done, failed, working}, nil, memNow, time.UTC)
 	want := []string{
 		"- [11:00 AM] done: summarise the open issues. Reply: There are 12 open issues; 3 are bugs.",
 		"- [Mon 6:00 AM] failed: deploy the site. Why: the agent stopped",
@@ -42,7 +42,7 @@ func TestMemoryFactsListsJobsWithTheirLastReply(t *testing.T) {
 	if !strings.HasPrefix(got, "Recent work with the agent") || !strings.HasSuffix(got, strings.Join(want, "\n")) {
 		t.Fatal(got)
 	}
-	if MemoryFacts(nil, memNow, time.UTC) != "" {
+	if MemoryFacts(nil, nil, memNow, time.UTC) != "" {
 		t.Fatal("no jobs, no block")
 	}
 }
@@ -57,7 +57,7 @@ func TestMemoryFactsKeepsOpenJobsAndTheNewestWithinTheBudget(t *testing.T) {
 		jobs = append(jobs, j)
 	}
 	jobs = append(jobs, memJob(41, "Recall: what did we decide about the logo?", JobDone, memNow))
-	got := MemoryFacts(jobs, memNow, time.UTC)
+	got := MemoryFacts(jobs, nil, memNow, time.UTC)
 	if len([]rune(got)) > MemoryBudgetChars {
 		t.Fatalf("%d chars", len([]rune(got)))
 	}
