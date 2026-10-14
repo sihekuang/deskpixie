@@ -1360,3 +1360,31 @@ func TestTheHostRefusesMismatchedVersions(t *testing.T) {
 		})
 	}
 }
+
+// Herdr 0.9.x refuses a whole events.subscribe naming a pane that no longer exists
+// (pane_not_found); 0.7.5 accepted it. A pane gone without an event must not stop every
+// status event: it is reported exited once and the stream resubscribes without it.
+func TestASubscriptionRefusedForAGonePaneRecoversOnEveryProtocol(t *testing.T) {
+	for _, p := range []uint32{17, 22} {
+		t.Run(fmt.Sprint(p), func(t *testing.T) {
+			t.Parallel()
+			server := herdrtest.StartProtocol(t, p)
+			h := newTestHost(t, server)
+			events := h.Subscribe()
+			mustStart(t, h, "coordinator")
+			gone := mustStart(t, h, "second")
+			collect(events, 300*time.Millisecond)
+			server.Vanish(gone.Pane)
+			server.HangUp()
+			got := collect(events, BackoffMin+1600*time.Millisecond)
+			if count(got, exitedEv("second")) != 1 {
+				t.Fatalf("%+v", got)
+			}
+			if err := h.Prompt(bg, "coordinator", "hi"); err != nil {
+				t.Fatal(err)
+			}
+			got = collect(events, 600*time.Millisecond)
+			wantEvents(t, got, []agent.PaneEvent{st("coordinator", agent.PaneWorking), st("coordinator", agent.PaneIdle)}, "live after the refusal")
+		})
+	}
+}

@@ -9,6 +9,8 @@ import "github.com/sihekuang/deskpixie/core/agent"
 //     0.9.4); start retries it on both.
 //   - Read uses agent.read's "visible" source on both ("recent" came back empty on 0.7.5).
 //   - launch_pending outlasts detection by a few seconds on both: start waits it out.
+//   - 0.9.x refuses a whole events.subscribe naming a pane that is gone (pane_not_found); the
+//     pump drops that pane and resubscribes (Host.dropGonePane), which is a no-op on 0.7.5.
 type Behavior struct {
 	// ExitDropsName: an agent process that exits takes its name with it (agent.get answers
 	// agent_not_found) instead of leaving its pane named without an agent. 0.9.x.

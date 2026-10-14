@@ -10,8 +10,8 @@ package agentapp_test
 // never the app's "deskpixie"), the hook server on a free loopback port (never 48217: the
 // running app holds it), temp app data and projects root. A trivial task is delegated through
 // the voice tool; the coordinator's Stop-hook reply must reach the voice loop as an injected
-// "Agent reply: Pong." (any case or punctuation); any other injection mentioning pong (the
-// task echoed back in a failure) fails. Shutdown then denies anything pending, closes the panes
+// "Agent reply: Pong." (any case or punctuation); any other Agent reply (such as the failure
+// notice, which echoes the task) fails. Shutdown then denies anything pending, closes the panes
 // and deletes the MCP configs. The smoke session is stopped and deleted at the end.
 
 import (
@@ -142,21 +142,22 @@ func TestLiveDelegationEndToEnd(t *testing.T) {
 		t.Fatalf("delegate failed: %s", out.Output)
 	}
 
-	// Only the coordinator's own answer counts: an "Agent reply:" whose text is just "pong".
-	// Anything else that mentions pong (e.g. "The agent stopped before finishing: Reply with the
-	// word pong…" when the coordinator never started) fails the test.
+	// Only the coordinator's own answer counts: an "Agent reply:" whose text is just "pong". Any
+	// other Agent reply (e.g. "The agent stopped before finishing: Reply with the word pong…"
+	// when the coordinator never started) fails at once; progress lines are ignored.
 	deadline := time.Now().Add(4 * time.Minute)
 	reply := ""
 	for reply == "" {
 		for _, text := range v.all() {
-			if body, ok := strings.CutPrefix(text, "Agent reply:"); ok && isPong(body) {
-				reply = text
+			body, ok := strings.CutPrefix(text, "Agent reply:")
+			if !ok {
 				continue
 			}
-			if strings.Contains(strings.ToLower(text), "pong") {
+			if !isPong(body) {
 				notesMu.Lock()
 				t.Fatalf("the voice loop got %q, not an Agent reply of pong; injected %q; notifications %q; tray %+v", text, v.all(), notes, a.Tray())
 			}
+			reply = text
 		}
 		if reply != "" {
 			break

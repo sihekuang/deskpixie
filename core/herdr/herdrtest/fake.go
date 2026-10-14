@@ -261,6 +261,12 @@ func (f *FakeHerdr) serveEvents(c net.Conn, r *bufio.Reader, params map[string]a
 		<-f.closed
 		return
 	}
+	if missing := f.missingPane(params); missing != "" {
+		// Like Herdr 0.9.x: a subscription naming a pane that doesn't exist is refused whole.
+		b, _ := json.Marshal(map[string]any{"id": "am_events", "error": map[string]any{"code": "pane_not_found", "message": fmt.Sprintf("pane %s not found", missing)}})
+		c.Write(append(b, '\n'))
+		return
+	}
 	if _, err := c.Write([]byte(`{"id":"am_events","result":{"type":"subscription_started"}}` + "\n")); err != nil {
 		return
 	}
@@ -304,6 +310,27 @@ func (f *FakeHerdr) serveEvents(c net.Conn, r *bufio.Reader, params map[string]a
 			return
 		}
 	}
+}
+
+// missingPane is the first pane a subscription names that doesn't exist, on 0.9.x ("" on
+// 0.7.5, which accepts them).
+func (f *FakeHerdr) missingPane(params map[string]any) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.protocol == 17 {
+		return ""
+	}
+	subs, _ := params["subscriptions"].([]any)
+	for _, s := range subs {
+		if m, ok := s.(map[string]any); ok {
+			if p, ok := m["pane_id"].(string); ok {
+				if _, exists := f.panes[p]; !exists {
+					return p
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // Requests returns the params of every request for method, oldest first.
