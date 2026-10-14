@@ -32,7 +32,7 @@ make -C mac release VERSION=0.4.0 \
 
 Output: `mac/build/Build/Products/Release/DeskPixie.app`. `make release` ends with
 `verify-release` (codesign `--deep --strict`, `libdeskpixie.dylib` + `libdf.dylib` in
-`Contents/Frameworks`, `DeepFilterNet3.tar.gz` + `design-system` + `mascots` in
+`Contents/Frameworks`, `DeepFilterNet3.tar.gz` + `design-system` + `pixies` in
 `Contents/Resources`, every `@rpath` dependency resolvable, audio-input entitlement). With a
 real identity the bundled dylibs are re-signed with the same identity, `--timestamp` and the
 hardened runtime, which notarization requires. `BUILD_NUMBER` (CFBundleVersion) defaults to the
