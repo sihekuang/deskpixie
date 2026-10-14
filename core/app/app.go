@@ -71,7 +71,7 @@ type Deps struct {
 	Emit func(kind string, event []byte)
 	// Providers is the voice provider registry; nil = Providers().
 	Providers map[string]ModelFactory
-	// Secrets finds API keys; nil = env, then Keychain values (secrets.keychain), then .env in
+	// Secrets finds API keys; nil = Keychain values (secrets.keychain), then env, then .env in
 	// the cwd and AppSupport.
 	Secrets voice.SecretSource
 	// Run starts a program without waiting (open the pages folder, reveal settings.json).

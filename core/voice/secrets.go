@@ -1,7 +1,7 @@
 package voice
 
-// API keys from the environment, then Keychain values handed over by the app, then .env
-// files. Never logs values.
+// API keys from the Keychain values handed over by the app (a key typed in Settings wins),
+// then the environment, then .env files. Never logs values.
 // Port of ai-mascot crates/voice-core/src/env_secrets.rs (+ the SecretSource trait).
 
 import (
@@ -52,8 +52,8 @@ const (
 	SourceDotenv   = "dotenv"
 )
 
-// EnvSecrets looks in the process environment first, then in the Keychain values the app
-// handed over (SetKeychain), then in each .env file in order. Every lookup reads afresh, so a
+// EnvSecrets looks in the Keychain values the app handed over (SetKeychain) first, then in
+// the process environment, then in each .env file in order. Every lookup reads afresh, so a
 // changed key applies to the next connect.
 type EnvSecrets struct {
 	dotenvPaths []string
@@ -106,14 +106,14 @@ func (s *EnvSecrets) lookup(provider string) (Secret, string) {
 	if !ok {
 		return Secret{}, SourceNone
 	}
-	if v, ok := s.env(name); ok && strings.TrimSpace(v) != "" {
-		return NewSecret(strings.TrimSpace(v)), SourceEnv
-	}
 	s.mu.RLock()
-	v, ok := s.keychain[name]
+	kc, ok := s.keychain[name]
 	s.mu.RUnlock()
 	if ok {
-		return NewSecret(v), SourceKeychain
+		return NewSecret(kc), SourceKeychain
+	}
+	if v, ok := s.env(name); ok && strings.TrimSpace(v) != "" {
+		return NewSecret(strings.TrimSpace(v)), SourceEnv
 	}
 	for _, p := range s.dotenvPaths {
 		b, err := os.ReadFile(p)

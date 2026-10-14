@@ -132,7 +132,7 @@ func TestSecretsReportsFoundOrMissing(t *testing.T) {
 	}
 }
 
-// --- Keychain values (#59): environment → Keychain → .env ---
+// --- Keychain values (#59): Keychain → environment → .env (a key typed in Settings wins) ---
 
 func writeDotenv(t *testing.T, text string) string {
 	t.Helper()
@@ -143,30 +143,29 @@ func writeDotenv(t *testing.T, text string) string {
 	return path
 }
 
-func TestKeychainValuesSitBetweenTheEnvironmentAndDotenv(t *testing.T) {
+func TestKeychainBeatsTheEnvironmentWhichBeatsDotenv(t *testing.T) {
 	path := writeDotenv(t, "OPENAI_API_KEY=sk-fake-file\nGEMINI_API_KEY=g-fake-file\n")
 	src := NewEnvSecretsWithLookup([]string{path}, func(name string) (string, bool) {
 		return "sk-fake-env", name == "OPENAI_API_KEY"
 	})
 	src.SetKeychain(map[string]string{"OPENAI_API_KEY": "sk-fake-kc", "GEMINI_API_KEY": "g-fake-kc"})
-	if k, ok := src.APIKey("openai-realtime"); !ok || k.Expose() != "sk-fake-env" {
-		t.Fatalf("env should beat keychain, got %q", k.Expose())
+	for _, p := range []string{"openai-realtime", "gemini-live"} {
+		if src.Source(p) != SourceKeychain {
+			t.Fatalf("%s: keychain should win, got %q", p, src.Source(p))
+		}
 	}
-	if k, ok := src.APIKey("gemini-live"); !ok || k.Expose() != "g-fake-kc" {
+	if k, _ := src.APIKey("openai-realtime"); k.Expose() != "sk-fake-kc" {
+		t.Fatalf("keychain should beat env, got %q", k.Expose())
+	}
+	if k, _ := src.APIKey("gemini-live"); k.Expose() != "g-fake-kc" {
 		t.Fatalf("keychain should beat .env, got %q", k.Expose())
 	}
-	if got := src.Source("openai-realtime"); got != SourceEnv {
-		t.Fatal(got)
-	}
-	if got := src.Source("gemini-live"); got != SourceKeychain {
-		t.Fatal(got)
-	}
 	src.SetKeychain(nil)
-	if k, _ := src.APIKey("gemini-live"); k.Expose() != "g-fake-file" {
-		t.Fatalf(".env after keychain cleared, got %q", k.Expose())
+	if k, _ := src.APIKey("openai-realtime"); k.Expose() != "sk-fake-env" || src.Source("openai-realtime") != SourceEnv {
+		t.Fatalf("env should beat .env, got %q", k.Expose())
 	}
-	if got := src.Source("gemini-live"); got != SourceDotenv {
-		t.Fatal(got)
+	if k, _ := src.APIKey("gemini-live"); k.Expose() != "g-fake-file" || src.Source("gemini-live") != SourceDotenv {
+		t.Fatalf(".env last, got %q", k.Expose())
 	}
 }
 
