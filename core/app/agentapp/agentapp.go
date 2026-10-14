@@ -26,6 +26,7 @@ import (
 	"github.com/sihekuang/deskpixie/core/agent/proc"
 	"github.com/sihekuang/deskpixie/core/app"
 	"github.com/sihekuang/deskpixie/core/settings"
+	"github.com/sihekuang/deskpixie/core/tmux"
 	"github.com/sihekuang/deskpixie/core/voice"
 )
 
@@ -191,7 +192,7 @@ func Build(c Config) *Agent {
 	ws := SetupWorkers(s.Workers, s.ProjectsRoot, c.Home)
 	workersOn := ws.Policy.Enabled
 	// tmux detects no agent status: Claude agents report theirs through hooks.
-	if err := InstallFor(paths, s.Port, ws.Root, s.SessionHost == "tmux"); err != nil {
+	if err := InstallFor(paths, s.Port, ws.Root, s.SessionHost == tmux.Name); err != nil {
 		log.Printf("agent: invalid settings: %v", err)
 		setProblem("Agent: invalid settings (see log)")
 	}

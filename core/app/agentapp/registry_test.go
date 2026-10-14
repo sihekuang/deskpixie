@@ -21,7 +21,7 @@ import (
 func noHint(string) {}
 
 func TestRegistriesNameTheShippedAdapters(t *testing.T) {
-	if got := slices.Sorted(keys(SessionHosts())); !reflect.DeepEqual(got, []string{"herdr"}) {
+	if got := slices.Sorted(keys(SessionHosts())); !reflect.DeepEqual(got, []string{"herdr", "tmux"}) {
 		t.Fatal(got)
 	}
 	if got := slices.Sorted(keys(Terminals())); !reflect.DeepEqual(got, []string{"iterm", "warp"}) {
@@ -52,6 +52,66 @@ func TestAMissingHerdrIsNotFound(t *testing.T) {
 	s.HerdrPath = &p
 	_, err := SessionHosts()["herdr"](HostDeps{Settings: s, Home: "/nonexistent-home", Runner: &agenttest.FakeRunner{}, Hint: noHint})
 	if !agent.IsHostError(err, agent.HostNotFound) {
+		t.Fatal(err)
+	}
+}
+
+func TestAMissingTmuxIsNotFoundNamingTmux(t *testing.T) {
+	s := settings.Default().Agent
+	s.SessionHost = "tmux"
+	p := "/definitely/not/tmux"
+	s.TmuxPath = &p
+	_, err := SessionHosts()["tmux"](HostDeps{Settings: s, Home: "/nonexistent-home", Runner: &agenttest.FakeRunner{}, Hint: noHint})
+	if !agent.IsHostError(err, agent.HostNotFound) || HostProblem(err) != "Agent: tmux not found" {
+		t.Fatal(err)
+	}
+}
+
+// The tmux host runs the found tmux on its own socket with the scrubbed environment, and is
+// not wrapped (no integration hint: its hooks are DeskPixie's own).
+func TestTheTmuxHostRunsTheConfiguredTmuxOnItsOwnSocket(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "tmux")
+	if err := os.WriteFile(bin, nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s := settings.Default().Agent
+	s.SessionHost, s.TmuxPath = "tmux", &bin
+	runner := &agenttest.FakeRunner{}
+	runner.Answer(bin+" -V", agenttest.Ok("tmux 3.5a\n"), nil)
+	runner.Answer(bin+" -L deskpixie has-session -t =deskpixie", agenttest.Ok(""), nil)
+	hinted := false
+	h, err := SessionHosts()["tmux"](HostDeps{Settings: s, Home: dir, Runner: runner, Hint: func(string) { hinted = true },
+		Environ: []string{"PATH=/usr/bin", "ANTHROPIC_API_KEY=k", "TMUX=/tmp/x", "LANG=C"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer shutdownHost(h)
+	if h.Name() != "tmux" {
+		t.Fatal(h.Name())
+	}
+	if _, wrapped := h.(*IntegrationCheck); wrapped {
+		t.Fatal("no integration check for tmux")
+	}
+	if err := h.EnsureSession(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if hinted {
+		t.Fatal("no hint")
+	}
+	ran := runner.Ran()
+	if len(ran) != 2 || !reflect.DeepEqual(ran[1].Argv, []string{bin, "-L", "deskpixie", "has-session", "-t", "=deskpixie"}) {
+		t.Fatal(ran)
+	}
+	want := []agent.EnvVar{{Key: "LANG", Value: "C"}, {Key: "PATH", Value: "/usr/bin:" + filepath.Join(dir, ".local/bin") + ":/opt/homebrew/bin:/usr/local/bin"}}
+	if !reflect.DeepEqual(ran[1].Env, want) {
+		t.Fatal(ran[1].Env)
+	}
+	if got := h.AttachCommand(); !reflect.DeepEqual(got, []string{bin, "-L", "deskpixie", "attach", "-t", "deskpixie"}) {
+		t.Fatal(got)
+	}
+	s.Session = "default"
+	if _, err := SessionHosts()["tmux"](HostDeps{Settings: s, Home: dir, Runner: runner, Hint: noHint}); !agent.IsHostError(err, agent.HostOther) {
 		t.Fatal(err)
 	}
 }

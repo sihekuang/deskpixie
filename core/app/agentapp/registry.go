@@ -14,6 +14,7 @@ import (
 	"github.com/sihekuang/deskpixie/core/agent/terminal"
 	"github.com/sihekuang/deskpixie/core/herdr"
 	"github.com/sihekuang/deskpixie/core/settings"
+	"github.com/sihekuang/deskpixie/core/tmux"
 )
 
 // Hint posts a one-line hint for the tray (e.g. IntegrationHint).
@@ -36,10 +37,11 @@ type (
 
 // SessionHosts is the session host registry.
 func SessionHosts() map[string]HostFactory {
-	return map[string]HostFactory{"herdr": newHerdrHost}
+	return map[string]HostFactory{"herdr": newHerdrHost, tmux.Name: newTmuxHost}
 }
 
-func newHerdrHost(d HostDeps) (agent.SessionHost, error) {
+// parentEnv is d's parent environment as EnvVars, and its PATH.
+func parentEnv(d HostDeps) ([]agent.EnvVar, string) {
 	environ := d.Environ
 	if environ == nil {
 		environ = os.Environ()
@@ -53,6 +55,11 @@ func newHerdrHost(d HostDeps) (agent.SessionHost, error) {
 			pathVar = v
 		}
 	}
+	return parent, pathVar
+}
+
+func newHerdrHost(d HostDeps) (agent.SessionHost, error) {
+	parent, pathVar := parentEnv(d)
 	configured := ""
 	if d.Settings.HerdrPath != nil {
 		configured = *d.Settings.HerdrPath
@@ -71,6 +78,25 @@ func newHerdrHost(d HostDeps) (agent.SessionHost, error) {
 	}
 	host := herdr.NewHost(d.Settings.Session, d.Home, sup)
 	return NewIntegrationCheck(host, host.IntegrationMissing, d.Hint), nil
+}
+
+// newTmuxHost is the tmux session host (no integration hint: the agents' status hooks are
+// DeskPixie's own, written into their settings files).
+func newTmuxHost(d HostDeps) (agent.SessionHost, error) {
+	parent, pathVar := parentEnv(d)
+	configured := ""
+	if d.Settings.TmuxPath != nil {
+		configured = *d.Settings.TmuxPath
+	}
+	bin, ok := tmux.FindTmux(configured, pathVar, isFile)
+	if !ok {
+		return nil, agent.HostError{Kind: agent.HostNotFound, Host: tmux.Name}
+	}
+	env, err := tmux.ServerEnv(parent, d.Settings.Session, d.Home)
+	if err != nil {
+		return nil, err
+	}
+	return tmux.NewHost(bin, d.Settings.Session, d.Home, tmux.ExecRunner{Bin: bin, Env: env, Exec: d.Runner}), nil
 }
 
 func isFile(p string) bool {
