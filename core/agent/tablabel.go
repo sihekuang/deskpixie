@@ -72,8 +72,6 @@ func CoordinatorTab(job *Job) TabLabel {
 	return TabLabel{Label: label, Title: task, Meta: map[string]string{"role": "coordinator", "job": job.ID.String(), "task": task}}
 }
 
-func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
-
 // relabelQuietly relabels agent's tab if the host can; a failure only leaves the old label.
 func relabelQuietly(ctx context.Context, host SessionHost, agent string, tab TabLabel) {
 	if l, ok := host.(Labeler); ok {
