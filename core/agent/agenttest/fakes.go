@@ -459,9 +459,10 @@ type VoiceCallKind int
 const (
 	CallInject VoiceCallKind = iota
 	CallHoldOpen
+	CallOpen
 )
 
-// VoiceCall is one recorded VoiceLink call: Inject(Text) or HoldOpen(On).
+// VoiceCall is one recorded VoiceLink call: Inject(Text), HoldOpen(On) or Open.
 type VoiceCall struct {
 	Kind VoiceCallKind
 	Text string
@@ -470,12 +471,30 @@ type VoiceCall struct {
 
 func InjectCall(text string) VoiceCall { return VoiceCall{Kind: CallInject, Text: text} }
 func HoldOpenCall(on bool) VoiceCall   { return VoiceCall{Kind: CallHoldOpen, On: on} }
+func OpenCall() VoiceCall              { return VoiceCall{Kind: CallOpen} }
 
-// RecordingVoiceLink records injects and holds; IsOpen answers what SetOpen set.
+// RecordingVoiceLink records injects, holds and opens; IsOpen answers what SetOpen set; Open
+// answers true unless SetBusy(true).
 type RecordingVoiceLink struct {
 	mu    sync.Mutex
 	open  bool
+	busy  bool
 	calls []VoiceCall
+}
+
+// SetBusy makes Open refuse (a conversation starting or closing, the mic unusable).
+func (v *RecordingVoiceLink) SetBusy(busy bool) {
+	v.mu.Lock()
+	v.busy = busy
+	v.mu.Unlock()
+}
+
+// Open records the call; it does not open anything (the test sends Opened itself).
+func (v *RecordingVoiceLink) Open() bool {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.calls = append(v.calls, OpenCall())
+	return !v.busy && !v.open
 }
 
 func (v *RecordingVoiceLink) SetOpen(open bool) {

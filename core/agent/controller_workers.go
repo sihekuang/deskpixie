@@ -319,7 +319,7 @@ func (c *AgentController) sayForWorker(agent string, line func(who string) strin
 	}
 	text := maskPendingTokens(line(WorkerWho(w.Plan)), c.pendingTokens())
 	if text != "" {
-		c.deliver(NewLine(LineInfo, text), now, fx)
+		c.deliverUpdate(NewLine(LineInfo, text), now, fx)
 	}
 }
 

@@ -13,6 +13,8 @@ import (
 type AgentVoice interface {
 	Inject(voice.Notice)
 	HoldOpen(on bool)
+	// Open starts a conversation if Bit is at rest (false: it did nothing).
+	Open() bool
 	Subscribe() <-chan voice.VoiceSignal
 }
 

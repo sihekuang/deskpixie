@@ -244,7 +244,7 @@ func TestAgentDefaultsMatchTheSpec(t *testing.T) {
 	want := map[string]any{
 		"enabled": true, "sessionHost": "herdr", "session": "deskpixie", "terminal": "warp",
 		"herdrPath": nil, "model": nil, "warm": false, "port": float64(48217), "keepPanesOnQuit": true,
-		"holdOpenSecs": float64(180), "permissionTimeoutSecs": float64(120), "notifyPerMinute": float64(4), "narration": true,
+		"holdOpenSecs": float64(180), "permissionTimeoutSecs": float64(120), "notifyPerMinute": float64(4), "narration": true, "openConversationForUpdates": false,
 		"projectsRoot": "~/Documents/Projects",
 		"workers":      map[string]any{"enabled": false, "max": float64(4), "kinds": []any{"claude", "codex"}, "speakResults": false},
 	}

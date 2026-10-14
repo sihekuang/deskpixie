@@ -63,6 +63,10 @@ type Settings struct {
 	// SpeakWorkerReports (`agent.workers.speakResults`, a feature flag, off by default): a
 	// worker's report_result and report_blocked are also said to the user at once.
 	SpeakWorkerReports bool
+	// OpenConversation (`agent.openConversationForUpdates`, a feature flag, off by default): a job's done
+	// or failed line, an agent question or a spoken worker report that comes while no
+	// conversation is open makes Bit open one and say it (opener.go).
+	OpenConversation bool
 }
 
 // DefaultSettings: 4 notifications a minute, 2-minute permission timeout, narration on.
@@ -115,6 +119,7 @@ const (
 	InWorkerScreen                        // Name, Text: EfReadWorker's screen
 	InWorkerPromptFailed                  // Name, Text: EfPromptWorker could not be typed
 	InAdoptWorker                         // Plan, Worktree, Status: a worker kept over the quit, its pane still there; answered with EfAdmitted
+	InOpenRefused                         // the voice loop was busy and did not start the conversation EfOpenConversation asked for
 )
 
 // Input is one stimulus for AgentController.Step. Build it with the *Input constructors.
@@ -201,6 +206,7 @@ func WorkerFailedInput(name, reason string) Input {
 	return Input{Kind: InWorkerFailed, Name: name, Reason: reason}
 }
 func WorkerClosedInput(name string) Input { return Input{Kind: InWorkerClosed, Name: name} }
+func OpenRefusedInput() Input             { return Input{Kind: InOpenRefused} }
 func WorkerScreenInput(name, text string) Input {
 	return Input{Kind: InWorkerScreen, Name: name, Text: text}
 }
@@ -218,23 +224,24 @@ const (
 	EfInject                             // Notice
 	EfHoldOpen                           // Hold
 	EfChime
-	EfNotify          // Text
-	EfCue             // Cue
-	EfDecide          // ID, Decision
-	EfAppend          // File, Line
-	EfRewrite         // File, Lines
-	EfStatus          // Text: the tray's agent status line; "" clears it (Rust's Status(None))
-	EfStopCoordinator // Escape, then close the coordinator pane
-	EfResetHost       // SessionHost reset: forget the crash history
-	EfLog             // Text
-	EfAnswerResult    // Job, or Err: the result of InAnswer (on Err no state changed)
-	EfAdmitted        // Plan, or Err: the answer to InAdmitWorker
-	EfToolResult      // Value, or Err: the answer to InMcp (the error is what the agent sees)
-	EfPromptWorker    // Name, Text: type this into a worker
-	EfSubmitWorker    // Name: press Enter in the worker's pane (a prompt sits in its input, not submitted)
-	EfStopWorker      // Name: Escape, then close the pane after a grace (answered with InWorkerClosed)
-	EfReadWorker      // Name: read the worker's screen (answered with InWorkerScreen)
-	EfForgetWorker    // Name: the worker is gone: revoke its token and delete its launch files
+	EfNotify           // Text
+	EfCue              // Cue
+	EfDecide           // ID, Decision
+	EfAppend           // File, Line
+	EfRewrite          // File, Lines
+	EfStatus           // Text: the tray's agent status line; "" clears it (Rust's Status(None))
+	EfStopCoordinator  // Escape, then close the coordinator pane
+	EfResetHost        // SessionHost reset: forget the crash history
+	EfLog              // Text
+	EfAnswerResult     // Job, or Err: the result of InAnswer (on Err no state changed)
+	EfAdmitted         // Plan, or Err: the answer to InAdmitWorker
+	EfToolResult       // Value, or Err: the answer to InMcp (the error is what the agent sees)
+	EfPromptWorker     // Name, Text: type this into a worker
+	EfSubmitWorker     // Name: press Enter in the worker's pane (a prompt sits in its input, not submitted)
+	EfStopWorker       // Name: Escape, then close the pane after a grace (answered with InWorkerClosed)
+	EfReadWorker       // Name: read the worker's screen (answered with InWorkerScreen)
+	EfForgetWorker     // Name: the worker is gone: revoke its token and delete its launch files
+	EfOpenConversation // start a conversation if the voice loop is at rest (else answered with InOpenRefused)
 )
 
 // Effect is one thing the caller must do, in order. Err set (non-empty) is the Err branch of
@@ -319,6 +326,8 @@ type AgentController struct {
 	coordStatus PaneStatus
 	// watch: liveness of the open working jobs (liveness.go).
 	watch map[JobID]*liveness
+	// opener: opening a conversation for an update (opener.go).
+	opener *opener
 }
 
 func NewAgentController(settings Settings) *AgentController {
@@ -331,6 +340,7 @@ func NewAgentController(settings Settings) *AgentController {
 		inbox:    NewInbox(),
 		outbox:   NewOutbox(),
 		workers:  NewWorkers(),
+		opener:   newOpener(settings.NotifyPerMinute),
 	}
 }
 
@@ -443,8 +453,10 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 	case InVoice:
 		switch in.Voice.Kind {
 		case voice.SigOpened:
+			c.openerSaw(voice.SigOpened)
 			c.voiceOpened(&fx)
 		case voice.SigClosed:
+			c.openerSaw(voice.SigClosed)
 			c.voiceOpen = false
 			for _, n := range in.Voice.Undelivered {
 				c.reroute(n, now, &fx)
@@ -514,6 +526,8 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 		c.onWorkerScreen(in.Name, in.Text, now, &fx)
 	case InWorkerPromptFailed:
 		c.workerSendFailed(in.Name, in.Text, now, &fx)
+	case InOpenRefused:
+		c.openRefused(now, &fx)
 	}
 	return fx
 }
@@ -816,7 +830,7 @@ func (c *AgentController) failJobSaying(id JobID, reason, line string, now Milli
 	c.stopJobWorkers(id, fx)
 	c.narrator.Forget(id)
 	c.saveJob(id, fx)
-	c.deliver(NewLine(LineReply, line), now, fx)
+	c.deliverUpdate(NewLine(LineReply, line), now, fx)
 	*fx = append(*fx, Effect{Kind: EfCue, Cue: CueError})
 }
 
@@ -947,14 +961,14 @@ func (c *AgentController) onReply(id JobID, status SpokenStatus, text string, no
 	case SpokenQuestion:
 		_, _ = c.jobs.Transition(id, JobQuestion, now)
 		c.saveJob(id, fx)
-		c.deliver(NewLine(LineQuestion, text), now, fx)
+		c.deliverUpdate(NewLine(LineQuestion, text), now, fx)
 	case SpokenDone:
 		_, _ = c.jobs.Transition(id, JobDone, now)
 		c.saveJob(id, fx)
 		c.narrator.Forget(id)
 		c.denyPendingFor(id, "The job ended.", fx)
 		c.stopJobWorkers(id, fx)
-		if c.deliver(NewLine(LineReply, text), now, fx) {
+		if c.deliverUpdate(NewLine(LineReply, text), now, fx) {
 			*fx = append(*fx, Effect{Kind: EfCue, Cue: CueHappy})
 		}
 	case SpokenFailed:
@@ -963,7 +977,7 @@ func (c *AgentController) onReply(id JobID, status SpokenStatus, text string, no
 		c.narrator.Forget(id)
 		c.denyPendingFor(id, "The job ended.", fx)
 		c.stopJobWorkers(id, fx)
-		c.deliver(NewLine(LineReply, text), now, fx)
+		c.deliverUpdate(NewLine(LineReply, text), now, fx)
 		*fx = append(*fx, Effect{Kind: EfCue, Cue: CueError})
 	}
 	c.syncHold(fx)
@@ -1014,7 +1028,7 @@ func (c *AgentController) onPermission(id RequestID, agent, toolName string, too
 		}
 	}
 	text := ConfirmQuestionLine(Describe(toolName, toolInput, label), token)
-	c.deliver(Line{Text: text, Kind: LineQuestion, Token: &token}, now, fx)
+	c.deliverUpdate(Line{Text: text, Kind: LineQuestion, Token: &token}, now, fx)
 }
 
 func (c *AgentController) onUserSaid(text string, now Millis, fx *[]Effect) {
@@ -1086,6 +1100,7 @@ func (c *AgentController) tick(now Millis, fx *[]Effect) {
 	for _, d := range c.router.Tick(now) {
 		c.applyDelivery(d, now, fx)
 	}
+	c.tryOpen(now, fx)
 	blockedLong := c.blocked.set && satSub(now, c.blocked.v) >= BlockedGraceMs
 	if blockedLong && !c.hinted && !c.confirms.HasPendingFor(Coordinator) {
 		c.hinted = true

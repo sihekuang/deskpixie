@@ -188,6 +188,13 @@ func (l *VoiceLink) Inject(n agent.Notice) {
 	}
 }
 
+func (l *VoiceLink) Open() bool {
+	if v := l.voice.Load(); v != nil {
+		return (*v).Open()
+	}
+	return false
+}
+
 func (l *VoiceLink) HoldOpen(on bool) {
 	if v := l.voice.Load(); v != nil {
 		(*v).HoldOpen(on)

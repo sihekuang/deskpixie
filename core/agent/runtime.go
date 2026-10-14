@@ -1145,6 +1145,10 @@ func (h *AgentHandle) apply(e Effect) {
 		}
 	case EfHoldOpen:
 		d.Voice.HoldOpen(e.Hold)
+	case EfOpenConversation:
+		if !d.Voice.Open() {
+			h.Input(OpenRefusedInput())
+		}
 	case EfChime:
 		d.Notifier.Chime()
 	case EfNotify:

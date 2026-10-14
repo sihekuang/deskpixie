@@ -45,6 +45,7 @@ func (v *liveVoice) Inject(n voice.Notice) {
 	v.mu.Unlock()
 }
 func (v *liveVoice) HoldOpen(bool)                       {}
+func (v *liveVoice) Open() bool                          { return false }
 func (v *liveVoice) Subscribe() <-chan voice.VoiceSignal { return v.sig }
 func (v *liveVoice) all() []string {
 	v.mu.Lock()

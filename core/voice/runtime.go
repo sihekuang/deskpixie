@@ -113,6 +113,7 @@ const (
 	ctlInject controlKind = iota
 	ctlHoldOpen
 	ctlMouthLevels
+	ctlOpen
 )
 
 type control struct {
@@ -193,6 +194,9 @@ type Runtime struct {
 	ctlMu     sync.Mutex
 	ctlQueue  []control
 	open      atomic.Bool
+	// resting: the conversation is idle (no conversation starting, open, closing or in its
+	// error cooldown); updated after every input.
+	resting   atomic.Bool
 	sigMu     sync.Mutex
 	sigSubs   []chan VoiceSignal
 	sigClosed bool
@@ -265,12 +269,29 @@ func NewRuntime(m Model, c audio.Cleaner, cfg RuntimeConfig, emit func(UIEvent))
 		conv:      NewConversation(cfg.Conversation),
 		meter:     NewMouthMeter(cfg.MouthLevels),
 	}
+	r.resting.Store(true)
 	r.pb.hook = cfg.playHook
 	if cfg.RecordDir != "" {
 		r.recorder = NewMicRecorder(cfg.RecordDir)
 	}
 	go r.run()
 	return r
+}
+
+// Open starts a conversation, as the hotkey does, but only when Bit is at rest and the mic is
+// usable: false (nothing done) while a conversation is starting, open, closing or showing an
+// error, when the mic could not start, or after Close.
+func (r *Runtime) Open() bool {
+	select {
+	case <-r.done:
+		return false
+	default:
+	}
+	if !r.resting.Load() || r.micUnavailable.Load() != nil {
+		return false
+	}
+	r.control(control{kind: ctlOpen})
+	return true
 }
 
 // Hotkey starts or ends a conversation.
@@ -523,6 +544,8 @@ func (r *Runtime) onControl(c control) {
 	case ctlMouthLevels:
 		r.cfg.MouthLevels = c.levels
 		r.meter = NewMouthMeter(c.levels)
+	case ctlOpen:
+		r.input(OpenInput())
 	}
 }
 
@@ -572,6 +595,7 @@ func (r *Runtime) input(in Input) {
 			r.apply(fx)
 		}
 	}
+	r.resting.Store(r.conv.Phase() == PhaseIdle)
 }
 
 func (r *Runtime) onMic(f micFrame) {

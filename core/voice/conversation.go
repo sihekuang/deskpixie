@@ -65,6 +65,7 @@ const (
 	InInject             // Notice: say something about it once nobody is talking
 	InHoldOpen           // Hold: while on, the silence timeout is the hold timeout and Bit rests in delegating
 	InMicLive            // the mic is actually on (the permission prompt may have shown first)
+	InOpen               // start a conversation if none is under way (unlike InHotkey, never ends one)
 )
 
 // Input is one stimulus for Conversation.Step. Build it with the *Input constructors.
@@ -96,6 +97,7 @@ func FailedInput(f Failure) Input       { return Input{Kind: InFailed, Failure: 
 func InjectInput(n Notice) Input        { return Input{Kind: InInject, Notice: n} }
 func HoldOpenInput(on bool) Input       { return Input{Kind: InHoldOpen, Hold: on} }
 func MicLiveInput() Input               { return Input{Kind: InMicLive} }
+func OpenInput() Input                  { return Input{Kind: InOpen} }
 
 // EffectKind mirrors the Rust `Effect` enum.
 type EffectKind int
@@ -251,6 +253,13 @@ func (c *Conversation) Step(in Input, now time.Time) []Effect {
 			fx = append(fx, Effect{Kind: EfClose}, mascotFx(c.restState()), c.closedSignal())
 		default:
 			fx = c.end(fx, true)
+		}
+	case InOpen:
+		// Only from rest: a conversation starting, open, closing or showing an error is left alone.
+		if c.phase == PhaseIdle {
+			c.resetTurn()
+			c.phase = PhaseConnecting
+			fx = append(fx, Effect{Kind: EfConnect}, mascotFx(StateThinking))
 		}
 	case InFailed:
 		fx = c.fail(in.Failure, now, fx)

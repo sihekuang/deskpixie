@@ -93,21 +93,25 @@ type CanvasWindow struct {
 
 // AgentSettings is the agent block.
 type AgentSettings struct {
-	Enabled               bool           `json:"enabled"`
-	SessionHost           string         `json:"sessionHost"`
-	Session               string         `json:"session"`
-	Terminal              string         `json:"terminal"`
-	HerdrPath             *string        `json:"herdrPath"`
-	Model                 *string        `json:"model"`
-	Warm                  bool           `json:"warm"`
-	Port                  uint16         `json:"port"`
-	KeepPanesOnQuit       bool           `json:"keepPanesOnQuit"`
-	HoldOpenSecs          uint64         `json:"holdOpenSecs"`
-	PermissionTimeoutSecs uint64         `json:"permissionTimeoutSecs"`
-	NotifyPerMinute       uint64         `json:"notifyPerMinute"`
-	Narration             bool           `json:"narration"`
-	ProjectsRoot          string         `json:"projectsRoot"`
-	Workers               WorkerSettings `json:"workers"`
+	Enabled               bool    `json:"enabled"`
+	SessionHost           string  `json:"sessionHost"`
+	Session               string  `json:"session"`
+	Terminal              string  `json:"terminal"`
+	HerdrPath             *string `json:"herdrPath"`
+	Model                 *string `json:"model"`
+	Warm                  bool    `json:"warm"`
+	Port                  uint16  `json:"port"`
+	KeepPanesOnQuit       bool    `json:"keepPanesOnQuit"`
+	HoldOpenSecs          uint64  `json:"holdOpenSecs"`
+	PermissionTimeoutSecs uint64  `json:"permissionTimeoutSecs"`
+	NotifyPerMinute       uint64  `json:"notifyPerMinute"`
+	Narration             bool    `json:"narration"`
+	// OpenConversationForUpdates: a job finishing or failing, an agent question or a spoken
+	// worker report that comes while no conversation is open makes Bit open one and say it
+	// (off by default: a feature flag).
+	OpenConversationForUpdates bool           `json:"openConversationForUpdates"`
+	ProjectsRoot               string         `json:"projectsRoot"`
+	Workers                    WorkerSettings `json:"workers"`
 }
 
 // WorkerSettings is agent.workers.

@@ -66,7 +66,22 @@ type fakeVoice struct {
 	mu       sync.Mutex
 	injected []string
 	holds    []bool
+	opens    int
 	signals  chan voice.VoiceSignal
+}
+
+// Open counts the call and answers yes; the test sends Opened itself.
+func (v *fakeVoice) Open() bool {
+	v.mu.Lock()
+	v.opens++
+	v.mu.Unlock()
+	return true
+}
+
+func (v *fakeVoice) Opens() int {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.opens
 }
 
 func newFakeVoice() *fakeVoice { return &fakeVoice{signals: make(chan voice.VoiceSignal, 16)} }
@@ -509,5 +524,36 @@ func TestAQuitKeepsTheCoordinatorAndTheNextStartAdoptsIt(t *testing.T) {
 	}
 	if s, _ := next.post(t, "/hooks/stop", token, map[string]any{"hook_event_name": "Stop", "last_assistant_message": "hi"}); s == 401 {
 		t.Fatal("the kept token is refused")
+	}
+}
+
+// agent.openConversationForUpdates: a done reply while no conversation is open makes the agent
+// ask the voice loop to open one; its Opened replays the reply once.
+func TestADoneReplyWhileClosedOpensAConversationThatSaysIt(t *testing.T) {
+	for _, on := range []bool{false, true} {
+		f := newFixture(t, func(c *Config) { c.Settings.OpenConversationForUpdates = on })
+		v := newFakeVoice()
+		f.agent.AttachVoice(v)
+		job := f.delegate(t, "count the open issues")
+		waitFor(t, "the prompt", func() bool { return len(f.host.Prompts()) > 0 })
+		f.post(t, "/hooks/stop", f.coordinatorToken(t), map[string]any{
+			"last_assistant_message": `<spoken ref="` + string(job) + `" status="done">There are twelve open issues.</spoken>`,
+		})
+		waitFor(t, "Bit celebrates", func() bool { c, _ := f.rec.counts(); return c == 1 })
+		if !on {
+			time.Sleep(50 * time.Millisecond)
+			if v.Opens() != 0 {
+				t.Fatal("opened with the flag off")
+			}
+			continue
+		}
+		waitFor(t, "the open", func() bool { return v.Opens() == 1 })
+		v.signals <- voice.VoiceSignal{Kind: voice.SigOpened}
+		want := "Agent replies while you were away:\n- Agent reply: There are twelve open issues."
+		waitFor(t, "the reply said", func() bool { return slices.Contains(v.Injected(), want) })
+		time.Sleep(50 * time.Millisecond)
+		if n := len(v.Injected()); n != 1 || v.Opens() != 1 {
+			t.Fatalf("injected %q, %d opens", v.Injected(), v.Opens())
+		}
 	}
 }
