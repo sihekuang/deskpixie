@@ -22,6 +22,9 @@ const (
 	// RouteAudioDevices: the audio unit reads the chosen mic and speaker when the next
 	// conversation builds it (the `devices` event).
 	RouteAudioDevices
+	// RouteNotifications: the updates bubble and presence monitor read these when they next
+	// decide (the settings snapshot the app already holds).
+	RouteNotifications
 )
 
 // RouteFor is the route for a Live field (or "position" for Reset position); ok is false for
@@ -42,6 +45,9 @@ func RouteFor(path string) (Route, bool) {
 		return RouteNoiseFilter, true
 	case "voice.inputDevice", "voice.outputDevice":
 		return RouteAudioDevices, true
+	case "notifications.bubble.enabled", "notifications.bubble.popSecs", "notifications.bubble.lines",
+		"notifications.awayAfterMins":
+		return RouteNotifications, true
 	case "position":
 		return RouteResetPosition, true
 	}

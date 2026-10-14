@@ -448,3 +448,20 @@ func TestTheRemovedShortTermMemoryKeyIsIgnored(t *testing.T) {
 		}
 	}
 }
+
+func TestSettingsWithoutANotificationsBlockGetDefaults(t *testing.T) {
+	c := parseConfig(t, `{"pack":"bit"}`)
+	want := NotificationSettings{DebounceSecs: 20, Bubble: BubbleSettings{Enabled: true, PopSecs: 6, Lines: 5}, AwayAfterMins: 5}
+	if !reflect.DeepEqual(c.Notifications, want) {
+		t.Fatalf("%+v", c.Notifications)
+	}
+}
+
+func TestNotificationsBlockUsesCamelCase(t *testing.T) {
+	j := mustJSON(t, Default())
+	want := map[string]any{"debounceSecs": float64(20), "awayAfterMins": float64(5),
+		"bubble": map[string]any{"enabled": true, "popSecs": float64(6), "lines": float64(5)}}
+	if !reflect.DeepEqual(j["notifications"], want) {
+		t.Fatal(j["notifications"])
+	}
+}

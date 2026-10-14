@@ -97,7 +97,8 @@ func TestEveryFieldPathExistsInConfig(t *testing.T) {
 
 func TestTheLiveListIsPinned(t *testing.T) {
 	want := []string{"hotkey", "pack", "scale", "proximityFade.enabled", "proximityFade.radius",
-		"voice.noiseFilter", "voice.inputDevice", "voice.outputDevice", "canvas.autoOpen"}
+		"voice.noiseFilter", "voice.inputDevice", "voice.outputDevice", "canvas.autoOpen",
+		"notifications.bubble.enabled", "notifications.bubble.popSecs", "notifications.bubble.lines", "notifications.awayAfterMins"}
 	if got := LivePaths(); !reflect.DeepEqual(got, want) {
 		t.Fatal(got)
 	}
@@ -404,5 +405,15 @@ func TestTheCurrentPlatformIsOneOfTheThree(t *testing.T) {
 	}
 	if runtime.GOOS == "darwin" && p != Macos {
 		t.Fatal(p)
+	}
+}
+
+func TestNotificationFieldsAreInTheNotificationsSection(t *testing.T) {
+	for _, p := range []string{"notifications.debounceSecs", "notifications.bubble.enabled", "notifications.bubble.popSecs",
+		"notifications.bubble.lines", "notifications.awayAfterMins", "agent.notifyPerMinute"} {
+		f := FieldByPath(p)
+		if f == nil || f.Section != SectionNotifications {
+			t.Fatalf("%s: %+v", p, f)
+		}
 	}
 }

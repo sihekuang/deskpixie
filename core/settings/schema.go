@@ -38,12 +38,13 @@ const MaxWorkers = 4
 type Section string
 
 const (
-	SectionMascot   Section = "Mascot"
-	SectionVoice    Section = "Voice"
-	SectionAgent    Section = "Agent"
-	SectionWorkers  Section = "Workers"
-	SectionCanvas   Section = "Canvas"
-	SectionAdvanced Section = "Advanced"
+	SectionMascot        Section = "Mascot"
+	SectionVoice         Section = "Voice"
+	SectionAgent         Section = "Agent"
+	SectionWorkers       Section = "Workers"
+	SectionNotifications Section = "Notifications"
+	SectionCanvas        Section = "Canvas"
+	SectionAdvanced      Section = "Advanced"
 )
 
 // Apply says when a change takes effect.
@@ -318,7 +319,12 @@ var Fields = []FieldSpec{
 	spec("agent.port", SectionAdvanced, "Hook server port", "The local port agents report to.", intKind(1024, 65535, false), ApplyRestart),
 	spec("agent.keepPanesOnQuit", SectionAdvanced, "Keep agent panes on quit", "Leave the agent's terminal panes open when the app quits.", boolKind, ApplyRestart),
 	spec("agent.permissionTimeoutSecs", SectionAdvanced, "Permission timeout (seconds)", "An unanswered permission request is denied after this long.", intKind(1, 120, false), ApplyRestart),
-	spec("agent.notifyPerMinute", SectionAdvanced, "Notifications per minute", "The most agent notifications shown in one minute.", intKind(1, 60, false), ApplyRestart),
+	spec("agent.notifyPerMinute", SectionNotifications, "Notifications per minute", "The most agent notifications shown in one minute.", intKind(1, 60, false), ApplyRestart),
+	spec("notifications.debounceSecs", SectionNotifications, "Notification debounce (seconds)", "A job's updates wait until it has been quiet this long, then go out together. 0 sends each one as it comes. Questions never wait.", intKind(0, 300, false), ApplyRestart),
+	spec("notifications.bubble.enabled", SectionNotifications, "Updates bubble", "Shows what happened since you last talked to Bit in a bubble beside it.", boolKind, ApplyLive),
+	spec("notifications.bubble.popSecs", SectionNotifications, "Pop for (seconds)", "How long the bubble shows a new update before it shrinks to a badge.", intKind(1, 60, false), ApplyLive),
+	spec("notifications.bubble.lines", SectionNotifications, "Updates shown", "The most updates the bubble lists.", intKind(1, 10, false), ApplyLive),
+	spec("notifications.awayAfterMins", SectionNotifications, "Away after (minutes idle)", "With no keyboard or mouse input for this long, nothing pops and Bit doesn't start a conversation until you're back.", intKind(1, 60, false), ApplyLive),
 }
 
 // FieldByPath is the field at path, or nil.

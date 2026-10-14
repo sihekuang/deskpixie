@@ -41,6 +41,7 @@ public enum SettingsLayout {
         Tab(section: .voice, title: "Voice", symbol: "waveform", tint: .purple),
         Tab(section: .agent, title: "Agent", symbol: "sparkles", tint: .orange),
         Tab(section: .workers, title: "Workers", symbol: "person.2", tint: .indigo),
+        Tab(section: .notifications, title: "Notifications", symbol: "bell.badge", tint: .red),
         Tab(section: .canvas, title: "Canvas", symbol: "rectangle.on.rectangle", tint: .teal),
         Tab(section: .advanced, title: "Advanced", symbol: "gearshape.2", tint: .gray),
     ]
@@ -464,7 +465,7 @@ public enum SettingsLayout {
         case .advanced:
             return [.button(label: "Settings file", help: "settings.json holds every setting on this page.",
                             title: "Open Settings File", action: .openFile)]
-        case .agent, .workers, .canvas:
+        case .agent, .workers, .notifications, .canvas:
             return []
         }
     }

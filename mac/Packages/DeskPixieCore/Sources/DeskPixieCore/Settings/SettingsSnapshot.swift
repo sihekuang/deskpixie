@@ -29,6 +29,7 @@ public enum SettingsSection: String, Codable, Sendable, CaseIterable {
     case voice = "Voice"
     case agent = "Agent"
     case workers = "Workers"
+    case notifications = "Notifications"
     case canvas = "Canvas"
     case advanced = "Advanced"
 }

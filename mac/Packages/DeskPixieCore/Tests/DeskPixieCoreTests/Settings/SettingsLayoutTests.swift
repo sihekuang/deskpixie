@@ -23,14 +23,14 @@ final class SettingsLayoutTests: XCTestCase {
     private func view(_ path: String) -> SettingsField { SettingsFixture.view(path) }
 
     func test_tabs_follow_the_sections_with_their_symbols() {
-        XCTAssertEqual(L.tabs.map(\.section), [.mascot, .voice, .agent, .workers, .canvas, .advanced])
-        XCTAssertEqual(L.tabs.map(\.title), ["Mascot", "Voice", "Agent", "Workers", "Canvas", "Advanced"])
+        XCTAssertEqual(L.tabs.map(\.section), [.mascot, .voice, .agent, .workers, .notifications, .canvas, .advanced])
+        XCTAssertEqual(L.tabs.map(\.title), ["Mascot", "Voice", "Agent", "Workers", "Notifications", "Canvas", "Advanced"])
         XCTAssertEqual(L.tabs.map(\.symbol),
-                       ["face.smiling", "waveform", "sparkles", "person.2", "rectangle.on.rectangle", "gearshape.2"])
+                       ["face.smiling", "waveform", "sparkles", "person.2", "bell.badge", "rectangle.on.rectangle", "gearshape.2"])
     }
 
     func test_every_tab_has_its_own_tint_in_tab_order() {
-        XCTAssertEqual(L.tabs.map(\.tint), [.pink, .purple, .orange, .indigo, .teal, .gray])
+        XCTAssertEqual(L.tabs.map(\.tint), [.pink, .purple, .orange, .indigo, .red, .teal, .gray])
         XCTAssertEqual(Set(L.tabs.map(\.tint)).count, L.tabs.count, "Each sidebar tile reads at a glance")
     }
 
