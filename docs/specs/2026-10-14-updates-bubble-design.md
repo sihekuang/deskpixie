@@ -23,6 +23,9 @@ conversation, and jump to the job's pane in one click; nothing pops or speaks wh
 - Away from the Mac: nothing pops, nothing is announced, no conversation is started; the pop is
   held and shown once when you come back.
 - Clicking a line focuses that job's herdr pane.
+- The bubble adds to the macOS notifications; it doesn't replace them (no chime while away).
+- The timings are settings, in a new Notifications section, and the existing update debounce
+  becomes one of them: one notification debounce timer for every channel (§5.3).
 
 ## 3. What the bubble shows
 
@@ -107,6 +110,29 @@ permission token is no longer pending are left out (the same filter `Replay` use
 - `EngineCoordinator.handle` gains `case .updates(let json)` → `UpdatesBubble.apply(lines)`;
   the core's `.state` events hide the bubble while a conversation is open.
 
+### 5.3 Settings: a new Notifications section
+
+The update debounce in `core/agent/debounce.go` (`UpdateQuietMs` 20 s, `UpdateMaxHoldMs` 30 s)
+decides when a job's worker reports and progress are let out at all, so it already paces every
+channel downstream: spoken lines, macOS notifications, the outbox and therefore the bubble's pop.
+It becomes the setting; the constants become defaults.
+
+| Path | Label | Default | Range | Applies |
+|---|---|---|---|---|
+| `notifications.debounceSecs` | Notification debounce (seconds) | 20 | 0–300 | restart |
+| `notifications.bubble.enabled` | Updates bubble | on | | live |
+| `notifications.bubble.popSecs` | Pop for (seconds) | 6 | 1–60 | live |
+| `notifications.bubble.lines` | Updates shown | 5 | 1–10 | live |
+| `notifications.awayAfterMins` | Away after (minutes idle) | 5 | 1–60 | live |
+
+- `debounceSecs` is the quiet time; the max hold follows it at 1.5× (20 → 30 s, today's values).
+  0 turns coalescing off (every report goes out as it comes; dedupe still applies). Questions are
+  never debounced, as today.
+- `awayAfterMins` is read by the shell's `Presence`; it also gates Bit starting conversations.
+- The 1 s "open long enough to count as seen" stays fixed.
+- `agent.notifyPerMinute` keeps its path (moving it would break saved settings) but is shown in
+  the Notifications section next to the others.
+
 ## 6. Error handling
 
 - `agent.updatesSeen` with unknown or already-delivered ids: ignored (idempotent).
@@ -118,6 +144,8 @@ permission token is no longer pending are left out (the same filter `Replay` use
 ## 7. Testing
 
 - Go unit tests:
+  - the debounce follows `notifications.debounceSecs` (quiet and 1.5× max hold; 0 = no
+    coalescing); the new settings validate their ranges.
   - `MarkSeen` marks lines, keeps pending questions, returns records; restore with and without
     the `job` field.
   - `EfUpdates` emitted on push / replay / seen / decided, not emitted with
@@ -134,12 +162,5 @@ permission token is no longer pending are left out (the same filter `Replay` use
 
 - Replying to or approving questions from the bubble.
 - Per-line dismiss, history beyond the undelivered list, settings to tune timings.
-- Changing what macOS notifications do (see §9).
+- Changing what macOS notifications do, beyond no chime while away.
 
-## 9. For review
-
-1. **macOS notifications.** With the conversation closed, updates also get a chime and a
-   notification today. Proposal: keep them unchanged in this change (the bubble adds a glanceable
-   view; you can turn notifications off in System Settings), except no chime while away.
-   Alternative: the bubble replaces update notifications (questions keep theirs).
-2. **Timings:** 6 s pop, 1 s to count as seen, 5 min idle = away, 5 lines shown.
