@@ -191,6 +191,10 @@ func TestSetupMessageHasTheDocumentedShape(t *testing.T) {
 	if len(v) != 1 {
 		t.Fatalf("exactly one top-level field: %v", v)
 	}
+	// #57: no toolConfig, so function calling stays on AUTO and nothing holds delegate back.
+	if _, ok := s.(map[string]any)["toolConfig"]; ok {
+		t.Fatal("toolConfig present")
+	}
 	b, _ := json.Marshal(setupMessage(protoCfg()))
 	if strings.Contains(string(b), "additionalProperties") {
 		t.Fatal(string(b))

@@ -36,3 +36,7 @@
 **Decision:** Backend model travels in SessionConfig (no ModelFactory change); the backend prompt reuses Bit's full instructions instead of splitting delegation.md; unanswered tool calls don't hold a reply open.
 **Trigger:** Implementing the approved GPT-Live spec (PR #50).
 **Basis:** Existing project convention: the conformance suite (core/voice/voicetest/conformance.go) and runtime answer tool calls after ResponseDone; SessionConfig already carries per-session provider settings (core/voice/types.go).
+
+## 2026-10-13 — Bit delegates eagerly (#57)
+**Decision:** Delegating is Bit's default: every request goes to the coordinator except small talk, simple stable facts Bit is certain of, what the user just said, Bit's own tools (time, weather, math, timers, music) and the job/recall tools. Bit doesn't try first, hesitate or ask permission; a vague request is delegated with what Bit has, and Bit asks only when it can't tell what the task is at all. The persona, delegation rules, delegate tool description and the "Recent work with the agent" block all say the same, with examples, and tests forbid the old hedging lines. Provider tool calling stays on auto (Gemini sends no toolConfig; OpenAI uses tool_choice auto), since forcing a tool call would break small talk.
+**Basis:** User's choice (issue #57); supersedes the "one clarifying question" part of the entry above.

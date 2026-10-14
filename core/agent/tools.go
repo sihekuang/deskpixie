@@ -41,12 +41,16 @@ type Delegate struct{ H *AgentHandle }
 func (Delegate) Name() string { return "delegate" }
 
 func (Delegate) Description() string {
-	return "Hand a task to the capable agent working in the background. Use it for any real work: research, " +
-		"facts to check, live information (news, prices, scores), the user's projects, files, code, " +
-		"repositories, writing, summaries, charts, diagrams or pages. Not for the time, the weather or " +
-		"arithmetic: get_time, get_weather and calculate answer those at once. The agent does not hear the " +
-		"conversation, so the task and context must stand on their own. Call this BEFORE saying you will " +
-		"hand something off. Returns at once with a job id; the result arrives later as an \"Agent reply:\" line."
+	return "Hand a task to the capable agent working in the background. This is the default for every " +
+		"request: use it for anything beyond small talk, simple stable facts you are certain of, what the " +
+		"user just told you, and your own tools. That includes research, facts to check, live information " +
+		"(news, prices, scores), the user's projects, files, code, repositories, apps and settings, writing, " +
+		"explanations, advice, summaries, charts, diagrams or pages. When unsure, call it; don't try it " +
+		"yourself first or ask whether to. Not for the time, the weather, arithmetic, timers or music " +
+		"controls: get_time, get_weather, calculate, timer and media answer those at once. The agent does " +
+		"not hear the conversation, so the task and context must stand on their own. Call this BEFORE " +
+		"saying you will hand something off. Returns at once with a job id; then say one short " +
+		"acknowledgement; the result arrives later as an \"Agent reply:\" line."
 }
 
 func (Delegate) Parameters() json.RawMessage {
