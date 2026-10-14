@@ -2,7 +2,8 @@ name: Release
 
 # Triggered by:
 #   - Tag pushes matching vX.Y.Z (e.g. v0.4.0) : full release (sign + notarize + staple + GitHub Release)
-#   - Manual dispatch from main                : Developer ID signed build only (smoke test, not notarized)
+#   - Manual dispatch from main                : Developer ID signed build, artifact only (no GitHub Release);
+#                                                with input notarize=true it is also notarized + stapled
 #
 # Mirrors ai-mascot's release.yml (same secret names, `release` environment). Apple's flow:
 # sign every Mach-O with Developer ID + hardened runtime + timestamp (make -C mac release),
@@ -13,6 +14,11 @@ on:
   push:
     tags: ['v[0-9]+.[0-9]+.[0-9]+']
   workflow_dispatch:
+    inputs:
+      notarize:
+        description: Notarize and staple the app and dmg (still no GitHub Release)
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -39,6 +45,8 @@ jobs:
 
       - name: Resolve release tag and version
         id: tag
+        env:
+          NOTARIZE_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.notarize && 'true' || 'false' }}
         run: |
           set -euo pipefail
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
@@ -49,18 +57,21 @@ jobs:
             fi
             VERSION="${TAG#v}"
             IS_RELEASE=true
+            NOTARIZE=true
           else
             TAG="dispatch-${GITHUB_RUN_NUMBER}"
             VERSION="0.0.0"
             IS_RELEASE=false
+            NOTARIZE="$NOTARIZE_INPUT"
           fi
           {
             echo "name=$TAG"
             echo "version=$VERSION"
             echo "is_release=$IS_RELEASE"
+            echo "notarize=$NOTARIZE"
             echo "ref_slug=${GITHUB_REF_NAME//\//-}"
           } >> "$GITHUB_OUTPUT"
-          echo "Release tag: $TAG  Version: $VERSION  Is release: $IS_RELEASE"
+          echo "Release tag: $TAG  Version: $VERSION  Is release: $IS_RELEASE  Notarize: $NOTARIZE"
 
       # Same choice as ci.yml: the newest stable Xcode on the image.
       - name: Select Xcode
@@ -126,10 +137,10 @@ jobs:
 
           rm -f "$P12"
 
-      # Tag builds only: the App Store Connect API key used for notarization.
-      # Removed in the cleanup step.
+      # Tag builds and notarize=true dispatches: the App Store Connect API key used for
+      # notarization. Removed in the cleanup step.
       - name: Decode notarization API key
-        if: steps.tag.outputs.is_release == 'true'
+        if: steps.tag.outputs.notarize == 'true'
         env:
           APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
         run: |
@@ -151,92 +162,21 @@ jobs:
           [ -n "$SIGNING_IDENTITY" ] || { echo "::error::MACOS_SIGNING_IDENTITY is not set"; exit 1; }
           make -C mac release VERSION="$VERSION" BUILD_NUMBER="$GITHUB_RUN_NUMBER"
 
+      # scripts/package-mac.sh: Developer ID / hardened runtime / timestamp checks, then (when
+      # notarizing) notarize + staple the app, dmg from the stapled app, sign, notarize + staple
+      # the dmg, stapler validate + spctl both. Writes dmg= and zip= to GITHUB_OUTPUT.
       - name: Verify, notarize and package
         id: pack
         env:
+          APP: mac/build/Build/Products/Release/DeskPixie.app
           VERSION: ${{ steps.tag.outputs.version }}
-          IS_RELEASE: ${{ steps.tag.outputs.is_release }}
+          OUT_DIR: out
+          NOTARIZE: ${{ steps.tag.outputs.notarize }}
           SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+          NOTARY_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
           NOTARY_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
           NOTARY_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-        run: |
-          set -euo pipefail
-          APP="mac/build/Build/Products/Release/DeskPixie.app"
-          test -d "$APP" || { echo "::error::$APP not found"; exit 1; }
-
-          mkdir -p out
-          DMG="out/DeskPixie-$VERSION-arm64.dmg"
-          ZIP="out/DeskPixie-$VERSION-arm64.app.zip"
-
-          codesign --verify --deep --strict --verbose=2 "$APP"
-          codesign -dvv "$APP" 2>&1 | head -20
-          ENT=$(codesign -d --entitlements - "$APP" 2>&1)
-          grep -q 'device.audio-input' <<<"$ENT" \
-            || { echo "::error::audio-input entitlement missing from signed app"; exit 1; }
-          # Every Mach-O must carry Developer ID + hardened runtime + timestamp for notarization.
-          for f in "$APP" "$APP"/Contents/Frameworks/*.dylib; do
-            INFO=$(codesign -dvv "$f" 2>&1)
-            grep -q '^Authority=Developer ID Application' <<<"$INFO" \
-              || { echo "::error::$f is not signed with Developer ID"; exit 1; }
-            grep -q 'flags=.*runtime' <<<"$INFO" \
-              || { echo "::error::$f lacks the hardened runtime"; exit 1; }
-            grep -q '^Timestamp=' <<<"$INFO" \
-              || { echo "::error::$f lacks a secure timestamp"; exit 1; }
-          done
-
-          # Submit, wait, and fail with Apple's log unless the submission is Accepted.
-          notarize() {
-            local file="$1" out id status
-            out=$(xcrun notarytool submit "$file" \
-              --key "$RUNNER_TEMP/AuthKey.p8" \
-              --key-id "$NOTARY_KEY_ID" \
-              --issuer "$NOTARY_ISSUER_ID" \
-              --wait --timeout 30m --output-format json) || true
-            echo "$out"
-            id=$(plutil -extract id raw -o - - <<<"$out" 2>/dev/null || true)
-            status=$(plutil -extract status raw -o - - <<<"$out" 2>/dev/null || true)
-            if [ "$status" != "Accepted" ]; then
-              if [ -n "$id" ]; then
-                xcrun notarytool log "$id" \
-                  --key "$RUNNER_TEMP/AuthKey.p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" || true
-              fi
-              echo "::error::notarization of $file: ${status:-no result}"
-              exit 1
-            fi
-          }
-
-          if [ "$IS_RELEASE" = "true" ]; then
-            # 1. Notarize the app (as a zip) and staple the ticket to the .app itself.
-            ditto -c -k --keepParent "$APP" "$RUNNER_TEMP/notarize-app.zip"
-            notarize "$RUNNER_TEMP/notarize-app.zip"
-            rm -f "$RUNNER_TEMP/notarize-app.zip"
-            xcrun stapler staple "$APP"
-            xcrun stapler validate "$APP"
-          fi
-
-          # 2. The dmg: the (stapled) app plus an /Applications symlink to drag it onto.
-          STAGE="$RUNNER_TEMP/dmg"
-          rm -rf "$STAGE" && mkdir -p "$STAGE"
-          ditto "$APP" "$STAGE/DeskPixie.app"
-          ln -s /Applications "$STAGE/Applications"
-          hdiutil create -volname "DeskPixie" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
-          rm -rf "$STAGE"
-          codesign --force --sign "$SIGNING_IDENTITY" --timestamp "$DMG"
-          codesign --verify --verbose=2 "$DMG"
-
-          if [ "$IS_RELEASE" = "true" ]; then
-            # 3. Notarize and staple the dmg, then check both with Gatekeeper.
-            notarize "$DMG"
-            xcrun stapler staple "$DMG"
-            xcrun stapler validate "$DMG"
-            spctl --assess --type open --context context:primary-signature -v "$DMG"
-            spctl --assess --type execute -v "$APP"
-          fi
-
-          ditto -c -k --keepParent --sequesterRsrc "$APP" "$ZIP"
-          ls -lh out
-          echo "dmg=$DMG" >> "$GITHUB_OUTPUT"
-          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+        run: scripts/package-mac.sh
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
@@ -273,4 +213,4 @@ jobs:
         if: always()
         run: |
           security delete-keychain "$RUNNER_TEMP/build.keychain-db" 2>/dev/null || true
-          rm -f "$RUNNER_TEMP/AuthKey.p8" "$RUNNER_TEMP/cert.p12" "$RUNNER_TEMP/notarize-app.zip"
+          rm -f "$RUNNER_TEMP/AuthKey.p8" "$RUNNER_TEMP/cert.p12"
