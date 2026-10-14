@@ -235,15 +235,16 @@ func Build(c Config) *Agent {
 		Env:  []agent.EnvVar{{Key: "MASCOT_AGENT_TOKEN", Value: coordinatorToken}},
 	}
 	deps := agent.Deps{
-		Host:     agent.NewAgentHost(session, c.Clock, recipe),
-		Voice:    a.link,
-		Notifier: NewNotifier(c.Runner, c.Hooks.Notify),
-		Mascot:   mascotCue{c.Hooks},
-		Status:   statusSink{a},
-		Launcher: termFactory(c.Runner, c.Home),
-		Store:    NewJsonlStore(paths.Root),
-		Clock:    c.Clock,
-		IDs:      c.IDs,
+		Host:        agent.NewAgentHost(session, c.Clock, recipe),
+		Voice:       a.link,
+		Notifier:    NewNotifier(c.Runner, c.Hooks.Notify),
+		Mascot:      mascotCue{c.Hooks},
+		Status:      statusSink{a},
+		Launcher:    termFactory(c.Runner, c.Home),
+		TerminalDir: TerminalDir(s.ProjectsRoot, c.Home),
+		Store:       NewJsonlStore(paths.Root),
+		Clock:       c.Clock,
+		IDs:         c.IDs,
 	}
 	// Exactly 127.0.0.1 (the hook server refuses any non-loopback listener). Bound before the
 	// runtime is built, so a busy port is known before a warm start could launch anything.

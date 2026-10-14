@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -46,6 +47,16 @@ func ShellLine(argv []string) string {
 		}
 	}
 	return strings.Join(parts, " ")
+}
+
+// AttachLine is the shell line a terminal runs: `cd '<dir>' && <argv>` (the folder always
+// single-quoted), or argv alone when there is no folder.
+func AttachLine(a agent.Attach) string {
+	line := ShellLine(a.Argv)
+	if a.Dir == "" {
+		return line
+	}
+	return "cd '" + strings.ReplaceAll(a.Dir, "'", `'\''`) + "' && " + line
 }
 
 // quoted is a double-quoted literal for TOML and AppleScript. \n \t \r are valid in both;
@@ -88,7 +99,9 @@ func run(r agent.CommandRunner, argv []string, what string) error {
 }
 
 // WarpLauncher keeps one app-owned Tab Config whose single pane runs the attach command,
-// opened with warp://tab_config/<stem>?new_window=true.
+// opened with warp://tab_config/<stem>. Deliberate deviation from Rust: no ?new_window=true —
+// a new window also gets Warp's default tab, so one click made two tabs; without it the URL
+// adds exactly one tab to the active window (and launches Warp when it is not running).
 type WarpLauncher struct {
 	runner agent.CommandRunner
 	dir    string // ~/.warp/tab_configs (Warp stable on macOS)
@@ -98,16 +111,25 @@ func NewWarpLauncher(runner agent.CommandRunner, dir string) *WarpLauncher {
 	return &WarpLauncher{runner: runner, dir: dir}
 }
 
-// WarpTabConfig is the TOML for argv. The tab name is the user-visible product name.
-func WarpTabConfig(argv []string) string {
-	return fmt.Sprintf("name = \"DeskPixie\"\n\n[[panes]]\nid = \"main\"\ntype = \"terminal\"\ncommands = [%s]\n", quoted(ShellLine(argv)))
+// WarpTabConfig is the TOML for an Attach. The config name and the tab title are the
+// user-visible product name (without a title the tab is named after the herdr path).
+// Deviation from Rust: the pane starts in a.Dir, set both as `directory` and as a leading
+// `cd` because Warp can ignore `directory` before the commands run (Warp bug #9130).
+func WarpTabConfig(a agent.Attach) string {
+	var b strings.Builder
+	b.WriteString("name = \"DeskPixie\"\ntitle = \"DeskPixie\"\n\n[[panes]]\nid = \"main\"\ntype = \"terminal\"\n")
+	if a.Dir != "" {
+		fmt.Fprintf(&b, "directory = %s\n", quoted(a.Dir))
+	}
+	fmt.Fprintf(&b, "commands = [%s]\n", quoted(AttachLine(a)))
+	return b.String()
 }
 
 func (w *WarpLauncher) Name() string { return "warp" }
 
-func (w *WarpLauncher) Open(argv []string) error {
+func (w *WarpLauncher) Open(a agent.Attach) error {
 	path := filepath.Join(w.dir, WarpStem+".toml")
-	toml := WarpTabConfig(argv)
+	toml := WarpTabConfig(a)
 	if cur, err := os.ReadFile(path); err != nil || string(cur) != toml {
 		fail := func(e error) error { return agent.LaunchError("could not open Warp: " + e.Error()) }
 		if err := os.MkdirAll(w.dir, 0o755); err != nil {
@@ -123,38 +145,38 @@ func (w *WarpLauncher) Open(argv []string) error {
 			return fail(err)
 		}
 	}
-	url := "warp://tab_config/" + WarpStem + "?new_window=true"
+	url := "warp://tab_config/" + WarpStem
 	return run(w.runner, []string{"/usr/bin/open", url}, "Warp")
 }
 
-// ItermLauncher opens a new iTerm window whose session runs the attach command.
+// ItermLauncher opens a new iTerm window whose session runs the attach command (in a.Dir).
 type ItermLauncher struct{ runner agent.CommandRunner }
 
 func NewItermLauncher(runner agent.CommandRunner) *ItermLauncher { return &ItermLauncher{runner} }
 
 // ItermScript is the AppleScript, one entry per line (each becomes one -e argument).
-func ItermScript(argv []string) []string {
+func ItermScript(a agent.Attach) []string {
 	return []string{
 		`tell application "iTerm"`,
 		"activate",
-		"create window with default profile command " + quoted(ShellLine(argv)),
+		"create window with default profile command " + quoted(AttachLine(a)),
 		"end tell",
 	}
 }
 
 func (i *ItermLauncher) Name() string { return "iterm" }
 
-func (i *ItermLauncher) Open(argv []string) error {
+func (i *ItermLauncher) Open(a agent.Attach) error {
 	// AppleScript string literals have no \u escape, so other control characters cannot be passed on.
-	for _, a := range argv {
-		for _, c := range a {
+	for _, w := range append(slices.Clone(a.Argv), a.Dir) {
+		for _, c := range w {
 			if unicode.IsControl(c) && c != '\n' && c != '\t' && c != '\r' {
 				return agent.LaunchError("could not open iTerm: the command contains control characters")
 			}
 		}
 	}
 	cmd := []string{"/usr/bin/osascript"}
-	for _, l := range ItermScript(argv) {
+	for _, l := range ItermScript(a) {
 		cmd = append(cmd, "-e", l)
 	}
 	return run(i.runner, cmd, "iTerm")

@@ -92,6 +92,15 @@ func SetupWorkers(w settings.WorkerSettings, projectsRootRaw, home string) Worke
 	return WorkersSetup{Policy: policy, Root: root}
 }
 
+// TerminalDir is where the agent terminal starts: the projects folder when it is usable
+// (see ProjectsRoot), else the home folder.
+func TerminalDir(projectsRootRaw, home string) string {
+	if root, err := ProjectsRoot(projectsRootRaw, home); err == nil {
+		return root
+	}
+	return home
+}
+
 // ProjectsRoot is agent.projectsRoot: only ~ and ~/… are expanded (not ~user); a relative
 // path is taken from the home folder. The result is canonical, an existing folder, and
 // strictly below the home folder (a root that wide, or outside it, is a mistake).

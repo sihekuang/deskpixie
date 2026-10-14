@@ -163,3 +163,18 @@ func TestTheCoordinatorMcpConfigIsPrivateAndCarriesItsBearer(t *testing.T) {
 		t.Fatal(info.Mode(), err)
 	}
 }
+
+// TerminalDir is the projects folder when usable, else home.
+func TestTheTerminalDirIsTheProjectsFolderOrHome(t *testing.T) {
+	home, _ := filepath.EvalSymlinks(t.TempDir())
+	if err := os.MkdirAll(filepath.Join(home, "code"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for raw, want := range map[string]string{
+		"~/code": filepath.Join(home, "code"), "~/missing": home, "": home, "/etc": home, "~": home,
+	} {
+		if got := TerminalDir(raw, home); got != want {
+			t.Fatalf("%q: %q, want %q", raw, got, want)
+		}
+	}
+}

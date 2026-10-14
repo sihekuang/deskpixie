@@ -51,7 +51,7 @@ func build(t *testing.T, store *agenttest.MemStore, cfg RuntimeConfig, wrap func
 	}
 	deps := Deps{
 		Host: NewAgentHost(session, clock, recipe), Voice: r.voice, Notifier: r.alerts, Mascot: r.alerts,
-		Status: r.status, Launcher: launch, Store: store, Clock: clock, IDs: &agenttest.SeqIds{},
+		Status: r.status, Launcher: launch, TerminalDir: "/home/me/Projects", Store: store, Clock: clock, IDs: &agenttest.SeqIds{},
 	}
 	r.h = NewRuntime(deps, cfg)
 	go r.h.Run(t.Context())
@@ -279,8 +279,9 @@ func TestOpenTerminalEnsuresTheSessionStartsTheCoordinatorAndAttaches(t *testing
 		if len(r.host.Starts()) != 1 {
 			t.Fatal(r.host.Starts())
 		}
-		if !reflect.DeepEqual(r.launcher.Opened(), [][]string{{"fake-herdr", "session", "attach", "test"}}) {
-			t.Fatal(r.launcher.Opened())
+		want := []Attach{{Argv: []string{"fake-herdr", "session", "attach", "test"}, Dir: "/home/me/Projects"}}
+		if !reflect.DeepEqual(r.launcher.Attaches(), want) {
+			t.Fatal(r.launcher.Attaches())
 		}
 	})
 }
@@ -772,7 +773,7 @@ type blockingLauncher struct {
 
 func (*blockingLauncher) Name() string { return "blocking" }
 
-func (l *blockingLauncher) Open([]string) error {
+func (l *blockingLauncher) Open(Attach) error {
 	close(l.entered)
 	<-l.release
 	return nil

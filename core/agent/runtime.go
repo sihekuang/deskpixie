@@ -71,9 +71,11 @@ type Deps struct {
 	Mascot   MascotCue
 	Status   StatusSink
 	Launcher TerminalLauncher
-	Store    Store
-	Clock    Clock
-	IDs      IdSource
+	// TerminalDir is the folder the agent terminal starts in (the projects folder, else home).
+	TerminalDir string
+	Store       Store
+	Clock       Clock
+	IDs         IdSource
 }
 
 // WorkerDeps are the worker adapters (spec §5.5), injected only when agent.workers.enabled.
@@ -392,7 +394,7 @@ func (h *AgentHandle) OpenTerminal(ctx context.Context) error {
 		return err
 	}
 	h.Input(EnsureCoordinatorInput())
-	return h.deps.Launcher.Open(h.deps.Host.AttachCommand())
+	return h.deps.Launcher.Open(Attach{Argv: h.deps.Host.AttachCommand(), Dir: h.deps.TerminalDir})
 }
 
 // Voice forwards the voice loop's signals.

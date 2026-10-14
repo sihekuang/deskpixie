@@ -392,26 +392,38 @@ func (f *FakeSessionHost) AttachCommand() []string {
 
 // ---------- launcher, voice, notifier, mascot ----------
 
-// FakeLauncher records every argv it opens; SetFail makes Open fail.
+// FakeLauncher records every Attach it opens; SetFail makes Open fail.
 type FakeLauncher struct {
 	mu     sync.Mutex
-	opened [][]string
+	opened []agent.Attach
 	fail   string
 }
 
 func (l *FakeLauncher) Name() string { return "fake" }
 
-func (l *FakeLauncher) Open(argv []string) error {
+func (l *FakeLauncher) Open(a agent.Attach) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.fail != "" {
 		return agent.LaunchError(l.fail)
 	}
-	l.opened = append(l.opened, slices.Clone(argv))
+	l.opened = append(l.opened, agent.Attach{Argv: slices.Clone(a.Argv), Dir: a.Dir})
 	return nil
 }
 
+// Opened is the argv of every Attach opened.
 func (l *FakeLauncher) Opened() [][]string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	out := make([][]string, len(l.opened))
+	for i, a := range l.opened {
+		out[i] = slices.Clone(a.Argv)
+	}
+	return out
+}
+
+// Attaches is every Attach opened.
+func (l *FakeLauncher) Attaches() []agent.Attach {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return slices.Clone(l.opened)

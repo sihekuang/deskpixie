@@ -64,10 +64,16 @@ func DefaultCloseExact(ctx context.Context, h SessionHost, agent, pane string) e
 	return nil
 }
 
-// TerminalLauncher opens a terminal window running argv (Warp, iTerm).
+// Attach is what a terminal opens: the attach command and the folder it starts in.
+type Attach struct {
+	Argv []string
+	Dir  string // absolute starting folder; "" = the terminal's default
+}
+
+// TerminalLauncher opens a terminal tab or window running an Attach (Warp, iTerm).
 type TerminalLauncher interface {
 	Name() string
-	Open(argv []string) error // LaunchError
+	Open(a Attach) error // LaunchError
 }
 
 // VoiceLink is the delegation side's only view of the voice loop.

@@ -37,12 +37,20 @@ func (f *fakeRunner) RunBy(argv []string, env []agent.EnvVar, d time.Time) (agen
 }
 func (f *fakeRunner) SpawnDetached([]string, []agent.EnvVar) error { return errors.New("unused") }
 
-func attach() []string {
+func argv() []string {
 	return []string{"/Users/x/.local/bin/herdr", "session", "attach", "deskpixie"}
 }
 
+// attach is the attach spec the runtime hands a launcher: argv plus the starting folder.
+func attach() agent.Attach {
+	return agent.Attach{Argv: argv(), Dir: "/Users/x/Documents/Projects"}
+}
+
+// bare is argv with no starting folder (the line is argv alone).
+func bare(a []string) agent.Attach { return agent.Attach{Argv: a} }
+
 func TestPlainWordsStayPlainAndOthersAreQuoted(t *testing.T) {
-	if got := ShellLine(attach()); got != "/Users/x/.local/bin/herdr session attach deskpixie" {
+	if got := ShellLine(argv()); got != "/Users/x/.local/bin/herdr session attach deskpixie" {
 		t.Fatal(got)
 	}
 	odd := []string{"/Users/Jane Doe/bin/herdr", "it's"}
@@ -61,11 +69,18 @@ func TestWarpWritesExactlyThisTabConfigAndOpensTheURL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "name = \"DeskPixie\"\n\n[[panes]]\nid = \"main\"\ntype = \"terminal\"\ncommands = [\"/Users/x/.local/bin/herdr session attach deskpixie\"]\n"
+	// Deliberate deviation from Rust: a tab title (not the herdr path), a starting folder,
+	// and a `cd` first (Warp bug #9130 can ignore `directory` before commands run).
+	want := "name = \"DeskPixie\"\ntitle = \"DeskPixie\"\n\n[[panes]]\nid = \"main\"\ntype = \"terminal\"\n" +
+		"directory = \"/Users/x/Documents/Projects\"\n" +
+		"commands = [\"cd '/Users/x/Documents/Projects' && /Users/x/.local/bin/herdr session attach deskpixie\"]\n"
 	if string(b) != want {
 		t.Fatalf("%q", b)
 	}
-	if len(r.ran) != 1 || !reflect.DeepEqual(r.ran[0].argv, []string{"/usr/bin/open", "warp://tab_config/deskpixie_attach?new_window=true"}) {
+	if len(r.ran) != 1 || !reflect.DeepEqual(r.ran[0].argv, []string{"/usr/bin/open", "warp://tab_config/deskpixie_attach"}) {
+		// Deliberate deviation from Rust: no ?new_window=true. A new window also gets Warp's
+		// default tab, so one click made two tabs; without it the URL adds exactly one tab to
+		// the active window (and launches Warp when it is not running).
 		t.Fatalf("%v", r.ran)
 	}
 	if !reflect.DeepEqual(r.ran[0].env, baseEnv()) {
@@ -78,7 +93,7 @@ func TestWarpWritesExactlyThisTabConfigAndOpensTheURL(t *testing.T) {
 }
 
 func TestWarpEscapesQuotesForToml(t *testing.T) {
-	toml := WarpTabConfig([]string{"/a b/herdr", `say "hi"`})
+	toml := WarpTabConfig(bare([]string{"/a b/herdr", `say "hi"`}))
 	if !strings.Contains(toml, `commands = ["'/a b/herdr' 'say \"hi\"'"]`) {
 		t.Fatal(toml)
 	}
@@ -107,7 +122,8 @@ func TestItermRunsTheExpectedAppleScript(t *testing.T) {
 	want := []string{
 		`tell application "iTerm"`,
 		"activate",
-		`create window with default profile command "/Users/x/.local/bin/herdr session attach deskpixie"`,
+		// Deviation from Rust (as for Warp): start in the projects folder.
+		`create window with default profile command "cd '/Users/x/Documents/Projects' && /Users/x/.local/bin/herdr session attach deskpixie"`,
 		"end tell",
 	}
 	if !reflect.DeepEqual(script, want) {
@@ -140,18 +156,18 @@ func TestWordsStartingWithEqualsAreQuoted(t *testing.T) {
 
 func TestBackslashesAndAppleScriptSpecialsAreEscaped(t *testing.T) {
 	argv := []string{"/p/herdr", `a\b`, `q"r`, "tab\there"}
-	line := ItermScript(argv)[2]
+	line := ItermScript(bare(argv))[2]
 	if line != `create window with default profile command "/p/herdr 'a\\b' 'q\"r' 'tab\there'"` {
 		t.Fatal(line)
 	}
-	if toml := WarpTabConfig(argv); !strings.Contains(toml, `'a\\b'`) {
+	if toml := WarpTabConfig(bare(argv)); !strings.Contains(toml, `'a\\b'`) {
 		t.Fatal(toml)
 	}
 }
 
 func TestControlCharactersAreEscapedForTomlAndRejectedForIterm(t *testing.T) {
 	argv := []string{"/p/herdr", "a\x07b\nc\x7f"}
-	toml := WarpTabConfig(argv)
+	toml := WarpTabConfig(bare(argv))
 	if !strings.Contains(toml, `\u0007`) || !strings.Contains(toml, `\n`) || !strings.Contains(toml, `\u007F`) {
 		t.Fatal(toml)
 	}
@@ -159,7 +175,7 @@ func TestControlCharactersAreEscapedForTomlAndRejectedForIterm(t *testing.T) {
 		t.Fatal("raw control char in toml")
 	}
 	r := &fakeRunner{}
-	err := NewItermLauncher(r).Open(argv)
+	err := NewItermLauncher(r).Open(bare(argv))
 	if err == nil || !strings.HasPrefix(err.Error(), "could not open iTerm") {
 		t.Fatal(err)
 	}
@@ -195,5 +211,41 @@ func TestLaunchersReportTheirNames(t *testing.T) {
 	var _ agent.TerminalLauncher = (*ItermLauncher)(nil)
 	if NewWarpLauncher(nil, "").Name() != "warp" || NewItermLauncher(nil).Name() != "iterm" {
 		t.Fatal("names")
+	}
+}
+
+// Extra (no Rust twin): the starting folder is shell-quoted in the cd and TOML-escaped in both keys.
+func TestAnOddStartingFolderIsQuotedForTheShellAndEscapedForToml(t *testing.T) {
+	a := agent.Attach{Argv: []string{"/p/herdr"}, Dir: `/Users/x/it's "here"`}
+	if got := AttachLine(a); got != `cd '/Users/x/it'\''s "here"' && /p/herdr` {
+		t.Fatal(got)
+	}
+	toml := WarpTabConfig(a)
+	if !strings.Contains(toml, "directory = \"/Users/x/it's \\\"here\\\"\"\n") ||
+		!strings.Contains(toml, `commands = ["cd '/Users/x/it'\\''s \"here\"' && /p/herdr"]`) {
+		t.Fatal(toml)
+	}
+	if line := ItermScript(a)[2]; line != `create window with default profile command "cd '/Users/x/it'\\''s \"here\"' && /p/herdr"` {
+		t.Fatal(line)
+	}
+}
+
+// Extra (no Rust twin): with no starting folder there is no directory key and no cd.
+func TestNoStartingFolderMeansNoDirectoryAndNoCd(t *testing.T) {
+	a := bare(argv())
+	if got := AttachLine(a); got != ShellLine(argv()) {
+		t.Fatal(got)
+	}
+	if toml := WarpTabConfig(a); strings.Contains(toml, "directory") || strings.Contains(toml, "cd ") {
+		t.Fatal(toml)
+	}
+}
+
+// Extra (no Rust twin): a control character in the folder is refused by iTerm too.
+func TestItermRefusesAControlCharacterInTheFolder(t *testing.T) {
+	r := &fakeRunner{}
+	err := NewItermLauncher(r).Open(agent.Attach{Argv: argv(), Dir: "/a\x07b"})
+	if err == nil || !strings.HasPrefix(err.Error(), "could not open iTerm") || len(r.ran) != 0 {
+		t.Fatal(err, r.ran)
 	}
 }

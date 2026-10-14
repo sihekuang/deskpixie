@@ -286,6 +286,10 @@ func TestOpenTerminalAttachesAndAFailureNamesTheTerminal(t *testing.T) {
 	if got := f.launcher.Opened()[0]; !slices.Equal(got, f.host.AttachCommand()) {
 		t.Fatal(got)
 	}
+	// The default projects folder (~/Documents/Projects) is missing here: start in home.
+	if got := f.launcher.Attaches()[0].Dir; got != f.home {
+		t.Fatal(got)
+	}
 	f.launcher.SetFail("no app")
 	f.agent.OpenTerminal()
 	waitFor(t, "the failure line", func() bool { return strings.HasPrefix(f.agent.Tray().Status, "Agent: ") })
@@ -459,4 +463,18 @@ func (r *recorder) notesOrNil() [][2]string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return slices.Clone(r.notes)
+}
+
+// The terminal starts in the projects folder when it exists.
+func TestTheTerminalStartsInTheProjectsFolder(t *testing.T) {
+	f := newFixture(t, func(c *Config) {
+		c.Settings.ProjectsRoot = "~/code"
+		_ = os.MkdirAll(filepath.Join(c.Home, "code"), 0o755)
+	})
+	f.agent.Menu("agent:open")
+	waitFor(t, "the terminal", func() bool { return len(f.launcher.Opened()) == 1 })
+	want, _ := filepath.EvalSymlinks(filepath.Join(f.home, "code"))
+	if got := f.launcher.Attaches()[0].Dir; got != want {
+		t.Fatalf("%q, want %q", got, want)
+	}
 }
