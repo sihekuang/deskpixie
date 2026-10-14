@@ -2,8 +2,9 @@ import AppKit
 import DeskPixieCore
 import SwiftUI
 
-/// The Settings window (tray Settings… / ⌘,): six toolbar tabs rendered from the core's
-/// settings snapshot. Remembers the last tab (`DeskPixieSettingsTab`) and its frame
+/// The Settings window (tray Settings… / ⌘,), laid out like Howl's: a sidebar listing the
+/// core's settings sections as coloured icon rows, and a scrolling detail panel showing the
+/// selected section. Remembers the last page (`DeskPixieSettingsTab`) and its frame
 /// (`DeskPixieSettingsWindow`); reloads when it becomes key; shows a dock icon while open.
 struct SettingsWindowView: View {
     static let tabKey = "DeskPixieSettingsTab"
@@ -14,18 +15,34 @@ struct SettingsWindowView: View {
     @AppStorage(SettingsWindowView.tabKey) private var tab = 0
     @State private var observers = WindowObservers()
 
+    /// The remembered index, clamped to the tabs that exist.
+    private var selectedIndex: Int { min(max(tab, 0), SettingsLayout.tabs.count - 1) }
+
     var body: some View {
-        TabView(selection: Binding(
-            get: { min(max(tab, 0), SettingsLayout.tabs.count - 1) },
-            set: { tab = $0; model.recordingPath = nil }
-        )) {
-            ForEach(Array(SettingsLayout.tabs.enumerated()), id: \.offset) { index, t in
-                SettingsTabView(model: model, section: t.section)
-                    .tabItem { Label(t.title, systemImage: t.symbol) }
-                    .tag(index)
+        HStack(spacing: 0) {
+            List(selection: Binding<Int?>(
+                get: { selectedIndex },
+                set: { new in
+                    guard let new, new != selectedIndex else { return }
+                    tab = new
+                    model.recordingPath = nil
+                }
+            )) {
+                ForEach(Array(SettingsLayout.tabs.enumerated()), id: \.offset) { index, t in
+                    SettingsSidebarRow(tab: t).tag(index)
+                }
             }
+            .listStyle(.sidebar)
+            .frame(width: 200)
+
+            SettingsDetailView(model: model, tab: SettingsLayout.tabs[selectedIndex])
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(
+                    VisualEffectBackground(material: .sidebar, blendingMode: .behindWindow)
+                        .ignoresSafeArea()
+                )
         }
-        .background(VisualEffectBackground().ignoresSafeArea())
+        .frame(minWidth: 720, minHeight: 520)
         .background(WindowAccessor { window in observers.attach(window, model: model) })
         .onAppear {
             // .regular lets the window become key and show in ⌘-Tab; back to .accessory
@@ -33,6 +50,82 @@ struct SettingsWindowView: View {
             NSApp.setActivationPolicy(.regular)
             NSApp.activate()
             model.load()
+        }
+    }
+}
+
+extension SettingsLayout.TabTint {
+    /// The SwiftUI colour of the same name.
+    var color: Color {
+        switch self {
+        case .gray: return .gray
+        case .red: return .red
+        case .purple: return .purple
+        case .blue: return .blue
+        case .orange: return .orange
+        case .teal: return .teal
+        case .green: return .green
+        case .mint: return .mint
+        case .pink: return .pink
+        case .indigo: return .indigo
+        case .cyan: return .cyan
+        }
+    }
+}
+
+/// A tab's SF Symbol as a white glyph on a rounded tile of its colour (Howl's sidebar icons).
+private struct SettingsIconTile: View {
+    let tab: SettingsLayout.Tab
+    let size: CGFloat
+    let glyph: CGFloat
+    let radius: CGFloat
+
+    var body: some View {
+        Image(systemName: tab.symbol)
+            .font(.system(size: glyph, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: size, height: size)
+            .background(
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .fill(tab.tint.color.gradient)
+            )
+            .accessibilityHidden(true)
+    }
+}
+
+/// One sidebar row (Howl's `SidebarRow`).
+private struct SettingsSidebarRow: View {
+    let tab: SettingsLayout.Tab
+
+    var body: some View {
+        Label {
+            Text(tab.title)
+        } icon: {
+            SettingsIconTile(tab: tab, size: 22, glyph: 12, radius: 6)
+        }
+    }
+}
+
+/// The selected page: its header, then the tab's rows, scrolling when taller than the window.
+private struct SettingsDetailView: View {
+    let model: SettingsModel
+    let tab: SettingsLayout.Tab
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(spacing: 10) {
+                    SettingsIconTile(tab: tab, size: 28, glyph: 14, radius: 7)
+                    Text(tab.title)
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                        .accessibilityAddTraits(.isHeader)
+                }
+                SettingsTabView(model: model, section: tab.section)
+            }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 20)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }

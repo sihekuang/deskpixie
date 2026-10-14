@@ -2,10 +2,11 @@ import AppKit
 import SwiftUI
 
 // Building blocks for the Settings window, after Howl's `SettingsComponents.swift`: a page
-// container with consistent padding, a translucent backing like System Settings, and a hook
+// container with consistent spacing, a translucent backing like System Settings, and a hook
 // to the hosting NSWindow (frame autosave, focus reloads, activation policy).
 
-/// Standard layout container for a Settings tab.
+/// Standard layout container for a Settings page. The detail panel's scroll view supplies the
+/// padding, so this only stacks the page's parts.
 struct SettingsPane<Content: View>: View {
     let content: Content
 
@@ -17,8 +18,7 @@ struct SettingsPane<Content: View>: View {
         VStack(alignment: .leading, spacing: 16) {
             content
         }
-        .padding(20)
-        .frame(minWidth: 480, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 }
 
