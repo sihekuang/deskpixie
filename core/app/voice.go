@@ -19,6 +19,7 @@ import (
 	"github.com/sihekuang/deskpixie/core/voice"
 	"github.com/sihekuang/deskpixie/core/voice/gemini"
 	"github.com/sihekuang/deskpixie/core/voice/openai"
+	"github.com/sihekuang/deskpixie/core/voice/openailive"
 )
 
 // ModelFactory builds a voice model adapter.
@@ -28,8 +29,9 @@ type ModelFactory func() voice.Model
 // are also the secrets' provider names ("gemini-live" → GEMINI_API_KEY).
 func Providers() map[string]ModelFactory {
 	return map[string]ModelFactory{
-		openai.Name: func() voice.Model { return openai.New("") },
-		gemini.Name: func() voice.Model { return gemini.New("") },
+		openai.Name:     func() voice.Model { return openai.New("") },
+		gemini.Name:     func() voice.Model { return gemini.New("") },
+		openailive.Name: func() voice.Model { return openailive.New("") },
 	}
 }
 
@@ -62,6 +64,7 @@ func SessionConfig(s settings.VoiceSettings, instructions string) voice.SessionC
 		Model:         s.Model,
 		Voice:         s.Voice,
 		Instructions:  instructions,
+		BackendModel:  s.LiveBackendModel,
 		TurnDetection: voice.TurnSemantic,
 		NoisyRoom:     s.NoisyRoom,
 		// A noisy room asks the provider to reduce noise only while the mic is not cleaned here.

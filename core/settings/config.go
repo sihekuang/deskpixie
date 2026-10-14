@@ -65,9 +65,11 @@ type VoiceSettings struct {
 	NoiseFilter     bool    `json:"noiseFilter"`
 	NoiseModel      string  `json:"noiseModel"`
 	NoisyRoom       bool    `json:"noisyRoom"`
-	InputDevice     *string `json:"inputDevice"`
-	OutputDevice    *string `json:"outputDevice"`
-	HomeCity        *string `json:"homeCity"`
+	// LiveBackendModel is the Responses model that runs Bit's tools on OpenAI GPT-Live.
+	LiveBackendModel string  `json:"liveBackendModel"`
+	InputDevice      *string `json:"inputDevice"`
+	OutputDevice     *string `json:"outputDevice"`
+	HomeCity         *string `json:"homeCity"`
 }
 
 // CanvasSettings is the canvas block.
@@ -121,7 +123,7 @@ func Default() Config {
 		ProximityFade: Fade{Enabled: true, Radius: 150},
 		Voice: VoiceSettings{
 			Provider: "openai-realtime", Audio: "macos-vpio", Model: "gpt-realtime", Voice: "marin",
-			Chimes: true, IdleTimeoutSecs: 7, NoiseModel: "hush",
+			Chimes: true, IdleTimeoutSecs: 7, NoiseModel: "hush", LiveBackendModel: "gpt-6-luna",
 		},
 		Canvas: CanvasSettings{AutoOpen: true, Keep: 50},
 		Agent: AgentSettings{

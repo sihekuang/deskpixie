@@ -188,6 +188,19 @@ var (
 		{"gemini-3.8-live", "Gemini 3.8 Live", AllPlatforms},
 		{"gemini-3.1-flash-live-preview", "Gemini 3.1 Flash Live (preview)", AllPlatforms},
 	}
+	// OpenAILiveModels / OpenAILiveVoices mirror core/voice/openailive (DefaultModel, Voices).
+	OpenAILiveModels = []Opt{{"gpt-live-1", "GPT-Live 1", AllPlatforms}}
+	OpenAILiveVoices = titled(
+		"alloy", "ash", "ballad", "beacon", "bossa", "brise", "cedar", "cinder", "coral", "delta",
+		"echo", "flitz", "gleam", "harema", "juni", "marin", "meridian", "nira", "noeul", "nuri",
+		"quartz", "ripple", "sage", "shida", "shimmer", "sillage", "stone", "tempo", "verse",
+		"vesper", "willow",
+	)
+	// LiveBackendModels are suggested Responses models for GPT-Live's tools.
+	LiveBackendModels = []Opt{
+		{"gpt-6-luna", "GPT-6 Luna (faster, cheaper)", AllPlatforms},
+		{"gpt-6-sol", "GPT-6 Sol (harder tasks)", AllPlatforms},
+	}
 	OpenAIVoices = titled("alloy", "ash", "ballad", "cedar", "coral", "echo", "marin", "sage", "shimmer", "verse")
 	GeminiVoices = titled(
 		"Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Aoede", "Callirrhoe", "Autonoe",
@@ -202,8 +215,9 @@ type ProviderDefault struct{ Model, Voice string }
 
 // ProviderDefaults: switching voice.provider swaps one provider's default for the other's.
 var ProviderDefaults = map[string]ProviderDefault{
-	ProviderOpenAI: {"gpt-realtime", "marin"},
-	ProviderGemini: {"gemini-3.8-live", "Puck"},
+	ProviderOpenAI:     {"gpt-realtime", "marin"},
+	ProviderGemini:     {"gemini-3.8-live", "Puck"},
+	ProviderOpenAILive: {"gpt-live-1", "marin"},
 }
 
 // titled is one option per name, labelled with a capital first letter.
@@ -239,6 +253,8 @@ var WorkerKinds = []Opt{
 const (
 	ProviderOpenAI = "openai-realtime"
 	ProviderGemini = "gemini-live"
+	// ProviderOpenAILive is OpenAI GPT-Live (core/voice/openailive).
+	ProviderOpenAILive = "openai-live"
 )
 
 // Labels and platforms for registry names, per registry. A registered name not listed shows as
@@ -249,6 +265,7 @@ var (
 	providerNames = []Opt{
 		{ProviderOpenAI, "OpenAI Realtime", AllPlatforms},
 		{ProviderGemini, "Gemini Live", AllPlatforms},
+		{ProviderOpenAILive, "OpenAI GPT-Live", AllPlatforms},
 	}
 	audioNames    = []Opt{{"macos-vpio", "macOS voice processing", mac}}
 	hostNames     = []Opt{{"herdr", "Herdr", AllPlatforms}}
@@ -275,7 +292,8 @@ var Fields = []FieldSpec{
 	macOnly(spec("voice.noiseModel", SectionVoice, "Noise model", "Hush also turns quieter background voices down by up to 18 dB. DeepFilterNet3 cleans steady noise only.", staticChoice(NoiseModels), ApplyRestart)),
 	macOnly(spec("voice.inputDevice", SectionVoice, "Microphone", "The mic Bit listens with. If it isn't connected, Bit uses the system default until it is. Bluetooth mics are slow to start and can cut off your first words.", choiceKind(SourceInputDevices), ApplyLive)),
 	macOnly(spec("voice.outputDevice", SectionVoice, "Speaker", "Where Bit's voice plays. If it isn't connected, Bit uses the system default until it is.", choiceKind(SourceOutputDevices), ApplyLive)),
-	spec("voice.noisyRoom", SectionVoice, "Noisy room", "Bit ignores quieter voices in the background, like a TV or people nearby. Speak up a little to interrupt Bit.", boolKind, ApplyRestart),
+	spec("voice.noisyRoom", SectionVoice, "Noisy room", "Bit ignores quieter voices in the background, like a TV or people nearby. Speak up a little to interrupt Bit. With OpenAI GPT-Live this only changes Bit's instructions.", boolKind, ApplyRestart),
+	spec("voice.liveBackendModel", SectionVoice, "Backend model (GPT-Live)", "Only for OpenAI GPT-Live: the model that runs Bit's tools while GPT-Live talks.", openChoice(Choices{Source: SourceStatic, Static: LiveBackendModels}), ApplyRestart),
 	spec("voice.idleTimeoutSecs", SectionVoice, "Silence timeout (seconds)", "A conversation ends after this much silence.", intKind(1, 600, false), ApplyRestart),
 	spec("voice.homeCity", SectionVoice, "Home city", "Where Bit checks the weather when you don't name a place, e.g. Portland, Oregon.", textKind(true), ApplyRestart),
 	spec("voice.personaPath", SectionVoice, "Persona file", "A Markdown file that replaces Bit's personality. Empty uses the built-in one.", pathKind(false, true), ApplyRestart),
@@ -426,9 +444,9 @@ func Options(c Choices, src OptionSources) []OptionView {
 	case SourceOutputDevices:
 		return devices(src.Outputs)
 	case SourceVoiceModels:
-		return static(map[string][]Opt{ProviderOpenAI: OpenAIModels, ProviderGemini: GeminiModels}[src.VoiceProvider])
+		return static(map[string][]Opt{ProviderOpenAI: OpenAIModels, ProviderGemini: GeminiModels, ProviderOpenAILive: OpenAILiveModels}[src.VoiceProvider])
 	case SourceVoiceVoices:
-		return static(map[string][]Opt{ProviderOpenAI: OpenAIVoices, ProviderGemini: GeminiVoices}[src.VoiceProvider])
+		return static(map[string][]Opt{ProviderOpenAI: OpenAIVoices, ProviderGemini: GeminiVoices, ProviderOpenAILive: OpenAILiveVoices}[src.VoiceProvider])
 	}
 	return []OptionView{}
 }

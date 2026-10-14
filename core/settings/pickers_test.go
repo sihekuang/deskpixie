@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/sihekuang/deskpixie/core/voice/gemini"
+	"github.com/sihekuang/deskpixie/core/voice/openailive"
 )
 
 func values(opts []OptionView) []string {
@@ -154,6 +155,26 @@ func TestSwitchingProviderSwapsTheOtherProvidersDefaults(t *testing.T) {
 		t.Fatal(v)
 	}
 	if got := svc.RestartPending(); !reflect.DeepEqual(got, []string{"voice.provider", "voice.model", "voice.voice"}) {
+		t.Fatal(got)
+	}
+}
+
+func TestGPTLiveListsMatchTheAdapter(t *testing.T) {
+	model, voiceC := FieldByPath("voice.model").Kind.Choices, FieldByPath("voice.voice").Kind.Choices
+	live := OptionSources{VoiceProvider: ProviderOpenAILive}
+	if got := values(Options(model, live)); !reflect.DeepEqual(got, []string{openailive.DefaultModel}) {
+		t.Fatal(got)
+	}
+	if got := values(Options(voiceC, live)); !reflect.DeepEqual(got, openailive.Voices) {
+		t.Fatal(got)
+	}
+	if (ProviderDefaults[ProviderOpenAILive] != ProviderDefault{openailive.DefaultModel, openailive.DefaultVoice}) {
+		t.Fatal(ProviderDefaults[ProviderOpenAILive])
+	}
+	if Default().Voice.LiveBackendModel != openailive.DefaultBackendModel {
+		t.Fatal(Default().Voice.LiveBackendModel)
+	}
+	if got := values(Options(FieldByPath("voice.liveBackendModel").Kind.Choices, live)); got[0] != openailive.DefaultBackendModel {
 		t.Fatal(got)
 	}
 }
