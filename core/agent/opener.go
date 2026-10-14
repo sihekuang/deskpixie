@@ -64,6 +64,9 @@ func (c *AgentController) tryOpen(now Millis, fx *[]Effect) {
 		o.waiting = optMs{}
 		o.retry = true
 	}
+	if c.away {
+		return
+	}
 	if !c.settings.OpenConversation || !o.retry || c.shutDown || o.waiting.set {
 		return
 	}
@@ -81,6 +84,15 @@ func (c *AgentController) tryOpen(now Millis, fx *[]Effect) {
 	o.waiting = someMs(now)
 	o.retry = false
 	*fx = append(*fx, Effect{Kind: EfOpenConversation})
+}
+
+// setAway (InPresence): while you're away Bit doesn't open a conversation or chime (the
+// notification and the outbox line still happen); on return it tries again.
+func (c *AgentController) setAway(away bool, now Millis, fx *[]Effect) {
+	c.away = away
+	if !away {
+		c.tryOpen(now, fx)
+	}
 }
 
 // openRefused (InOpenRefused): the voice loop was busy; the open does not count against the

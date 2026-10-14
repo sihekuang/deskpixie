@@ -13,12 +13,13 @@ import (
 // Shared helpers for controller_test.go and controller_worker_test.go (the Rust test modules'
 // helpers; renamed where a name is taken elsewhere in the package).
 
-// visible drops the persistence and log noise (and tab labels, tested on their own).
+// visible drops the persistence and log noise (and tab labels and the updates bubble's list,
+// tested on their own).
 func visible(fx []Effect) []Effect {
 	var out []Effect
 	for _, e := range fx {
 		switch e.Kind {
-		case EfAppend, EfRewrite, EfLog, EfLabel:
+		case EfAppend, EfRewrite, EfLog, EfLabel, EfUpdates:
 		default:
 			out = append(out, e)
 		}
@@ -86,6 +87,8 @@ func fmtEffect(e Effect) string {
 		return fmt.Sprintf("Label(%q)", e.Tab.Label)
 	case EfOpenConversation:
 		return "OpenConversation"
+	case EfUpdates:
+		return fmt.Sprintf("Updates(%+v)", e.Value)
 	}
 	return fmt.Sprintf("Effect(%d)", e.Kind)
 }
