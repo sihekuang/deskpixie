@@ -711,6 +711,12 @@ func (h *AgentHandle) hook(ev HookEvent) {
 		h.Input(StopInput(ev.Agent, ev.Message))
 	case HookPostTool:
 		h.Input(PostToolInput(ev.Agent, ev.ToolName, ev.ToolInput))
+	case HookState:
+		// The host turns it into a PaneEvent (deduplicated with what it detects itself), which
+		// comes back here as a PaneInput. A host that detects status itself (Herdr) ignores it.
+		if r, ok := h.deps.Host.Session().(StatusReporter); ok {
+			r.ReportStatus(ev.Agent, ev.Status)
+		}
 	case HookMcp:
 		// Its own goroutine: a start_worker takes seconds, and nothing else may wait on it.
 		go func() {

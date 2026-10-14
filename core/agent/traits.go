@@ -15,6 +15,13 @@ type Focuser interface {
 	Focus(ctx context.Context, agent string) error
 }
 
+// StatusReporter is a SessionHost that takes an agent's status from the agent's own hooks
+// (optional: tmux has it, since it detects no status itself; Herdr does not). The host reports
+// it to subscribers as a PaneEvent, like a status it detected.
+type StatusReporter interface {
+	ReportStatus(agent string, status PaneStatus)
+}
+
 type SessionHost interface {
 	// Name is the registry name, e.g. "herdr".
 	Name() string

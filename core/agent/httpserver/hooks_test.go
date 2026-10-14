@@ -458,3 +458,52 @@ func TestServeAnswersOnLoopback(t *testing.T) {
 		t.Fatal("Serve did not return after its listener closed")
 	}
 }
+
+// The state route (tmux session host, #64): Claude Code's UserPromptSubmit, Stop and
+// Notification hooks say working, idle and blocked; an explicit status wins.
+func TestTheStateRouteReportsTheCallersStatus(t *testing.T) {
+	r := rig()
+	for _, tc := range []struct {
+		body string
+		want agent.PaneStatus
+	}{
+		{`{"hook_event_name":"UserPromptSubmit","prompt":"hi"}`, agent.PaneWorking},
+		{`{"hook_event_name":"Stop","last_assistant_message":"done"}`, agent.PaneIdle},
+		{`{"hook_event_name":"Notification","notification_type":"permission_prompt"}`, agent.PaneBlocked},
+		{`{"status":"working"}`, agent.PaneWorking},
+		{`{"status":"idle","hook_event_name":"UserPromptSubmit"}`, agent.PaneIdle},
+		{`{"status":"blocked"}`, agent.PaneBlocked},
+	} {
+		code, text := send(r.app, postReq("/hooks/state", &r.token, strings.NewReader(tc.body)))
+		if code != http.StatusOK || text != "{}" {
+			t.Fatalf("%s: %d %q", tc.body, code, text)
+		}
+		ev := r.rt.recv(t)
+		if ev.Kind != agent.HookState || ev.Agent != "coordinator" || ev.Status != tc.want {
+			t.Fatalf("%s: %+v", tc.body, ev)
+		}
+	}
+}
+
+func TestTheStateRouteRefusesStrangersAndUnknownStates(t *testing.T) {
+	r := rig()
+	if code, _ := send(r.app, postReq("/hooks/state", nil, strings.NewReader(`{"status":"idle"}`))); code != http.StatusUnauthorized {
+		t.Fatal(code)
+	}
+	if code, _ := send(r.app, postReq("/hooks/state", strp("nope"), strings.NewReader(`{"status":"idle"}`))); code != http.StatusUnauthorized {
+		t.Fatal(code)
+	}
+	for _, body := range []string{`{"status":"done"}`, `{"status":"sleeping"}`, `{"hook_event_name":"PreToolUse"}`, `{}`, `[]`, `nope`} {
+		if code, _ := send(r.app, postReq("/hooks/state", &r.token, strings.NewReader(body))); code != http.StatusBadRequest {
+			t.Fatalf("%s: %d", body, code)
+		}
+	}
+	if ev, ok := r.rt.tryRecv(); ok {
+		t.Fatalf("nothing delivered: %+v", ev)
+	}
+	req := postReq("/hooks/state", &r.token, strings.NewReader(`{"status":"idle"}`))
+	req.Header.Set("Origin", "http://evil.example")
+	if code, _ := send(r.app, req); code != http.StatusForbidden {
+		t.Fatal(code)
+	}
+}

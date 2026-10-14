@@ -598,14 +598,19 @@ const (
 	HookPostTool
 	// HookMcp is a mascot MCP tool call; answered on McpReply.
 	HookMcp
+	// HookState is the agent's own status report (Claude Code hooks on the tmux session host,
+	// which detects no status itself): Status is Working, Idle or Blocked.
+	HookState
 )
 
 // HookEvent is what the hook server reports, with the calling agent resolved from its bearer.
 // Stop → Message; Permission → ToolName, ToolInput, Reply; PostTool → ToolName, ToolInput;
-// Mcp → Call, McpReply. Reply channels are one-shot: send at most once (buffer them by 1).
+// Mcp → Call, McpReply; State → Status. Reply channels are one-shot: send at most once (buffer
+// them by 1).
 type HookEvent struct {
 	Kind      HookEventKind
 	Agent     string
+	Status    PaneStatus
 	Message   string
 	ToolName  string
 	ToolInput any
