@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/sihekuang/deskpixie/core/herdr/compat"
+	tmuxcompat "github.com/sihekuang/deskpixie/core/tmux/compat"
 )
 
 // Platform is a platform the Settings window styles itself for.
@@ -271,7 +272,7 @@ var (
 		{ProviderOpenAILive, "OpenAI GPT-Live", AllPlatforms},
 	}
 	audioNames    = []Opt{{"macos-vpio", "macOS voice processing", mac}}
-	hostNames     = []Opt{{"herdr", "Herdr", AllPlatforms}}
+	hostNames     = []Opt{{"herdr", "Herdr", AllPlatforms}, {"tmux", "tmux", AllPlatforms}}
 	terminalNames = []Opt{{"warp", "Warp", mac}, {"iterm", "iTerm", mac}}
 )
 
@@ -315,9 +316,10 @@ var Fields = []FieldSpec{
 	spec("canvas.autoOpen", SectionCanvas, "Open new pages", "Show new and changed canvas pages automatically.", boolKind, ApplyLive),
 	spec("canvas.keep", SectionCanvas, "Pages kept", "Older pages are deleted at startup.", intKind(1, 1000, false), ApplyRestart),
 	spec("canvas.window", SectionCanvas, "Canvas window", "The canvas window's last place and size; written by the app.", managedKind, ApplyLive),
-	spec("agent.sessionHost", SectionAdvanced, "Session host", "The terminal multiplexer that runs the agent. Supported: "+compat.SupportedVersions+".", choiceKind(SourceSessionHosts), ApplyRestart),
-	spec("agent.session", SectionAdvanced, "Session name", "The Herdr session's name: a-z, 0-9 and -, not \"default\".", textKind(false), ApplyRestart),
+	spec("agent.sessionHost", SectionAdvanced, "Session host", "The terminal multiplexer that runs the agent. Supported: "+compat.SupportedVersions+", or "+tmuxcompat.SupportedVersions+".", choiceKind(SourceSessionHosts), ApplyRestart),
+	spec("agent.session", SectionAdvanced, "Session name", "The agent session's name: a-z, 0-9 and -, not \"default\".", textKind(false), ApplyRestart),
 	spec("agent.herdrPath", SectionAdvanced, "Herdr program", "Empty finds herdr on PATH or in ~/.local/bin, /opt/homebrew/bin or /usr/local/bin. Supported: "+compat.SupportedVersions+".", pathKind(false, true), ApplyRestart),
+	spec("agent.tmuxPath", SectionAdvanced, "tmux program", "Empty finds tmux on PATH or in /opt/homebrew/bin or /usr/local/bin. Supported: "+tmuxcompat.SupportedVersions+".", pathKind(false, true), ApplyRestart),
 	spec("agent.port", SectionAdvanced, "Hook server port", "The local port agents report to.", intKind(1024, 65535, false), ApplyRestart),
 	spec("agent.keepPanesOnQuit", SectionAdvanced, "Keep agent panes on quit", "Leave the agent's terminal panes open when the app quits.", boolKind, ApplyRestart),
 	spec("agent.permissionTimeoutSecs", SectionAdvanced, "Permission timeout (seconds)", "An unanswered permission request is denied after this long.", intKind(1, 120, false), ApplyRestart),

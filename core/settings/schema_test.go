@@ -418,6 +418,32 @@ func TestNotificationFieldsAreInTheNotificationsSection(t *testing.T) {
 	}
 }
 
+func TestTheTmuxSettingsNameTheSupportedVersion(t *testing.T) {
+	for _, path := range []string{"agent.sessionHost", "agent.tmuxPath"} {
+		if f := FieldByPath(path); f == nil || !strings.Contains(f.Help, "tmux 3.2 or newer") {
+			t.Fatalf("%s: %+v", path, f)
+		}
+	}
+	if f := FieldByPath("agent.tmuxPath"); f.Section != SectionAdvanced || f.Apply != ApplyRestart {
+		t.Fatalf("%+v", f)
+	}
+	// The session name is the host's, whichever host it is.
+	if f := FieldByPath("agent.session"); strings.Contains(f.Help, "Herdr") {
+		t.Fatal(f.Help)
+	}
+}
+
+func TestBothSessionHostsAreChoices(t *testing.T) {
+	opts := Options(Choices{Source: SourceSessionHosts}, OptionSources{Hosts: []string{"herdr", "tmux"}})
+	var got [][2]string
+	for _, o := range opts {
+		got = append(got, [2]string{o.Value, o.Label})
+	}
+	if !reflect.DeepEqual(got, [][2]string{{"herdr", "Herdr"}, {"tmux", "tmux"}}) {
+		t.Fatal(got)
+	}
+}
+
 func TestTheHerdrSettingsNameTheSupportedVersions(t *testing.T) {
 	for _, path := range []string{"agent.sessionHost", "agent.herdrPath"} {
 		if f := FieldByPath(path); !strings.Contains(f.Help, "Herdr 0.7.5 (protocol 17) or 0.9.x (protocol 22)") {

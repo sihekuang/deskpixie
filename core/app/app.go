@@ -842,7 +842,7 @@ func (a *App) settingsEnv(p settings.Platform) settings.Env {
 		Providers: ProviderNames(),
 		Audio:     AudioBackends(),
 		// The session host and terminals are P12/P13's; their names are fixed.
-		Hosts:     []string{"herdr"},
+		Hosts:     []string{"herdr", "tmux"},
 		Terminals: []string{"warp", "iterm"},
 	}}
 }

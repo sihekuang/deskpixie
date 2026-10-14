@@ -26,7 +26,7 @@ func testEnv(t *testing.T) Env {
 			Packs:     []Pair{{"bit", "Bit"}, {"dino", "Dino"}},
 			Providers: []string{"openai-realtime", "gemini-live"},
 			Audio:     []string{"macos-vpio"},
-			Hosts:     []string{"herdr"},
+			Hosts:     []string{"herdr", "tmux"},
 			Terminals: []string{"warp", "iterm"},
 			Inputs:    []Pair{{"BuiltInMic", "MacBook Pro Microphone"}},
 			Outputs:   []Pair{{"BuiltInSpeaker", "MacBook Pro Speakers"}},
@@ -214,12 +214,14 @@ func TestPersonaAndHerdrPathsMustBeFilesWhenSet(t *testing.T) {
 	c := Default()
 	c.Voice.PersonaPath = ptr(file)
 	c.Agent.HerdrPath = ptr(file)
+	c.Agent.TmuxPath = ptr(file)
 	if !valid(c, env) {
 		t.Fatal(problems(c, env))
 	}
 	c.Voice.PersonaPath = ptr(filepath.Join(env.Home, "nope.md"))
 	c.Agent.HerdrPath = ptr(filepath.Join(env.Home, "Documents"))
-	want := [][2]string{{"voice.personaPath", NoFile}, {"agent.herdrPath", NoFile}}
+	c.Agent.TmuxPath = ptr(filepath.Join(env.Home, "nope"))
+	want := [][2]string{{"voice.personaPath", NoFile}, {"agent.herdrPath", NoFile}, {"agent.tmuxPath", NoFile}}
 	if p := problems(c, env); !reflect.DeepEqual(p, want) {
 		t.Fatal(p)
 	}
@@ -309,5 +311,18 @@ func TestNotificationRanges(t *testing.T) {
 		if valid(c, env) != tc.ok {
 			t.Fatal(tc.name)
 		}
+	}
+}
+
+func TestTmuxIsAValidSessionHost(t *testing.T) {
+	env := testEnv(t)
+	c := Default()
+	c.Agent.SessionHost = "tmux"
+	if !valid(c, env) {
+		t.Fatal(problems(c, env))
+	}
+	c.Agent.SessionHost = "screen"
+	if valid(c, env) {
+		t.Fatal("not a host")
 	}
 }

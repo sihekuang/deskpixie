@@ -94,6 +94,9 @@ func Validate(c Config, env Env) []FieldError {
 	if c.Agent.HerdrPath != nil && !isFile(*c.Agent.HerdrPath) {
 		add("agent.herdrPath", NoFile)
 	}
+	if c.Agent.TmuxPath != nil && !isFile(*c.Agent.TmuxPath) {
+		add("agent.tmuxPath", NoFile)
+	}
 	if w := c.Agent.Workers; w.Enabled {
 		any := false
 		for _, k := range w.Kinds {
@@ -137,8 +140,8 @@ func ParseAgentKind(s string) string {
 	return ""
 }
 
-// CheckSession is the herdr session name rule: [a-z0-9][a-z0-9-]{0,47}, never "default".
-// (Rust session_herdr::check_session; P12 owns the supervisor.)
+// CheckSession is the session name rule (Herdr's session, tmux's socket and session):
+// [a-z0-9][a-z0-9-]{0,47}, never "default". (Rust session_herdr::check_session.)
 func CheckSession(session string) error {
 	ok := len(session) >= 1 && len(session) <= 48 && session != "default"
 	for i, c := range session {
@@ -148,7 +151,7 @@ func CheckSession(session string) error {
 		}
 	}
 	if !ok {
-		return fmt.Errorf("herdr session must be a dedicated name (a-z, 0-9, -; not \"default\"), not %q", session)
+		return fmt.Errorf("the agent session must be a dedicated name (a-z, 0-9, -; not \"default\"), not %q", session)
 	}
 	return nil
 }
