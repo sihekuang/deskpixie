@@ -57,6 +57,7 @@ type hostState struct {
 	prompts       []Prompt
 	keys          []Keys
 	focused       []string
+	labels        []string
 	closed        []string
 	subscribers   []chan agent.PaneEvent
 	failEnsure    error
@@ -177,6 +178,23 @@ func (f *FakeSessionHost) Focus(_ context.Context, name string) error {
 	f.with(func(s *hostState) {
 		if err = known(s, name); err == nil {
 			s.focused = append(s.focused, name)
+		}
+	})
+	return err
+}
+
+// Labels lists the tab relabels, in order, as "<agent>: <label>".
+func (f *FakeSessionHost) Labels() (out []string) {
+	f.with(func(s *hostState) { out = slices.Clone(s.labels) })
+	return
+}
+
+// Relabel is agent.Labeler: a missing agent is an error, as in Herdr.
+func (f *FakeSessionHost) Relabel(_ context.Context, name string, tab agent.TabLabel) error {
+	var err error
+	f.with(func(s *hostState) {
+		if err = known(s, name); err == nil {
+			s.labels = append(s.labels, name+": "+tab.Label)
 		}
 	})
 	return err

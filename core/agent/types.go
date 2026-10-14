@@ -332,6 +332,8 @@ type AgentSpec struct {
 	Args []string
 	// Env is the per-tab environment. Only MASCOT_AGENT_TOKEN.
 	Env []EnvVar
+	// Tab is what the tab shows (label "" = Name), where the host supports it.
+	Tab TabLabel
 }
 
 // HostErrorKind tells HostError variants apart.

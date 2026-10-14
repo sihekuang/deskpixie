@@ -350,6 +350,80 @@ func TestTheWorkspaceIsCreatedOnceAndTabsCarryTheTokenEnv(t *testing.T) {
 	assertJSON(t, server.Requests("agent.start")[0].(map[string]any)["args"], `["--model","haiku"]`)
 }
 
+func TestTheWorkspacesEmptyTabIsClosedOnceTheFirstAgentTabIsUp(t *testing.T) {
+	t.Parallel()
+	server := herdrtest.Start(t)
+	h := newTestHost(t, server)
+	if err := h.EnsureSession(bg); err != nil {
+		t.Fatal(err)
+	}
+	if got := server.Tabs(); !reflect.DeepEqual(got, []string{"1"}) {
+		t.Fatalf("before: %q", got)
+	}
+	mustStart(t, h, "coordinator")
+	if got := server.Tabs(); !reflect.DeepEqual(got, []string{"coordinator"}) {
+		t.Fatalf("after: %q", got)
+	}
+	mustStart(t, h, "w-b")
+	assertJSON(t, server.Requests("tab.close"), `[{"tab_id":"w1:t1"}]`)
+}
+
+func TestAWorkerTabCarriesItsLabelAndMetadata(t *testing.T) {
+	t.Parallel()
+	server := herdrtest.Start(t)
+	h := newTestHost(t, server)
+	s := spec("deskpixie-fix-it")
+	s.Tab = agent.WorkerTab(agent.WorkerPlan{Name: "deskpixie-fix-it", Slug: "fix-it", RepoName: "deskpixie",
+		Job: "job_7", Task: "Fix the   tray icon\nso that it never flickers when the app restarts at night"})
+	if _, err := h.StartAgent(bg, s); err != nil {
+		t.Fatal(err)
+	}
+	want := "deskpixie-fix-it · job_7 · Fix the tray icon so that it never flic…"
+	if got := server.TabLabel("deskpixie-fix-it"); got != want {
+		t.Fatalf("%q", got)
+	}
+	title, meta := server.Metadata("deskpixie-fix-it")
+	wantMeta := map[string]string{"role": "worker", "job": "job_7", "repo": "deskpixie", "branch": "mascot/fix-it",
+		"task": "Fix the tray icon so that it never flickers when the app restarts at night"}
+	if title != "" || !reflect.DeepEqual(meta, wantMeta) {
+		t.Fatalf("%q %v", title, meta)
+	}
+	// Still found by name, not by label.
+	list, err := h.List(bg)
+	if err != nil || len(list) != 1 || list[0].Name != "deskpixie-fix-it" {
+		t.Fatalf("%+v %v", list, err)
+	}
+}
+
+func TestRelabelRenamesTheTabAndSetsItsTitle(t *testing.T) {
+	t.Parallel()
+	server := herdrtest.Start(t)
+	h := newTestHost(t, server)
+	mustStart(t, h, "coordinator")
+	job := agent.Job{ID: "job_3", Task: "Update the application icon before the next restart"}
+	if err := h.Relabel(bg, "coordinator", agent.CoordinatorTab(&job)); err != nil {
+		t.Fatal(err)
+	}
+	if got := server.TabLabel("coordinator"); got != "coordinator · Update the application icon before the…" {
+		t.Fatalf("%q", got)
+	}
+	title, meta := server.Metadata("coordinator")
+	if title != job.Task || meta["job"] != "job_3" || meta["task"] != job.Task {
+		t.Fatalf("%q %v", title, meta)
+	}
+	// Idle: back to the plain label, title and job cleared.
+	if err := h.Relabel(bg, "coordinator", agent.CoordinatorTab(nil)); err != nil {
+		t.Fatal(err)
+	}
+	title, meta = server.Metadata("coordinator")
+	if got := server.TabLabel("coordinator"); got != "coordinator" || title != "" || !reflect.DeepEqual(meta, map[string]string{"role": "coordinator"}) {
+		t.Fatalf("%q %q %v", got, title, meta)
+	}
+	if err := h.Relabel(bg, "nobody", agent.CoordinatorTab(nil)); !agent.IsHostError(err, agent.HostNoAgent) {
+		t.Fatalf("%v", err)
+	}
+}
+
 func TestAnAgentProcessExitIsReportedOnceEvenAcrossResubscribes(t *testing.T) {
 	t.Parallel()
 	server := herdrtest.Start(t)

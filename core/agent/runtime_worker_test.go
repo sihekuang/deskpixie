@@ -152,6 +152,9 @@ func TestStartWorkerMakesAWorktreeStartsThePaneAndSendsTheBrief(t *testing.T) {
 		if spec.Cwd != "/projects/focus/.worktrees/upload" {
 			t.Fatal(spec.Cwd)
 		}
+		if spec.Tab.Label != wName+" · job_000000000001 · Fix the flaky upload test." || spec.Tab.Meta["branch"] != "mascot/upload" {
+			t.Fatalf("%+v", spec.Tab)
+		}
 		if !slices.Equal(spec.Env, []EnvVar{{Key: "MASCOT_AGENT_TOKEN", Value: "tok-focus-upload"}}) {
 			t.Fatal(spec.Env)
 		}
