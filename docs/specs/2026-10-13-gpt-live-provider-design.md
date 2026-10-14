@@ -1,7 +1,7 @@
 # DeskPixie: OpenAI GPT-Live as a third voice provider
 
 Date: 2026-10-13
-Status: **Draft for review.** Spec only; no code. The open questions in §12 need the user's answers before a plan is written.
+Status: **Approved and implemented** (2026-10-13; §12 accepted as recommended). See §15 for the rulings made while building it.
 Builds on: `docs/specs/2026-10-13-deskpixie-port-design.md` (the Go core layout, §4) and the existing adapters in `core/voice/openai` (Realtime) and `core/voice/gemini` (Gemini Live).
 
 ## 1. Goal
@@ -371,3 +371,24 @@ Recommendation: log `usage.seconds` per conversation (via the `UsageSink`) so th
 4. `session.go` + the fake server + conformance.
 5. Settings and secrets; composition root; the prompt split.
 6. Live smoke; tune the §3.1 constants; update this spec with measured numbers.
+
+## 15. Implementation notes (2026-10-13)
+
+**Access probe (§10):** `ACCESS OK` on the user's key: `gpt-live-1`, `session.closed` `close_requested`, 0 s billed.
+
+**Live smoke:** `go test -tags live -run 'TestLiveVoiceProviders/openai-live' -v ./voice/` passed against the real service:
+- "What is two plus two?" → backend `calculate` call → "Let me check that." / "Four."
+- Barge-in: GPT-Live yielded and the user's turn started (6 s billed).
+
+**Rulings** (spec intent kept, simpler mechanics):
+1. **No `ModelFactory` change.** `SessionConfig` carries `BackendModel` as well as `BackendInstructions`, so the factory signature stays `func() voice.Model` (§8).
+2. **No `delegation.md` split.**
+   - The Live prompt is Bit's full instructions plus the GPT-Live policies section.
+   - The backend prompt is a short preamble plus the same full instructions (`BackendInstructions` empty → `Instructions`, which already includes the session facts).
+   - Realtime and Gemini prompts are untouched. Cost if wrong: some backend tokens; it can be split later.
+3. **Unanswered tool calls don't hold a reply open; backend work in flight does.** The conformance suite (like the runtime) sends a tool result only after `ResponseDone`.
+4. **`ProviderTurns` skips the reply wait after any tool result**, not only while Listening. GPT-Live's next reply opens a response anyway.
+5. **Cancel when Bit is already quiet sends nothing and mutes nothing.** After a real cancel, the mute ends after 700 ms without loud output, or as soon as the user talks.
+6. **A user's words while Bit talks don't start a turn.** If the user goes quiet first, it was a backchannel: the transcript is kept, with no speech events.
+7. **Usage is logged** by the adapter when the session closes (`[voice] gpt-live session closed: <reason>, N s billed`). There is no `UsageSink`.
+8. **`outputSpeechRMS` = 0.01**, not 0.02, so soft syllables keep a reply open.
