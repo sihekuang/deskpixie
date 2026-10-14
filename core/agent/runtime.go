@@ -1310,9 +1310,10 @@ func closeBounded(ctx context.Context, agent string, close func(context.Context)
 
 // checkStartScreen reads the start screen every StartScreenPoll (each read bounded by the time
 // left). A refusal (e.g. a folder-trust prompt the app won't answer) fails the start with its
-// reason, and nothing is typed. With ready, the start is up only once the screen shows its
-// marker and no refusal screen, watched until ReadyWindow after began (at least DialogWait); if
-// it never shows, the start fails with its reason naming the last screen line. Without it, the
+// reason, and nothing is typed. With ready, the start is up only once the screen has shown its
+// marker and no refusal screen on every read for ready.Settle, watched until ReadyWindow after
+// began (at least DialogWait, and on past it while a settle that began before it runs); if it
+// never is, the start fails with its reason naming the last screen line. Without it, the
 // screen is read once, and again for up to DialogWait only while the pane is blocked.
 func checkStartScreen(ctx context.Context, session SessionHost, plan WorkerPlan, refusal *StartRefusal, ready *StartReady, status PaneStatus, began time.Time) error {
 	if refusal == nil && ready == nil {
@@ -1325,6 +1326,7 @@ func checkStartScreen(ctx context.Context, session SessionHost, plan WorkerPlan,
 		}
 	}
 	last := ""
+	var since time.Time // when the marker began to show on every read; zero: it doesn't
 	for {
 		text, err := within(ctx, max(time.Until(deadline), 0), func(c context.Context) (string, error) {
 			return session.Read(c, plan.Name, 40)
@@ -1333,10 +1335,23 @@ func checkStartScreen(ctx context.Context, session SessionHost, plan WorkerPlan,
 			if refusal != nil && ShowsAnyScreen(text, refusal.Screens) {
 				return errors.New(refusal.Reason)
 			}
-			if ready != nil && strings.Contains(text, ready.Marker) {
-				return nil
-			}
 			last = lastLine(text)
+			if ready != nil {
+				if !strings.Contains(text, ready.Marker) {
+					since = time.Time{}
+				} else {
+					if since.IsZero() {
+						since = time.Now()
+						// A settle that begins before the deadline runs to its end (and one read past it).
+						if end := since.Add(ready.Settle + StartScreenPoll); end.After(deadline) {
+							deadline = end
+						}
+					}
+					if time.Since(since) >= ready.Settle {
+						return nil
+					}
+				}
+			}
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()

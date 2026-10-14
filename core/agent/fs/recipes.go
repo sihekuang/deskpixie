@@ -199,7 +199,7 @@ func (r *FileWorkerRecipes) codex(l agent.WorkerLaunch) (agent.PreparedWorker, e
 			Env:  []agent.EnvVar{{Key: agent.TokenEnv, Value: l.Token}},
 		},
 		Refusal: &agent.StartRefusal{Screens: agent.CodexTrustScreensOwned(), Reason: agent.CodexTrustRefusal(l.Repo)},
-		Ready:   &agent.StartReady{Marker: agent.CodexIdleMarker, Reason: agent.CodexNotReady(l.Repo)},
+		Ready:   &agent.StartReady{Marker: agent.CodexIdleMarker, Reason: agent.CodexNotReady(l.Repo), Settle: agent.CodexReadySettle},
 	}, nil
 }
 

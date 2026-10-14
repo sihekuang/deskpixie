@@ -1038,7 +1038,7 @@ func (s *workerSmoke) watchTrust(ctx context.Context, seen *string, mu *sync.Mut
 	}
 }
 
-// codexPart (SMOKE_CODEX=1; as in the Herdr worker smoke, not yet run on tmux): a Codex start
+// codexPart (SMOKE_CODEX=1; as in the Herdr worker smoke): a Codex start
 // in a repo Codex does not trust fails with the trust message and types nothing; then a worker
 // in the trusted repo works end to end.
 func (s *workerSmoke) codexPart() error {

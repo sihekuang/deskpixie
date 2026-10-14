@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/sihekuang/deskpixie/core/voice"
 )
@@ -499,12 +500,15 @@ func rustLines(s string) []string {
 }
 
 // StartReady is what a start waits for: the pane is not up (and nothing is sent) until it
-// shows Marker (e.g. Codex's empty input box) with no refusal screen; if it never does, the
-// start fails with Reason, its {last} replaced by the screen's last non-empty line (at most 80
-// chars, control characters dropped).
+// shows Marker (e.g. Codex's empty input box) with no refusal screen on every read for Settle
+// since the marker first showed (a read without it starts the wait again); if it never does,
+// the start fails with Reason, its {last} replaced by the screen's last non-empty line (at most
+// 80 chars, control characters dropped). Settle is for a CLI that draws its input box before a
+// refusal screen (Codex 0.162 draws it, then its folder-trust prompt over it).
 type StartReady struct {
 	Marker string
 	Reason string
+	Settle time.Duration
 }
 
 // PreparedWorker is a worker's launch spec plus its optional start checks.

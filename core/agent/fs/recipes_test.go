@@ -197,7 +197,7 @@ func TestACodexWorkerNeedsNoFileAndNeverTrustsAFolder(t *testing.T) {
 		t.Fatal(p.Refusal.Reason)
 	}
 	notReady := fmt.Sprintf("Codex didn't become ready (its screen ends with \"{last}\"); open Codex in %s to see why.", l.Repo)
-	if p.Ready == nil || *p.Ready != (agent.StartReady{Marker: "Ask Codex to do anything", Reason: notReady}) {
+	if p.Ready == nil || *p.Ready != (agent.StartReady{Marker: "Ask Codex to do anything", Reason: notReady, Settle: agent.CodexReadySettle}) {
 		t.Fatalf("up only once its input box shows: %+v", p.Ready)
 	}
 	for _, a := range p.Spec.Args {

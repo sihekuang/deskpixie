@@ -371,7 +371,7 @@ func TestNoTrustPromptMeansANormalStart(t *testing.T) {
 // codexLike: refused on any trust marker, up only once the input box shows.
 func codexLike(r *wRig) {
 	r.recipes.SetRefusal(&StartRefusal{Screens: CodexTrustScreensOwned(), Reason: "trust it yourself"})
-	r.recipes.SetReady(&StartReady{Marker: CodexIdleMarker, Reason: CodexNotReady("/projects/focus")})
+	r.recipes.SetReady(&StartReady{Marker: CodexIdleMarker, Reason: CodexNotReady("/projects/focus"), Settle: CodexReadySettle})
 }
 
 func TestTheStartWaitsForTheInputBoxBeforeTheBrief(t *testing.T) {
@@ -390,7 +390,8 @@ func TestTheStartWaitsForTheInputBoxBeforeTheBrief(t *testing.T) {
 		}()
 		began := time.Now()
 		okValue(t, call(r, Coordinator, startCall("focus")))
-		if e := time.Since(began); e < 5*time.Second || e >= 6*time.Second {
+		// Up once the input box has shown for CodexReadySettle.
+		if e := time.Since(began); e < 5*time.Second+CodexReadySettle || e >= 6*time.Second+CodexReadySettle {
 			t.Fatal(e)
 		}
 		select {
@@ -449,6 +450,64 @@ func TestCodexSNewTrustScreenOnAnIdlePaneFailsTheStartAndNothingIsTyped(t *testi
 		if !slices.Contains(r.host.Closed(), wName) {
 			t.Fatal("its pane is closed")
 		}
+	})
+}
+
+func TestCodexSTrustScreenDrawnOverItsInputBoxFailsTheStart(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := withJob(t, true)
+		codexLike(r)
+		// codex 0.162 draws its input box first, then its trust screen over it.
+		r.host.SetScreen(wName, "› Ask Codex to do anything\n\n  ? for shortcuts")
+		host := r.host
+		go func() {
+			time.Sleep(time.Second)
+			host.SetScreen(wName, CodexTrustScreenForTest)
+		}()
+		wantErr(t, call(r, Coordinator, startCall("focus")), "trust it yourself")
+		settle()
+		if typedInto(r.host.Keys(), wName) || promptedTo(r.host.Prompts(), wName) {
+			t.Fatal("nothing is typed", r.host.Keys(), r.host.Prompts())
+		}
+		if !slices.Contains(r.host.Closed(), wName) {
+			t.Fatal("its pane is closed")
+		}
+	})
+}
+
+func TestTheInputBoxMustShowOnEveryReadForTheSettle(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := withJob(t, true)
+		codexLike(r)
+		box := "› Ask Codex to do anything\n\n  ? for shortcuts"
+		r.host.SetScreen(wName, box)
+		host := r.host
+		go func() {
+			time.Sleep(2 * time.Second)
+			host.SetScreen(wName, "Booting MCP server: mascot")
+			time.Sleep(time.Second)
+			host.SetScreen(wName, box)
+		}()
+		began := time.Now()
+		okValue(t, call(r, Coordinator, startCall("focus")))
+		// The settle starts again when the box shows again (at 3 s).
+		if e := time.Since(began); e < 3*time.Second+CodexReadySettle || e >= 4*time.Second+CodexReadySettle {
+			t.Fatal(e)
+		}
+	})
+}
+
+func TestASettleBegunNearTheDeadlineRunsToItsEnd(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := withJob(t, true)
+		codexLike(r)
+		r.host.SetScreen(wName, "Booting MCP server: mascot")
+		host := r.host
+		go func() {
+			time.Sleep(ReadyWindow - time.Second)
+			host.SetScreen(wName, "› Ask Codex to do anything")
+		}()
+		okValue(t, call(r, Coordinator, startCall("focus")))
 	})
 }
 
