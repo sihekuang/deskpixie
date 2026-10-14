@@ -7,15 +7,15 @@ import (
 	"encoding/json"
 )
 
-type MascotState string
+type PixieState string
 
 const (
-	StateIdle       MascotState = "idle"
-	StateListening  MascotState = "listening"
-	StateThinking   MascotState = "thinking"
-	StateDelegating MascotState = "delegating"
-	StateHappy      MascotState = "happy"
-	StateError      MascotState = "error"
+	StateIdle       PixieState = "idle"
+	StateListening  PixieState = "listening"
+	StateThinking   PixieState = "thinking"
+	StateDelegating PixieState = "delegating"
+	StateHappy      PixieState = "happy"
+	StateError      PixieState = "error"
 )
 
 // TurnDetection decides who determines the user has finished speaking.

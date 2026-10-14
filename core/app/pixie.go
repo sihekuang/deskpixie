@@ -1,6 +1,6 @@
 package app
 
-// What the mascot is doing. Talking is independent of state (mouth layer). Port of ai-mascot
+// What the pixie is doing. Talking is independent of state (mouth layer). Port of ai-mascot
 // src-tauri/src/mascot_state.rs.
 
 import (
@@ -17,20 +17,20 @@ const Hold = 2 * time.Second
 // transient are the states the app shows briefly and then leaves on its own.
 var transient = []string{"happy", "error"}
 
-// MascotState is the mascot's state and talking flag. Not safe for concurrent use (the app
+// PixieState is the pixie's state and talking flag. Not safe for concurrent use (the app
 // guards it with its lock).
-type MascotState struct {
+type PixieState struct {
 	State   string
 	Talking bool
 	// seq is bumped on every state change, so a pending one-shot end can tell it is stale.
 	seq uint64
 }
 
-// NewMascotState starts idle and silent.
-func NewMascotState() MascotState { return MascotState{State: "idle"} }
+// NewPixieState starts idle and silent.
+func NewPixieState() PixieState { return PixieState{State: "idle"} }
 
 // ToggleListening: listening → idle, anything else → listening (the hotkey without voice).
-func (s *MascotState) ToggleListening() string {
+func (s *PixieState) ToggleListening() string {
 	if s.State == "listening" {
 		s.State = "idle"
 	} else {
@@ -41,7 +41,7 @@ func (s *MascotState) ToggleListening() string {
 }
 
 // SetState switches to a known state name; false (no change) for an unknown one.
-func (s *MascotState) SetState(name string) bool {
+func (s *PixieState) SetState(name string) bool {
 	if !slices.Contains(packs.StateNames[:], name) {
 		return false
 	}
@@ -52,7 +52,7 @@ func (s *MascotState) SetState(name string) bool {
 
 // playOnce is how long the player takes to play the current state once, if it does not loop.
 // One frame of slack keeps the app from cutting the last frame short.
-func (s *MascotState) playOnce(p *packs.Pack) (time.Duration, bool) {
+func (s *PixieState) playOnce(p *packs.Pack) (time.Duration, bool) {
 	if p == nil {
 		return 0, false
 	}
@@ -67,7 +67,7 @@ func (s *MascotState) playOnce(p *packs.Pack) (time.Duration, bool) {
 // OneShot: for a non-looping transient state (`happy` or `error`, e.g. from the tray), this
 // change's sequence number and how long the player takes to play it once, after which it falls
 // back to `idle` on its own. Conversation states are never mirrored: their owner holds them.
-func (s *MascotState) OneShot(p *packs.Pack) (seq uint64, after time.Duration, ok bool) {
+func (s *PixieState) OneShot(p *packs.Pack) (seq uint64, after time.Duration, ok bool) {
 	if !slices.Contains(transient, s.State) {
 		return 0, 0, false
 	}
@@ -77,7 +77,7 @@ func (s *MascotState) OneShot(p *packs.Pack) (seq uint64, after time.Duration, o
 
 // FinishOneShot: the one-shot started by change seq has played out: back to idle. False (no
 // change) when anything changed the state since.
-func (s *MascotState) FinishOneShot(seq uint64) bool {
+func (s *PixieState) FinishOneShot(seq uint64) bool {
 	return s.EndHold(HeldState{Seq: seq, Then: "idle"})
 }
 
@@ -91,7 +91,7 @@ type HeldState struct {
 
 // Celebrate plays `happy` (a new canvas page). Only from idle, so a conversation is never
 // interrupted. The caller announces `happy` and calls EndHold after HeldState.After.
-func (s *MascotState) Celebrate(p *packs.Pack) (HeldState, bool) {
+func (s *PixieState) Celebrate(p *packs.Pack) (HeldState, bool) {
 	if s.State != "idle" {
 		return HeldState{}, false
 	}
@@ -100,14 +100,14 @@ func (s *MascotState) Celebrate(p *packs.Pack) (HeldState, bool) {
 
 // FlashError shows `error` (a delegated job failed), then returns to where it was. Only from a
 // resting state (idle or delegating).
-func (s *MascotState) FlashError(p *packs.Pack) (HeldState, bool) {
+func (s *PixieState) FlashError(p *packs.Pack) (HeldState, bool) {
 	if s.State != "idle" && s.State != "delegating" {
 		return HeldState{}, false
 	}
 	return s.hold("error", p)
 }
 
-func (s *MascotState) hold(name string, p *packs.Pack) (HeldState, bool) {
+func (s *PixieState) hold(name string, p *packs.Pack) (HeldState, bool) {
 	then := s.State
 	if !s.SetState(name) {
 		return HeldState{}, false
@@ -120,7 +120,7 @@ func (s *MascotState) hold(name string, p *packs.Pack) (HeldState, bool) {
 }
 
 // EndHold goes back to h.Then, unless anything changed the state since the hold started.
-func (s *MascotState) EndHold(h HeldState) bool {
+func (s *PixieState) EndHold(h HeldState) bool {
 	return h.Seq == s.seq && s.SetState(h.Then)
 }
 

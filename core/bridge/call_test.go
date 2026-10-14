@@ -175,7 +175,7 @@ func TestConfigureRegistersTheContractMethods(t *testing.T) {
 	for _, m := range []string{
 		"settings.snapshot", "settings.set", "settings.reload", "settings.secrets", "settings.choices",
 		"settings.openFile", "settings.restart", "settings.hotkeyFailed",
-		"app.state", "app.action", "mascot.click", "mascot.moved",
+		"app.state", "app.action", "pixie.click", "pixie.moved",
 		"canvas.resolve", "canvas.geometry", "audio.deviceChanged", "audio.failed",
 	} {
 		if strings.HasPrefix(string(e.Call(m, []byte(`{"bogus":`))), `{"error":"unknown method`) {

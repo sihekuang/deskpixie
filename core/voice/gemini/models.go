@@ -20,7 +20,7 @@ import (
 
 const (
 	DefaultModel = "gemini-3.8-live"
-	// DefaultVoice is "Upbeat": suits a small cheerful mascot.
+	// DefaultVoice is "Upbeat": suits a small cheerful pixie.
 	DefaultVoice = "Puck"
 )
 

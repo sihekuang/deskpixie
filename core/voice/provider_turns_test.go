@@ -78,7 +78,7 @@ func TestNewFailureStatusLines(t *testing.T) {
 
 type failErr struct{ f Failure }
 
-func (e failErr) Error() string     { return "nope" }
+func (e failErr) Error() string    { return "nope" }
 func (e failErr) Failure() Failure { return e.f }
 
 type failingModel struct{ err error }

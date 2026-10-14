@@ -1,10 +1,10 @@
 // Package app is DeskPixie's app core: the composition root that turns settings.json into a
-// running voice loop, canvas and mascot, and the app.* / mascot.* / canvas.* / audio.* dp_call
+// running voice loop, canvas and pixie, and the app.* / pixie.* / canvas.* / audio.* dp_call
 // methods Swift uses. Port of ai-mascot src-tauri/src/{lib.rs, actions.rs, settings/live.rs,
 // voice/mod.rs, canvas/mod.rs} minus the windows, tray and hotkey (Swift's).
 //
 // The delegation agent plugs in through Deps.Agent (core/app/agentapp builds it); without it
-// the Agent menu is hidden and mascot.click is a logged no-op.
+// the Agent menu is hidden and pixie.click is a logged no-op.
 //
 // Lock order: settings API lock → app lock (a.mu) → settings store lock. The app never holds
 // a.mu while calling the settings API, the canvas controller or the runtime's blocking calls,
@@ -36,10 +36,10 @@ import (
 // Paths is what Swift passes to dp_configure: where things are on disk.
 type Paths struct {
 	// AppSupport is ~/Library/Application Support/com.sihekuang.deskpixie (settings.json,
-	// mascots/, canvas/, recordings/, .env).
+	// pixies/, canvas/, recordings/, .env).
 	AppSupport string `json:"appSupport"`
-	// BundledMascots is the app bundle's mascots folder (Resources/mascots).
-	BundledMascots string `json:"bundledMascots"`
+	// BundledPixies is the app bundle's pixies folder (Resources/pixies).
+	BundledPixies string `json:"bundledPixies"`
 	// DesignSystem is the app bundle's design-system folder (Resources/design-system).
 	DesignSystem string `json:"designSystem"`
 	// DFN3ModelPath is Resources/DeepFilterNet3.tar.gz ("" = DFN3 unavailable; Hush is built in).
@@ -48,8 +48,8 @@ type Paths struct {
 	Platform string `json:"platform"`
 }
 
-// ErrNoPack: no valid mascot pack in any root.
-var ErrNoPack = errors.New("no valid mascot pack")
+// ErrNoPack: no valid pixie pack in any root.
+var ErrNoPack = errors.New("no valid pixie pack")
 
 // Registrar is the dp_call registry (core/bridge adapts its own).
 type Registrar interface {
@@ -129,7 +129,7 @@ type App struct {
 	closeOnce sync.Once
 
 	mu           sync.Mutex
-	mascot       MascotState
+	pixie        PixieState
 	packs        map[string]packs.Pack
 	wanted       string            // the chosen pack id (shown when loaded, else a fallback)
 	hitMasks     map[string]string // pack id → base64 hit mask
@@ -145,7 +145,7 @@ type App struct {
 var setupFailureHold = 2 * time.Second
 
 // New loads settings and packs, builds the voice loop and canvas, and starts the background
-// loops. It fails only without AppSupport or without any valid mascot pack.
+// loops. It fails only without AppSupport or without any valid pixie pack.
 func New(d Deps) (*App, error) {
 	p := d.Paths
 	if p.AppSupport == "" {
@@ -166,23 +166,20 @@ func New(d Deps) (*App, error) {
 	if d.CanvasTick <= 0 {
 		d.CanvasTick = CanvasTick
 	}
-	userMascots := filepath.Join(p.AppSupport, "mascots")
-	if err := os.MkdirAll(userMascots, 0o755); err != nil {
-		log.Printf("app: creating user mascots folder: %v", err)
-	}
+	userRoots := UserPackRoots(p.AppSupport)
 	a := &App{
 		deps:       d,
 		paths:      p,
 		store:      settings.OpenFileStore(filepath.Join(p.AppSupport, "settings.json")),
 		talkSwitch: make(chan bool),
 		stop:       make(chan struct{}),
-		mascot:     NewMascotState(),
+		pixie:      NewPixieState(),
 		hitMasks:   map[string]string{},
 	}
-	if p.BundledMascots != "" {
-		a.roots = append(a.roots, p.BundledMascots)
+	if p.BundledPixies != "" {
+		a.roots = append(a.roots, p.BundledPixies)
 	}
-	a.roots = append(a.roots, userMascots)
+	a.roots = append(a.roots, userRoots...)
 	a.packs, _ = packs.Load(a.roots...) // rejected packs are logged by Load
 	if len(a.packs) == 0 {
 		return nil, fmt.Errorf("%w in %q", ErrNoPack, a.roots)
@@ -443,7 +440,7 @@ func (a *App) emitRaw(ev voice.UIEvent) {
 	a.deps.Emit(ev.Kind, b)
 }
 
-// --- mascot state ---
+// --- pixie state ---
 
 // currentPackLocked is the pack shown: the chosen one, else bit, else the first. Needs a.mu.
 func (a *App) currentPackLocked() (*packs.Pack, bool) {
@@ -464,10 +461,10 @@ func (a *App) currentLevels() (uint32, bool) {
 	return p.Mouth.Levels, true
 }
 
-// setState switches the mascot's state and tells the player; false for an unknown name.
+// setState switches the pixie's state and tells the player; false for an unknown name.
 func (a *App) setState(name string) bool {
 	a.mu.Lock()
-	ok := a.mascot.SetState(name)
+	ok := a.pixie.SetState(name)
 	a.mu.Unlock()
 	if ok {
 		a.announce(name)
@@ -481,14 +478,14 @@ func (a *App) announce(name string) {
 	a.emit("state", map[string]any{"state": name})
 	a.mu.Lock()
 	p, _ := a.currentPackLocked()
-	seq, after, ok := a.mascot.OneShot(p)
+	seq, after, ok := a.pixie.OneShot(p)
 	a.mu.Unlock()
 	if !ok {
 		return
 	}
 	time.AfterFunc(after, func() {
 		a.mu.Lock()
-		done := a.mascot.FinishOneShot(seq)
+		done := a.pixie.FinishOneShot(seq)
 		a.mu.Unlock()
 		if done {
 			a.emit("state", map[string]any{"state": "idle"})
@@ -501,7 +498,7 @@ func (a *App) announce(name string) {
 func (a *App) Celebrate() {
 	a.mu.Lock()
 	p, _ := a.currentPackLocked()
-	h, ok := a.mascot.Celebrate(p)
+	h, ok := a.pixie.Celebrate(p)
 	a.mu.Unlock()
 	a.showHeld("happy", h, ok)
 }
@@ -510,7 +507,7 @@ func (a *App) Celebrate() {
 func (a *App) FlashError() {
 	a.mu.Lock()
 	p, _ := a.currentPackLocked()
-	h, ok := a.mascot.FlashError(p)
+	h, ok := a.pixie.FlashError(p)
 	a.mu.Unlock()
 	a.showHeld("error", h, ok)
 }
@@ -523,7 +520,7 @@ func (a *App) showHeld(name string, h HeldState, ok bool) {
 	a.pushTray()
 	time.AfterFunc(h.After, func() {
 		a.mu.Lock()
-		ended := a.mascot.EndHold(h)
+		ended := a.pixie.EndHold(h)
 		a.mu.Unlock()
 		if ended {
 			a.announce(h.Then)
@@ -540,7 +537,7 @@ func (a *App) Hotkey() {
 	}
 	if a.setupFail == nil {
 		a.mu.Lock()
-		name := a.mascot.ToggleListening()
+		name := a.pixie.ToggleListening()
 		a.mu.Unlock()
 		a.announce(name)
 		a.pushTray()
@@ -610,7 +607,7 @@ func (a *App) packPayload(scale uint32) map[string]any {
 	return f
 }
 
-// showPack tells the voice loop and the mascot window about the pack shown now.
+// showPack tells the voice loop and the pixie window about the pack shown now.
 func (a *App) showPack() {
 	f := a.packPayload(a.store.Current().Scale)
 	if f == nil {
@@ -646,7 +643,7 @@ func (a *App) PackJSON() []byte {
 	return b
 }
 
-// selectPack: Tray ▸ Mascot. Saves the choice.
+// selectPack: Tray ▸ Pixie. Saves the choice.
 func (a *App) selectPack(id string) error {
 	a.mu.Lock()
 	_, ok := a.packs[id]
@@ -709,11 +706,11 @@ func (a *App) State() AppState {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	s := AppState{
-		State:        a.mascot.State,
+		State:        a.pixie.State,
 		Packs:        make([]PackRef, 0, len(a.packs)),
 		Scale:        int(cfg.Scale),
 		Fade:         cfg.ProximityFade.Enabled,
-		Talking:      a.mascot.Talking,
+		Talking:      a.pixie.Talking,
 		CanvasRecent: append([]CanvasPage{}, a.canvasRecent...),
 		Agent:        AgentState{Enabled: agent.Enabled, Jobs: JobItems(agent.Jobs)},
 		StatusLines:  []string{},
@@ -816,8 +813,8 @@ func (a *App) action(id string) error {
 
 func (a *App) toggleTalking() {
 	a.mu.Lock()
-	a.mascot.Talking = !a.mascot.Talking
-	on := a.mascot.Talking
+	a.pixie.Talking = !a.pixie.Talking
+	on := a.pixie.Talking
 	a.mu.Unlock()
 	a.talkMu.Lock()
 	defer a.talkMu.Unlock()
@@ -1058,13 +1055,13 @@ func (a *App) Register(r Registrar) {
 		}
 		return struct{}{}, a.Action(in.ID)
 	})
-	r.Register("mascot.click", func(json.RawMessage) (any, error) {
+	r.Register("pixie.click", func(json.RawMessage) (any, error) {
 		a.OpenAgentTerminal()
 		return struct{}{}, nil
 	})
-	r.Register("mascot.moved", func(args json.RawMessage) (any, error) {
+	r.Register("pixie.moved", func(args json.RawMessage) (any, error) {
 		var in struct{ X, Y float64 }
-		if err := decodeArgs("mascot.moved", args, &in); err != nil {
+		if err := decodeArgs("pixie.moved", args, &in); err != nil {
 			return nil, err
 		}
 		a.save(func(c *settings.Config) { c.Position = &[2]float64{in.X, in.Y} })

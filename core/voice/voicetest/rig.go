@@ -35,12 +35,12 @@ func (s *Sink) Events() []voice.UIEvent {
 	return slices.Clone(s.events)
 }
 
-// States are the mascot states, in order.
-func (s *Sink) States() []voice.MascotState {
-	var out []voice.MascotState
+// States are the pixie states, in order.
+func (s *Sink) States() []voice.PixieState {
+	var out []voice.PixieState
 	for _, e := range s.Events() {
 		if e.Kind == "state" {
-			out = append(out, voice.MascotState(e.State))
+			out = append(out, voice.PixieState(e.State))
 		}
 	}
 	return out

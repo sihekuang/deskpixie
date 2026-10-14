@@ -137,7 +137,7 @@ func TestAgentMenuIdsClickAndMouthReachTheAgent(t *testing.T) {
 	if _, err := h.callErr("app.action", map[string]string{"id": "agent:bogus"}); err == nil {
 		t.Fatal("an id the agent does not know is an error")
 	}
-	h.call("mascot.click", nil)
+	h.call("pixie.click", nil)
 	h.app.onVoiceEvent(voice.UIEvent{Kind: "mouth", Level: 3})
 	h.app.onVoiceEvent(voice.UIEvent{Kind: "mouth", Level: 0})
 	f.mu.Lock()
@@ -188,7 +188,7 @@ func TestANilAgentLeavesTheMenuHidden(t *testing.T) {
 		t.Fatal("shown")
 	}
 	h.action("agent:open") // a logged no-op
-	h.call("mascot.click", nil)
+	h.call("pixie.click", nil)
 }
 
 // rememberingAgent is an agent whose coordinator side gives each voice session a context block.

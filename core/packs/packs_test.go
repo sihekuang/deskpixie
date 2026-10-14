@@ -8,14 +8,14 @@ import (
 	"testing"
 )
 
-const bundled = "../../mascots"
+const bundled = "../../pixies"
 
 func copyPack(t *testing.T, from, to string, edit func(string) string) {
 	t.Helper()
 	if err := os.MkdirAll(to, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	m, err := os.ReadFile(filepath.Join(from, "mascot.json"))
+	m, err := os.ReadFile(filepath.Join(from, "pixie.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -23,7 +23,7 @@ func copyPack(t *testing.T, from, to string, edit func(string) string) {
 	if edit != nil {
 		text = edit(text)
 	}
-	if err := os.WriteFile(filepath.Join(to, "mascot.json"), []byte(text), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(to, "pixie.json"), []byte(text), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	png, err := os.ReadFile(filepath.Join(from, "sheet.png"))

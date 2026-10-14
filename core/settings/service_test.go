@@ -469,7 +469,7 @@ func TestALiveApplyFailureAfterASaveReachesThePage(t *testing.T) {
 		t.Fatal("saved anyway")
 	}
 	w := svc.Snapshot(env).Warning
-	if w == nil || !strings.HasPrefix(*w, "Mascot couldn't be applied now") {
+	if w == nil || !strings.HasPrefix(*w, "Pixie couldn't be applied now") {
 		t.Fatal(w)
 	}
 	if err := svc.SetField(env, "scale", raw(`4`)); err != nil {

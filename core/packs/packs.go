@@ -1,4 +1,4 @@
-// Package packs finds mascot packs on disk (bundled + user folders), validates them and
+// Package packs finds pixie packs on disk (bundled + user folders), validates them and
 // resolves them into the fully populated shape the Swift player reads. Port of ai-mascot
 // src-tauri/src/packs.rs and crates/mascot-pack (manifest, validate, resolve), contract v1.
 package packs
@@ -16,8 +16,15 @@ import (
 	"strings"
 )
 
-// ContractVersion is the only mascot.json contract this package understands.
+// ContractVersion is the only pixie.json contract this package understands.
 const ContractVersion = 1
+
+// Manifest is a pack's manifest file; LegacyManifest is its name before the pixie rename (#68),
+// read when a pack has no Manifest.
+const (
+	Manifest       = "pixie.json"
+	LegacyManifest = "mascot.json"
+)
 
 // Limits, as in mascot-pack validate.rs.
 const (
@@ -95,7 +102,7 @@ func Load(roots ...string) (map[string]Pack, error) {
 		for _, dir := range dirs {
 			p, err := loadPack(dir)
 			if err != nil {
-				rejected = append(rejected, fmt.Errorf("mascot pack %s: %w", dir, err))
+				rejected = append(rejected, fmt.Errorf("pixie pack %s: %w", dir, err))
 				log.Printf("packs: rejected %s: %v", dir, err) // as log_rejected in packs.rs
 				continue
 			}
@@ -124,7 +131,7 @@ func Select(packs map[string]Pack, wanted string) (Pack, bool) {
 	return packs[ids[0]], true
 }
 
-// --- manifest (mascot.json) ---
+// --- manifest (pixie.json) ---
 
 type manifest struct {
 	Name     *string               `json:"name"`
@@ -157,7 +164,7 @@ type mouthSpec struct {
 	Levels *uint32    `json:"levels"`
 }
 
-// parseManifest decodes mascot.json, rejecting missing required fields (as serde does).
+// parseManifest decodes pixie.json, rejecting missing required fields (as serde does).
 // Unknown fields are ignored.
 func parseManifest(data []byte) (*manifest, error) {
 	var m manifest
@@ -270,20 +277,26 @@ func validate(m *manifest, sw, sh int) []string {
 	return errs
 }
 
-// loadPack reads <dir>/mascot.json, checks the sheet stays inside dir, reads the sheet's
-// dimensions, validates and resolves. Never panics on bad input.
+// loadPack reads <dir>/pixie.json (else the pre-#68 <dir>/mascot.json), checks the sheet stays
+// inside dir, reads the sheet's dimensions, validates and resolves. Never panics on bad input.
 func loadPack(dir string) (Pack, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return Pack{}, err
 	}
-	data, err := os.ReadFile(filepath.Join(abs, "mascot.json"))
+	name := Manifest
+	data, err := os.ReadFile(filepath.Join(abs, name))
+	if errors.Is(err, os.ErrNotExist) {
+		if old, oerr := os.ReadFile(filepath.Join(abs, LegacyManifest)); !errors.Is(oerr, os.ErrNotExist) {
+			name, data, err = LegacyManifest, old, oerr
+		}
+	}
 	if err != nil {
-		return Pack{}, fmt.Errorf("mascot.json: cannot read: %w", err)
+		return Pack{}, fmt.Errorf("%s: cannot read: %w", name, err)
 	}
 	m, err := parseManifest(data)
 	if err != nil {
-		return Pack{}, fmt.Errorf("mascot.json: %w", err)
+		return Pack{}, fmt.Errorf("%s: %w", name, err)
 	}
 	if !insidePack(*m.Sheet) {
 		return Pack{}, fmt.Errorf("sheet: '%s' must be a relative path inside the pack", *m.Sheet)
