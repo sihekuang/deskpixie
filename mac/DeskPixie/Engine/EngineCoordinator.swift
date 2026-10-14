@@ -28,7 +28,7 @@ final class EngineCoordinator {
     /// Binding, rollback and the "Hotkey unavailable" line (DeskPixieCore, tested there).
     private var hotkeys: HotkeyBinder!
     private let notifier = Notifier()
-    private lazy var canvas = CanvasWindowController(engine: engine)
+    private lazy var canvas = CanvasWindowController(engine: engine, worker: worker)
 
     private(set) var mascot: MascotController?
     /// The combo the Carbon hotkey is bound to right now (nil = none).
@@ -124,6 +124,9 @@ final class EngineCoordinator {
         // Quitting while the core is still starting: dp_configure may be blocked on another
         // thread; tearing the core down under it is unsafe, and there is nothing to save.
         guard startupFinished else { return }
+        // Stop taking core work and wait for what is queued (app.action, app.state, …), so no
+        // handler runs during or after dp_destroy (e.g. an agent restart spawning a process).
+        worker.shutdown()
         // Before the engine goes: the last move/resize must still reach `canvas.geometry`.
         canvas.flushGeometry()
         engine.shutdown()
@@ -206,7 +209,7 @@ final class EngineCoordinator {
     func refreshTray() {
         let engine = engine, worker = worker
         Task { @MainActor [weak self] in
-            let state: TrayAppState? = await worker.run {
+            let state: TrayAppState?? = await worker.run {
                 do {
                     return try engine.call("app.state", as: TrayAppState.self)
                 } catch {
@@ -214,7 +217,7 @@ final class EngineCoordinator {
                     return nil
                 }
             }
-            if let state { self?.appState.core = state }
+            if let state = state ?? nil { self?.appState.core = state }
         }
     }
 
@@ -391,7 +394,7 @@ final class EngineCoordinator {
     private func applyMascotSettings() {
         let engine = engine, worker = worker
         Task { @MainActor [weak self] in
-            let snapshot: Data? = await worker.run {
+            let snapshot: Data?? = await worker.run {
                 do {
                     return try engine.call("settings.snapshot")
                 } catch {
@@ -399,6 +402,8 @@ final class EngineCoordinator {
                     return nil
                 }
             }
+            // nil: the worker closed (quitting); leave the mascot alone.
+            guard let snapshot else { return }
             self?.mascot?.apply(settings: snapshot.flatMap(MascotSettings.fromSnapshot) ?? .defaults)
         }
     }

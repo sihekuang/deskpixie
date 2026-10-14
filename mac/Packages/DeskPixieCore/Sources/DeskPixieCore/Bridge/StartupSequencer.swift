@@ -127,26 +127,3 @@ public final class StartupSequencer {
         }
     }
 }
-
-/// A serial background queue for core calls that may touch the disk, the network or spawn a
-/// process (`app.action`, `settings.choices`, …). Keeps them off the main thread and in
-/// submission order; callers hop back to the main actor for UI updates.
-public final class CoreWorker: Sendable {
-    private let queue: DispatchQueue
-
-    public init(label: String = "com.sihekuang.deskpixie.core") {
-        queue = DispatchQueue(label: label, qos: .userInitiated)
-    }
-
-    /// Runs `work` on the queue and returns its value.
-    public func run<T: Sendable>(_ work: @escaping @Sendable () -> T) async -> T {
-        await withCheckedContinuation { cont in
-            queue.async { cont.resume(returning: work()) }
-        }
-    }
-
-    /// Fire and forget.
-    public func async(_ work: @escaping @Sendable () -> Void) {
-        queue.async(execute: work)
-    }
-}

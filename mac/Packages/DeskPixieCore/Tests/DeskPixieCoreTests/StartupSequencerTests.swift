@@ -133,10 +133,10 @@ final class StartupSequencerTests: XCTestCase {
     func testCoreWorkerRunsOffMainInOrder() async {
         let worker = CoreWorker(label: "test.core")
         let order = OrderLog()
-        async let a: Bool = worker.run { order.add(1); return !Thread.isMainThread }
-        async let b: Bool = worker.run { order.add(2); return !Thread.isMainThread }
+        async let a: Bool? = worker.run { order.add(1); return !Thread.isMainThread }
+        async let b: Bool? = worker.run { order.add(2); return !Thread.isMainThread }
         let (offA, offB) = await (a, b)
-        XCTAssertTrue(offA && offB)
+        XCTAssertEqual(offA, true); XCTAssertEqual(offB, true)
         XCTAssertEqual(order.values.sorted(), [1, 2])
         // Submission order is kept for calls made from one task.
         for i in 3...6 { _ = await worker.run { order.add(i) } }

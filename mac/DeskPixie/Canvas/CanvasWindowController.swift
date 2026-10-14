@@ -19,6 +19,8 @@ final class CanvasWindowController: NSObject, NSWindowDelegate, WKNavigationDele
     nonisolated private static let log = Logger(subsystem: "com.sihekuang.deskpixie", category: "canvas")
 
     private let engine: CoreEngine
+    /// Orders every `canvas.geometry` save on the core worker (see `flushGeometry`).
+    private let saver: CanvasGeometrySaver
     private let navGuard = CanvasNavGuard()
     private var window: NSWindow?
     private var webView: WKWebView?
@@ -30,8 +32,15 @@ final class CanvasWindowController: NSObject, NSWindowDelegate, WKNavigationDele
     private var lastSaved: CanvasGeometry?
     private var focusNextShow = false
 
-    init(engine: CoreEngine) {
+    init(engine: CoreEngine, worker: CoreWorker) {
         self.engine = engine
+        saver = CanvasGeometrySaver(worker: worker) { g in
+            do {
+                _ = try engine.call("canvas.geometry", g)
+            } catch {
+                Self.log.error("canvas.geometry: \(String(describing: error), privacy: .public)")
+            }
+        }
     }
 
     var isOpen: Bool { window != nil }
@@ -178,22 +187,15 @@ final class CanvasWindowController: NSObject, NSWindowDelegate, WKNavigationDele
     }
 
     /// Saves any pending geometry now (settled, window closing, app exiting). The settled save
-    /// writes settings.json off main (`waitForCore: false`); closing and quitting wait for it.
+    /// is queued on the core worker (`waitForCore: false`), in order with every other save;
+    /// closing and quitting drain the worker, then save synchronously.
     func flushGeometry(waitForCore: Bool = true) {
         settleTask?.cancel()
         settleTask = nil
         guard let g = pending else { return }
         pending = nil
         lastSaved = g
-        let engine = engine
-        let save: @Sendable () -> Void = {
-            do {
-                _ = try engine.call("canvas.geometry", g)
-            } catch {
-                Self.log.error("canvas.geometry: \(String(describing: error), privacy: .public)")
-            }
-        }
-        if waitForCore { save() } else { Task.detached(priority: .utility, operation: save) }
+        if waitForCore { saver.saveNow(g) } else { saver.saveSettled(g) }
     }
 
     /// Frame top-left (title bar) and content size, in the top-left space settings use.
