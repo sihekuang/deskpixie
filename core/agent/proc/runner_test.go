@@ -1,4 +1,4 @@
-package herdr
+package proc
 
 import (
 	"strings"

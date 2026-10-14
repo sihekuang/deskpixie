@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 )
 
 // Pure launch recipes for workers (port of recipes.rs): their names, the MCP client config, the
@@ -97,6 +98,10 @@ func ShowsCodexTrust(screen string) bool { return ShowsAnyScreen(screen, CodexTr
 const (
 	// CodexIdleMarker is Codex's placeholder in its empty input box (codex 0.162).
 	CodexIdleMarker = "Ask Codex to do anything"
+	// CodexReadySettle is how long Codex's input box must show, with no trust screen, before a
+	// start is up: codex 0.162 draws its input box first and its folder-trust prompt over it a
+	// moment later (0.2-1 s seen).
+	CodexReadySettle = 3 * time.Second
 	// CodexMcpApprovalMarker is Codex 0.162's prompt before it runs one of our MCP server's tools.
 	CodexMcpApprovalMarker = "Allow the mascot MCP server to run tool"
 )

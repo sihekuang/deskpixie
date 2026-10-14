@@ -106,7 +106,7 @@ final class SettingsModelTests: XCTestCase {
         XCTAssertEqual(s.setError, .invalid([.init(path: "scale", message: "bad")]))
         let save = try JSONDecoder().decode(SettingsSetError.self, from: Data(#"{"kind":"save","message":"disk full"}"#.utf8))
         XCTAssertEqual(save, .save("disk full"))
-        XCTAssertEqual(SettingsFixture.fields.count, 37, "39 leaves less the 2 Managed ones")
+        XCTAssertEqual(SettingsFixture.fields.count, 38, "40 leaves less the 2 Managed ones")
         XCTAssertEqual(SettingsFixture.defaults.at("agent.session"), "deskpixie")
     }
 

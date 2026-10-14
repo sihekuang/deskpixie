@@ -69,6 +69,9 @@ func TestAHostThatCannotBeBuiltIsASetupProblem(t *testing.T) {
 	if got := HostProblem(agent.HostError{Kind: agent.HostNotFound}); got != "Agent: herdr not found" {
 		t.Fatal(got)
 	}
+	if got := HostProblem(agent.HostError{Kind: agent.HostNotFound, Host: "tmux"}); got != "Agent: tmux not found" {
+		t.Fatal(got)
+	}
 	if got := HostProblem(agent.HostError{Kind: agent.HostOther, Detail: "bad session"}); got != "Agent: invalid settings (see log)" {
 		t.Fatal(got)
 	}

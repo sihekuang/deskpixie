@@ -1001,3 +1001,51 @@ func TestFocusJobReportsHerdrMissing(t *testing.T) {
 		}
 	})
 }
+
+// reportingHost is a session host that takes status reports from the agents' hooks (as tmux's
+// does); the fake records them.
+type reportingHost struct {
+	*agenttest.FakeSessionHost
+	mu      sync.Mutex
+	reports []string
+}
+
+func (h *reportingHost) ReportStatus(agent string, status PaneStatus) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.reports = append(h.reports, agent+": "+status.String())
+}
+
+func (h *reportingHost) got() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return slices.Clone(h.reports)
+}
+
+func TestAStateHookGoesToAHostThatTakesStatusReports(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var host *reportingHost
+		r := rigOn(t, &agenttest.MemStore{}, false, func(f *agenttest.FakeSessionHost) SessionHost {
+			host = &reportingHost{FakeSessionHost: f}
+			return host
+		})
+		r.h.Deliver(HookEvent{Kind: HookState, Agent: Coordinator, Status: PaneWorking})
+		r.h.Deliver(HookEvent{Kind: HookState, Agent: "w-1", Status: PaneBlocked})
+		settle()
+		if got := host.got(); !slices.Equal(got, []string{"coordinator: working", "w-1: blocked"}) {
+			t.Fatal(got)
+		}
+	})
+}
+
+// Herdr detects status itself: a stray state hook changes nothing.
+func TestAStateHookIsIgnoredByAHostThatDetectsStatusItself(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRig(t)
+		r.h.Deliver(HookEvent{Kind: HookState, Agent: Coordinator, Status: PaneWorking})
+		settle()
+		if len(r.host.Starts()) != 0 || len(r.host.Prompts()) != 0 || len(r.status.Lines()) != 0 {
+			t.Fatal(r.host.Starts(), r.host.Prompts(), r.status.Lines())
+		}
+	})
+}

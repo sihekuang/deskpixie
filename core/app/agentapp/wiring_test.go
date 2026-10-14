@@ -387,8 +387,33 @@ func TestSetupProblemsBecomeTheStatusLine(t *testing.T) {
 		t.Fatal(string(out.Output))
 	}
 
-	unknown := newFixture(t, func(c *Config) { c.Settings.SessionHost = "tmux" })
+	unknown := newFixture(t, func(c *Config) { c.Settings.SessionHost = "screen" })
 	waitFor(t, "invalid settings", func() bool { return unknown.agent.Tray().Status == "Agent: invalid settings (see log)" })
+
+	noTmux := newFixture(t, func(c *Config) {
+		c.Hosts = nil
+		c.Settings.SessionHost = "tmux"
+		p := "/definitely/not/tmux"
+		c.Settings.TmuxPath = &p
+	})
+	waitFor(t, "tmux not found", func() bool { return noTmux.agent.Tray().Status == "Agent: tmux not found" })
+}
+
+// Under tmux the Claude settings files carry the state hooks; under Herdr they don't.
+func TestBuildInstallsTheStateHooksOnlyForTmux(t *testing.T) {
+	data := t.TempDir()
+	newFixture(t, func(c *Config) {
+		c.AppSupport = data
+		c.Settings.SessionHost = "tmux"
+		c.Hosts["tmux"] = c.Hosts["herdr"]
+	})
+	paths := NewPaths(data)
+	port := settings.Default().Agent.Port
+	for _, p := range []string{paths.Settings, paths.WorkerSettings} {
+		if err := ValidateStateHooks(readFile(t, p), port); err != nil {
+			t.Fatal(p, err)
+		}
+	}
 }
 
 func TestTheIntegrationHintReachesTheTray(t *testing.T) {

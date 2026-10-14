@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sihekuang/deskpixie/core/agent"
+	"github.com/sihekuang/deskpixie/core/agent/proc"
 	"github.com/sihekuang/deskpixie/core/herdr/herdrtest"
 )
 
@@ -301,7 +302,7 @@ func TestAWorkerStartFitsInItsLimit(t *testing.T) {
 		"BackoffMin":       {BackoffMin, 1 * time.Second},
 		"BackoffMax":       {BackoffMax, 30 * time.Second},
 		"RequestTimeout":   {RequestTimeout, 30 * time.Second},
-		"DefaultTimeout":   {DefaultTimeout, 10 * time.Second},
+		"DefaultTimeout":   {proc.DefaultTimeout, 10 * time.Second},
 	}
 	for k, v := range want {
 		if v[0] != v[1] {

@@ -108,11 +108,13 @@ type CanvasWindow struct {
 
 // AgentSettings is the agent block.
 type AgentSettings struct {
-	Enabled               bool    `json:"enabled"`
-	SessionHost           string  `json:"sessionHost"`
-	Session               string  `json:"session"`
-	Terminal              string  `json:"terminal"`
-	HerdrPath             *string `json:"herdrPath"`
+	Enabled     bool    `json:"enabled"`
+	SessionHost string  `json:"sessionHost"`
+	Session     string  `json:"session"`
+	Terminal    string  `json:"terminal"`
+	HerdrPath   *string `json:"herdrPath"`
+	// TmuxPath is the tmux program for sessionHost "tmux" (nil finds it).
+	TmuxPath              *string `json:"tmuxPath"`
 	Model                 *string `json:"model"`
 	Warm                  bool    `json:"warm"`
 	Port                  uint16  `json:"port"`
@@ -181,6 +183,7 @@ func (c Config) Clone() Config {
 	out.Voice.HomeCity = clonePtr(c.Voice.HomeCity)
 	out.Canvas.Window = clonePtr(c.Canvas.Window)
 	out.Agent.HerdrPath = clonePtr(c.Agent.HerdrPath)
+	out.Agent.TmuxPath = clonePtr(c.Agent.TmuxPath)
 	out.Agent.Model = clonePtr(c.Agent.Model)
 	if c.Agent.Workers.Kinds != nil {
 		out.Agent.Workers.Kinds = append([]string{}, c.Agent.Workers.Kinds...)
@@ -368,6 +371,7 @@ func (c Config) Normalized() Config {
 		blankToNil(&out.Voice.HomeCity)
 	}
 	blankToNil(&out.Agent.HerdrPath)
+	blankToNil(&out.Agent.TmuxPath)
 	return out
 }
 

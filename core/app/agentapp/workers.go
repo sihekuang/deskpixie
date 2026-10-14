@@ -17,7 +17,7 @@ import (
 	"github.com/sihekuang/deskpixie/core/agent"
 	agentfs "github.com/sihekuang/deskpixie/core/agent/fs"
 	"github.com/sihekuang/deskpixie/core/agent/httpserver"
-	"github.com/sihekuang/deskpixie/core/herdr"
+	"github.com/sihekuang/deskpixie/core/agent/proc"
 	"github.com/sihekuang/deskpixie/core/settings"
 )
 
@@ -159,8 +159,8 @@ func WriteCoordinatorMcp(paths Paths, port uint16, token string) error {
 // root. model "" is none.
 func WorkerAdapters(paths Paths, root, home string, port uint16, model string, tokens *httpserver.Tokens) *agent.WorkerDeps {
 	trust := agentfs.NewClaudeTrustStore(filepath.Join(home, ".claude.json"), []string{root})
-	worktrees := agentfs.NewGitWorktrees(root, paths.Workspace, home, herdr.PatientRunner(GitTimeout)).
-		WithCleanupRunner(herdr.PatientRunner(GitCleanupTimeout))
+	worktrees := agentfs.NewGitWorktrees(root, paths.Workspace, home, proc.PatientRunner(GitTimeout)).
+		WithCleanupRunner(proc.PatientRunner(GitCleanupTimeout))
 	return &agent.WorkerDeps{
 		Worktrees: worktrees,
 		Tokens:    tokens,

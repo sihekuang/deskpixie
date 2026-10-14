@@ -23,9 +23,10 @@ import (
 	"github.com/sihekuang/deskpixie/core/agent"
 	agentfs "github.com/sihekuang/deskpixie/core/agent/fs"
 	"github.com/sihekuang/deskpixie/core/agent/httpserver"
+	"github.com/sihekuang/deskpixie/core/agent/proc"
 	"github.com/sihekuang/deskpixie/core/app"
-	"github.com/sihekuang/deskpixie/core/herdr"
 	"github.com/sihekuang/deskpixie/core/settings"
+	"github.com/sihekuang/deskpixie/core/tmux"
 	"github.com/sihekuang/deskpixie/core/voice"
 )
 
@@ -73,8 +74,9 @@ func UpdateQuietMs(n settings.NotificationSettings) agent.Millis {
 // HostProblem is the tray status line when the configured session host can't be built (a
 // sticky setup disable).
 func HostProblem(err error) string {
-	if agent.IsHostError(err, agent.HostNotFound) {
-		return "Agent: herdr not found"
+	var he agent.HostError
+	if errors.As(err, &he) && he.Kind == agent.HostNotFound {
+		return "Agent: " + he.HostName() + " not found"
 	}
 	return "Agent: invalid settings (see log)"
 }
@@ -95,7 +97,7 @@ type Config struct {
 	AppSupport, Home string
 	Hooks            app.AgentHooks
 
-	Runner    agent.CommandRunner        // nil = herdr.ProcessRunner{}
+	Runner    agent.CommandRunner        // nil = proc.ProcessRunner{}
 	Environ   []string                   // nil = os.Environ()
 	Hosts     map[string]HostFactory     // nil = SessionHosts()
 	Terminals map[string]TerminalFactory // nil = Terminals()
@@ -157,7 +159,7 @@ func Build(c Config) *Agent {
 		return nil
 	}
 	if c.Runner == nil {
-		c.Runner = herdr.ProcessRunner{}
+		c.Runner = proc.ProcessRunner{}
 	}
 	if c.Hosts == nil {
 		c.Hosts = SessionHosts()
@@ -189,7 +191,8 @@ func Build(c Config) *Agent {
 	// A workers problem turns only workers off (a tray notice): the coordinator still works solo.
 	ws := SetupWorkers(s.Workers, s.ProjectsRoot, c.Home)
 	workersOn := ws.Policy.Enabled
-	if err := Install(paths, s.Port, ws.Root); err != nil {
+	// tmux detects no agent status: Claude agents report theirs through hooks.
+	if err := InstallFor(paths, s.Port, ws.Root, s.SessionHost == tmux.Name); err != nil {
 		log.Printf("agent: invalid settings: %v", err)
 		setProblem("Agent: invalid settings (see log)")
 	}

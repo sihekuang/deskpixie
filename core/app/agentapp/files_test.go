@@ -309,3 +309,85 @@ func TestTheCoordinatorClosesAWorkerOnceItsWorkIsDone(t *testing.T) {
 		}
 	}
 }
+
+// stateHook is the url and bearer of each http hook on event that posts to the state route.
+func stateHooks(t *testing.T, text, event string) []map[string]any {
+	t.Helper()
+	var out []map[string]any
+	groups, _ := at(decodeJSON(t, text), "hooks", event).([]any)
+	for _, g := range groups {
+		hooks, _ := at(g, "hooks").([]any)
+		for _, h := range hooks {
+			m, _ := h.(map[string]any)
+			if url, _ := m["url"].(string); strings.HasSuffix(url, "/hooks/state") {
+				out = append(out, m)
+			}
+		}
+	}
+	return out
+}
+
+// Under tmux (which detects no status) Claude agents report working / idle / blocked through
+// their own hooks; under Herdr the files are exactly the shipped ones.
+func TestUnderTmuxTheClaudeSettingsAlsoReportTheirState(t *testing.T) {
+	for name, tc := range map[string]struct {
+		render func(uint16) string
+		hooks  []HookTimeout
+	}{
+		"coordinator": {RenderSettings, HookTimeouts},
+		"worker":      {RenderWorkerSettings, WorkerHookTimeouts},
+	} {
+		text, err := WithStateHooks(tc.render(4000))
+		if err != nil {
+			t.Fatal(name, err)
+		}
+		if err := ValidateSettings(text, 4000, append(slices.Clone(tc.hooks), StateHookTimeouts...)); err != nil {
+			t.Fatal(name, err)
+		}
+		if err := ValidateStateHooks(text, 4000); err != nil {
+			t.Fatal(name, err)
+		}
+		for _, event := range []string{"UserPromptSubmit", "Stop", "Notification"} {
+			hs := stateHooks(t, text, event)
+			if len(hs) != 1 {
+				t.Fatalf("%s %s: %v", name, event, hs)
+			}
+			h := hs[0]
+			if h["type"] != "http" || h["url"] != "http://127.0.0.1:4000/hooks/state" ||
+				at(h, "headers", "Authorization") != "Bearer $MASCOT_AGENT_TOKEN" ||
+				!reflect.DeepEqual(h["allowedEnvVars"], []any{"MASCOT_AGENT_TOKEN"}) || h["timeout"] != float64(5) {
+				t.Fatalf("%s %s: %v", name, event, h)
+			}
+		}
+		// The Stop hook that carries the reply is still the first.
+		if url := at(decodeJSON(t, text), "hooks", "Stop", 0, "hooks", 0, "url"); url != "http://127.0.0.1:4000/hooks/stop" {
+			t.Fatal(name, url)
+		}
+		// Only prompts that wait on the owner count as blocked: Claude's idle reminder doesn't.
+		if m := at(decodeJSON(t, text), "hooks", "Notification", 0, "matcher"); m != "permission_prompt|elicitation_dialog" {
+			t.Fatal(name, m)
+		}
+		// The shipped files have none.
+		if len(stateHooks(t, tc.render(4000), "Stop")) != 0 || ValidateStateHooks(tc.render(4000), 4000) == nil {
+			t.Fatal(name, "herdr's files have no state hooks")
+		}
+	}
+}
+
+func TestInstallForTmuxWritesTheStateHooksAndHerdrDoesNot(t *testing.T) {
+	paths := NewPaths(filepath.Join(t.TempDir(), "install"))
+	if err := InstallFor(paths, 48217, "", true); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{paths.Settings, paths.WorkerSettings} {
+		if err := ValidateStateHooks(readFile(t, p), 48217); err != nil {
+			t.Fatal(p, err)
+		}
+	}
+	if err := InstallFor(paths, 48217, "", false); err != nil {
+		t.Fatal(err)
+	}
+	if readFile(t, paths.Settings) != RenderSettings(48217) || readFile(t, paths.WorkerSettings) != RenderWorkerSettings(48217) {
+		t.Fatal("herdr: the shipped files")
+	}
+}

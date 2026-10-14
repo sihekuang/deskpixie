@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/sihekuang/deskpixie/core/voice"
 )
@@ -361,13 +362,31 @@ type HostError struct {
 	// NoAgent name, Timeout what, ExitedAtStart kind, Other text; for VersionMismatch, what the
 	// user has and which versions are supported ("" if the host doesn't say).
 	Detail string
+	// Host is the session host's program for NotFound and VersionMismatch, e.g. "tmux"; ""
+	// is Herdr (HostName).
+	Host string
+}
+
+// HostName is the program the error is about: Host, or "herdr" when unset.
+func (e HostError) HostName() string {
+	if e.Host == "" {
+		return "herdr"
+	}
+	return e.Host
 }
 
 func (e HostError) Error() string {
 	switch e.Kind {
 	case HostNotFound:
-		return "herdr not found"
+		return e.HostName() + " not found"
 	case HostVersionMismatch:
+		if e.HostName() != "herdr" {
+			// Herdr's socket protocols mean nothing for another host.
+			if e.Detail != "" {
+				return e.HostName() + " version mismatch: " + e.Detail
+			}
+			return e.HostName() + " version mismatch"
+		}
 		msg := fmt.Sprintf("herdr version mismatch (client protocol %d, server %d)", e.Client, e.Server)
 		if e.Detail != "" {
 			msg += ": " + e.Detail
@@ -481,12 +500,15 @@ func rustLines(s string) []string {
 }
 
 // StartReady is what a start waits for: the pane is not up (and nothing is sent) until it
-// shows Marker (e.g. Codex's empty input box) with no refusal screen; if it never does, the
-// start fails with Reason, its {last} replaced by the screen's last non-empty line (at most 80
-// chars, control characters dropped).
+// shows Marker (e.g. Codex's empty input box) with no refusal screen on every read for Settle
+// since the marker first showed (a read without it starts the wait again); if it never does,
+// the start fails with Reason, its {last} replaced by the screen's last non-empty line (at most
+// 80 chars, control characters dropped). Settle is for a CLI that draws its input box before a
+// refusal screen (Codex 0.162 draws it, then its folder-trust prompt over it).
 type StartReady struct {
 	Marker string
 	Reason string
+	Settle time.Duration
 }
 
 // PreparedWorker is a worker's launch spec plus its optional start checks.
@@ -580,14 +602,19 @@ const (
 	HookPostTool
 	// HookMcp is a mascot MCP tool call; answered on McpReply.
 	HookMcp
+	// HookState is the agent's own status report (Claude Code hooks on the tmux session host,
+	// which detects no status itself): Status is Working, Idle or Blocked.
+	HookState
 )
 
 // HookEvent is what the hook server reports, with the calling agent resolved from its bearer.
 // Stop → Message; Permission → ToolName, ToolInput, Reply; PostTool → ToolName, ToolInput;
-// Mcp → Call, McpReply. Reply channels are one-shot: send at most once (buffer them by 1).
+// Mcp → Call, McpReply; State → Status. Reply channels are one-shot: send at most once (buffer
+// them by 1).
 type HookEvent struct {
 	Kind      HookEventKind
 	Agent     string
+	Status    PaneStatus
 	Message   string
 	ToolName  string
 	ToolInput any

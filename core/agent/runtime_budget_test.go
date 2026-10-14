@@ -8,6 +8,7 @@ import (
 	agentfs "github.com/sihekuang/deskpixie/core/agent/fs"
 	"github.com/sihekuang/deskpixie/core/agent/httpserver"
 	"github.com/sihekuang/deskpixie/core/herdr"
+	"github.com/sihekuang/deskpixie/core/tmux"
 )
 
 // The budget relations Rust enforces at compile time (`const _: () = assert!(…)`) across
@@ -81,6 +82,19 @@ func TestAWorkerStartFitsInTheSessionHostsBudget(t *testing.T) {
 	}
 	if !(RepoLimit+ListLimit+WorkerStartLimit < McpCallLimit) {
 		t.Error("RepoLimit + ListLimit + WorkerStartLimit < McpCallLimit")
+	}
+}
+
+// The tmux host's start fits the same budgets (it has no pane-busy retry).
+func TestAWorkerStartFitsInTheTmuxHostsBudget(t *testing.T) {
+	if !(EnsureBudget+tmux.StartTimeout+DialogWait+PostStartCheck < WorkerStartLimit) {
+		t.Error("EnsureBudget + tmux.StartTimeout + DialogWait + PostStartCheck < WorkerStartLimit")
+	}
+	if !(ReadyWindow <= tmux.StartTimeout+DialogWait) {
+		t.Error("ReadyWindow <= tmux.StartTimeout + DialogWait")
+	}
+	if !(tmux.StartTimeout < StartOpLimit) {
+		t.Error("tmux.StartTimeout < StartOpLimit")
 	}
 }
 

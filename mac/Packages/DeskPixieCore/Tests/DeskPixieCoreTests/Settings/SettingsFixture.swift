@@ -2,7 +2,7 @@ import Foundation
 @testable import DeskPixieCore
 
 /// The Go core's `settings.Views` output for the sources Rust's layout tests use
-/// (packs bit/dino, both providers with openai-realtime current, macos-vpio, herdr, warp/iterm,
+/// (packs bit/dino, both providers with openai-realtime current, macos-vpio, herdr/tmux, warp/iterm,
 /// one mic, no speakers), and
 /// `settings.Default()` as JSON. Generated from core/settings on 2026-10-13; regenerate if the
 /// schema changes.
@@ -805,13 +805,22 @@ enum SettingsFixture {
   "path": "agent.sessionHost",
   "section": "Advanced",
   "label": "Session host",
-  "help": "The terminal multiplexer that runs the agent. Supported: Herdr 0.7.5 (protocol 17) or 0.9.x (protocol 22).",
+  "help": "The terminal multiplexer that runs the agent. Supported: Herdr 0.7.5 (protocol 17) or 0.9.x (protocol 22), or tmux 3.2 or newer.",
   "kind": {
    "type": "choice",
    "options": [
     {
      "value": "herdr",
      "label": "Herdr",
+     "platforms": [
+      "macos",
+      "windows",
+      "linux"
+     ]
+    },
+    {
+     "value": "tmux",
+     "label": "tmux",
      "platforms": [
       "macos",
       "windows",
@@ -831,7 +840,7 @@ enum SettingsFixture {
   "path": "agent.session",
   "section": "Advanced",
   "label": "Session name",
-  "help": "The Herdr session's name: a-z, 0-9 and -, not \"default\".",
+  "help": "The agent session's name: a-z, 0-9 and -, not \"default\".",
   "kind": {
    "type": "text",
    "optional": false
@@ -848,6 +857,23 @@ enum SettingsFixture {
   "section": "Advanced",
   "label": "Herdr program",
   "help": "Empty finds herdr on PATH or in ~/.local/bin, /opt/homebrew/bin or /usr/local/bin. Supported: Herdr 0.7.5 (protocol 17) or 0.9.x (protocol 22).",
+  "kind": {
+   "type": "path",
+   "dir": false,
+   "optional": true
+  },
+  "apply": "restart",
+  "platforms": [
+   "macos",
+   "windows",
+   "linux"
+  ]
+ },
+ {
+  "path": "agent.tmuxPath",
+  "section": "Advanced",
+  "label": "tmux program",
+  "help": "Empty finds tmux on PATH or in /opt/homebrew/bin or /usr/local/bin. Supported: tmux 3.2 or newer.",
   "kind": {
    "type": "path",
    "dir": false,
@@ -933,7 +959,7 @@ enum SettingsFixture {
 """#
 
     static let defaultsJSON = #"""
-{"hotkey": "ctrl+alt+Space", "pack": "bit", "scale": 8, "position": null, "proximityFade": {"enabled": true, "radius": 150}, "voice": {"provider": "openai-realtime", "audio": "macos-vpio", "model": "gpt-realtime", "voice": "marin", "chimes": true, "idleTimeoutSecs": 7, "personaPath": null, "noiseFilter": false, "noiseModel": "hush", "noisyRoom": false, "inputDevice": null, "outputDevice": null, "homeCity": null}, "canvas": {"autoOpen": true, "keep": 50, "window": null}, "agent": {"enabled": true, "sessionHost": "herdr", "session": "deskpixie", "terminal": "warp", "herdrPath": null, "model": null, "warm": false, "port": 48217, "keepPanesOnQuit": true, "holdOpenSecs": 180, "permissionTimeoutSecs": 120, "notifyPerMinute": 4, "narration": true, "projectsRoot": "~/Documents/Projects", "workers": {"enabled": false, "max": 4, "kinds": ["claude", "codex"]}}}
+{"hotkey": "ctrl+alt+Space", "pack": "bit", "scale": 8, "position": null, "proximityFade": {"enabled": true, "radius": 150}, "voice": {"provider": "openai-realtime", "audio": "macos-vpio", "model": "gpt-realtime", "voice": "marin", "chimes": true, "idleTimeoutSecs": 7, "personaPath": null, "noiseFilter": false, "noiseModel": "hush", "noisyRoom": false, "inputDevice": null, "outputDevice": null, "homeCity": null}, "canvas": {"autoOpen": true, "keep": 50, "window": null}, "agent": {"enabled": true, "sessionHost": "herdr", "session": "deskpixie", "terminal": "warp", "herdrPath": null, "tmuxPath": null, "model": null, "warm": false, "port": 48217, "keepPanesOnQuit": true, "holdOpenSecs": 180, "permissionTimeoutSecs": 120, "notifyPerMinute": 4, "narration": true, "projectsRoot": "~/Documents/Projects", "workers": {"enabled": false, "max": 4, "kinds": ["claude", "codex"]}}}
 """#
 
     static let fields: [SettingsField] = try! JSONDecoder().decode([SettingsField].self, from: Data(fieldsJSON.utf8))

@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/sihekuang/deskpixie/core/agent"
+	"github.com/sihekuang/deskpixie/core/agent/proc"
 	"github.com/sihekuang/deskpixie/core/herdr"
 )
 
@@ -62,7 +63,7 @@ func Smoke(t testing.TB, extraParent ...agent.EnvVar) *LiveSmoke {
 	if err != nil {
 		t.Fatalf("server env: %v", err)
 	}
-	s := &LiveSmoke{Bin: bin, Env: env, Home: home, Environ: os.Environ(), Runner: herdr.ProcessRunner{}}
+	s := &LiveSmoke{Bin: bin, Env: env, Home: home, Environ: os.Environ(), Runner: proc.ProcessRunner{}}
 
 	lock, err := os.OpenFile(filepath.Join(os.TempDir(), "deskpixie-smoke.lock"), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {

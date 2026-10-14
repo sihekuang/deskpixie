@@ -1,5 +1,70 @@
 # Live smoke results
 
+## 2026-10-14: tmux 3.8 session host, issue #64
+
+Run on the `tmux-host` branch (macOS, tmux 3.8 from Homebrew at `/opt/homebrew/bin/tmux`,
+Claude Code 2.1.300; Codex not installed then, so the worker smoke's Codex part was skipped;
+see "Codex 0.162.1 on tmux" below), on the smoke server `tmux -L deskpixie-smoke`, with the final code, twice in a row,
+both green (an earlier full run on the code before the last test-only logging change was green
+too):
+
+```
+cd core && go test -count=1 -tags live -run LiveTmux -v -timeout 20m ./...
+```
+
+| Test | Run 1 | Run 2 | What it checked |
+|---|---|---|---|
+| `tmux` TestLiveTmuxAgentSmoke | PASS (51 s) | PASS (54 s) | Parent's fake `ANTHROPIC_API_KEY` scrubbed (coordinator on the subscription); folder-trust dialog counts as started (StartAgent returns blocked); a two-line prompt (bracketed paste) is one prompt; Stop hook carries `<spoken ref=…>`; state hooks reach the hook server and the host (`working`, then `idle`, as host events); PermissionRequest allow ran `touch`, deny blocked it; `/exit` is Exited once and not listed; a real permission dialog (settings without the PermissionRequest hook) reads blocked and the Notification hook reports blocked; Escape on it ends the turn (idle from the screen; no state hook came); SessionHost conformance live (7 steps) with the probe's own hooks |
+| `tmux` TestLiveTmuxWorkerSmoke | PASS (41 s) | PASS (53 s) | As the Herdr worker smoke (Claude part), with `InstallFor(…, stateHooks true)`: start_worker over MCP; a haiku worker commits HELLO.txt on `mascot/<slug>` in `.worktrees/` of a throwaway repo; report_result, Stop and state hooks of the coordinator and the worker reach the app; the job's end closes the window and deletes its MCP config; cancelling a job stops its worker; shutdown leaves no windows |
+| `agentapp` TestLiveTmuxDelegationEndToEnd | PASS (7 s) | PASS (7 s) | `agentapp.Build` with `sessionHost = tmux`: the coordinator settings carry the state hooks; the voice loop got `Agent reply: pong` (any other Agent reply fails); `--continue` with nothing to continue was ExitedAtStart and restarted fresh; Shutdown about 0.5 s; no windows and no `mcp/*.json` left |
+
+Screen markers on real Claude Code 2.1.300 screens in tmux (`info` lines):
+
+- Folder trust: "Yes, I trust this folder" / "No, exit" — `trust this folder` matches
+  (Classify blocked, StartedScreen started). A Down sent the moment the dialog is drawn can be
+  lost (the smoke once exited on "No, exit"); the smokes now press Down until "❯ Yes" shows.
+- Ready: `Try "` and `shift+tab to cycle` (footer "⏵⏵ auto mode on (shift+tab to cycle)");
+  "for shortcuts" did not show with `--permission-mode auto`.
+- Approval: `Do you want to` — shown while a PermissionRequest hook waits too (Classify blocked).
+- Busy: `esc to interrupt` in the footer.
+- Claude Code takes a typed LF (Ctrl-J) as a line break, so `send-keys -l` with newlines would
+  have worked for it; prompts of several lines are pasted anyway (Codex untested), and a paste
+  followed at once by Enter submits it whole.
+- The probe had 2 Stop hooks during conformance (its first turn and, most likely, the one
+  Escape interrupted, which was listed working just before): on 2.1.300 an Escape during a
+  working turn apparently fires Stop; Escape on a permission dialog fired no
+  hook at all, and the host's screen fallback brought it back to idle.
+
+Fixed on the way (all on real tmux 3.8): tmux reads its own argv as commands, so an argument
+ending in `;` (prompt chunk, agent argument, env value, label) lost it and the rest ran as a new
+command; `-c` and `select-pane -T` expand formats (`#H`, `#{…}`). Both are escaped now. A hooked
+Claude turn that ends without a Stop (Escape on a dialog) stayed working; the screen now ends
+it. Version check: everything used exists in tmux 3.2 (per tmux's CHANGES) except
+`allow-set-title` (3.4), which stays best-effort; tmux 3.2 itself was not run.
+
+### Codex 0.162.1 on tmux (SMOKE_CODEX=1)
+
+Codex CLI 0.162.1 (`/opt/homebrew/bin/codex`), Claude Code 2.1.300, tmux 3.8:
+
+```
+cd core && SMOKE_CODEX=1 go test -count=1 -tags live -run LiveTmuxWorkerSmoke -v -timeout 20m ./tmux/
+cd core && SMOKE_CODEX=1 go test -count=1 -tags live -run LiveTmux -v -timeout 30m ./...
+```
+
+| Test | Result | What it checked (Codex part) |
+|---|---|---|
+| `tmux` TestLiveTmuxWorkerSmoke, alone | PASS (94 s) | A Codex start in the untrusted repo showed the trust screen and failed with "Codex asks to trust this repo…", nothing typed, no trust saved; in the trusted repo (smoke-only `-c projects={…}` override) a Codex worker committed CODEX.txt on `mascot/add-codex-file` and stopped with its job |
+| full `-run LiveTmux ./...` | PASS | TestLiveTmuxAgentSmoke (52 s), TestLiveTmuxWorkerSmoke (94 s), TestLiveTmuxDelegationEndToEnd (8 s) |
+
+Before the fix the worker smoke failed after 524 s: Codex 0.162.1 draws its input box ("Ask
+Codex to do anything") for a moment (0.2–1 s seen), then its "Trust this folder?" screen over
+it ("You're in a subdirectory of a Git project. Trusting will apply to the repository root").
+The start took the input box as ready, so the untrusted worker sat `blocked` on the trust screen
+instead of failing. A Codex start is now up only once its input box has shown, with no trust
+screen, on every read for `CodexReadySettle` (3 s; `StartReady.Settle`). Seen on 0.162.1: until
+Codex is really ready the box has only "? for shortcuts" under it; the model line
+("<model> <effort> · <cwd>") comes when it is.
+
 ## 2026-10-14: Herdr 0.9.4 (protocol 22), issue #63
 
 Run on the `herdr-compat` branch (macOS, herdr 0.9.4 from Homebrew at `/opt/homebrew/bin/herdr`,
@@ -44,6 +109,23 @@ PermissionRequest under `--permission-mode auto`.
 **Claude hook:** `herdr integration status` says `claude: outdated (v7 < v10)`; the app shows
 its "run `herdr integration install claude`" hint. All smokes passed with the outdated hook;
 it was not updated (that needs the owner's OK).
+
+### Codex 0.162.1 on Herdr 0.9.4 (SMOKE_CODEX=1)
+
+On the `tmux-host` branch, with the start-settle fix above:
+
+```
+cd core && SMOKE_CODEX=1 go test -count=1 -tags live -run LiveWorkerSmoke -v -timeout 20m ./herdr/
+cd core && SMOKE_CODEX=1 go test -count=1 -tags live -run Live -v -timeout 30m ./herdr/ ./app/agentapp/
+```
+
+| Test | Result | What it checked (Codex part) |
+|---|---|---|
+| `herdr` TestLiveWorkerSmoke, alone | PASS (111 s) | Untrusted repo: trust screen showed, start_worker failed with "Codex asks to trust this repo…", nothing typed, no trust saved. Trusted repo: no trust screen; `-c mcp_servers.mascot.*` reached the app with its bearer; the workspace-write sandbox let it commit CODEX.txt on `mascot/codex-hi`; stopped with its job |
+| full `-run Live ./herdr/ ./app/agentapp/` | PASS | TestLiveAgentSmoke (41 s), TestLiveWorkerSmoke (127 s), TestLiveDelegationEndToEnd (55 s), TestLiveTmuxDelegationEndToEnd (119 s, run alongside the Herdr package) |
+
+`herdr integration status` still says `codex: not installed` (Herdr's Codex hook); Codex
+workers are read from the screen, so it is not needed.
 
 ## 2026-10-13: Herdr 0.7.5 (protocol 17)
 

@@ -105,6 +105,27 @@ func capped(v any) any {
 	return v
 }
 
+// stateOf is a state report's status: its "status" (working, idle or blocked), else the one
+// its Claude Code hook stands for (UserPromptSubmit working, Stop idle, Notification blocked).
+func stateOf(obj map[string]any) (agent.PaneStatus, bool) {
+	if s, ok := obj["status"].(string); ok {
+		switch st := agent.ParsePaneStatus(s); st {
+		case agent.PaneWorking, agent.PaneIdle, agent.PaneBlocked:
+			return st, true
+		}
+		return agent.PaneUnknown, false
+	}
+	switch obj["hook_event_name"] {
+	case "UserPromptSubmit":
+		return agent.PaneWorking, true
+	case "Stop":
+		return agent.PaneIdle, true
+	case "Notification":
+		return agent.PaneBlocked, true
+	}
+	return agent.PaneUnknown, false
+}
+
 func (s *Server) hook(w http.ResponseWriter, r *http.Request, event string) {
 	// Every failure on the permission route is a 200 deny: Claude Code must never fall back to
 	// its native prompt inside the unattended pane.
@@ -126,7 +147,7 @@ func (s *Server) hook(w http.ResponseWriter, r *http.Request, event string) {
 		refuse(http.StatusUnauthorized, "Not authorised.")
 		return
 	}
-	if event != "stop" && event != "permission" && event != "post-tool" {
+	if event != "stop" && event != "permission" && event != "post-tool" && event != "state" {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
@@ -146,6 +167,14 @@ func (s *Server) hook(w http.ResponseWriter, r *http.Request, event string) {
 		if message, ok := obj["last_assistant_message"].(string); ok {
 			s.rt.Deliver(agent.HookEvent{Kind: agent.HookStop, Agent: agentName, Message: cleanTail(message)})
 		}
+		json200(w, map[string]any{})
+	case "state":
+		status, ok := stateOf(obj)
+		if !ok {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		s.rt.Deliver(agent.HookEvent{Kind: agent.HookState, Agent: agentName, Status: status})
 		json200(w, map[string]any{})
 	case "post-tool":
 		if toolName, ok := obj["tool_name"].(string); ok {
