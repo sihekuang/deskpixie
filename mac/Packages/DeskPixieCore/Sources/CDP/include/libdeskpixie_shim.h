@@ -16,6 +16,8 @@ void  dp_mic_failed(char* reason);
 char* dp_poll_event(void);
 char* dp_pack_json(void);
 char* dp_last_error(void);
+// Generic request/response: returns {"ok":<json>} or {"error":"<msg>"}, never NULL.
+char* dp_call(char* method, char* args_json);
 void  dp_free_string(char* s);
 void  dp_destroy(void);
 

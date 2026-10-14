@@ -36,3 +36,24 @@ func RMS(s []int16) float32 {
 	}
 	return float32(math.Sqrt(sum / float64(len(s))))
 }
+
+// Int16ToFloat maps a sample to [-1, 1): s / 32768.
+func Int16ToFloat(s int16) float32 { return float32(s) / 32768 }
+
+// FloatToInt16 maps a [-1, 1] sample back, rounding half away from zero (as Rust's f32::round)
+// and clamping to the int16 range. Int16ToFloat then FloatToInt16 is exact.
+func FloatToInt16(s float32) int16 {
+	v := s * 32768
+	if v >= 0 {
+		v += 0.5
+	} else {
+		v -= 0.5
+	}
+	switch {
+	case v >= 32767:
+		return 32767
+	case v <= -32768:
+		return -32768
+	}
+	return int16(v)
+}

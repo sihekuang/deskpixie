@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"image"
 	_ "image/png" // sheets are PNGs
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -95,6 +96,7 @@ func Load(roots ...string) (map[string]Pack, error) {
 			p, err := loadPack(dir)
 			if err != nil {
 				rejected = append(rejected, fmt.Errorf("mascot pack %s: %w", dir, err))
+				log.Printf("packs: rejected %s: %v", dir, err) // as log_rejected in packs.rs
 				continue
 			}
 			packs[p.ID] = p

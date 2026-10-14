@@ -1,0 +1,497 @@
+import Foundation
+
+/// Pure: what the Settings window shows. Each `SettingsField` becomes one `ControlSpec`, and
+/// each control's input becomes the JSON value `settings.set` takes. Port of ai-mascot
+/// `src-tauri/src/settings/native/layout.rs` and the matching rules of
+/// `ui/settings/settings-core.js`. No SwiftUI here, so it is tested on its own.
+public enum SettingsLayout {
+    public static let notAvailable = "(not available on this platform)"
+    public static let notFound = "(not found)"
+    /// The hotkey recorder's title while it waits for a key.
+    public static let recording = "Type shortcut…"
+    public static let whole = "Enter a whole number"
+    public static let empty = "Can't be empty"
+    public static let wrongInput = "This control can't take that input"
+    /// The banner's lead text (Go `FileBroken`).
+    public static let fileBroken = "settings.json has a syntax error; fix it or reset it"
+    /// Shown under the hotkey when the app could not bind the recorded shortcut.
+    public static let hotkeyInUse = "That shortcut is in use"
+    /// The field whose pop-up menu uses the tray's size names.
+    public static let sizeField = "scale"
+
+    // MARK: Tabs
+
+    /// One toolbar tab: a section, its title and its SF Symbol.
+    public struct Tab: Equatable, Sendable {
+        public var section: SettingsSection
+        public var title: String
+        public var symbol: String
+    }
+
+    /// The toolbar's tabs, in order.
+    public static let tabs: [Tab] = [
+        Tab(section: .mascot, title: "Mascot", symbol: "face.smiling"),
+        Tab(section: .voice, title: "Voice", symbol: "waveform"),
+        Tab(section: .agent, title: "Agent", symbol: "sparkles"),
+        Tab(section: .workers, title: "Workers", symbol: "person.2"),
+        Tab(section: .canvas, title: "Canvas", symbol: "rectangle.on.rectangle"),
+        Tab(section: .advanced, title: "Advanced", symbol: "gearshape.2"),
+    ]
+
+    /// Whether `platforms` includes `platform`; nil means everywhere.
+    public static func availableOn(_ platforms: [SettingsPlatform]?, _ platform: SettingsPlatform) -> Bool {
+        platforms?.contains(platform) ?? true
+    }
+
+    /// The fields of `section` that show on `platform`, in schema order.
+    public static func fields(in section: SettingsSection, _ fields: [SettingsField],
+                              platform: SettingsPlatform) -> [SettingsField] {
+        fields.filter { $0.section == section && availableOn($0.platforms, platform) }
+    }
+
+    // MARK: Controls
+
+    public enum ControlKind: Equatable, Sendable {
+        case `switch`, menu, stepper, checks, text, path, hotkey
+    }
+
+    /// The control for a kind. Exhaustive, so a new kind does not compile until it is mapped.
+    public static func controlKind(_ kind: SettingsKind) -> ControlKind {
+        switch kind {
+        case .bool: return .switch
+        case .int(_, _, let menu): return menu ? .menu : .stepper
+        case .choice: return .menu
+        case .multiChoice: return .checks
+        case .text: return .text
+        case .path: return .path
+        case .hotkey: return .hotkey
+        }
+    }
+
+    public struct MenuItem: Equatable, Sendable {
+        public var label: String
+        /// What choosing it commits.
+        public var value: JSONValue
+        public var enabled: Bool
+
+        public init(label: String, value: JSONValue, enabled: Bool) {
+            self.label = label
+            self.value = value
+            self.enabled = enabled
+        }
+    }
+
+    public struct CheckItem: Equatable, Sendable {
+        public var label: String
+        public var value: String
+        public var checked: Bool
+        public var enabled: Bool
+
+        public init(label: String, value: String, checked: Bool, enabled: Bool) {
+            self.label = label
+            self.value = value
+            self.checked = checked
+            self.enabled = enabled
+        }
+    }
+
+    public enum Control: Equatable, Sendable {
+        case `switch`(on: Bool)
+        case menu(items: [MenuItem], selected: Int?)
+        case stepper(min: Int64, max: Int64, value: Int64, text: String)
+        /// `current` is the stored list, in order; a toggle changes only its own entry.
+        case checks(items: [CheckItem], current: [String])
+        case text(text: String, optional: Bool)
+        /// `path` is nil when unset.
+        case path(path: String?, dir: Bool, optional: Bool)
+        /// `combo` is the stored shortcut string; `title` its Mac symbols, e.g. "⌥⌘Space".
+        case hotkey(combo: String, title: String)
+
+        public var kind: ControlKind {
+            switch self {
+            case .switch: return .switch
+            case .menu: return .menu
+            case .stepper: return .stepper
+            case .checks: return .checks
+            case .text: return .text
+            case .path: return .path
+            case .hotkey: return .hotkey
+            }
+        }
+    }
+
+    /// One row of a tab: the label column, the control, and the line under it.
+    public struct ControlSpec: Equatable, Sendable {
+        public var path: String
+        /// The label column's text, ending in a colon.
+        public var label: String
+        /// The accessibility label: the field's label as written.
+        public var a11yLabel: String
+        /// The help line, which is also the accessibility help.
+        public var help: String
+        /// Shown in red in place of the help line until the next good commit.
+        public var error: String?
+        public var control: Control
+
+        /// The line under the control and whether it is an error.
+        public var note: (text: String, isError: Bool) {
+            if let error { return (error, true) }
+            return (help, false)
+        }
+    }
+
+    public static func labelText(_ label: String) -> String { "\(label):" }
+
+    /// Text shown for a value (web `toText`): null and missing are empty.
+    public static func textOf(_ value: JSONValue?) -> String {
+        switch value {
+        case nil, .null?: return ""
+        case .string(let s)?: return s
+        case let v?: return v.description
+        }
+    }
+
+    private static func unavailableLabel(_ all: [SettingsOption], _ value: String) -> String {
+        if let known = all.first(where: { $0.value == value }) {
+            return "\(known.label) \(notAvailable)"
+        }
+        return "\(value) \(notFound)"
+    }
+
+    /// The pop-up's items for a choice. A current value that isn't offered here stays visible
+    /// as a disabled, labelled item, so it is never changed silently.
+    public static func choiceItems(_ options: [SettingsOption], platform: SettingsPlatform,
+                                   current: String) -> [MenuItem] {
+        var items = options.filter { availableOn($0.platforms, platform) }.map {
+            // An empty value ("System Default") stands for null.
+            MenuItem(label: $0.label, value: $0.value.isEmpty ? .null : .string($0.value), enabled: true)
+        }
+        if !current.isEmpty, !items.contains(where: { $0.value.stringValue == current }) {
+            items.append(MenuItem(label: unavailableLabel(options, current), value: .string(current), enabled: false))
+        }
+        return items
+    }
+
+    /// The size menu's names for the tray's sizes.
+    private static func sizeName(_ n: Int64) -> String? {
+        switch n {
+        case 4: return "Small"
+        case 6: return "Medium"
+        case 8: return "Large"
+        case 12: return "Huge"
+        default: return nil
+        }
+    }
+
+    /// Every whole number from `min` to `max`. The size field reads "Large (×8)" or "×5".
+    public static func intItems(path: String, min: Int64, max: Int64) -> [MenuItem] {
+        guard min <= max else { return [] }
+        return (min...max).map { n in
+            let label: String
+            if path == sizeField {
+                label = sizeName(n).map { "\($0) (×\(n))" } ?? "×\(n)"
+            } else {
+                label = String(n)
+            }
+            return MenuItem(label: label, value: .int(n), enabled: true)
+        }
+    }
+
+    public static func checkItems(_ options: [SettingsOption], platform: SettingsPlatform,
+                                  current: [String]) -> [CheckItem] {
+        var items = options.filter { availableOn($0.platforms, platform) }.map {
+            CheckItem(label: $0.label, value: $0.value, checked: current.contains($0.value), enabled: true)
+        }
+        for value in current where !items.contains(where: { $0.value == value }) {
+            items.append(CheckItem(label: unavailableLabel(options, value), value: value, checked: true, enabled: false))
+        }
+        return items
+    }
+
+    /// `current` with `value` switched on or off; every other entry stays as it was (web `toggleMulti`).
+    public static func toggleMulti(_ current: [String]?, _ value: String, on: Bool) -> [String] {
+        let rest = (current ?? []).filter { $0 != value }
+        return on ? rest + [value] : rest
+    }
+
+    /// The field's row, from the snapshot's values.
+    public static func controlSpec(_ field: SettingsField, values: JSONValue, platform: SettingsPlatform,
+                                   error: String? = nil) -> ControlSpec {
+        let value = values.at(field.path)
+        let control: Control
+        switch field.kind {
+        case .bool:
+            control = .switch(on: value?.boolValue ?? false)
+        case .int(let min, let max, true):
+            let items = intItems(path: field.path, min: min, max: max)
+            control = .menu(items: items, selected: value.flatMap { v in items.firstIndex { $0.value == v } })
+        case .int(let min, let max, false):
+            let n = value?.intValue ?? min
+            control = .stepper(min: min, max: max, value: Swift.min(Swift.max(n, min), max), text: textOf(value))
+        case .choice(let options):
+            let current = textOf(value)
+            let items = choiceItems(options, platform: platform, current: current)
+            control = .menu(items: items, selected: items.firstIndex { textOf($0.value) == current })
+        case .multiChoice(let options):
+            let current = value?.arrayValue?.compactMap(\.stringValue) ?? []
+            control = .checks(items: checkItems(options, platform: platform, current: current), current: current)
+        case .text(let optional):
+            control = .text(text: textOf(value), optional: optional)
+        case .path(let dir, let optional):
+            let p = textOf(value)
+            control = .path(path: p.isEmpty ? nil : p, dir: dir, optional: optional)
+        case .hotkey:
+            let combo = textOf(value)
+            control = .hotkey(combo: combo, title: formatHotkey(combo, platform: platform))
+        }
+        return ControlSpec(path: field.path, label: labelText(field.label), a11yLabel: field.label, help: field.help,
+                           error: error, control: control)
+    }
+
+    // MARK: Input
+
+    /// What the user did to a control.
+    public enum Input: Equatable, Sendable {
+        case `switch`(Bool)
+        /// The index of the chosen pop-up item.
+        case menu(Int)
+        /// Text typed in a text or number field.
+        case text(String)
+        /// The stepper's new value.
+        case step(Int64)
+        /// A checkbox turned on or off.
+        case check(index: Int, on: Bool)
+        /// A path picked in the open panel, or nil for Clear.
+        case path(String?)
+        /// A recorded shortcut string.
+        case hotkey(String)
+
+        /// The text a refused value leaves in the field.
+        public var typed: String? {
+            switch self {
+            case .text(let t): return t
+            case .path(let p?): return p
+            default: return nil
+            }
+        }
+    }
+
+    private static func wholeNumber(_ text: String) -> Int64? {
+        let digits = text.hasPrefix("-") ? String(text.dropFirst()) : text
+        guard !digits.isEmpty, digits.allSatisfy({ $0.isASCII && $0.isNumber }) else { return nil }
+        return Int64(text)
+    }
+
+    private static func textValue(_ text: String, optional: Bool) -> Result<JSONValue, CommitError> {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.isEmpty { return optional ? .success(.null) : .failure(CommitError(empty)) }
+        return .success(.string(t))
+    }
+
+    /// Why an input could not become a value; shown under the field.
+    public struct CommitError: Error, Equatable, Sendable {
+        public var message: String
+        public init(_ message: String) { self.message = message }
+    }
+
+    /// The JSON `settings.set` takes for `input`. Ranges and choices are checked by the core.
+    public static func commitValue(_ spec: ControlSpec, _ input: Input) -> Result<JSONValue, CommitError> {
+        switch (spec.control, input) {
+        case (.switch, .switch(let on)):
+            return .success(.bool(on))
+        case (.menu(let items, _), .menu(let i)):
+            guard items.indices.contains(i), items[i].enabled else { return .failure(CommitError(notAvailable)) }
+            return .success(items[i].value)
+        case (.stepper, .step(let n)):
+            return .success(.int(n))
+        case (.stepper, .text(let text)):
+            guard let n = wholeNumber(text.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+                return .failure(CommitError(whole))
+            }
+            return .success(.int(n))
+        case (.checks(let items, let current), .check(let index, let on)):
+            guard items.indices.contains(index) else { return .failure(CommitError(wrongInput)) }
+            return .success(.array(toggleMulti(current, items[index].value, on: on).map(JSONValue.string)))
+        case (.text(_, let optional), .text(let text)):
+            return textValue(text, optional: optional)
+        case (.path(_, _, let optional), .path(let path)):
+            return textValue(path ?? "", optional: optional)
+        case (.hotkey, .hotkey(let combo)):
+            return .success(.string(combo))
+        default:
+            return .failure(CommitError(wrongInput))
+        }
+    }
+
+    /// Whether text a field sends when editing ends is worth committing. `shown` is the text the
+    /// window last wrote into the field: an untouched field (perhaps showing a value that has
+    /// since changed elsewhere) must not commit it back. A kept draft or a shown error is always
+    /// retried.
+    public static func shouldCommit(typed: String, shown: String, hasDraft: Bool, hasError: Bool) -> Bool {
+        hasDraft || hasError || typed != shown
+    }
+
+    // MARK: Hotkey text
+
+    private static func macSymbol(_ modifier: String) -> String? {
+        switch modifier.lowercased() {
+        case "ctrl", "control": return "⌃"
+        case "alt", "option": return "⌥"
+        case "shift": return "⇧"
+        case "super", "cmd", "command": return "⌘"
+        default: return nil
+        }
+    }
+
+    private static let namedKeys: [String: String] = [
+        "Minus": "-", "Equal": "=", "Comma": ",", "Period": ".", "Slash": "/", "Backslash": "\\",
+        "Semicolon": ";", "Quote": "'", "Backquote": "`", "BracketLeft": "[", "BracketRight": "]", "Space": "Space",
+    ]
+
+    private static func keyName(_ code: String, platform: SettingsPlatform) -> String {
+        if let n = namedKeys[code] { return n }
+        let arrows: [String: String] = platform == .macos
+            ? ["ArrowUp": "↑", "ArrowDown": "↓", "ArrowLeft": "←", "ArrowRight": "→"]
+            : ["ArrowUp": "Up", "ArrowDown": "Down", "ArrowLeft": "Left", "ArrowRight": "Right"]
+        if let a = arrows[code] { return a }
+        func single(_ prefix: String, _ ok: (Character) -> Bool) -> String? {
+            guard code.hasPrefix(prefix) else { return nil }
+            let rest = code.dropFirst(prefix.count)
+            guard rest.count == 1, let c = rest.first, ok(c) else { return nil }
+            return String(rest)
+        }
+        return single("Key") { $0.isASCII && $0.isUppercase }
+            ?? single("Digit") { $0.isASCII && $0.isNumber }
+            ?? code
+    }
+
+    /// A shortcut string for people (web `formatHotkey`): "⌥⌘Space" on macOS, "Ctrl+Alt+K"
+    /// elsewhere.
+    public static func formatHotkey(_ combo: String, platform: SettingsPlatform) -> String {
+        var parts = combo.split(separator: "+", omittingEmptySubsequences: false)
+            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        guard let code = parts.popLast() else { return "" }
+        let key = keyName(code, platform: platform)
+        if platform == .macos {
+            return parts.map { macSymbol($0) ?? $0 }.joined() + key
+        }
+        let superName = platform == .windows ? "Win" : "Super"
+        var out = parts.map { p -> String in
+            switch p.lowercased() {
+            case "ctrl", "control": return "Ctrl"
+            case "alt", "option": return "Alt"
+            case "shift": return "Shift"
+            case "super", "cmd", "command": return superName
+            default: return p
+            }
+        }
+        out.append(key)
+        return out.joined(separator: "+")
+    }
+
+    // MARK: Chrome
+
+    /// The file-error banner's text.
+    public static func bannerText(_ fileError: String) -> String {
+        "\(fileBroken) (\(fileError))"
+    }
+
+    /// "Restart to apply: Voice service, Model", or nil when nothing waits for a restart.
+    public static func restartText(_ pending: [String], fields: [SettingsField]) -> String? {
+        guard !pending.isEmpty else { return nil }
+        let labels = pending.map { p in fields.first { $0.path == p }?.label ?? p }
+        return "Restart to apply: " + labels.joined(separator: ", ")
+    }
+
+    /// A failed save or action, shown above the Restart bar.
+    public static func saveNotice(_ message: String) -> String {
+        "Couldn't save settings: \(message)"
+    }
+
+    /// Where each error of a refused commit of `path` goes: under its own field, and when none
+    /// is for `path` itself, all of them under `path` too, each named.
+    public static func placeErrors(_ path: String, _ errors: [SettingsFieldError],
+                                   fields: [SettingsField]) -> [(path: String, message: String)] {
+        var out = errors.map { (path: $0.path, message: $0.message) }
+        if !errors.contains(where: { $0.path == path }) {
+            let label = { (p: String) in fields.first { $0.path == p }?.label ?? p }
+            out.append((path, errors.map { "\(label($0.path)): \($0.message)" }.joined(separator: " ")))
+        }
+        return out
+    }
+
+    /// Whether a snapshot numbered `next` should replace the one shown (numbered `shown`).
+    public static func isNewer(_ shown: UInt64?, _ next: UInt64) -> Bool {
+        guard let shown else { return true }
+        return next > shown
+    }
+
+    /// Whether a path is absolute (web `isAbsolutePath`): the open panel starts there.
+    public static func isAbsolutePath(_ p: String?) -> Bool {
+        guard let p else { return false }
+        if p.hasPrefix("/") || p.hasPrefix("\\\\") { return true }
+        let chars = Array(p)
+        return chars.count >= 3 && chars[0].isASCII && chars[0].isLetter && chars[1] == ":"
+            && (chars[2] == "\\" || chars[2] == "/")
+    }
+
+    // MARK: Extra rows
+
+    public enum Action: Equatable, Sendable { case resetPosition, openFile }
+
+    /// The rows a section has besides its fields.
+    public enum Extra: Equatable, Sendable {
+        case button(label: String, help: String, title: String, action: Action)
+        /// An API key's row: found or missing, never the key.
+        case secret(id: SettingsSecretID, label: String, help: String)
+    }
+
+    public static func extras(_ section: SettingsSection) -> [Extra] {
+        switch section {
+        case .mascot:
+            return [.button(label: "Reset position",
+                            help: "Move Bit back to the bottom-right corner of the main screen.",
+                            title: "Reset Position", action: .resetPosition)]
+        case .voice:
+            return SettingsSecretID.allCases.map { .secret(id: $0, label: $0.label, help: $0.help) }
+        case .advanced:
+            return [.button(label: "Settings file", help: "settings.json holds every setting on this page.",
+                            title: "Open Settings File", action: .openFile)]
+        case .agent, .workers, .canvas:
+            return []
+        }
+    }
+
+    /// "Found", "Missing" or "Unknown" (the status could not be read).
+    public static func secretText(_ secrets: SettingsSecrets?, _ id: SettingsSecretID) -> String {
+        switch secrets?[id] {
+        case .found?: return "Found"
+        case .missing?: return "Missing"
+        case nil: return "Unknown"
+        }
+    }
+}
+
+/// The API keys the Voice tab reports, in order. Never the keys themselves.
+public enum SettingsSecretID: String, CaseIterable, Sendable {
+    case openAI = "openai"
+    case gemini = "gemini"
+
+    public var label: String {
+        switch self {
+        case .openAI: return "OpenAI key"
+        case .gemini: return "Gemini key"
+        }
+    }
+
+    public var variable: String {
+        switch self {
+        case .openAI: return "OPENAI_API_KEY"
+        case .gemini: return "GEMINI_API_KEY"
+        }
+    }
+
+    public var help: String {
+        "Set \(variable) in your environment or a .env file. Keys are never shown here."
+    }
+}

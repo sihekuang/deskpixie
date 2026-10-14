@@ -1,0 +1,94 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Weekly product dashboard</title>
+<link rel="stylesheet" href="/ds/tokens.css">
+<link rel="stylesheet" href="/ds/base.css">
+<script src="/ds/vendor/chart.umd.min.js"></script>
+<script src="/ds/vendor/mermaid.min.js"></script>
+<script src="/ds/canvas.js"></script>
+</head>
+<body>
+<main class="page">
+  <header class="page-header">
+    <h1>Weekly product dashboard</h1>
+    <p class="subtitle">Week 41 · compared with week 40</p>
+  </header>
+
+  <div class="grid grid-4">
+    <div class="card stat">
+      <span class="stat-label">Weekly active users</span>
+      <span class="stat-value">48,210</span>
+      <span class="stat-delta up">▲ 6.2%</span>
+    </div>
+    <div class="card stat">
+      <span class="stat-label">New sign-ups</span>
+      <span class="stat-value">3,904</span>
+      <span class="stat-delta up">▲ 11.0%</span>
+    </div>
+    <div class="card stat">
+      <span class="stat-label">p95 latency</span>
+      <span class="stat-value">412 ms</span>
+      <span class="stat-delta down">▲ 38 ms</span>
+    </div>
+    <div class="card stat">
+      <span class="stat-label">Error rate</span>
+      <span class="stat-value">0.31%</span>
+      <span class="stat-delta">no change</span>
+    </div>
+  </div>
+
+  <div class="grid grid-2">
+    <section class="card">
+      <h3 class="card-title">Active users, last 8 weeks</h3>
+      <div class="chart" id="wau"></div>
+    </section>
+    <section class="card">
+      <h3 class="card-title">Requests by region (millions)</h3>
+      <div class="chart" id="regions"></div>
+    </section>
+  </div>
+
+  <div class="callout callout-warn">
+    <p class="callout-title">Latency is up in EU-West</p>
+    <p>p95 rose 38 ms after Tuesday's deploy. Requests there grew 9%, so check whether this is load or the release.</p>
+  </div>
+
+  <section class="card">
+    <h3 class="card-title">Top pages</h3>
+    <table>
+      <thead><tr><th>Page</th><th class="num">Views</th><th class="num">Change</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr><td>Home</td><td class="num">182,400</td><td class="num">+4.1%</td><td><span class="badge badge-good">healthy</span></td></tr>
+        <tr><td>Search</td><td class="num">96,130</td><td class="num">+12.8%</td><td><span class="badge badge-good">healthy</span></td></tr>
+        <tr><td>Checkout</td><td class="num">21,770</td><td class="num">−2.3%</td><td><span class="badge badge-warn">slow</span></td></tr>
+      </tbody>
+    </table>
+  </section>
+</main>
+<script>
+  Canvas.chart('#wau', {
+    type: 'line',
+    data: {
+      labels: ['W34', 'W35', 'W36', 'W37', 'W38', 'W39', 'W40', 'W41'],
+      datasets: [
+        { label: 'Weekly active', data: [39100, 40250, 41800, 41200, 43900, 44800, 45390, 48210], fill: true },
+        { label: 'Returning', data: [30200, 30900, 31800, 31500, 33100, 33600, 34050, 35900] }
+      ]
+    },
+    options: { scales: { y: { beginAtZero: true } } }
+  });
+  Canvas.chart('#regions', {
+    type: 'bar',
+    data: {
+      labels: ['US-East', 'US-West', 'EU-West', 'EU-Central', 'APAC'],
+      datasets: [
+        { label: 'Week 40', data: [41.2, 27.9, 22.4, 12.1, 9.8] },
+        { label: 'Week 41', data: [42.0, 28.3, 24.4, 12.6, 10.9] }
+      ]
+    }
+  });
+</script>
+</body>
+</html>

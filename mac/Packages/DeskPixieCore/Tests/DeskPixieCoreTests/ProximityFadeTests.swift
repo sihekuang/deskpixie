@@ -2,10 +2,9 @@ import CoreGraphics
 import XCTest
 @testable import DeskPixieCore
 
-/// Port of ai-mascot `src-tauri/src/proximity.rs` tests (opacity, distance, should_emit), plus the
-/// `actions.rs` spawn_proximity rule (full opacity over Bit / while pressed / when disabled).
-/// `cursor_cell` and `rescale` are not ported: AppKit gives points in one global space and
-/// MascotController maps the cursor into the body cell itself.
+/// Port of ai-mascot `src-tauri/src/proximity.rs` tests (12 of 12: opacity, distance, should_emit,
+/// cursor_cell, rescale), plus the `actions.rs` spawn_proximity rule (full opacity over Bit / while
+/// pressed / when disabled). Rects are desktop coordinates (top-left origin, y down), as in Rust.
 final class ProximityFadeTests: XCTestCase {
     private let r = CGRect(x: 1000, y: 500, width: 256, height: 256)
 
@@ -43,6 +42,33 @@ final class ProximityFadeTests: XCTestCase {
         let left = CGRect(x: -900, y: -300, width: 256, height: 256)
         approx(ProximityFade.opacity(cursor: CGPoint(x: -920, y: -200), rect: left, radius: 150), 0.0)
         approx(ProximityFade.opacity(cursor: CGPoint(x: -1200, y: -200), rect: left, radius: 150), 1.0)
+        XCTAssertEqual(ProximityFade.cursorCell(CGPoint(x: -900 + 128, y: -300 + 8), rect: left, cell: (32, 32)),
+                       CellIndex(x: 16, y: 1))
+    }
+
+    func testCursorCellMapsWindowPixelsToSpriteCells() {
+        XCTAssertEqual(ProximityFade.cursorCell(CGPoint(x: 1000, y: 500), rect: r, cell: (32, 32)), CellIndex(x: 0, y: 0))
+        XCTAssertEqual(ProximityFade.cursorCell(CGPoint(x: 1128, y: 628), rect: r, cell: (32, 32)), CellIndex(x: 16, y: 16))
+        XCTAssertEqual(ProximityFade.cursorCell(CGPoint(x: 1255.9, y: 755.9), rect: r, cell: (32, 32)), CellIndex(x: 31, y: 31))
+    }
+
+    func testCursorCellIsNilOutsideTheWindow() {
+        XCTAssertNil(ProximityFade.cursorCell(CGPoint(x: 1256, y: 600), rect: r, cell: (32, 32))) // right edge is exclusive
+        XCTAssertNil(ProximityFade.cursorCell(CGPoint(x: 999, y: 600), rect: r, cell: (32, 32)))
+        XCTAssertNil(ProximityFade.cursorCell(CGPoint(x: 0, y: 0), rect: .zero, cell: (32, 32)))
+    }
+
+    /// AppKit reports the cursor and every window frame in one global point space, so the app
+    /// calls `rescale` with equal factors (a no-op); the function and its Rust test are kept so the
+    /// tao mixed-Retina rule stays documented and checked.
+    func testRescaleMapsARetinaScaledCursorOntoA1xMonitor() {
+        // Bit at (679,-833) 256x256 on a 1x display above a 2x Retina primary (seen live).
+        let rect = CGRect(x: 679, y: -833, width: 256, height: 256)
+        let c = ProximityFade.rescale(CGPoint(x: 1611, y: -1326), from: 2, to: 1)
+        XCTAssertEqual(c, CGPoint(x: 805.5, y: -663))
+        XCTAssertNotNil(ProximityFade.cursorCell(c, rect: rect, cell: (32, 32)))
+        XCTAssertEqual(ProximityFade.rescale(CGPoint(x: 10, y: 20), from: 2, to: 2), CGPoint(x: 10, y: 20))
+        XCTAssertEqual(ProximityFade.rescale(CGPoint(x: 10, y: 20), from: 0, to: 1), CGPoint(x: 10, y: 20))
     }
 
     func testZeroRadiusNeverHides() {

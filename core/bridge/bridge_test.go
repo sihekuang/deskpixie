@@ -24,20 +24,50 @@ func absMascots(t *testing.T) string {
 	return p
 }
 
+// cfgJSON is a dp_configure config with a fresh app support folder.
 func cfgJSON(t *testing.T, extra string) []byte {
 	t.Helper()
-	b, _ := json.Marshal(absMascots(t))
-	s := `{"packRoots":[` + string(b) + `]`
-	if extra != "" {
-		s += "," + extra
-	}
-	return []byte(s + "}")
+	return cfgIn(t, t.TempDir(), extra)
 }
+
+// cfgIn is a dp_configure config for appSupport dir (bundled mascots and design system from
+// the repo).
+func cfgIn(t *testing.T, dir, extra string) []byte {
+	t.Helper()
+	ds, _ := filepath.Abs("../../design-system")
+	m := map[string]string{"appSupport": dir, "bundledMascots": absMascots(t), "designSystem": ds, "platform": "macos"}
+	b, _ := json.Marshal(m)
+	s := string(b)
+	if extra != "" {
+		s = s[:len(s)-1] + "," + extra + "}"
+	}
+	return []byte(s)
+}
+
+// writeSettings writes settings.json into dir.
+func writeSettings(t *testing.T, dir, body string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// noSecrets finds no API key (tests never read the real environment or .env).
+var noSecrets = voice.NewEnvSecretsWithLookup(nil, func(string) (string, bool) { return "", false })
 
 func newEngine(t *testing.T, o Options) *Engine {
 	t.Helper()
 	if o.MetricsLogPath == "" {
 		o.MetricsLogPath = filepath.Join(t.TempDir(), "logs", "metrics.log")
+	}
+	if o.Secrets == nil {
+		o.Secrets = noSecrets
+	}
+	if o.Run == nil {
+		o.Run = func(string, ...string) error { return nil }
+	}
+	if o.Agent == nil {
+		o.Agent = NoAgent // never the real herdr, port 48217 or ~/.claude.json
 	}
 	e := New(o)
 	t.Cleanup(e.Close)
@@ -76,7 +106,7 @@ func waitEvent(t *testing.T, e *Engine, match func(voice.UIEvent) bool) []voice.
 
 func TestBridgeConfigureWithoutKey(t *testing.T) {
 	e := newEngine(t, Options{})
-	if err := e.Configure(cfgJSON(t, `"apiKey":""`)); err != nil {
+	if err := e.Configure(cfgJSON(t, "")); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	e.Hotkey()
@@ -111,7 +141,7 @@ func TestBridgeConfigureBadJSON(t *testing.T) {
 
 func TestBridgeConfigureNoPackIsBuildError(t *testing.T) {
 	e := newEngine(t, Options{})
-	err := e.Configure([]byte(`{"packRoots":["` + t.TempDir() + `"]}`))
+	err := e.Configure([]byte(`{"appSupport":"` + t.TempDir() + `","bundledMascots":"` + t.TempDir() + `"}`))
 	if err == nil || errors.Is(err, ErrBadJSON) || errors.Is(err, ErrNotInit) {
 		t.Fatalf("err = %v, want a build error", err)
 	}
@@ -120,17 +150,33 @@ func TestBridgeConfigureNoPackIsBuildError(t *testing.T) {
 	}
 }
 
-func TestBridgeConfigDefaults(t *testing.T) {
+func TestBridgeConfigPaths(t *testing.T) {
 	var c Config
-	if err := json.Unmarshal([]byte(`{"apiKey":"k","personaPath":"/p","idleTimeoutSecs":0,"packRoots":["a"],"noisyRoom":true}`), &c); err != nil {
+	if err := json.Unmarshal([]byte(`{"appSupport":"/a","bundledMascots":"/b","designSystem":"/d","dfn3ModelPath":"/m","platform":"macos"}`), &c); err != nil {
 		t.Fatal(err)
 	}
-	c.applyDefaults()
-	if c.Model != "gpt-realtime" || c.Voice != "marin" || c.IdleTimeoutSecs != 7 || c.Pack != "bit" {
-		t.Errorf("defaults = %+v", c)
+	p := c.paths()
+	if p.AppSupport != "/a" || p.BundledMascots != "/b" || p.DesignSystem != "/d" || p.DFN3ModelPath != "/m" || p.Platform != "macos" {
+		t.Errorf("camelCase keys not decoded: %+v", p)
 	}
-	if c.APIKey != "k" || c.PersonaPath != "/p" || !c.NoisyRoom || len(c.PackRoots) != 1 {
-		t.Errorf("camelCase keys not decoded: %+v", c)
+}
+
+func TestBridgeLegacyConfigDerivesThePaths(t *testing.T) {
+	var c Config
+	legacy := `{"apiKey":"k","model":"m","packRoots":["/App/Resources/mascots","/Support/com.sihekuang.deskpixie/mascots"],"noisyRoom":true}`
+	if err := json.Unmarshal([]byte(legacy), &c); err != nil {
+		t.Fatal(err)
+	}
+	p := c.paths()
+	if p.BundledMascots != "/App/Resources/mascots" || p.AppSupport != "/Support/com.sihekuang.deskpixie" {
+		t.Errorf("%+v", p)
+	}
+}
+
+func TestBridgeConfigNeedsAppSupport(t *testing.T) {
+	e := newEngine(t, Options{})
+	if err := e.Configure([]byte(`{"bundledMascots":"/b"}`)); !errors.Is(err, ErrBadJSON) {
+		t.Fatalf("err = %v", err)
 	}
 }
 
@@ -140,7 +186,9 @@ func TestBridgeReconfigureReplacesRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	first := e.rt.Load()
-	if err := e.Configure(cfgJSON(t, `"pack":"dino"`)); err != nil {
+	dir := t.TempDir()
+	writeSettings(t, dir, `{"pack":"dino"}`)
+	if err := e.Configure(cfgIn(t, dir, "")); err != nil {
 		t.Fatal(err)
 	}
 	if e.rt.Load() == first || e.rt.Load() == nil {
@@ -199,18 +247,25 @@ func TestBridgeWithoutRuntimeIsSafe(t *testing.T) {
 
 func TestBridgePackJSON(t *testing.T) {
 	e := newEngine(t, Options{})
-	if err := e.Configure(cfgJSON(t, `"pack":"nope"`)); err != nil {
+	dir := t.TempDir()
+	writeSettings(t, dir, `{"pack":"nope","scale":6}`)
+	if err := e.Configure(cfgIn(t, dir, "")); err != nil {
 		t.Fatal(err)
 	}
 	var v struct {
 		Pack      map[string]any `json:"pack"`
 		SheetPath string         `json:"sheetPath"`
+		Scale     int            `json:"scale"`
+		HitMask   []byte         `json:"hitMask"`
 	}
 	if err := json.Unmarshal(e.PackJSON(), &v); err != nil {
 		t.Fatal(err)
 	}
 	if v.Pack["name"] != "Bit" {
 		t.Errorf("name = %v", v.Pack["name"])
+	}
+	if v.Scale != 6 || len(v.HitMask) != 32*32/8 {
+		t.Errorf("scale %d, hit mask %d bytes", v.Scale, len(v.HitMask))
 	}
 	if !filepath.IsAbs(v.SheetPath) {
 		t.Errorf("sheetPath %q not absolute", v.SheetPath)
@@ -315,7 +370,8 @@ func TestBridgeMetricsEventAndLog(t *testing.T) {
 }
 
 func TestGlobalAPI(t *testing.T) {
-	defaultOptions = Options{MetricsLogPath: filepath.Join(t.TempDir(), "metrics.log")}
+	defaultOptions = Options{MetricsLogPath: filepath.Join(t.TempDir(), "metrics.log"), Secrets: noSecrets, Run: func(string, ...string) error { return nil }, Agent: NoAgent}
+	t.Cleanup(func() { defaultOptions = Options{} })
 	Destroy()
 	if err := Configure(cfgJSON(t, "")); !errors.Is(err, ErrNotInit) {
 		t.Fatalf("Configure before Init: %v", err)

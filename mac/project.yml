@@ -14,6 +14,9 @@ settings:
     ENABLE_HARDENED_RUNTIME: YES
     # libdeskpixie.dylib (Go cgo) is built for the host arch only.
     ARCHS: arm64
+    # Overridden by `make release VERSION=x.y.z` (MARKETING_VERSION, CURRENT_PROJECT_VERSION).
+    MARKETING_VERSION: "0.3.0"
+    CURRENT_PROJECT_VERSION: "1"
 packages:
   DeskPixieCore:
     path: Packages/DeskPixieCore
@@ -28,6 +31,11 @@ targets:
           - "DeskPixie.entitlements"
       # Folder reference: copied as Contents/Resources/mascots (first pack root).
       - path: ../mascots
+        type: folder
+        buildPhase: resources
+      # Folder reference: Contents/Resources/design-system (canvas /ds/ pages, CANVAS.md,
+      # examples); its path goes to dp_configure as `designSystem`.
+      - path: ../design-system
         type: folder
         buildPhase: resources
     settings:
@@ -47,10 +55,16 @@ targets:
         basedOnDependencyAnalysis: false
         script: |
           set -e
-          # Xcode does not inherit the login shell PATH.
-          source ~/.zprofile 2>/dev/null || true
-          export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+          # Use the go already on PATH (CI: actions/setup-go; xcodebuild passes its environment
+          # through). Xcode.app launched from the Dock does not inherit the login shell PATH, so
+          # fall back to the login profile and the Homebrew prefixes, appended so they never
+          # shadow a go that is already on PATH.
+          if ! command -v go >/dev/null; then
+            source ~/.zprofile 2>/dev/null || true
+            export PATH="$PATH:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+          fi
           command -v go >/dev/null || { echo "error: go not found (brew install go)" >&2; exit 1; }
+          echo "Go core: $(command -v go) ($(go version))"
           cd "$SRCROOT/../core"
           unset GOFLAGS
           make build-dylib
@@ -65,12 +79,50 @@ targets:
           mkdir -p "$DST"
           # install_name is already @rpath/libdeskpixie.dylib (core/Makefile).
           cp -pf "$SRCROOT/../core/build/libdeskpixie.dylib" "$DST/"
-          # Ad-hoc sign so the hardened-runtime app can load it.
-          codesign --force --sign "${EXPANDED_CODE_SIGN_IDENTITY:--}" "$DST/libdeskpixie.dylib"
+          # Sign with the app's identity so the hardened-runtime app can load it. With a real
+          # identity (make release SIGNING_IDENTITY=...), notarization also needs a secure
+          # timestamp and the hardened runtime on every Mach-O in the bundle.
+          ID="${EXPANDED_CODE_SIGN_IDENTITY:--}"
+          if [ "$ID" = "-" ]; then FLAGS=""; else FLAGS="--timestamp --options runtime"; fi
+          codesign --force --sign "$ID" $FLAGS "$DST/libdeskpixie.dylib"
         inputFiles:
           - "$(SRCROOT)/../core/build/libdeskpixie.dylib"
         outputFiles:
           - "$(BUILT_PRODUCTS_DIR)/$(FRAMEWORKS_FOLDER_PATH)/libdeskpixie.dylib"
+      - name: Bundle libdf + DeepFilterNet3 model when built
+        # core/Makefile build-dylib stages these when libdf is present (it is committed under
+        # core/audio/denoise/libdf); otherwise the core is built without the deepfilter tag and the noise
+        # filter passes audio through. libdf is dlopen'ed as @rpath/libdf.dylib (its
+        # install name), which LD_RUNPATH_SEARCH_PATHS covers.
+        basedOnDependencyAnalysis: false
+        script: |
+          set -e
+          FW="$BUILT_PRODUCTS_DIR/$FRAMEWORKS_FOLDER_PATH"
+          RES="$BUILT_PRODUCTS_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH"
+          LIBDF="$SRCROOT/../core/build/libdf.dylib"
+          MODEL="$SRCROOT/../core/build/DeepFilterNet3.tar.gz"
+          mkdir -p "$FW" "$RES"
+          ID="${EXPANDED_CODE_SIGN_IDENTITY:--}"
+          if [ "$ID" = "-" ]; then FLAGS=""; else FLAGS="--timestamp --options runtime"; fi
+          STAMP="$DERIVED_FILE_DIR/libdf.signed-with"
+          if [ -f "$LIBDF" ]; then
+            # Copy + re-sign only when the source or the identity changed (signing a 16 MB
+            # dylib every build is slow; a timestamped signature needs a network round-trip).
+            if [ ! -f "$FW/libdf.dylib" ] || [ "$LIBDF" -nt "$FW/libdf.dylib" ] \
+              || [ "$(cat "$STAMP" 2>/dev/null)" != "$ID" ]; then
+              cp -pf "$LIBDF" "$FW/"
+              codesign --force --sign "$ID" $FLAGS "$FW/libdf.dylib"
+              mkdir -p "$DERIVED_FILE_DIR"
+              echo "$ID" > "$STAMP"
+            fi
+          else
+            rm -f "$FW/libdf.dylib" "$STAMP"
+          fi
+          if [ -f "$MODEL" ]; then
+            cp -pf "$MODEL" "$RES/"
+          else
+            rm -f "$RES/DeepFilterNet3.tar.gz"
+          fi
 schemes:
   DeskPixie:
     build:

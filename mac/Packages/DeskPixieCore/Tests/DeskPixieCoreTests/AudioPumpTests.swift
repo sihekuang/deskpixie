@@ -48,6 +48,9 @@ final class FakeEngine: CoreEngine, @unchecked Sendable {
     func micFailed(_ reason: String) {}
     func pollEvent() -> EngineEvent? { nil }
     func packJSON() -> Data? { nil }
+    func call(_ method: String, _ args: any Encodable) throws -> Data {
+        throw DeskPixieEngineError.callFailed("unknown method \(method)")
+    }
     func shutdown() {}
 }
 

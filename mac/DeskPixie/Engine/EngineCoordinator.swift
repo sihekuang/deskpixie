@@ -3,14 +3,20 @@ import DeskPixieCore
 import Foundation
 import os
 
-/// Wires the Go engine to the mascot, the tray, the hotkey and the audio I/O, and drains
-/// engine events on the main actor every 30 ms (Howl's poll pattern).
+/// Wires the Go engine to the mascot, the tray, the hotkey, the audio I/O, notifications,
+/// the canvas window and the settings window, and drains engine events on the main actor
+/// every 30 ms (Howl's poll pattern). Every event kind of the plan's shared contract is
+/// handled in `handle(_:)`.
+///
+/// Threading: no core call that can touch the disk, the network or spawn a process runs on the
+/// main thread. Launch (migration, `dp_configure`, first reads) runs in `StartupSequencer`;
+/// `app.action`, `app.state`, `settings.snapshot`/`choices`/`hotkeyFailed` go through `worker`.
+/// Only `dp_poll_event` (a non-blocking queue pop), `dp_hotkey` and `dp_pack_json` stay on main.
 @MainActor
 final class EngineCoordinator {
     static let pollInterval: UInt64 = 30_000_000
-    static let missingKeyStatus = "OPENAI_API_KEY not set"
 
-    private static let log = Logger(subsystem: "com.sihekuang.deskpixie", category: "coordinator")
+    nonisolated private static let log = Logger(subsystem: "com.sihekuang.deskpixie", category: "coordinator")
     private static let metricsLog = Logger(subsystem: "com.sihekuang.deskpixie", category: "metrics")
 
     private let appState: AppState
@@ -19,12 +25,26 @@ final class EngineCoordinator {
     private let ring: PlaybackRing
     private let micRing: SampleRing
     private let pump: AudioPump
-    private let hotkey: CarbonHotkey
+    /// Binding, rollback and the "Hotkey unavailable" line (DeskPixieCore, tested there).
+    private var hotkeys: HotkeyBinder!
+    private let notifier = Notifier()
+    private lazy var canvas = CanvasWindowController(engine: engine, worker: worker)
 
     private(set) var mascot: MascotController?
+    /// The combo the Carbon hotkey is bound to right now (nil = none).
+    var boundCombo: String? { hotkeys.boundCombo }
+    /// Settings platform, for formatting combos in status lines.
+    private var platform = SettingsPlatform.macos
+    /// Re-sends the device menus on plug/unplug; kept for the app's lifetime.
+    private var deviceObserver: AudioDeviceListObserver?
     private var pollTask: Task<Void, Never>?
     private var audioTask: Task<Void, Never>?
     private var configured = false
+    /// True once launch work has returned (configured or failed).
+    private var startupFinished = false
+    private let startup = StartupSequencer()
+    /// Serial background queue for core calls that may block.
+    private let worker = CoreWorker()
 
     private enum AudioState { case stopped, starting, running }
     private var audioState = AudioState.stopped
@@ -37,44 +57,57 @@ final class EngineCoordinator {
         self.ring = ring
         self.micRing = micRing
         self.pump = pump
-        self.hotkey = hotkey
+        hotkeys = HotkeyBinder(registrar: hotkey) { [weak self] in self?.talk() }
     }
 
     // MARK: Lifecycle
 
+    /// Returns at once: the tray shows "Starting…" while the core starts in the background;
+    /// the mascot, hotkey and audio come up in `finishStart` back on the main actor.
     func start() {
-        let key = EnvSecrets.openAIKey(env: ProcessInfo.processInfo.environment,
-                                       dotenvURL: EnvSecrets.defaultDotenvURL)
-        Self.log.notice("OPENAI_API_KEY \(key == nil ? "missing" : "present", privacy: .public)")
+        startup.onPhase = { [weak self] phase in self?.appState.startup = phase }
+        let engine = engine
+        Task { @MainActor [weak self] in
+            guard let startup = self?.startup else { return }
+            let result = await startup.run(engine: engine, config: { Self.engineConfig() },
+                                           migrate: { DataMigration.runIfNeeded() })
+            self?.finishStart(result)
+        }
+    }
 
-        let config = EngineConfig(apiKey: key ?? "", model: "gpt-realtime", voice: "marin", personaPath: nil,
-                                  idleTimeoutSecs: 7, pack: "bit", packRoots: Self.packRoots(), noisyRoom: false)
-        do {
-            try engine.configure(config)
-            configured = true
-            appState.status = key == nil ? Self.missingKeyStatus : "Ready — press ⌃⌥Space"
-        } catch {
-            Self.log.error("configure failed: \(String(describing: error), privacy: .public)")
-            appState.status = "Engine error: \(Self.describe(error))"
+    private func finishStart(_ result: StartupResult) {
+        if let error = result.configureError {
+            appState.engineError = "Engine error: \(error)"
             appState.mascotState = "error"
+        } else {
+            configured = true
         }
 
+        // One read for everything launch needs; defaults when the core does not serve it.
+        let snapshot = result.snapshot
+        let launch = LaunchSettings.fromSnapshot(snapshot)
+        platform = launch.platform
+        hotkeys.platform = platform
+
         if configured {
-            if let m = MascotController.load(engine: engine) {
+            let mascotSettings = snapshot.flatMap(MascotSettings.fromSnapshot) ?? .defaults
+            if let m = MascotController.load(engine: engine, settings: mascotSettings) {
                 mascot = m
+                m.onDoubleClick = { [weak self] in self?.talk() }
                 m.show()
             } else {
-                appState.status = "Could not load Bit's mascot pack"
+                appState.engineError = "Could not load the mascot pack"
             }
         }
 
-        do {
-            try hotkey.start { [weak self] in self?.talk() }
-        } catch {
-            Self.log.error("hotkey unavailable: \(String(describing: error), privacy: .public)")
-            appState.status = "⌃⌥Space unavailable (taken by another app)"
-        }
+        // The stored combo (Rust binds config.hotkey at startup); a failure is a tray line.
+        hotkeys.bindAtLaunch(launch.hotkey)
+        appState.hotkeyError = hotkeys.unavailableLine
 
+        wireAudio(pinnedInput: launch.inputDevice, pinnedOutput: launch.outputDevice)
+
+        if let core = result.appState { appState.core = core }
+        startupFinished = true
         startPolling()
         if configured { startAudio(retryForHotkey: false) }
     }
@@ -82,11 +115,49 @@ final class EngineCoordinator {
     func shutdown() {
         pollTask?.cancel()
         audioTask?.cancel()
-        hotkey.stop()
+        deviceObserver?.cancel()
+        deviceObserver = nil
+        hotkeys.stop()
         pump.stop()
         voiceIO.stop()
         mascot?.stop()
+        // Quitting while the core is still starting: dp_configure may be blocked on another
+        // thread; tearing the core down under it is unsafe, and there is nothing to save.
+        guard startupFinished else { return }
+        // Stop taking core work and wait for what is queued (app.action, app.state, …), so no
+        // handler runs during or after dp_destroy (e.g. an agent restart spawning a process).
+        worker.shutdown()
+        // Before the engine goes: the last move/resize must still reach `canvas.geometry`.
+        canvas.flushGeometry()
         engine.shutdown()
+    }
+
+    // MARK: Hotkey
+
+    /// Binds `combo` (a stored combo such as `ctrl+alt+Space`) as the talk hotkey; on failure
+    /// `previous` (default: the combo bound now) is bound again. Returns whether `combo` is now
+    /// bound. Used at launch, for the `hotkey` event and by the Settings window's recorder.
+    @discardableResult
+    func bindHotkey(_ combo: String, previous: String?) -> Bool {
+        let ok = hotkeys.bind(combo, previous: previous)
+        appState.hotkeyError = hotkeys.unavailableLine
+        return ok
+    }
+
+    /// `hotkey` event: the core reloaded a hand-edited combo. If it cannot be bound the old
+    /// one stays and the core is told (`settings.hotkeyFailed`), so it does not adopt it.
+    private func hotkeyChanged(_ combo: String) {
+        let engine = engine, worker = worker
+        hotkeys.changed(combo) { failed in
+            worker.async {
+                do {
+                    _ = try engine.call("settings.hotkeyFailed", HotkeyFailedArgs(combo: failed))
+                } catch {
+                    Self.log.error("settings.hotkeyFailed: \(String(describing: error), privacy: .public)")
+                }
+            }
+        }
+        appState.hotkeyError = hotkeys.unavailableLine
     }
 
     // MARK: Actions
@@ -95,6 +166,7 @@ final class EngineCoordinator {
     /// (e.g. mic permission was denied at launch and granted since), retry it first, so the
     /// conversation does not open a session and wait out the mic timeout.
     func talk() {
+        guard startupFinished else { return }
         guard configured, audioState == .stopped else {
             engine.hotkey()
             return
@@ -102,13 +174,124 @@ final class EngineCoordinator {
         startAudio(retryForHotkey: true)
     }
 
-    /// Debug: State ▸ menu sets the sprite directly, bypassing the engine.
-    func debugSetState(_ s: String) {
-        mascot?.setState(s)
-        appState.mascotState = s
+    /// A tray menu id. Quit and Mic Mode are handled here (Settings… by the menu view);
+    /// every other id is the core's (`app.action`), after which the menu is re-read.
+    func perform(_ id: String) {
+        switch TrayMenu.route(id) {
+        case .quit:
+            NSApp.terminate(nil)
+        case .micMode:
+            MicModes.show(using: appState.micModes)
+        case .settings:
+            break // MenuBarMenu opens the Settings scene
+        case .core(let id, let focusCanvas):
+            struct Action: Encodable { let id: String }
+            // A canvas the user asked for comes forward; core-initiated opens never take focus.
+            if focusCanvas { canvas.requestFocusOnNextShow() }
+            // Off main: actions open Finder/Terminal, rescan packs, restart the agent, …
+            let engine = engine, worker = worker
+            Task { @MainActor [weak self] in
+                await worker.run {
+                    do {
+                        _ = try engine.call("app.action", Action(id: id))
+                    } catch {
+                        Self.log.error("app.action \(id, privacy: .public): \(String(describing: error), privacy: .public)")
+                    }
+                }
+                guard let self else { return }
+                if id == "fade" { self.applyMascotSettings() }
+                self.refreshTray()
+            }
+        }
+    }
+
+    /// Re-reads `app.state` off main; on failure the last good model stays.
+    func refreshTray() {
+        let engine = engine, worker = worker
+        Task { @MainActor [weak self] in
+            let state: TrayAppState?? = await worker.run {
+                do {
+                    return try engine.call("app.state", as: TrayAppState.self)
+                } catch {
+                    Self.log.error("app.state: \(String(describing: error), privacy: .public)")
+                    return nil
+                }
+            }
+            if let state = state ?? nil { self?.appState.core = state }
+        }
+    }
+
+    /// `restart` event: start a fresh copy once this process has exited (so the new one can
+    /// take the hotkey and the audio device), then quit.
+    private func relaunch() {
+        let pid = ProcessInfo.processInfo.processIdentifier
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/sh")
+        p.arguments = ["-c", "while kill -0 \(pid) 2>/dev/null; do sleep 0.1; done; exec /usr/bin/open \"$0\"",
+                       Bundle.main.bundleURL.path]
+        do {
+            try p.run()
+        } catch {
+            Self.log.error("relaunch failed: \(String(describing: error), privacy: .public)")
+            return
+        }
+        NSApp.terminate(nil)
     }
 
     // MARK: Audio
+
+    /// Pins the saved devices, routes the voice unit's failures to the core, and keeps the
+    /// Settings device menus current (S3 wiring).
+    private func wireAudio(pinnedInput: String?, pinnedOutput: String?) {
+        voiceIO.setPinned(input: pinnedInput, output: pinnedOutput)
+        let engine = engine
+        voiceIO.setEventHandler { event in
+            switch event {
+            case .live:
+                break // the core sees the mic as live on the first frame
+            case .failed(.permissionDenied):
+                engine.micFailed("Microphone access denied")
+            case .failed(.deviceChanged):
+                do {
+                    _ = try engine.call("audio.deviceChanged")
+                } catch {
+                    Self.log.error("audio.deviceChanged: \(String(describing: error), privacy: .public)")
+                }
+            case .failed(.other(let reason)):
+                Self.reportAudioFailure(engine, reason)
+            }
+        }
+        sendDeviceChoices()
+        deviceObserver = AudioDeviceListObserver { [weak self] in
+            Task { @MainActor in self?.sendDeviceChoices() }
+        }
+    }
+
+    /// The Microphone and Speaker menus (`settings.choices`); Go adds "System Default".
+    /// Enumerates devices and calls the core off main.
+    private func sendDeviceChoices() {
+        let engine = engine
+        worker.async {
+            for args in AudioDevices.settingsChoices(CoreAudioDevices()) {
+                do {
+                    _ = try engine.call("settings.choices", args)
+                } catch {
+                    Self.log.error("settings.choices \(args.field, privacy: .public): \(String(describing: error), privacy: .public)")
+                }
+            }
+        }
+    }
+
+    /// A unit that could not be built is not a permission problem: `audio.failed {reason}`.
+    /// Falls back to `micFailed` while the core lacks that method.
+    nonisolated private static func reportAudioFailure(_ engine: CoreEngine, _ reason: String) {
+        do {
+            _ = try engine.call("audio.failed", AudioFailedArgs(reason: reason))
+        } catch {
+            log.error("audio.failed: \(String(describing: error), privacy: .public)")
+            engine.micFailed(reason)
+        }
+    }
 
     /// Starts VoiceIO (mic gated off) and the pump.
     /// - At launch (`retryForHotkey == false`) a failure only goes to the tray: reporting it to
@@ -121,6 +304,7 @@ final class EngineCoordinator {
         let voiceIO = voiceIO, ring = ring, micRing = micRing, pump = pump, engine = engine
         audioTask = Task { @MainActor [weak self] in
             var failure: String?
+            var permission = false
             do {
                 // Runs on the real-time input thread: ring write only.
                 try await voiceIO.start(playback: ring) { samples, unixNanos in
@@ -132,17 +316,18 @@ final class EngineCoordinator {
             } catch VoiceIOError.permissionDenied {
                 Self.log.error("microphone permission denied")
                 failure = "Microphone access denied"
+                permission = true
             } catch {
                 Self.log.error("audio start failed: \(String(describing: error), privacy: .public)")
                 failure = "Audio start failed: \(Self.describe(error))"
             }
-            if let failure {
-                self?.audioState = .stopped
-                self?.appState.status = failure
-            }
+            self?.appState.audioError = failure
+            if failure != nil { self?.audioState = .stopped }
             if retryForHotkey {
                 engine.hotkey()
-                if let failure { engine.micFailed(failure) }
+                if let failure {
+                    if permission { engine.micFailed(failure) } else { Self.reportAudioFailure(engine, failure) }
+                }
             }
         }
     }
@@ -171,37 +356,74 @@ final class EngineCoordinator {
             voiceIO.setMicEnabled(start)
             Self.log.info("mic \(start ? "on" : "off", privacy: .public)")
         case .status(let text):
-            appState.status = text
+            // The tray line comes from app.state; the core follows this with a tray event.
+            Self.log.info("status: \(text, privacy: .public)")
         case .error(let text):
             Self.log.error("engine error: \(text, privacy: .public)")
-            appState.status = text
         case .transcript(let role, let text):
             Self.log.info("\(role, privacy: .public): \(text, privacy: .private)")
         case .metrics(let json):
             Self.metricsLog.notice("\(json, privacy: .public)")
+        case .tray:
+            refreshTray()
+        case .restart:
+            relaunch()
+        case .pack(let p):
+            mascot?.applyPack(p)
+        case .position(let x, let y):
+            mascot?.moveTo(x: x, y: y)
+        case .settingsChanged:
+            // The mascot follows proximityFade.{enabled,radius}; the open Settings window re-reads.
+            applyMascotSettings()
+            SettingsHub.shared?.refresh()
+        case .hotkey(let combo):
+            hotkeyChanged(combo)
+        case .devices(let input, let output):
+            voiceIO.setPinned(input: input, output: output)
+        case .notify:
+            notifier.handle(ev)
+        case .canvasOpen(let url, let title):
+            canvas.show(url: url, title: title)
         }
     }
 
     // MARK: Helpers
 
-    /// Bundled packs first, then the user's (later roots override earlier ones).
-    static func packRoots() -> [String] {
-        var roots: [String] = []
-        if let res = Bundle.main.resourceURL {
-            roots.append(res.appendingPathComponent("mascots", isDirectory: true).path)
+    /// Reads the mascot's settings (`position`, `scale`, `proximityFade`) off main and applies
+    /// them; config.rs defaults while the core does not serve them.
+    private func applyMascotSettings() {
+        let engine = engine, worker = worker
+        Task { @MainActor [weak self] in
+            let snapshot: Data?? = await worker.run {
+                do {
+                    return try engine.call("settings.snapshot")
+                } catch {
+                    Self.log.error("settings.snapshot: \(String(describing: error), privacy: .public)")
+                    return nil
+                }
+            }
+            // nil: the worker closed (quitting); leave the mascot alone.
+            guard let snapshot else { return }
+            self?.mascot?.apply(settings: snapshot.flatMap(MascotSettings.fromSnapshot) ?? .defaults)
         }
-        let user = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/com.sihekuang.deskpixie/mascots", isDirectory: true)
-        do {
-            try FileManager.default.createDirectory(at: user, withIntermediateDirectories: true)
-        } catch {
-            log.error("cannot create \(user.path, privacy: .public): \(String(describing: error), privacy: .public)")
-        }
-        roots.append(user.path)
-        return roots
     }
 
-    private static func describe(_ error: Error) -> String {
+    /// The `dp_configure` payload: paths only (P14a). Creates the user's data and pack folders.
+    /// Runs off main (inside the startup work).
+    nonisolated static func engineConfig() -> EngineConfig {
+        let support = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/com.sihekuang.deskpixie", isDirectory: true)
+        let userPacks = support.appendingPathComponent("mascots", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: userPacks, withIntermediateDirectories: true)
+        } catch {
+            log.error("cannot create \(userPacks.path, privacy: .public): \(String(describing: error), privacy: .public)")
+        }
+        let resources = Bundle.main.resourceURL ?? Bundle.main.bundleURL
+        return EngineConfig.forBundle(resources: resources, appSupport: support)
+    }
+
+    nonisolated private static func describe(_ error: Error) -> String {
         switch error {
         case DeskPixieEngineError.configureFailed(let m), DeskPixieEngineError.invalidConfig(let m): return m
         default: return String(describing: error)

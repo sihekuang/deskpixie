@@ -1,0 +1,180 @@
+package agentapp
+
+import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"reflect"
+	"slices"
+	"sync"
+	"sync/atomic"
+	"testing"
+
+	"github.com/sihekuang/deskpixie/core/agent"
+	"github.com/sihekuang/deskpixie/core/agent/agenttest"
+	"github.com/sihekuang/deskpixie/core/settings"
+)
+
+// Port of src-tauri/src/agent/registry.rs tests (8).
+
+func noHint(string) {}
+
+func TestRegistriesNameTheShippedAdapters(t *testing.T) {
+	if got := slices.Sorted(keys(SessionHosts())); !reflect.DeepEqual(got, []string{"herdr"}) {
+		t.Fatal(got)
+	}
+	if got := slices.Sorted(keys(Terminals())); !reflect.DeepEqual(got, []string{"iterm", "warp"}) {
+		t.Fatal(got)
+	}
+	runner := &agenttest.FakeRunner{}
+	if n := Terminals()["warp"](runner, "/Users/x").Name(); n != "warp" {
+		t.Fatal(n)
+	}
+	if n := Terminals()["iterm"](runner, "/Users/x").Name(); n != "iterm" {
+		t.Fatal(n)
+	}
+}
+
+func keys[V any](m map[string]V) func(func(string) bool) {
+	return func(yield func(string) bool) {
+		for k := range m {
+			if !yield(k) {
+				return
+			}
+		}
+	}
+}
+
+func TestAMissingHerdrIsNotFound(t *testing.T) {
+	s := settings.Default().Agent
+	p := "/definitely/not/herdr"
+	s.HerdrPath = &p
+	_, err := SessionHosts()["herdr"](HostDeps{Settings: s, Home: "/nonexistent-home", Runner: &agenttest.FakeRunner{}, Hint: noHint})
+	if !agent.IsHostError(err, agent.HostNotFound) {
+		t.Fatal(err)
+	}
+}
+
+func TestASharedOrMalformedSessionNameIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "herdr")
+	if err := os.WriteFile(bin, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runner := &agenttest.FakeRunner{}
+	for _, session := range []string{"default", "", "Ai Mascot"} {
+		s := settings.Default().Agent
+		s.HerdrPath = &bin
+		s.Session = session
+		_, err := SessionHosts()["herdr"](HostDeps{Settings: s, Home: dir, Runner: runner, Hint: noHint})
+		if !agent.IsHostError(err, agent.HostOther) {
+			t.Errorf("%q: %v", session, err)
+		}
+	}
+	if len(runner.Ran()) != 0 || len(runner.Spawned()) != 0 {
+		t.Fatal("nothing ran")
+	}
+}
+
+func TestUnavailableReportsItsError(t *testing.T) {
+	u := Unavailable{Err: agent.HostError{Kind: agent.HostNotFound}}
+	if err := u.EnsureSession(context.Background()); !agent.IsHostError(err, agent.HostNotFound) {
+		t.Fatal(err)
+	}
+	err := u.Close(context.Background(), "coordinator")
+	var he agent.HostError
+	if !errors.As(err, &he) || he != (agent.HostError{Kind: agent.HostNoAgent, Detail: "coordinator"}) {
+		t.Fatal(err)
+	}
+}
+
+type checkProbe struct {
+	asked  atomic.Int32
+	mu     sync.Mutex
+	posted []string
+}
+
+func (p *checkProbe) Posted() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.posted)
+}
+
+// checkedOver is an IntegrationCheck over inner whose host reports the Claude integration
+// missing; it returns the check and a probe counting how often the host was asked and the
+// hints posted.
+func checkedOver(inner agent.SessionHost, missing bool) (*IntegrationCheck, *checkProbe) {
+	p := &checkProbe{}
+	return NewIntegrationCheck(inner, func() bool {
+		p.asked.Add(1)
+		return missing
+	}, func(line string) {
+		p.mu.Lock()
+		p.posted = append(p.posted, line)
+		p.mu.Unlock()
+	}), p
+}
+
+func TestAMissingClaudeIntegrationPostsTheHintOnce(t *testing.T) {
+	host, p := checkedOver(agenttest.NewFakeSessionHost(), true)
+	ctx := context.Background()
+	if err := host.EnsureSession(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := host.EnsureSession(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := p.Posted(); !reflect.DeepEqual(got, []string{IntegrationHint}) {
+		t.Fatal("posted once:", got)
+	}
+	if IntegrationHint != "Agent: run `herdr integration install claude`" {
+		t.Fatal(IntegrationHint)
+	}
+	if p.asked.Load() != 1 {
+		t.Fatal("the host's own check, read once")
+	}
+}
+
+func TestACurrentIntegrationPostsNothingAndDelegationStillWorks(t *testing.T) {
+	host, p := checkedOver(agenttest.NewFakeSessionHost(), false)
+	ctx := context.Background()
+	if err := host.EnsureSession(ctx); err != nil {
+		t.Fatal(err)
+	}
+	info, err := host.StartAgent(ctx, agent.AgentSpec{Name: "coordinator", Kind: agent.Claude, Cwd: "/w"})
+	if err != nil || info.Name != "coordinator" {
+		t.Fatal(info, err)
+	}
+	if len(p.Posted()) != 0 {
+		t.Fatal(p.Posted())
+	}
+}
+
+// replacer overrides only ReplaceAgent, so a wrapper that skips it is caught.
+type replacer struct{ *agenttest.FakeSessionHost }
+
+func (replacer) Name() string { return "replacer" }
+func (replacer) ReplaceAgent(context.Context, agent.AgentSpec) (agent.AgentInfo, error) {
+	return agent.AgentInfo{}, agent.HostError{Kind: agent.HostOther, Detail: "the host's own replace"}
+}
+
+func TestTheWrapperForwardsReplaceAgentToTheHost(t *testing.T) {
+	host, _ := checkedOver(replacer{agenttest.NewFakeSessionHost()}, false)
+	_, err := host.ReplaceAgent(context.Background(), agent.AgentSpec{Name: "coordinator", Kind: agent.Claude, Cwd: "/w"})
+	if err == nil || err.Error() != "the host's own replace" {
+		t.Fatal(err)
+	}
+}
+
+func TestAFailedSessionSkipsTheCheck(t *testing.T) {
+	fake := agenttest.NewFakeSessionHost()
+	fake.FailEnsure(agent.HostError{Kind: agent.HostNotFound})
+	host, p := checkedOver(fake, true)
+	if err := host.EnsureSession(context.Background()); !agent.IsHostError(err, agent.HostNotFound) {
+		t.Fatal(err)
+	}
+	if p.asked.Load() != 0 || len(p.Posted()) != 0 {
+		t.Fatal("checked after a failed session")
+	}
+}

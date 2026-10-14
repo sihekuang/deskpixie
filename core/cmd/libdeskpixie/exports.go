@@ -30,6 +30,18 @@ func dp_init() C.int {
 	return 0
 }
 
+// dp_configure builds the app core from paths; everything else comes from settings.json:
+//
+//	{"appSupport":"…/Application Support/com.sihekuang.deskpixie",
+//	 "bundledMascots":"…/DeskPixie.app/Contents/Resources/mascots",
+//	 "designSystem":"…/DeskPixie.app/Contents/Resources/design-system",
+//	 "dfn3ModelPath":"…/DeskPixie.app/Contents/Resources/DeepFilterNet3.tar.gz",
+//	 "platform":"macos"}
+//
+// appSupport is required; the others may be "" (no bundled packs, no design system, no DFN3).
+// Phase 3's {apiKey, model, …, packRoots} is still accepted (see bridge.Config).
+// Returns 0 ok, 1 not initialized, 2 bad JSON / no appSupport, 3 build error (dp_last_error).
+//
 //export dp_configure
 func dp_configure(json *C.char) C.int {
 	if json == nil {
@@ -119,6 +131,21 @@ func dp_last_error() *C.char {
 		return C.CString(s)
 	}
 	return nil
+}
+
+// dp_call runs a registered core method. args_json may be NULL (= {}). It returns
+// {"ok":<json>} or {"error":"<msg>"} (never NULL). Free with dp_free_string.
+//
+//export dp_call
+func dp_call(method *C.char, args_json *C.char) *C.char {
+	if method == nil {
+		return cString([]byte(`{"error":"missing method"}`))
+	}
+	var args []byte
+	if args_json != nil {
+		args = []byte(C.GoString(args_json))
+	}
+	return cString(bridge.Call(C.GoString(method), args))
 }
 
 //export dp_free_string

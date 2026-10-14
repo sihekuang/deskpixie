@@ -3,7 +3,8 @@ import CDP
 
 /// Single-producer / single-consumer lock-free Int16 ring.
 ///
-/// Producer (pump thread): `write`, `flush`. Consumer (render callback): `read`.
+/// Producer (pump thread): `write`, `flush`. Consumer (render callback): `read`; or, while
+/// no unit is running, the VoiceIO's control queue: `discardAll`.
 /// Counters are monotonic: `written` (producer), `readPos` (consumer),
 /// `flushTo` (producer; `flush()` sets it to `written`). `read` first skips
 /// `readPos` forward to `flushTo`. Atomics come from C helpers in CDP because
@@ -72,19 +73,14 @@ public final class PlaybackRing: @unchecked Sendable {
         if r < f { r = f; cdp_store(slots + 1, r) }
         let w = cdp_load(slots)
         let n = min(dst.count, Int(w - r))
-        var sumSq: Double = 0
         if n > 0 {
             let start = Int(r % Int64(capacity))
             let first = min(n, capacity - start)
             out.update(from: buf + start, count: first)
             if n > first { (out + first).update(from: buf, count: n - first) }
-            for i in 0..<n {
-                let v = Double(out[i]) / 32768.0
-                sumSq += v * v
-            }
             cdp_store(slots + 1, r + Int64(n))
             _ = cdp_add(slots + 3, Int64(n))
-            let rms = Float((sumSq / Double(n)).squareRoot())
+            let rms = Self.rms(UnsafeBufferPointer(start: out, count: n))
             cdp_store(slots + 5, Int64(rms.bitPattern))
         }
         if n < dst.count {
@@ -98,4 +94,44 @@ public final class PlaybackRing: @unchecked Sendable {
     public func flush() {
         cdp_store(slots + 2, cdp_load(slots))
     }
+
+    /// Everything written has been read (played or skipped by a flush): Rust `Counters::is_idle`.
+    public var isIdle: Bool { buffered == 0 }
+
+    /// Consumer side, for when no unit is left to read the ring (torn down or failed to build):
+    /// drops everything queued, so playback reads idle and the conversation does not wait on
+    /// audio nobody plays (Rust `speaker::discard_all`). Unlike `flush`, it frees the space at
+    /// once. Returns the samples dropped; they do not count as played. Never call it while a
+    /// render callback may run.
+    @discardableResult
+    public func discardAll() -> Int {
+        let r = max(cdp_load(slots + 1), cdp_load(slots + 2))
+        let w = cdp_load(slots)
+        let n = Int(max(0, w - r))
+        cdp_store(slots + 1, w)
+        cdp_store(slots + 5, Int64(Float(0).bitPattern))
+        return n
+    }
+
+    /// RMS loudness of Int16 samples, 0...1. Allocation-free.
+    public static func rms(_ samples: UnsafeBufferPointer<Int16>) -> Float {
+        guard !samples.isEmpty else { return 0 }
+        var sumSq: Double = 0
+        for s in samples {
+            let v = Double(s) / 32768.0
+            sumSq += v * v
+        }
+        return Float((sumSq / Double(samples.count)).squareRoot())
+    }
+
+    public static func rms(_ samples: [Int16]) -> Float {
+        samples.withUnsafeBufferPointer { rms($0) }
+    }
+}
+
+/// The app's ring sizes (ai-mascot engine.rs): the speaker ring holds 120 s at 24 kHz so a
+/// whole answer fits without back-pressure; the mic ring holds 2 s.
+public enum VoiceAudioSizes {
+    public static let speakerRingSamples = 24_000 * 120
+    public static let micRingSamples = 24_000 * 2
 }

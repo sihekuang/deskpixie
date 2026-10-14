@@ -102,7 +102,7 @@ const (
 	EfResponseStarted // a new reply started playing: remember the playback position to compute "heard"
 	EfInterrupt       // the user talked over Bit: flush playback and send CmdCancelResponse{HeardMs}
 	EfFlushPlayback
-	EfPlayChime  // Chime (ignored by the Phase 3 runtime)
+	EfPlayChime  // Chime (played only when RuntimeConfig.Chimes)
 	EfInvokeTool // CallID, ToolName, Args
 	EfMascot     // State
 	EfStatus     // Status; "" clears the status line (Rust's Status(None))

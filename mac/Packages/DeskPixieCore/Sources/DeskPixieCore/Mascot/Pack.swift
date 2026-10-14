@@ -92,14 +92,29 @@ public struct Pack: Decodable, Sendable, Equatable {
     public var cellHeight: Int { cell[1] }
 }
 
-/// What `CoreEngine.packJSON()` returns: `{"pack": ResolvedPack, "sheetPath": "/abs/sheet.png"}`.
+/// What `CoreEngine.packJSON()` returns: `{"pack": ResolvedPack, "sheetPath": "/abs/sheet.png"}`,
+/// optionally with the `pack` event's `scale` and `hitMask` (base64) when the core includes them.
 public struct PackPayload: Decodable, Sendable, Equatable {
     public let pack: Pack
     public let sheetPath: String
+    public let scale: Int?
+    public let hitMask: Data?
 
-    public init(pack: Pack, sheetPath: String) {
+    public init(pack: Pack, sheetPath: String, scale: Int? = nil, hitMask: Data? = nil) {
         self.pack = pack
         self.sheetPath = sheetPath
+        self.scale = scale
+        self.hitMask = hitMask
+    }
+
+    private enum CodingKeys: String, CodingKey { case pack, sheetPath, scale, hitMask }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        pack = try c.decode(Pack.self, forKey: .pack)
+        sheetPath = try c.decode(String.self, forKey: .sheetPath)
+        scale = try? c.decodeIfPresent(Int.self, forKey: .scale)
+        hitMask = try? c.decodeIfPresent(Data.self, forKey: .hitMask)
     }
 
     /// nil for malformed JSON or a missing field.
