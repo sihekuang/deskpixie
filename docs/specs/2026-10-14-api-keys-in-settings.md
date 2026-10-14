@@ -23,7 +23,7 @@ Type the OpenAI and Gemini API keys into the Settings window instead of editing 
 - **Core holds Keychain values in memory.** At startup and after every save/remove Swift calls
   `secrets.keychain {"values": {"OPENAI_API_KEY": "…"}}` (only the keys present). The core's
   secret source becomes a chain: in-memory Keychain values → environment → dotenv files.
-- **Status with source.** `settings.secrets` (and the snapshot's `secrets`) keep `openai` /
+- **Status with source.** `settings.secrets` keeps `openai` /
   `gemini` = "found"/"missing" and add `sources: {openai, gemini}` = "env" | "keychain" |
   "dotenv" | "" (missing).
 - **Settings UI** saves via KeychainSecrets, then pushes `secrets.keychain`, then reloads the
