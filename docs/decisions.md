@@ -54,3 +54,5 @@
 - AWS CLI, "Configuration and credential file settings — precedence": environment variables before the shared credentials file — https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-files.html
 - Google Cloud, Application Default Credentials: GOOGLE_APPLICATION_CREDENTIALS checked before the gcloud-stored credentials — https://cloud.google.com/docs/authentication/application-default-credentials
 Keychain before .env is a ruling (no source settles it): a key typed into the app is the most deliberate, recent choice; .env still works when no key was typed. Easy to flip if wrong.
+
+**Update (same day):** the user confirmed Keychain storage and set the order to Keychain → environment → .env ("what the user sees goes first"), with Settings always naming the source in use. This supersedes the environment-first order above.
