@@ -74,7 +74,7 @@ final class TrayMenuTests: XCTestCase {
             "label:Hotkey unavailable: ⌃⌥Space", "--",
             "label:Voice: connection lost", "--",
             "label:Agent: herdr not found", "--",
-            "menu:State", "talk", "menu:Size", "reset-position", "fade", "menu:Mascot", "reload", "menu:Canvas",
+            "menu:State", "talk", "menu:Size", "reset-position", "fade", "menu:Pixie", "reload", "menu:Canvas",
             "menu:Agent", "--", "mic-mode", "settings", "--", "quit",
         ])
         let st = try XCTUnwrap(submenu(items, "State"))
@@ -83,8 +83,8 @@ final class TrayMenuTests: XCTestCase {
         XCTAssertTrue(items.contains(.action(.init(id: "fade", title: "Proximity fade", checked: true))))
         XCTAssertTrue(items.contains(.action(.init(id: "talk", title: "Simulate talking", checked: false))))
         XCTAssertTrue(items.contains(.action(.init(id: "settings", title: "Settings…", shortcut: ","))))
-        let mascot = try XCTUnwrap(submenu(items, "Mascot"))
-        XCTAssertEqual(mascot.items, [.action(.init(id: "pack:bit", title: "Bit", checked: true)),
+        let pixie = try XCTUnwrap(submenu(items, "Pixie"))
+        XCTAssertEqual(pixie.items, [.action(.init(id: "pack:bit", title: "Bit", checked: true)),
                                       .action(.init(id: "pack:zed", title: "Zed", checked: false))])
         let size = try XCTUnwrap(submenu(items, "Size"))
         XCTAssertTrue(size.items.contains(.action(.init(id: "size:6", title: "Medium (×6)", checked: true))))
@@ -106,7 +106,7 @@ final class TrayMenuTests: XCTestCase {
         let s = try state(#"{"state":"idle","packs":[],"pack":"","scale":8,"statusLines":[]}"#)
         let items = TrayMenu.build(s, localStatusLines: [], micModeAvailable: false)
         XCTAssertNil(submenu(items, "Agent"))
-        XCTAssertNil(submenu(items, "Mascot"), "no packs, no Mascot submenu")
+        XCTAssertNil(submenu(items, "Pixie"), "no packs, no Pixie submenu")
         XCTAssertFalse(titles(items).contains("mic-mode"))
         let recent = try XCTUnwrap(submenu(try XCTUnwrap(submenu(items, "Canvas")).items, "Recent"))
         XCTAssertFalse(recent.enabled)

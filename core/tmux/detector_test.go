@@ -48,15 +48,17 @@ const (
 	codexIdle    = "╭──────────────╮\n│ >_ OpenAI Codex (v0.162.1) │\n╰──────────────╯\n\n› Ask Codex to do anything\n\n  ? for shortcuts"
 	codexWorking = "• Working (12s • esc to interrupt)\n\n› Ask Codex to do anything\n\n  ? for shortcuts"
 	codexTrust   = "> You are in /repo\n\n  Do you trust the contents of this directory?\n  1. Yes, continue\n  2. No, quit\n\n  Press enter to continue · esc quit"
-	codexMcp     = "  Allow the mascot MCP server to run tool \"report_progress\"?\n  1. Yes\n  2. No"
-	codexCommand = "  Would you like to run the following command?\n  $ rm -rf build\n  › 1. Yes, proceed\n    2. No"
-	claudeIdle   = "╭───────────────╮\n│ >             │\n╰───────────────╯\n  ? for shortcuts"
-	claudeAuto   = "────────\n❯ \n────────\n  ⏵⏵ auto mode on (shift+tab to cycle)"
-	claudeBusy   = "✻ Pondering… (3s · esc to interrupt)\n╭───────────────╮\n│ >             │\n╰───────────────╯\n  ? for shortcuts"
-	claudeTrust  = " Do you trust the files in this folder?\n\n ❯ 1. Yes, proceed\n   2. No, exit"
-	claudeTrust2 = " Quick safety check: Is this a project you created or one you trust? (Like your own code, a well-known open source project, or work from your team). If not, take a moment to review what's in this folder first.\n\n Claude Code'll be able to read, edit, and execute files here.\n\n Security guide\n\n ❯ 1. Yes, I trust this folder\n   2. No, exit"
-	claudeAsk    = " Bash command\n   rm -rf build\n Do you want to proceed?\n ❯ 1. Yes\n   2. No"
-	blank        = "\n\n\n"
+	codexMcp     = "  Allow the pixie MCP server to run tool \"report_progress\"?\n  1. Yes\n  2. No"
+	// A Codex kept running over the #68 rename still names the server "mascot".
+	codexMcpLegacy = "  Allow the mascot MCP server to run tool \"report_progress\"?\n  1. Yes\n  2. No"
+	codexCommand   = "  Would you like to run the following command?\n  $ rm -rf build\n  › 1. Yes, proceed\n    2. No"
+	claudeIdle     = "╭───────────────╮\n│ >             │\n╰───────────────╯\n  ? for shortcuts"
+	claudeAuto     = "────────\n❯ \n────────\n  ⏵⏵ auto mode on (shift+tab to cycle)"
+	claudeBusy     = "✻ Pondering… (3s · esc to interrupt)\n╭───────────────╮\n│ >             │\n╰───────────────╯\n  ? for shortcuts"
+	claudeTrust    = " Do you trust the files in this folder?\n\n ❯ 1. Yes, proceed\n   2. No, exit"
+	claudeTrust2   = " Quick safety check: Is this a project you created or one you trust? (Like your own code, a well-known open source project, or work from your team). If not, take a moment to review what's in this folder first.\n\n Claude Code'll be able to read, edit, and execute files here.\n\n Security guide\n\n ❯ 1. Yes, I trust this folder\n   2. No, exit"
+	claudeAsk      = " Bash command\n   rm -rf build\n Do you want to proceed?\n ❯ 1. Yes\n   2. No"
+	blank          = "\n\n\n"
 )
 
 func TestScreensAreClassifiedWithTheControllersMarkers(t *testing.T) {
@@ -70,8 +72,9 @@ func TestScreensAreClassifiedWithTheControllersMarkers(t *testing.T) {
 		{"codex working keeps its placeholder", agent.Codex, codexWorking, agent.PaneWorking},
 		{"codex trust is no busy pane", agent.Codex, codexTrust, agent.PaneBlocked},
 		{"codex mcp approval", agent.Codex, codexMcp, agent.PaneBlocked},
+		{"codex mcp approval, pre-#68 server name", agent.Codex, codexMcpLegacy, agent.PaneBlocked},
 		{"codex command approval", agent.Codex, codexCommand, agent.PaneBlocked},
-		{"codex starting", agent.Codex, "Booting MCP server: mascot", agent.PaneUnknown},
+		{"codex starting", agent.Codex, "Booting MCP server: pixie", agent.PaneUnknown},
 		{"codex blank", agent.Codex, blank, agent.PaneUnknown},
 		{"claude idle", agent.Claude, claudeIdle, agent.PaneIdle},
 		{"claude idle in auto mode", agent.Claude, claudeAuto, agent.PaneIdle},

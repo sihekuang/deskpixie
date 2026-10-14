@@ -37,7 +37,7 @@ public enum SettingsLayout {
 
     /// The sidebar's pages, in order.
     public static let tabs: [Tab] = [
-        Tab(section: .mascot, title: "Mascot", symbol: "face.smiling", tint: .pink),
+        Tab(section: .pixie, title: "Pixie", symbol: "face.smiling", tint: .pink),
         Tab(section: .voice, title: "Voice", symbol: "waveform", tint: .purple),
         Tab(section: .agent, title: "Agent", symbol: "sparkles", tint: .orange),
         Tab(section: .workers, title: "Workers", symbol: "person.2", tint: .indigo),
@@ -457,7 +457,7 @@ public enum SettingsLayout {
 
     public static func extras(_ section: SettingsSection) -> [Extra] {
         switch section {
-        case .mascot:
+        case .pixie:
             return [.button(label: "Reset position",
                             help: "Move Bit back to the bottom-right corner of the main screen.",
                             title: "Reset Position", action: .resetPosition)]

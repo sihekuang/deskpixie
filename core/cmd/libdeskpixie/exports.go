@@ -33,7 +33,7 @@ func dp_init() C.int {
 // dp_configure builds the app core from paths; everything else comes from settings.json:
 //
 //	{"appSupport":"…/Application Support/com.sihekuang.deskpixie",
-//	 "bundledMascots":"…/DeskPixie.app/Contents/Resources/mascots",
+//	 "bundledPixies":"…/DeskPixie.app/Contents/Resources/pixies",
 //	 "designSystem":"…/DeskPixie.app/Contents/Resources/design-system",
 //	 "dfn3ModelPath":"…/DeskPixie.app/Contents/Resources/DeepFilterNet3.tar.gz",
 //	 "platform":"macos"}

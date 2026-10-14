@@ -728,7 +728,7 @@ func (r *Runtime) apply(fx Effect) {
 		}
 	case EfInvokeTool:
 		r.invokeTool(fx.CallID, fx.ToolName, fx.Args)
-	case EfMascot:
+	case EfPixie:
 		r.emit(UIEvent{Kind: "state", State: string(fx.State)})
 	case EfStatus:
 		r.emit(UIEvent{Kind: "status", Text: fx.Status})

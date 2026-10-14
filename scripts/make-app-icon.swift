@@ -39,8 +39,8 @@ struct Pack: Decodable {
     var mouth: Mouth?
 }
 
-guard let json = try? Data(contentsOf: packDir.appendingPathComponent("mascot.json")),
-      let pack = try? JSONDecoder().decode(Pack.self, from: json) else { fail("cannot read \(packDir.path)/mascot.json") }
+guard let json = try? Data(contentsOf: packDir.appendingPathComponent("pixie.json")),
+      let pack = try? JSONDecoder().decode(Pack.self, from: json) else { fail("cannot read \(packDir.path)/pixie.json") }
 let sheetURL = packDir.appendingPathComponent(pack.sheet ?? "sheet.png")
 guard let src = CGImageSourceCreateWithURL(sheetURL as CFURL, nil),
       let sheet = CGImageSourceCreateImageAtIndex(src, 0, nil) else { fail("cannot read \(sheetURL.path)") }

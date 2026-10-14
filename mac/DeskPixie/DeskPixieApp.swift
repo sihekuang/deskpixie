@@ -6,7 +6,7 @@ struct DeskPixieApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     private static let menuBarIcon = MenuBarIcon.imageOrFallback(
-        packDirectory: (Bundle.main.resourceURL ?? Bundle.main.bundleURL).appendingPathComponent("mascots/bit"))
+        packDirectory: (Bundle.main.resourceURL ?? Bundle.main.bundleURL).appendingPathComponent("pixies/bit"))
 
     var body: some Scene {
         MenuBarExtra {

@@ -193,7 +193,7 @@ func (f *fixture) coordinatorToken(t *testing.T) string {
 	t.Helper()
 	for _, s := range f.host.Starts() {
 		for _, e := range s.Env {
-			if e.Key == "MASCOT_AGENT_TOKEN" {
+			if e.Key == "PIXIE_AGENT_TOKEN" {
 				return e.Value
 			}
 		}

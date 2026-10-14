@@ -113,7 +113,7 @@ const (
 	EfFlushPlayback
 	EfPlayChime  // Chime (played only when RuntimeConfig.Chimes)
 	EfInvokeTool // CallID, ToolName, Args
-	EfMascot     // State
+	EfPixie      // State
 	EfStatus     // Status; "" clears the status line (Rust's Status(None))
 	EfInject     // Text: send CmdInject{Text, Respond: true}
 	EfSignal     // Signal: tell subscribers
@@ -127,7 +127,7 @@ type Effect struct {
 	CallID   string          // EfInvokeTool
 	ToolName string          // EfInvokeTool
 	Args     json.RawMessage // EfInvokeTool
-	State    MascotState     // EfMascot
+	State    PixieState      // EfPixie
 	Status   string          // EfStatus
 	Text     string          // EfInject
 	Signal   VoiceSignal     // EfSignal
@@ -218,7 +218,7 @@ func (c *Conversation) timeout() time.Duration {
 }
 
 // restState is the state Bit rests in outside a conversation.
-func (c *Conversation) restState() MascotState {
+func (c *Conversation) restState() PixieState {
 	if c.held {
 		return StateDelegating
 	}
@@ -247,10 +247,10 @@ func (c *Conversation) Step(in Input, now time.Time) []Effect {
 		case PhaseIdle, PhaseCooldown:
 			c.resetTurn()
 			c.phase = PhaseConnecting
-			fx = append(fx, Effect{Kind: EfConnect}, mascotFx(StateThinking))
+			fx = append(fx, Effect{Kind: EfConnect}, pixieFx(StateThinking))
 		case PhaseConnecting:
 			c.phase = PhaseIdle
-			fx = append(fx, Effect{Kind: EfClose}, mascotFx(c.restState()), c.closedSignal())
+			fx = append(fx, Effect{Kind: EfClose}, pixieFx(c.restState()), c.closedSignal())
 		default:
 			fx = c.end(fx, true)
 		}
@@ -259,7 +259,7 @@ func (c *Conversation) Step(in Input, now time.Time) []Effect {
 		if c.phase == PhaseIdle {
 			c.resetTurn()
 			c.phase = PhaseConnecting
-			fx = append(fx, Effect{Kind: EfConnect}, mascotFx(StateThinking))
+			fx = append(fx, Effect{Kind: EfConnect}, pixieFx(StateThinking))
 		}
 	case InFailed:
 		fx = c.fail(in.Failure, now, fx)
@@ -280,7 +280,7 @@ func (c *Conversation) Step(in Input, now time.Time) []Effect {
 	case InHoldOpen:
 		c.held = in.Hold
 		if c.phase == PhaseIdle {
-			fx = append(fx, mascotFx(c.restState()))
+			fx = append(fx, pixieFx(c.restState()))
 		}
 	case InTick:
 		c.playbackIdle = in.PlaybackIdle
@@ -297,21 +297,21 @@ func (c *Conversation) Step(in Input, now time.Time) []Effect {
 		switch {
 		case c.phase == PhaseCooldown && !now.Before(c.cooldownUntil):
 			c.phase = PhaseIdle
-			fx = append(fx, mascotFx(c.restState()))
+			fx = append(fx, pixieFx(c.restState()))
 		case c.listeningArmed() && c.micLive && c.pendingTools == 0 && elapsed(c.silenceSince, now, c.timeout()):
 			fx = c.end(fx, false)
 		case c.phase == PhaseThinking && c.openResponses == 0 && c.pendingTools == 0 &&
 			elapsed(c.thinkingSince, now, ReplyWatchdog):
 			c.thinkingSince = time.Time{}
 			c.listen(now)
-			fx = append(fx, mascotFx(StateListening))
+			fx = append(fx, pixieFx(StateListening))
 		case c.phase == PhaseSpeaking && elapsed(c.stalledSince, now, ReplyWatchdog):
 			c.stalledSince = time.Time{}
 			if c.ending {
 				fx = c.end(fx, false)
 			} else {
 				c.listen(now)
-				fx = append(fx, mascotFx(StateListening))
+				fx = append(fx, pixieFx(StateListening))
 			}
 		default:
 			fx = c.checkTurnEnd(now, fx)
@@ -371,7 +371,7 @@ func (c *Conversation) onModel(ev Event, now time.Time, fx []Effect) []Effect {
 				Effect{Kind: EfStatus},
 				Effect{Kind: EfPlayChime, Chime: ChimeStart},
 				Effect{Kind: EfStartMic},
-				mascotFx(StateListening),
+				pixieFx(StateListening),
 				Effect{Kind: EfSignal, Signal: VoiceSignal{Kind: SigOpened}})
 		}
 	case EvSpeechStarted:
@@ -380,12 +380,12 @@ func (c *Conversation) onModel(ev Event, now time.Time, fx []Effect) []Effect {
 		case PhaseSpeaking:
 			c.listen(time.Time{})
 			c.ending = false
-			fx = append(fx, Effect{Kind: EfInterrupt}, mascotFx(StateListening))
+			fx = append(fx, Effect{Kind: EfInterrupt}, pixieFx(StateListening))
 		case PhaseThinking:
 			c.thinkingSince = time.Time{}
 			c.ending = false
 			c.listen(time.Time{})
-			fx = append(fx, mascotFx(StateListening))
+			fx = append(fx, pixieFx(StateListening))
 		case PhaseListening:
 			c.listen(time.Time{})
 		}
@@ -394,7 +394,7 @@ func (c *Conversation) onModel(ev Event, now time.Time, fx []Effect) []Effect {
 			c.phase = PhaseThinking
 			c.thinkingSince = now
 			c.turnReplySeen = false
-			fx = append(fx, mascotFx(StateThinking))
+			fx = append(fx, pixieFx(StateThinking))
 		}
 	case EvAudioDelta:
 		switch {
@@ -404,7 +404,7 @@ func (c *Conversation) onModel(ev Event, now time.Time, fx []Effect) []Effect {
 			c.thinkingSince = time.Time{}
 			c.playbackIdle = false
 			c.responseAudioPending = false
-			fx = append(fx, Effect{Kind: EfResponseStarted}, mascotFx(StateIdle), Effect{Kind: EfPlay, Audio: ev.Audio})
+			fx = append(fx, Effect{Kind: EfResponseStarted}, pixieFx(StateIdle), Effect{Kind: EfPlay, Audio: ev.Audio})
 		case c.phase == PhaseSpeaking:
 			c.playbackIdle = false
 			// First audio of a follow-up response (e.g. after a tool call): re-mark playback.
@@ -467,7 +467,7 @@ func (c *Conversation) checkTurnEnd(now time.Time, fx []Effect) []Effect {
 	if c.phase != PhaseListening {
 		c.thinkingSince = time.Time{}
 		c.listen(now)
-		fx = append(fx, mascotFx(StateListening))
+		fx = append(fx, pixieFx(StateListening))
 	}
 	return fx
 }
@@ -484,7 +484,7 @@ func (c *Conversation) tryInject(now time.Time, fx []Effect) []Effect {
 	c.phase = PhaseThinking
 	c.thinkingSince = now
 	c.turnReplySeen = false
-	return append(fx, Effect{Kind: EfInject, Text: n.Text}, mascotFx(StateThinking))
+	return append(fx, Effect{Kind: EfInject, Text: n.Text}, pixieFx(StateThinking))
 }
 
 // closedSignal drains the queued notices into a SigClosed signal.
@@ -505,7 +505,7 @@ func (c *Conversation) end(fx []Effect, flush bool) []Effect {
 		Effect{Kind: EfStopMic},
 		Effect{Kind: EfClose},
 		Effect{Kind: EfPlayChime, Chime: ChimeEnd},
-		mascotFx(c.restState()),
+		pixieFx(c.restState()),
 		c.closedSignal())
 	c.phase = PhaseIdle
 	c.silenceSince = time.Time{}
@@ -521,7 +521,7 @@ func (c *Conversation) fail(f Failure, now time.Time, fx []Effect) []Effect {
 		Effect{Kind: EfFlushPlayback},
 		Effect{Kind: EfStopMic},
 		Effect{Kind: EfClose},
-		mascotFx(StateError),
+		pixieFx(StateError),
 		Effect{Kind: EfPlayChime, Chime: ChimeEnd},
 		Effect{Kind: EfStatus, Status: f.Status()},
 		c.closedSignal())
@@ -545,4 +545,4 @@ func (c *Conversation) resetTurn() {
 	c.micAskedAt = time.Time{}
 }
 
-func mascotFx(s MascotState) Effect { return Effect{Kind: EfMascot, State: s} }
+func pixieFx(s PixieState) Effect { return Effect{Kind: EfPixie, State: s} }

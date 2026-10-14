@@ -42,3 +42,17 @@ func TestFindProgramPrefersConfiguredThenPathThenInstallDirs(t *testing.T) {
 		t.Fatal("none")
 	}
 }
+
+func TestBothAgentTokenNamesAreScrubbed(t *testing.T) {
+	for _, k := range []string{"PIXIE_AGENT_TOKEN", "MASCOT_AGENT_TOKEN"} {
+		if !Scrubbed(k) {
+			t.Fatalf("%s passed on", k)
+		}
+	}
+	got := ServerEnv([]agent.EnvVar{{Key: "PIXIE_AGENT_TOKEN", Value: "a"}, {Key: "MASCOT_AGENT_TOKEN", Value: "b"}, {Key: "HOME", Value: "/h"}}, "/h", nil)
+	for _, e := range got {
+		if e.Key == "PIXIE_AGENT_TOKEN" || e.Key == "MASCOT_AGENT_TOKEN" {
+			t.Fatalf("%v", got)
+		}
+	}
+}

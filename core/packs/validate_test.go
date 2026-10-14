@@ -12,13 +12,13 @@ import (
 // src-tauri packs.rs discover/pick tests not already covered in packs_test.go.
 // Omitted: sheet_data_url_is_base64_png and hit_at_maps_the_cursor_onto_the_mask (the Swift
 // player reads the sheet by path and hit-tests natively; no Go equivalent), and the
-// gen_*/bit_sheet generator tests (build-time only; bundled mascots/ are loaded instead).
+// gen_*/bit_sheet generator tests (build-time only; bundled pixies/ are loaded instead).
 
 const sheetW, sheetH = 256, 192
 
 func bitManifest(t *testing.T) *manifest {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(bundled, "bit", "mascot.json"))
+	data, err := os.ReadFile(filepath.Join(bundled, "bit", "pixie.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +31,7 @@ func bitManifest(t *testing.T) *manifest {
 
 func bitText(t *testing.T) string {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(bundled, "bit", "mascot.json"))
+	data, err := os.ReadFile(filepath.Join(bundled, "bit", "pixie.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,7 +280,7 @@ func writePack(t *testing.T, dir, json string, sheetBytes []byte) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "mascot.json"), []byte(json), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "pixie.json"), []byte(json), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if sheetBytes != nil {
@@ -377,14 +377,14 @@ func TestCorruptJSONIsAnError(t *testing.T) {
 	d := t.TempDir()
 	writePack(t, d, "{nope", bitSheetBytes(t))
 	_, err := loadPack(d)
-	if firstPath(t, err) != "mascot.json" {
+	if firstPath(t, err) != "pixie.json" {
 		t.Fatal(err)
 	}
 }
 
 func TestMissingManifestIsAnError(t *testing.T) {
 	_, err := loadPack(t.TempDir())
-	if firstPath(t, err) != "mascot.json" {
+	if firstPath(t, err) != "pixie.json" {
 		t.Fatal(err)
 	}
 }
@@ -425,7 +425,7 @@ func TestBrokenPackIsRejectedNotFatal(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, "broken"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "broken", "mascot.json"), []byte("{"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "broken", "pixie.json"), []byte("{"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	ps, err := Load(root)

@@ -35,7 +35,7 @@ type Config struct {
 	Hotkey string `json:"hotkey"`
 	Pack   string `json:"pack"`
 	Scale  uint32 `json:"scale"`
-	// Position is the logical top-left of the mascot window; nil = bottom-right of the primary
+	// Position is the logical top-left of the pixie window; nil = bottom-right of the primary
 	// display. Managed: written by the app.
 	Position      *[2]float64          `json:"position"`
 	ProximityFade Fade                 `json:"proximityFade"`

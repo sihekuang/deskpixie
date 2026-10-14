@@ -48,8 +48,8 @@ func TestSecretNeverPrintsItsValue(t *testing.T) {
 	}
 }
 
-func TestMascotStatesUseSlice1Names(t *testing.T) {
-	cases := map[MascotState]string{
+func TestPixieStatesUseSlice1Names(t *testing.T) {
+	cases := map[PixieState]string{
 		StateIdle: "idle", StateListening: "listening", StateThinking: "thinking",
 		StateDelegating: "delegating", StateHappy: "happy", StateError: "error",
 	}

@@ -91,7 +91,7 @@ final class SettingsModelTests: XCTestCase {
     func test_the_snapshot_decodes_from_the_cores_json() throws {
         let json = #"""
         {"platform":"macos","values":{"scale":8,"hotkey":"ctrl+alt+Space"},
-         "fields":[{"path":"scale","section":"Mascot","label":"Size","help":"h",
+         "fields":[{"path":"scale","section":"Pixie","label":"Size","help":"h",
                     "kind":{"type":"int","min":1,"max":16,"menu":true},"apply":"live","platforms":["macos"]}],
          "restartPending":["voice.model"],"fileError":null,"warning":"w","seq":42,
          "setError":{"kind":"invalid","errors":[{"path":"scale","message":"bad"}]}}

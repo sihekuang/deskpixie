@@ -33,7 +33,7 @@ public struct HitMask: Equatable, Sendable {
     }
 
     /// packs.rs `hit_at`: whether the cursor is over one of Bit's pixels. `window` is the
-    /// mascot window, which shows one cell scaled to fill it (desktop coordinates, y down).
+    /// pixie window, which shows one cell scaled to fill it (desktop coordinates, y down).
     public func hit(cursor: CGPoint, window: CGRect) -> Bool {
         ProximityFade.cursorCell(cursor, rect: window, cell: (width, height)).map { contains(x: $0.x, y: $0.y) } ?? false
     }

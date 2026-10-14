@@ -35,11 +35,10 @@ var ClaudeReadyMarkers = []string{"for shortcuts", "Try \"", "shift+tab to cycle
 var ClaudeDialogMarkers = []string{"trust this folder", "Do you trust the files", "Do you want to"}
 
 // CodexApprovalMarkers: Codex waits for an approval.
-var CodexApprovalMarkers = []string{
-	agent.CodexMcpApprovalMarker,
+var CodexApprovalMarkers = append(slices.Clone(agent.CodexMcpApprovalMarkers),
 	"Would you like to run the following command",
 	"Would you like to make the following edits",
-}
+)
 
 // HookIdleGrace is how long a hooked Claude agent whose hooks left it working or blocked must
 // show its idle prompt (and no busy marker) before it counts as idle without a Stop hook.

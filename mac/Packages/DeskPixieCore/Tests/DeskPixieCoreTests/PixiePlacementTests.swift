@@ -2,9 +2,9 @@ import CoreGraphics
 import XCTest
 @testable import DeskPixieCore
 
-/// actions.rs `save_position_after_drag` (400 ms settle) and the mascot's view of
+/// actions.rs `save_position_after_drag` (400 ms settle) and the pixie's view of
 /// `settings.snapshot` values (position, scale, proximityFade).
-final class MascotPlacementTests: XCTestCase {
+final class PixiePlacementTests: XCTestCase {
     func testAMoveIsReportedOnceAfter400msOfStillness() {
         var d = MoveDebounce()
         XCTAssertFalse(d.takeSettled(now: 10), "nothing moved")
@@ -29,7 +29,7 @@ final class MascotPlacementTests: XCTestCase {
     }
 
     func testSettingsComeFromTheSnapshotValues() throws {
-        let s = try XCTUnwrap(MascotSettings.fromSnapshot(snapshot(
+        let s = try XCTUnwrap(PixieSettings.fromSnapshot(snapshot(
             #"{"scale":6,"position":[-900.5,300],"proximityFade":{"enabled":false,"radius":200},"pack":"bit"}"#)))
         XCTAssertEqual(s.position, CGPoint(x: -900.5, y: 300))
         XCTAssertEqual(s.scale, 6)
@@ -38,14 +38,14 @@ final class MascotPlacementTests: XCTestCase {
     }
 
     func testMissingOrNullValuesFallBackToTheDefaults() throws {
-        let s = try XCTUnwrap(MascotSettings.fromSnapshot(snapshot(#"{"position":null}"#)))
+        let s = try XCTUnwrap(PixieSettings.fromSnapshot(snapshot(#"{"position":null}"#)))
         XCTAssertNil(s.position)
         XCTAssertNil(s.scale)
         XCTAssertTrue(s.fadeEnabled)
         XCTAssertEqual(s.fadeRadius, 150)
-        XCTAssertEqual(MascotSettings.defaults, MascotSettings(position: nil, scale: nil, fadeEnabled: true, fadeRadius: 150))
-        XCTAssertNil(MascotSettings.fromSnapshot(Data("nope".utf8)))
-        let bad = try XCTUnwrap(MascotSettings.fromSnapshot(snapshot(#"{"position":[1],"scale":0}"#)))
+        XCTAssertEqual(PixieSettings.defaults, PixieSettings(position: nil, scale: nil, fadeEnabled: true, fadeRadius: 150))
+        XCTAssertNil(PixieSettings.fromSnapshot(Data("nope".utf8)))
+        let bad = try XCTUnwrap(PixieSettings.fromSnapshot(snapshot(#"{"position":[1],"scale":0}"#)))
         XCTAssertNil(bad.position, "a position needs two numbers")
         XCTAssertNil(bad.scale, "scale 0 means unset (config.rs normalizes it to 8)")
     }

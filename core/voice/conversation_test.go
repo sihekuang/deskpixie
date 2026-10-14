@@ -58,7 +58,7 @@ func notice(text string) Notice { return Notice{Text: text} }
 // ---- effects ----
 
 func ef(k EffectKind) Effect         { return Effect{Kind: k} }
-func mascot(s MascotState) Effect    { return Effect{Kind: EfMascot, State: s} }
+func pixie(s PixieState) Effect      { return Effect{Kind: EfPixie, State: s} }
 func status(s string) Effect         { return Effect{Kind: EfStatus, Status: s} }
 func chime(ch Chime) Effect          { return Effect{Kind: EfPlayChime, Chime: ch} }
 func play(f []int16) Effect          { return Effect{Kind: EfPlay, Audio: f} }
@@ -71,7 +71,7 @@ func invoke(id, name string, args string) Effect {
 }
 
 func ended() []Effect {
-	return []Effect{ef(EfStopMic), ef(EfClose), chime(ChimeEnd), mascot(StateIdle), closed()}
+	return []Effect{ef(EfStopMic), ef(EfClose), chime(ChimeEnd), pixie(StateIdle), closed()}
 }
 
 // ---- assertions ----
@@ -188,7 +188,7 @@ func TestConversation(t *testing.T) {
 	}{
 		{"hotkey_from_idle_connects", func(t *testing.T) {
 			c := newConv()
-			eq(t, c.Step(HotkeyInput(), t0()), ef(EfConnect), mascot(StateThinking))
+			eq(t, c.Step(HotkeyInput(), t0()), ef(EfConnect), pixie(StateThinking))
 			phase(t, c, PhaseConnecting)
 			if !c.IsActive() {
 				t.Fatal("active")
@@ -199,13 +199,13 @@ func TestConversation(t *testing.T) {
 			c := newConv()
 			c.Step(HotkeyInput(), now)
 			eq(t, model(c, evReady, now),
-				status(""), chime(ChimeStart), ef(EfStartMic), mascot(StateListening), signalFx(VoiceSignal{Kind: SigOpened}))
+				status(""), chime(ChimeStart), ef(EfStartMic), pixie(StateListening), signalFx(VoiceSignal{Kind: SigOpened}))
 			listeningArmed(t, c, now)
 		}},
 		{"hotkey_while_connecting_cancels_quietly", func(t *testing.T) {
 			c := newConv()
 			c.Step(HotkeyInput(), t0())
-			eq(t, c.Step(HotkeyInput(), t0()), ef(EfClose), mascot(StateIdle), closed())
+			eq(t, c.Step(HotkeyInput(), t0()), ef(EfClose), pixie(StateIdle), closed())
 			phase(t, c, PhaseIdle)
 			empty(t, model(c, evReady, t0()), "a late Ready is ignored")
 		}},
@@ -214,13 +214,13 @@ func TestConversation(t *testing.T) {
 			c := listening(now)
 			empty(t, model(c, evSpeechStarted, now))
 			listeningTalking(t, c)
-			eq(t, model(c, evSpeechStopped, now), mascot(StateThinking))
+			eq(t, model(c, evSpeechStopped, now), pixie(StateThinking))
 			phase(t, c, PhaseThinking)
 		}},
 		{"first_audio_starts_speaking", func(t *testing.T) {
 			now := t0()
 			c := thinking(now)
-			eq(t, model(c, evAudio(frame()), now), ef(EfResponseStarted), mascot(StateIdle), play(frame()))
+			eq(t, model(c, evAudio(frame()), now), ef(EfResponseStarted), pixie(StateIdle), play(frame()))
 			phase(t, c, PhaseSpeaking)
 			eq(t, model(c, evAudio(frame()), now), play(frame()))
 		}},
@@ -229,20 +229,20 @@ func TestConversation(t *testing.T) {
 			c := speaking(now)
 			empty(t, model(c, evResponseDone, now))
 			empty(t, tick(c, false, ms(now, 500)), "still playing")
-			eq(t, tick(c, true, ms(now, 900)), mascot(StateListening))
+			eq(t, tick(c, true, ms(now, 900)), pixie(StateListening))
 			listeningArmed(t, c, ms(now, 900))
 		}},
 		{"reply_without_audio_returns_to_listening", func(t *testing.T) {
 			now := t0()
 			c := thinking(now)
 			model(c, evResponseCreated, now)
-			eq(t, model(c, evResponseDone, now), mascot(StateListening))
+			eq(t, model(c, evResponseDone, now), pixie(StateListening))
 			listeningArmed(t, c, now)
 		}},
 		{"talking_over_bit_interrupts", func(t *testing.T) {
 			now := t0()
 			c := speaking(now)
-			eq(t, model(c, evSpeechStarted, now), ef(EfInterrupt), mascot(StateListening))
+			eq(t, model(c, evSpeechStarted, now), ef(EfInterrupt), pixie(StateListening))
 			listeningTalking(t, c)
 		}},
 		{"trailing_audio_after_interrupt_is_dropped", func(t *testing.T) {
@@ -256,12 +256,12 @@ func TestConversation(t *testing.T) {
 		{"unprompted_reply_while_quietly_listening_is_played", func(t *testing.T) {
 			now := t0()
 			c := listening(now)
-			eq(t, model(c, evAudio(frame()), now), ef(EfResponseStarted), mascot(StateIdle), play(frame()))
+			eq(t, model(c, evAudio(frame()), now), ef(EfResponseStarted), pixie(StateIdle), play(frame()))
 		}},
 		{"speech_while_thinking_goes_back_to_listening", func(t *testing.T) {
 			now := t0()
 			c := thinking(now)
-			eq(t, model(c, evSpeechStarted, now), mascot(StateListening))
+			eq(t, model(c, evSpeechStarted, now), pixie(StateListening))
 			listeningTalking(t, c)
 		}},
 		{"silence_timeout_ends_after_seven_seconds", func(t *testing.T) {
@@ -317,20 +317,20 @@ func TestConversation(t *testing.T) {
 			now := t0()
 			c := speaking(now)
 			eq(t, c.Step(FailedInput(Failure{Kind: FailConnectionLost}), now),
-				ef(EfFlushPlayback), ef(EfStopMic), ef(EfClose), mascot(StateError), chime(ChimeEnd),
+				ef(EfFlushPlayback), ef(EfStopMic), ef(EfClose), pixie(StateError), chime(ChimeEnd),
 				status("Voice: connection lost"), closed())
 			if c.IsActive() {
 				t.Fatal("still active")
 			}
 			empty(t, tick(c, true, ms(now, 1_999)))
-			eq(t, tick(c, true, ms(now, 2_000)), mascot(StateIdle))
+			eq(t, tick(c, true, ms(now, 2_000)), pixie(StateIdle))
 			phase(t, c, PhaseIdle)
 		}},
 		{"failure_while_connecting_also_shows_error", func(t *testing.T) {
 			c := newConv()
 			c.Step(HotkeyInput(), t0())
 			fx := c.Step(FailedInput(NoAPIKey("OPENAI_API_KEY")), t0())
-			if !contains(fx, mascot(StateError)) {
+			if !contains(fx, pixie(StateError)) {
 				t.Fatalf("%+v", fx)
 			}
 			if !contains(fx, status("Voice: no API key (set OPENAI_API_KEY)")) {
@@ -357,7 +357,7 @@ func TestConversation(t *testing.T) {
 			now := t0()
 			c := listening(now)
 			c.Step(FailedInput(Failure{Kind: FailConnectionLost}), now)
-			eq(t, c.Step(HotkeyInput(), ms(now, 500)), ef(EfConnect), mascot(StateThinking))
+			eq(t, c.Step(HotkeyInput(), ms(now, 500)), ef(EfConnect), pixie(StateThinking))
 			phase(t, c, PhaseConnecting)
 		}},
 		{"user_transcripts_are_signalled_and_change_nothing_else", func(t *testing.T) {
@@ -374,7 +374,7 @@ func TestConversation(t *testing.T) {
 		{"inject_while_quietly_listening_is_sent_at_once", func(t *testing.T) {
 			now := t0()
 			c := listening(now)
-			eq(t, c.Step(InjectInput(notice("Agent reply: done")), now), injectFx("Agent reply: done"), mascot(StateThinking))
+			eq(t, c.Step(InjectInput(notice("Agent reply: done")), now), injectFx("Agent reply: done"), pixie(StateThinking))
 			phase(t, c, PhaseThinking)
 		}},
 		{"inject_waits_while_the_user_talks", func(t *testing.T) {
@@ -387,7 +387,7 @@ func TestConversation(t *testing.T) {
 			model(c, evResponseCreated, ms(now, 300))
 			model(c, evResponseDone, ms(now, 400))
 			// Back to listening with the timer armed: the notice goes out on the next tick.
-			eq(t, tick(c, true, ms(now, 500)), injectFx("Agent reply: x"), mascot(StateThinking))
+			eq(t, tick(c, true, ms(now, 500)), injectFx("Agent reply: x"), pixie(StateThinking))
 		}},
 		{"inject_is_never_sent_mid_speech", func(t *testing.T) {
 			now := t0()
@@ -399,7 +399,7 @@ func TestConversation(t *testing.T) {
 				t.Fatal("injected mid speech")
 			}
 			// Playback drains: Speaking -> Listening, and the notice goes out in the same tick.
-			eq(t, tick(c, true, ms(now, 400)), mascot(StateListening), injectFx("Agent reply: y"), mascot(StateThinking))
+			eq(t, tick(c, true, ms(now, 400)), pixie(StateListening), injectFx("Agent reply: y"), pixie(StateThinking))
 		}},
 		{"inject_waits_for_running_tools", func(t *testing.T) {
 			now := t0()
@@ -415,7 +415,7 @@ func TestConversation(t *testing.T) {
 			empty(t, c.Step(InjectInput(notice("second")), now), "the first is being answered")
 			model(c, evResponseCreated, ms(now, 100))
 			model(c, evResponseDone, ms(now, 200))
-			eq(t, tick(c, true, ms(now, 300)), injectFx("second"), mascot(StateThinking))
+			eq(t, tick(c, true, ms(now, 300)), injectFx("second"), pixie(StateThinking))
 		}},
 		{"inject_when_closed_bounces_as_undelivered", func(t *testing.T) {
 			c := newConv()
@@ -457,7 +457,7 @@ func TestConversation(t *testing.T) {
 			if !contains(fx, ef(EfClose)) {
 				t.Fatalf("%+v", fx)
 			}
-			if !contains(fx, mascot(StateDelegating)) {
+			if !contains(fx, pixie(StateDelegating)) {
 				t.Fatalf("rests in delegating while held: %+v", fx)
 			}
 		}},
@@ -473,17 +473,17 @@ func TestConversation(t *testing.T) {
 		}},
 		{"hold_open_while_idle_sets_the_rest_state", func(t *testing.T) {
 			c := newHeldConv()
-			eq(t, c.Step(HoldOpenInput(true), t0()), mascot(StateDelegating))
-			eq(t, c.Step(HoldOpenInput(false), t0()), mascot(StateIdle))
+			eq(t, c.Step(HoldOpenInput(true), t0()), pixie(StateDelegating))
+			eq(t, c.Step(HoldOpenInput(false), t0()), pixie(StateIdle))
 			now := t0()
 			c = listening(now)
-			empty(t, c.Step(HoldOpenInput(true), now), "mid-conversation the voice loop owns the mascot")
+			empty(t, c.Step(HoldOpenInput(true), now), "mid-conversation the voice loop owns the pixie")
 		}},
 		{"barge_in_with_a_hold_only_interrupts_speech", func(t *testing.T) {
 			now := t0()
 			c := speaking(now)
 			c.Step(HoldOpenInput(true), now)
-			eq(t, model(c, evSpeechStarted, now), ef(EfInterrupt), mascot(StateListening))
+			eq(t, model(c, evSpeechStarted, now), ef(EfInterrupt), pixie(StateListening))
 			if !c.IsActive() {
 				t.Fatal("ended")
 			}
@@ -498,7 +498,7 @@ func TestConversation(t *testing.T) {
 			model(c, evResponseCreated, now)
 			model(c, evAudio(frame()), now)
 			model(c, evResponseDone, now)
-			eq(t, tick(c, true, ms(now, 500)), mascot(StateListening))
+			eq(t, tick(c, true, ms(now, 500)), pixie(StateListening))
 			listeningArmed(t, c, ms(now, 500))
 		}},
 		{"tool_done_before_response_done_waits_for_follow_up", func(t *testing.T) {
@@ -529,7 +529,7 @@ func TestConversation(t *testing.T) {
 			c := thinking(now)
 			empty(t, tick(c, true, ms(now, 14_900)))
 			phase(t, c, PhaseThinking)
-			eq(t, tick(c, true, ms(now, 15_000)), mascot(StateListening))
+			eq(t, tick(c, true, ms(now, 15_000)), pixie(StateListening))
 			listeningArmed(t, c, ms(now, 15_000))
 		}},
 		{"goodbye_interrupted_by_user_does_not_end", func(t *testing.T) {
@@ -560,7 +560,7 @@ func TestConversation(t *testing.T) {
 			c.Step(ToolDoneInput("c1", false), ms(now, 16_000))
 			empty(t, tick(c, true, ms(now, 16_100)))
 			phase(t, c, PhaseThinking)
-			eq(t, tick(c, true, ms(now, 31_000)), mascot(StateListening))
+			eq(t, tick(c, true, ms(now, 31_000)), pixie(StateListening))
 			phase(t, c, PhaseListening)
 		}},
 		{"speaking_with_no_follow_up_recovers", func(t *testing.T) {
@@ -573,7 +573,7 @@ func TestConversation(t *testing.T) {
 			empty(t, tick(c, false, ms(now, 1_000)), "still playing")
 			empty(t, tick(c, true, ms(now, 2_000)))
 			empty(t, tick(c, true, ms(now, 16_900)))
-			eq(t, tick(c, true, ms(now, 17_000)), mascot(StateListening))
+			eq(t, tick(c, true, ms(now, 17_000)), pixie(StateListening))
 			listeningArmed(t, c, ms(now, 17_000))
 		}},
 		{"new_question_cancels_pending_goodbye", func(t *testing.T) {
@@ -615,7 +615,7 @@ func TestConversation(t *testing.T) {
 			model(c, evAudio(frame()), now)
 			model(c, evResponseDone, now)
 			// The new answer must not end the conversation.
-			eq(t, tick(c, true, ms(now, 500)), mascot(StateListening))
+			eq(t, tick(c, true, ms(now, 500)), pixie(StateListening))
 		}},
 		{"goodbye_from_the_current_turn_still_ends_after_a_late_result", func(t *testing.T) {
 			now := t0()
@@ -707,7 +707,7 @@ func TestConversationConfigDefaults(t *testing.T) {
 	c := listening(now)
 	c.Step(HoldOpenInput(true), now)
 	fx := tick(c, true, ms(now, 7_000))
-	if !contains(fx, ef(EfClose)) || !contains(fx, mascot(StateDelegating)) {
+	if !contains(fx, ef(EfClose)) || !contains(fx, pixie(StateDelegating)) {
 		t.Fatalf("%+v", fx)
 	}
 }

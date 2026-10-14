@@ -3,7 +3,7 @@ import XCTest
 @testable import DeskPixieCore
 
 /// V-043 / D-449 / D-494: the whole tray menu as the user reads it, built from a representative
-/// `app.state`; where each id goes; and how gestures on Bit are routed (click → `mascot.click`,
+/// `app.state`; where each id goes; and how gestures on Bit are routed (click → `pixie.click`,
 /// double-click → talk).
 @MainActor
 final class TrayLabelsAndRoutingTests: XCTestCase {
@@ -43,7 +43,7 @@ final class TrayLabelsAndRoutingTests: XCTestCase {
             "  [ ] Small (×4)", "  [ ] Medium (×6)", "  [x] Large (×8)", "  [ ] Huge (×12)",
             "Reset position",
             "[x] Proximity fade",
-            "> Mascot",
+            "> Pixie",
             "  [x] Bit",
             "Reload packs",
             "> Canvas",
@@ -109,10 +109,10 @@ final class TrayLabelsAndRoutingTests: XCTestCase {
 
     private let p = CGPoint(x: 10, y: 10)
 
-    func testSingleClickCallsMascotClick() async {
+    func testSingleClickCallsPixieClick() async {
         let e = RecordingEngine()
         var talks = 0
-        let r = MascotGestureRouter(engine: e)
+        let r = PixieGestureRouter(engine: e)
         r.onDoubleClick = { talks += 1 }
         XCTAssertEqual(r.down(at: p, time: 1.0, leftButton: true), .none)
         XCTAssertTrue(r.pointerActive)
@@ -120,8 +120,8 @@ final class TrayLabelsAndRoutingTests: XCTestCase {
         XCTAssertFalse(r.pointerActive)
         XCTAssertEqual(r.expire(now: 1.2), .none, "still inside the double-click window")
         XCTAssertEqual(r.expire(now: 1.4), .openedTerminal)
-        await waitFor { e.calls == ["mascot.click"] }
-        XCTAssertEqual(e.calls, ["mascot.click"])
+        await waitFor { e.calls == ["pixie.click"] }
+        XCTAssertEqual(e.calls, ["pixie.click"])
         XCTAssertEqual(talks, 0)
         XCTAssertEqual(e.hotkeys, 0)
     }
@@ -129,7 +129,7 @@ final class TrayLabelsAndRoutingTests: XCTestCase {
     func testDoubleClickTalks() async throws {
         let e = RecordingEngine()
         var talks = 0
-        let r = MascotGestureRouter(engine: e)
+        let r = PixieGestureRouter(engine: e)
         r.onDoubleClick = { talks += 1 }
         _ = r.down(at: p, time: 1.0, leftButton: true)
         _ = r.up(at: p, time: 1.05, leftButton: true)
@@ -143,7 +143,7 @@ final class TrayLabelsAndRoutingTests: XCTestCase {
 
     func testDoubleClickWithoutAHandlerSendsTheHotkey() {
         let e = RecordingEngine()
-        let r = MascotGestureRouter(engine: e)
+        let r = PixieGestureRouter(engine: e)
         _ = r.down(at: p, time: 1.0, leftButton: true)
         _ = r.up(at: p, time: 1.05, leftButton: true)
         _ = r.down(at: p, time: 1.15, leftButton: true)
@@ -153,7 +153,7 @@ final class TrayLabelsAndRoutingTests: XCTestCase {
 
     func testDragStartsAWindowDragAndIsNoClick() async throws {
         let e = RecordingEngine()
-        let r = MascotGestureRouter(engine: e)
+        let r = PixieGestureRouter(engine: e)
         _ = r.down(at: p, time: 1.0, leftButton: true)
         XCTAssertEqual(r.dragged(to: CGPoint(x: 11, y: 11)), .none, "within the 3 pt slop")
         XCTAssertEqual(r.dragged(to: CGPoint(x: 20, y: 10)), .beginDrag)
@@ -165,7 +165,7 @@ final class TrayLabelsAndRoutingTests: XCTestCase {
     }
 
     func testRightClickIsIgnored() {
-        let r = MascotGestureRouter(engine: RecordingEngine())
+        let r = PixieGestureRouter(engine: RecordingEngine())
         XCTAssertEqual(r.down(at: p, time: 1, leftButton: false), .none)
         XCTAssertFalse(r.pointerActive)
     }

@@ -36,8 +36,8 @@ func TestTheEngineBuildsTheAgentAndCloseShutsItDown(t *testing.T) {
 	if err := e.Configure(cfgJSON(t, "")); err != nil {
 		t.Fatal(err)
 	}
-	if res := callJSON(t, e.Call("mascot.click", []byte(`{}`))); res["ok"] == nil {
-		t.Fatalf("mascot.click: %s", res["error"])
+	if res := callJSON(t, e.Call("pixie.click", []byte(`{}`))); res["ok"] == nil {
+		t.Fatalf("pixie.click: %s", res["error"])
 	}
 	state := callJSON(t, e.Call("app.state", []byte(`{}`)))
 	if string(state["ok"]) == "" || !strings.Contains(string(state["ok"]), `"agent":{"enabled":true`) {

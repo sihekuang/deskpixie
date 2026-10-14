@@ -20,7 +20,7 @@
 flowchart LR
   user([You]) -- voice --> voice[Voice loop]
   subgraph app [DeskPixie app]
-    voice -- state, mouth --> mascot[Mascot window]
+    voice -- state, mouth --> pixie[Pixie window]
     voice -- delegate --> agent[Agent]
     agent -- writes HTML --> pages[(canvas/pages)]
     pages -- polled every 500 ms --> canvas[Canvas window]
@@ -33,8 +33,8 @@ flowchart LR
     <table>
       <thead><tr><th>Component</th><th>Responsibility</th><th>Talks to</th><th>Trust</th></tr></thead>
       <tbody>
-        <tr><td>Voice loop</td><td>Hotkey, mic and speaker, conversation state</td><td>Realtime model, mascot, agent</td><td><span class="badge badge-info">app</span></td></tr>
-        <tr><td>Mascot window</td><td>Draws Bit and its states</td><td>Events from the app only</td><td><span class="badge badge-info">app</span></td></tr>
+        <tr><td>Voice loop</td><td>Hotkey, mic and speaker, conversation state</td><td>Realtime model, pixie, agent</td><td><span class="badge badge-info">app</span></td></tr>
+        <tr><td>Pixie window</td><td>Draws Bit and its states</td><td>Events from the app only</td><td><span class="badge badge-info">app</span></td></tr>
         <tr><td>Agent</td><td>Long tasks; writes canvas pages</td><td>Pages folder</td><td><span class="badge badge-warn">delegated</span></td></tr>
         <tr><td>Canvas window</td><td>Shows one agent-written page</td><td>Nothing: no IPC, no network</td><td><span class="badge badge-bad">sandboxed</span></td></tr>
       </tbody>

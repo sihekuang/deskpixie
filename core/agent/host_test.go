@@ -23,7 +23,7 @@ func hostRig() (*AgentHost, *agenttest.FakeSessionHost, *agenttest.ManualClock) 
 	recipe := CoordinatorRecipe{
 		Cwd:  "/data/agent/workspace",
 		Args: []string{"--permission-mode", "auto"},
-		Env:  []EnvVar{{Key: "MASCOT_AGENT_TOKEN", Value: "t"}},
+		Env:  []EnvVar{{Key: "PIXIE_AGENT_TOKEN", Value: "t"}},
 	}
 	return NewAgentHost(fake, clock, recipe), fake, clock
 }
@@ -64,7 +64,7 @@ func TestFirstStartLaunchesTheCoordinatorFresh(t *testing.T) {
 	if !slices.Equal(spec.Args, []string{"--permission-mode", "auto"}) {
 		t.Fatal(spec.Args)
 	}
-	if !slices.Equal(spec.Env, []EnvVar{{Key: "MASCOT_AGENT_TOKEN", Value: "t"}}) {
+	if !slices.Equal(spec.Env, []EnvVar{{Key: "PIXIE_AGENT_TOKEN", Value: "t"}}) {
 		t.Fatal(spec.Env)
 	}
 	if fake.Ensures() != 1 {
@@ -193,7 +193,7 @@ func TestConcurrentEnsuresStartOneCoordinator(t *testing.T) {
 // process replaces it (closed, then started with --continue: same conversation, new token).
 func TestACoordinatorLeftByAnEarlierRunIsReplacedWithContinue(t *testing.T) {
 	h, fake, _ := hostRig()
-	fake.StartAgent(bg, AgentSpec{Name: Coordinator, Kind: Claude, Cwd: "/old", Env: []EnvVar{{Key: "MASCOT_AGENT_TOKEN", Value: "old"}}})
+	fake.StartAgent(bg, AgentSpec{Name: Coordinator, Kind: Claude, Cwd: "/old", Env: []EnvVar{{Key: "PIXIE_AGENT_TOKEN", Value: "old"}}})
 	wantEnsured(t, h, started(true))
 	if !slices.Equal(fake.Closed(), []string{"coordinator"}) {
 		t.Fatal(fake.Closed())
@@ -202,7 +202,7 @@ func TestACoordinatorLeftByAnEarlierRunIsReplacedWithContinue(t *testing.T) {
 	if lastArg(spec) != "--continue" {
 		t.Fatal(spec.Args)
 	}
-	if !slices.Equal(spec.Env, []EnvVar{{Key: "MASCOT_AGENT_TOKEN", Value: "t"}}) {
+	if !slices.Equal(spec.Env, []EnvVar{{Key: "PIXIE_AGENT_TOKEN", Value: "t"}}) {
 		t.Fatal("this run's token", spec.Env)
 	}
 	if h.RecreationsForTest() != 0 {
@@ -219,7 +219,7 @@ func TestACoordinatorLeftByAnEarlierRunIsReplacedWithContinue(t *testing.T) {
 // is: no replacement, no --continue, and later ensures leave it alone.
 func TestAKeptCoordinatorIsAdoptedWhenItsTokenWasRestored(t *testing.T) {
 	fake := agenttest.NewFakeSessionHost()
-	recipe := CoordinatorRecipe{Cwd: "/data/agent/workspace", Env: []EnvVar{{Key: "MASCOT_AGENT_TOKEN", Value: "kept"}}, AdoptEarlier: true}
+	recipe := CoordinatorRecipe{Cwd: "/data/agent/workspace", Env: []EnvVar{{Key: "PIXIE_AGENT_TOKEN", Value: "kept"}}, AdoptEarlier: true}
 	h := NewAgentHost(fake, agenttest.ClockAt(1_000_000), recipe)
 	fake.StartAgent(bg, AgentSpec{Name: Coordinator, Kind: Claude, Cwd: "/data/agent/workspace", Env: recipe.Env})
 	wantEnsured(t, h, Ensured{Status: PaneIdle})
@@ -236,7 +236,7 @@ func TestAKeptCoordinatorIsAdoptedWhenItsTokenWasRestored(t *testing.T) {
 // is today's first start: fresh.
 func TestAKeptCoordinatorThatIsGoneStartsFresh(t *testing.T) {
 	fake := agenttest.NewFakeSessionHost()
-	recipe := CoordinatorRecipe{Cwd: "/w", Env: []EnvVar{{Key: "MASCOT_AGENT_TOKEN", Value: "kept"}}, AdoptEarlier: true}
+	recipe := CoordinatorRecipe{Cwd: "/w", Env: []EnvVar{{Key: "PIXIE_AGENT_TOKEN", Value: "kept"}}, AdoptEarlier: true}
 	h := NewAgentHost(fake, agenttest.ClockAt(1_000_000), recipe)
 	wantEnsured(t, h, started(false))
 }
@@ -330,5 +330,13 @@ func TestResumeLastResumesTheLastConversationOnTheFirstStart(t *testing.T) {
 	wantEnsured(t, h, started(false))
 	if spec := fake.Starts()[len(fake.Starts())-1]; slices.Contains(spec.Args, "--continue") {
 		t.Fatal(spec.Args)
+	}
+}
+
+// A recipe carrying the pre-#68 token variable still yields its token.
+func TestTheTokenIsFoundUnderItsPreRenameName(t *testing.T) {
+	h := NewAgentHost(agenttest.NewFakeSessionHost(), agenttest.ClockAt(0), CoordinatorRecipe{Env: []EnvVar{{Key: "MASCOT_AGENT_TOKEN", Value: "old"}}})
+	if h.Token() != "old" {
+		t.Fatal(h.Token())
 	}
 }

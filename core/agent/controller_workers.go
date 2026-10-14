@@ -6,7 +6,7 @@ import (
 	"slices"
 )
 
-// The controller's worker rules (port of controller/worker_steps.rs, spec §5.5, §6): the mascot
+// The controller's worker rules (port of controller/worker_steps.rs, spec §5.5, §6): the pixie
 // MCP tools, worker turns and reports, and stopping a job's workers when it ends.
 
 // admitWorker is start_worker after the runtime resolved the repo: it checks the policy and
@@ -192,7 +192,7 @@ func (c *AgentController) workerGone(name string, now Millis, fx *[]Effect) {
 	}
 }
 
-// onMcp answers a mascot MCP tool call (all but start_worker, which the runtime runs).
+// onMcp answers a pixie MCP tool call (all but start_worker, which the runtime runs).
 func (c *AgentController) onMcp(agent string, call McpCall, now Millis, fx *[]Effect) {
 	coordinator := agent == Coordinator
 	var value any

@@ -60,7 +60,7 @@ func TestTheMcpConfigIsOneHTTPServerWithABearerHeader(t *testing.T) {
 	if err := json.Unmarshal([]byte(McpConfigJSON(48217, "abc")), &v); err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]any{"mcpServers": map[string]any{"mascot": map[string]any{
+	want := map[string]any{"mcpServers": map[string]any{"pixie": map[string]any{
 		"type": "http", "url": "http://127.0.0.1:48217/mcp", "headers": map[string]any{"Authorization": "Bearer abc"},
 	}}}
 	if !reflect.DeepEqual(v, want) {
@@ -91,11 +91,11 @@ func TestCodexWorkerArgsFollowTheSpec(t *testing.T) {
 		"--add-dir",
 		"/p/focus/.git/worktrees/fix",
 		"-c",
-		"mcp_servers.mascot.url=http://127.0.0.1:48217/mcp",
+		"mcp_servers.pixie.url=http://127.0.0.1:48217/mcp",
 		"-c",
-		"mcp_servers.mascot.bearer_token_env_var=MASCOT_AGENT_TOKEN",
+		"mcp_servers.pixie.bearer_token_env_var=PIXIE_AGENT_TOKEN",
 		"-c",
-		"mcp_servers.mascot.default_tools_approval_mode=\"approve\"",
+		"mcp_servers.pixie.default_tools_approval_mode=\"approve\"",
 		"-c",
 		"check_for_update_on_startup=false",
 	}
@@ -185,7 +185,7 @@ func TestWorkerNamesAreChecked(t *testing.T) {
 
 func TestTheBriefCarriesTheRulesAndTheTask(t *testing.T) {
 	b := WorkerBrief("focus", "fix-upload", "Fix the flaky upload test.")
-	for _, s := range []string{"branch mascot/fix-upload", "Never push", "report_result"} {
+	for _, s := range []string{"own branch (pixie/fix-upload, or mascot/fix-upload for a worktree from before the rename)", "Never push", "report_result"} {
 		if !strings.Contains(b, s) {
 			t.Errorf("missing %q", s)
 		}

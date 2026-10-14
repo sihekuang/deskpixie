@@ -426,7 +426,7 @@ func (f *FakeSessionHost) AttachCommand() []string {
 	return []string{"fake-herdr", "session", "attach", "test"}
 }
 
-// ---------- launcher, voice, notifier, mascot ----------
+// ---------- launcher, voice, notifier, pixie ----------
 
 // FakeLauncher records every Attach it opens; SetFail makes Open fail.
 type FakeLauncher struct {
@@ -554,7 +554,7 @@ const (
 	AlertCueKind
 )
 
-// Alert is a chime, a notification (Title, Body) or a mascot cue.
+// Alert is a chime, a notification (Title, Body) or a pixie cue.
 type Alert struct {
 	Kind        AlertKind
 	Title, Body string
@@ -569,7 +569,7 @@ func CueAlert(cue agent.Cue) Alert { return Alert{Kind: AlertCueKind, Cue: cue} 
 func (a Alert) String() string     { return fmt.Sprintf("%d:%s:%s:%d", a.Kind, a.Title, a.Body, a.Cue) }
 func (a Alert) IsNotify() bool     { return a.Kind == AlertNotifyKind }
 
-// RecordingNotifier records chimes, notifications and mascot cues in one ordered list.
+// RecordingNotifier records chimes, notifications and pixie cues in one ordered list.
 type RecordingNotifier struct {
 	mu     sync.Mutex
 	alerts []Alert
@@ -935,7 +935,7 @@ func (t *FakeTokens) Revoked() []string {
 	return slices.Clone(t.revoked)
 }
 
-// FakeRecipes launches any kind as AgentSpec{Cwd: worktree, Env: [MASCOT_AGENT_TOKEN]}.
+// FakeRecipes launches any kind as AgentSpec{Cwd: worktree, Env: [PIXIE_AGENT_TOKEN]}.
 type FakeRecipes struct {
 	mu        sync.Mutex
 	prepared  []agent.WorkerLaunch
@@ -984,7 +984,7 @@ func (r *FakeRecipes) Prepare(launch agent.WorkerLaunch) (agent.PreparedWorker, 
 	r.prepared = append(r.prepared, launch)
 	p := agent.PreparedWorker{Spec: agent.AgentSpec{
 		Name: launch.Name, Kind: launch.Kind, Cwd: launch.Worktree,
-		Env: []agent.EnvVar{{Key: "MASCOT_AGENT_TOKEN", Value: launch.Token}},
+		Env: []agent.EnvVar{{Key: "PIXIE_AGENT_TOKEN", Value: launch.Token}},
 	}}
 	if r.refusal != nil {
 		c := *r.refusal
@@ -1083,7 +1083,7 @@ var (
 	_ agent.TerminalLauncher = (*FakeLauncher)(nil)
 	_ agent.VoiceLink        = (*RecordingVoiceLink)(nil)
 	_ agent.Notifier         = (*RecordingNotifier)(nil)
-	_ agent.MascotCue        = (*RecordingNotifier)(nil)
+	_ agent.PixieCue         = (*RecordingNotifier)(nil)
 	_ agent.StatusSink       = (*RecordingStatus)(nil)
 	_ agent.Store            = (*MemStore)(nil)
 	_ agent.Clock            = (*ManualClock)(nil)

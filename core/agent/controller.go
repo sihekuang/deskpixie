@@ -114,7 +114,7 @@ const (
 	InTick                                // about once a second
 	InRestart                             // tray ▸ Restart agent
 	InShutdown                            // app quit
-	InMcp                                 // Agent, Call: a mascot MCP tool call other than start_worker; answered with EfToolResult
+	InMcp                                 // Agent, Call: a pixie MCP tool call other than start_worker; answered with EfToolResult
 	InAdmitWorker                         // Worker, Repo (canonical), Taken: start_worker; answered with EfAdmitted
 	InWorkerUp                            // Name, Worktree, Status: an admitted worker's pane is up
 	InWorkerFailed                        // Name, Reason: an admitted worker never started

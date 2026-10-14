@@ -37,11 +37,11 @@ func CurrentPlatform() Platform {
 // MaxWorkers is the most workers at once.
 const MaxWorkers = 4
 
-// Section is a Settings window tab. It serializes as its Rust name ("Mascot", …).
+// Section is a Settings window tab. It serializes as its Rust name ("Pixie", …).
 type Section string
 
 const (
-	SectionMascot        Section = "Mascot"
+	SectionPixie         Section = "Pixie"
 	SectionVoice         Section = "Voice"
 	SectionAgent         Section = "Agent"
 	SectionWorkers       Section = "Workers"
@@ -279,12 +279,12 @@ var (
 // Fields is every leaf of Config, in page order within each section. A test fails when a
 // Config leaf has no entry.
 var Fields = []FieldSpec{
-	spec("hotkey", SectionMascot, "Voice hotkey", "Starts or ends a conversation with Bit from any app.", hotkeyKind, ApplyLive),
-	spec("pack", SectionMascot, "Mascot", "Which mascot pack is shown.", choiceKind(SourcePacks), ApplyLive),
-	spec("scale", SectionMascot, "Size", "Whole-number sizes keep the pixel art crisp.", intKind(1, MaxScale, true), ApplyLive),
-	spec("proximityFade.enabled", SectionMascot, "Fade near the pointer", "Bit fades as the pointer comes close, so it never blocks your work.", boolKind, ApplyLive),
-	spec("proximityFade.radius", SectionMascot, "Fade distance", "How far from Bit, in points, the fading starts.", intKind(0, 1000, false), ApplyLive),
-	spec("position", SectionMascot, "Position", "Where Bit was last dragged; written by the app.", managedKind, ApplyLive),
+	spec("hotkey", SectionPixie, "Voice hotkey", "Starts or ends a conversation with Bit from any app.", hotkeyKind, ApplyLive),
+	spec("pack", SectionPixie, "Pixie", "Which pixie pack is shown.", choiceKind(SourcePacks), ApplyLive),
+	spec("scale", SectionPixie, "Size", "Whole-number sizes keep the pixel art crisp.", intKind(1, MaxScale, true), ApplyLive),
+	spec("proximityFade.enabled", SectionPixie, "Fade near the pointer", "Bit fades as the pointer comes close, so it never blocks your work.", boolKind, ApplyLive),
+	spec("proximityFade.radius", SectionPixie, "Fade distance", "How far from Bit, in points, the fading starts.", intKind(0, 1000, false), ApplyLive),
+	spec("position", SectionPixie, "Position", "Where Bit was last dragged; written by the app.", managedKind, ApplyLive),
 	spec("voice.provider", SectionVoice, "Voice service", "The realtime voice service Bit talks through.", choiceKind(SourceVoiceProviders), ApplyRestart),
 	spec("voice.audio", SectionVoice, "Audio", "The microphone and speaker backend.", choiceKind(SourceAudioBackends), ApplyRestart),
 	// voice.model, voice.voice and agent.model are free Text in Rust; here they are open

@@ -65,10 +65,10 @@ func TestTheSettingsHoldNoSecretAndTheSpecRules(t *testing.T) {
 	if at(v, "hooks", "Stop", 0, "hooks", 0, "timeout") != float64(5) {
 		t.Fatal("stop timeout")
 	}
-	if at(v, "hooks", "PostToolUse", 0, "matcher") != "Bash|Edit|Write|mcp__mascot__start_worker" {
+	if at(v, "hooks", "PostToolUse", 0, "matcher") != "Bash|Edit|Write|mcp__pixie__start_worker|mcp__mascot__start_worker" {
 		t.Fatal("matcher")
 	}
-	if !reflect.DeepEqual(at(v, "permissions", "allow"), []any{"mcp__mascot"}) {
+	if !reflect.DeepEqual(at(v, "permissions", "allow"), []any{"mcp__pixie", "mcp__mascot"}) {
 		t.Fatal("allow")
 	}
 	var ask []string
@@ -94,7 +94,7 @@ func TestBrokenSettingsAreRefused(t *testing.T) {
 	if ValidateSettings(RenderSettings(1), 2, HookTimeouts) == nil {
 		t.Error("wrong port accepted")
 	}
-	literal := strings.ReplaceAll(RenderSettings(1), "$MASCOT_AGENT_TOKEN", "abc123")
+	literal := strings.ReplaceAll(RenderSettings(1), "$PIXIE_AGENT_TOKEN", "abc123")
 	if ValidateSettings(literal, 1, HookTimeouts) == nil {
 		t.Error("literal token accepted")
 	}
@@ -102,8 +102,8 @@ func TestBrokenSettingsAreRefused(t *testing.T) {
 	if ValidateSettings(noDeny, 1, HookTimeouts) == nil {
 		t.Error("no deny accepted")
 	}
-	noAllow := strings.ReplaceAll(RenderSettings(1), `"mcp__mascot"]`, `"Nothing"]`)
-	if err := ValidateSettings(noAllow, 1, HookTimeouts); err == nil || err.Error() != "permissions.allow must include mcp__mascot" {
+	noAllow := strings.ReplaceAll(RenderSettings(1), `"mcp__pixie", "mcp__mascot"]`, `"Nothing"]`)
+	if err := ValidateSettings(noAllow, 1, HookTimeouts); err == nil || err.Error() != "permissions.allow must include mcp__pixie" {
 		t.Errorf("no allow: %v", err)
 	}
 }
@@ -186,13 +186,13 @@ func TestClaudeMdSaysHowRepositoryWorkIsDone(t *testing.T) {
 	}
 	with := RenderClaudeMd("/data/canvas", "/Users/x/Documents/Projects")
 	for _, want := range []string{"`start_worker`", "under /Users/x/Documents/Projects", "never merge or push",
-		"Give each worker a short `name`", "a new name for unrelated work", "a `mascot/…` branch"} {
+		"Give each worker a short `name`", "a new name for unrelated work", "a `pixie/…` branch"} {
 		if !strings.Contains(with, want) {
 			t.Error(want)
 		}
 	}
-	if strings.Contains(with, "mascot/<name>") {
-		t.Error("mascot/<name>")
+	if strings.Contains(with, "pixie/<name>") {
+		t.Error("pixie/<name>")
 	}
 	for _, md := range []string{solo, with} {
 		if strings.Contains(md, "{{") {
@@ -209,7 +209,7 @@ func TestWorkerSettingsAreStrictAndCarryNoCoordinatorExtras(t *testing.T) {
 	if _, ok := at(v, "hooks").(map[string]any)["PostToolUse"]; ok {
 		t.Fatal("PostToolUse")
 	}
-	if !reflect.DeepEqual(at(v, "permissions", "allow"), []any{"mcp__mascot"}) {
+	if !reflect.DeepEqual(at(v, "permissions", "allow"), []any{"mcp__pixie", "mcp__mascot"}) {
 		t.Fatal("allow")
 	}
 	// The coordinator's timeouts do not fit a worker without PostToolUse, and vice versa.
@@ -223,7 +223,7 @@ func TestWorkerSettingsAreStrictAndCarryNoCoordinatorExtras(t *testing.T) {
 	if ValidateSettings(short, 1, WorkerHookTimeouts) == nil {
 		t.Error("short")
 	}
-	literal := strings.ReplaceAll(RenderWorkerSettings(1), "$MASCOT_AGENT_TOKEN", "abc123")
+	literal := strings.ReplaceAll(RenderWorkerSettings(1), "$PIXIE_AGENT_TOKEN", "abc123")
 	if ValidateSettings(literal, 1, WorkerHookTimeouts) == nil {
 		t.Error("literal")
 	}
@@ -354,8 +354,8 @@ func TestUnderTmuxTheClaudeSettingsAlsoReportTheirState(t *testing.T) {
 			}
 			h := hs[0]
 			if h["type"] != "http" || h["url"] != "http://127.0.0.1:4000/hooks/state" ||
-				at(h, "headers", "Authorization") != "Bearer $MASCOT_AGENT_TOKEN" ||
-				!reflect.DeepEqual(h["allowedEnvVars"], []any{"MASCOT_AGENT_TOKEN"}) || h["timeout"] != float64(5) {
+				at(h, "headers", "Authorization") != "Bearer $PIXIE_AGENT_TOKEN" ||
+				!reflect.DeepEqual(h["allowedEnvVars"], []any{"PIXIE_AGENT_TOKEN"}) || h["timeout"] != float64(5) {
 				t.Fatalf("%s %s: %v", name, event, h)
 			}
 		}

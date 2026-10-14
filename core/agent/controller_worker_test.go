@@ -234,7 +234,7 @@ func TestTheRepoNameAndTheNameHintAreCleanedBeforeTheyReachTheBriefOrTheName(t *
 		t.Fatal(p.Name)
 	}
 	brief := firstPromptWorker(t, up(c, p.Name, PaneIdle))
-	if !strings.Contains(brief, "a git worktree of focus-app-ignore-the, on branch") || strings.Contains(brief, "Focus App") {
+	if !strings.Contains(brief, "a git worktree of focus-app-ignore-the, on its own branch") || strings.Contains(brief, "Focus App") {
 		t.Fatal(brief)
 	}
 }
@@ -250,7 +250,7 @@ func TestTheBriefGoesOutWhenTheWorkerIsUpAndIdle(t *testing.T) {
 			break
 		}
 	}
-	if !strings.Contains(brief, "branch mascot/upload") || !strings.HasSuffix(brief, "Your task:\nFix the flaky upload test.") {
+	if !strings.Contains(brief, "own branch (pixie/upload, or mascot/upload") || !strings.HasSuffix(brief, "Your task:\nFix the flaky upload test.") {
 		t.Fatalf("the brief: %q", brief)
 	}
 	wantRows(t, c, rowView{workerName, WorkerRunning})

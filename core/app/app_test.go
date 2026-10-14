@@ -35,7 +35,7 @@ type harness struct {
 	t       *testing.T
 	app     *App
 	dir     string // app support
-	bundled string // bundled mascots
+	bundled string // bundled pixies
 	methods map[string]func(json.RawMessage) (any, error)
 
 	mu     sync.Mutex
@@ -74,11 +74,11 @@ func copyDir(t *testing.T, from, to string) {
 func writePack(t *testing.T, root, id string, levels int) {
 	t.Helper()
 	dir := filepath.Join(root, id)
-	copyDir(t, filepath.Join(bundledMascots(t), "bit"), dir)
-	m := read(t, filepath.Join(dir, "mascot.json"))
+	copyDir(t, filepath.Join(bundledPixies(t), "bit"), dir)
+	m := read(t, filepath.Join(dir, "pixie.json"))
 	m = strings.Replace(m, `"levels": 4`, `"levels": `+itoa(levels), 1)
 	m = strings.Replace(m, `"name": "Bit"`, `"name": "`+strings.ToUpper(id[:1])+id[1:]+`"`, 1)
-	write(t, filepath.Join(dir, "mascot.json"), m)
+	write(t, filepath.Join(dir, "pixie.json"), m)
 }
 
 func itoa(n int) string { b, _ := json.Marshal(n); return string(b) }
@@ -86,7 +86,7 @@ func itoa(n int) string { b, _ := json.Marshal(n); return string(b) }
 type harnessOpt func(*Deps, *harness)
 
 func withBundled(root string) harnessOpt {
-	return func(d *Deps, h *harness) { d.Paths.BundledMascots = root; h.bundled = root }
+	return func(d *Deps, h *harness) { d.Paths.BundledPixies = root; h.bundled = root }
 }
 
 func withSettings(edit func(*settings.Config)) harnessOpt {
@@ -101,10 +101,10 @@ func withSettings(edit func(*settings.Config)) harnessOpt {
 
 func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 	t.Helper()
-	h := &harness{t: t, dir: t.TempDir(), bundled: bundledMascots(t), methods: map[string]func(json.RawMessage) (any, error){}}
+	h := &harness{t: t, dir: t.TempDir(), bundled: bundledPixies(t), methods: map[string]func(json.RawMessage) (any, error){}}
 	ds, _ := filepath.Abs("../../design-system")
 	d := Deps{
-		Paths: Paths{AppSupport: h.dir, BundledMascots: h.bundled, DesignSystem: ds, Platform: "macos"},
+		Paths: Paths{AppSupport: h.dir, BundledPixies: h.bundled, DesignSystem: ds, Platform: "macos"},
 		Emit: func(kind string, b []byte) {
 			var ev event
 			if err := json.Unmarshal(b, &ev); err != nil {
@@ -408,8 +408,8 @@ func TestStartupEmitsDevicesAndTrayAndInstallsTheCanvasGuide(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(h.dir, "canvas", "pages")); err != nil {
 		t.Error(err)
 	}
-	if _, err := os.Stat(filepath.Join(h.dir, "mascots")); err != nil {
-		t.Error("user mascots folder:", err)
+	if _, err := os.Stat(filepath.Join(h.dir, "pixies")); err != nil {
+		t.Error("user pixies folder:", err)
 	}
 }
 
@@ -531,7 +531,7 @@ func TestFadeActionTogglesTheSavedSetting(t *testing.T) {
 
 func TestResetPositionForgetsThePositionAndMovesBit(t *testing.T) {
 	h := newHarness(t)
-	h.call("mascot.moved", map[string]float64{"x": 10, "y": 20})
+	h.call("pixie.moved", map[string]float64{"x": 10, "y": 20})
 	if p := h.saved().Position; p == nil || p[0] != 10 || p[1] != 20 {
 		t.Fatalf("position %v", p)
 	}
@@ -643,9 +643,9 @@ func TestCanvasGeometryIsSavedAsTheCanvasWindow(t *testing.T) {
 	}
 }
 
-func TestMascotClickIsANoOpWithoutAnAgent(t *testing.T) {
+func TestPixieClickIsANoOpWithoutAnAgent(t *testing.T) {
 	h := newHarness(t)
-	h.call("mascot.click", nil)
+	h.call("pixie.click", nil)
 }
 
 func TestAudioMethodsReachTheRuntime(t *testing.T) {
@@ -731,7 +731,7 @@ func TestDeviceChoicesReachSwiftAsADevicesEvent(t *testing.T) {
 
 func TestPositionNullResetsThroughSettings(t *testing.T) {
 	h := newHarness(t)
-	h.call("mascot.moved", map[string]float64{"x": 3, "y": 4})
+	h.call("pixie.moved", map[string]float64{"x": 3, "y": 4})
 	h.take()
 	if s := h.set("position", nil); s.SetError != nil && string(s.SetError) != "null" {
 		t.Fatal(string(s.SetError))
@@ -1014,7 +1014,7 @@ func TestABrokenSettingsFileAtLaunchIsLeftAloneAndShowsTheBanner(t *testing.T) {
 	if snap := h.set("scale", 5); len(snap.SetError) == 0 || string(snap.SetError) == "null" {
 		t.Fatal("save not blocked")
 	}
-	h.call("mascot.moved", map[string]float64{"x": 1, "y": 2})
+	h.call("pixie.moved", map[string]float64{"x": 1, "y": 2})
 	h.call("canvas.geometry", map[string]float64{"x": 1, "y": 2, "width": 800, "height": 600})
 	h.action("size:5")
 	h.action("fade")
@@ -1027,7 +1027,7 @@ func TestABrokenSettingsFileAtLaunchIsLeftAloneAndShowsTheBanner(t *testing.T) {
 func TestAHandEditSurvivesADragAndATraySize(t *testing.T) {
 	h := newHarness(t)
 	h.handEdit(func(c *settings.Config) { c.Hotkey = "ctrl+shift+K"; c.Voice.Model = "hand-picked" })
-	h.call("mascot.moved", map[string]float64{"x": 10, "y": 20})
+	h.call("pixie.moved", map[string]float64{"x": 10, "y": 20})
 	h.action("size:5")
 	got := h.saved()
 	if got.Hotkey != "ctrl+shift+K" || got.Voice.Model != "hand-picked" {
@@ -1046,7 +1046,7 @@ func TestADragOverABrokenFileLeavesItAndTellsTheWindow(t *testing.T) {
 	const broken = `{ "scale": 4,, }`
 	write(t, filepath.Join(h.dir, "settings.json"), broken)
 	h.take()
-	h.call("mascot.moved", map[string]float64{"x": 10, "y": 20})
+	h.call("pixie.moved", map[string]float64{"x": 10, "y": 20})
 	if got := read(t, filepath.Join(h.dir, "settings.json")); got != broken {
 		t.Fatalf("overwritten: %s", got)
 	}

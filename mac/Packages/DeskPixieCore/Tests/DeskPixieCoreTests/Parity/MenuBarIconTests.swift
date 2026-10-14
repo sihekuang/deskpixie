@@ -61,9 +61,9 @@ final class MenuBarIconTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: dir) }
         let (pack, _) = try bit()
         _ = pack
-        // A pack folder as bundled: mascot.json (manifest) + sheet.png.
+        // A pack folder as bundled: pixie.json (manifest) + sheet.png.
         let manifest = try JSONSerialization.jsonObject(with: Data(contentsOf: fixture("bit-pack", "json"))) as! [String: Any]
-        try JSONSerialization.data(withJSONObject: manifest["pack"]!).write(to: dir.appendingPathComponent("mascot.json"))
+        try JSONSerialization.data(withJSONObject: manifest["pack"]!).write(to: dir.appendingPathComponent("pixie.json"))
         try FileManager.default.copyItem(at: fixture("bit-sheet", "png"), to: dir.appendingPathComponent("sheet.png"))
         XCTAssertNotNil(MenuBarIcon.load(packDirectory: dir))
 
@@ -73,5 +73,17 @@ final class MenuBarIconTests: XCTestCase {
         XCTAssertTrue(fallback.isTemplate)
         XCTAssertEqual(MenuBarIcon.fallbackSymbol, "sparkles")
         XCTAssertEqual(MenuBarIcon.tooltip, "DeskPixie")
+    }
+
+    /// A pack made before the pixie rename (#68) has only `mascot.json`: it still loads.
+    func testLoadsAPackWithOnlyAPreRenameManifest() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("icon-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let manifest = try JSONSerialization.jsonObject(with: Data(contentsOf: fixture("bit-pack", "json"))) as! [String: Any]
+        try JSONSerialization.data(withJSONObject: manifest["pack"]!).write(to: dir.appendingPathComponent("mascot.json"))
+        try FileManager.default.copyItem(at: fixture("bit-sheet", "png"), to: dir.appendingPathComponent("sheet.png"))
+        XCTAssertNotNil(MenuBarIcon.load(packDirectory: dir))
+        XCTAssertEqual(MenuBarIcon.manifestNames, ["pixie.json", "mascot.json"])
     }
 }

@@ -23,8 +23,8 @@ final class SettingsLayoutTests: XCTestCase {
     private func view(_ path: String) -> SettingsField { SettingsFixture.view(path) }
 
     func test_tabs_follow_the_sections_with_their_symbols() {
-        XCTAssertEqual(L.tabs.map(\.section), [.mascot, .voice, .agent, .workers, .notifications, .canvas, .advanced])
-        XCTAssertEqual(L.tabs.map(\.title), ["Mascot", "Voice", "Agent", "Workers", "Notifications", "Canvas", "Advanced"])
+        XCTAssertEqual(L.tabs.map(\.section), [.pixie, .voice, .agent, .workers, .notifications, .canvas, .advanced])
+        XCTAssertEqual(L.tabs.map(\.title), ["Pixie", "Voice", "Agent", "Workers", "Notifications", "Canvas", "Advanced"])
         XCTAssertEqual(L.tabs.map(\.symbol),
                        ["face.smiling", "waveform", "sparkles", "person.2", "bell.badge", "rectangle.on.rectangle", "gearshape.2"])
     }
@@ -49,7 +49,7 @@ final class SettingsLayoutTests: XCTestCase {
         let views = SettingsFixture.fields
         let count = L.tabs.map { L.fields(in: $0.section, views, platform: .macos).count }.reduce(0, +)
         XCTAssertEqual(count, views.count)
-        XCTAssertEqual(L.fields(in: .mascot, views, platform: .macos).map(\.path),
+        XCTAssertEqual(L.fields(in: .pixie, views, platform: .macos).map(\.path),
                        ["hotkey", "pack", "scale", "proximityFade.enabled", "proximityFade.radius"])
     }
 
@@ -229,7 +229,7 @@ final class SettingsLayoutTests: XCTestCase {
                       "idleTimeoutSecs": 30, "personaPath": nil],
             "agent": ["enabled": true, "terminal": "warp", "model": nil, "warm": false, "narration": true, "holdOpenSecs": 10,
                       "projectsRoot": "/Users/me/P", "workers": ["enabled": false, "max": 2, "kinds": ["claude"]],
-                      "sessionHost": "herdr", "session": "mascot", "herdrPath": nil, "port": 4000, "keepPanesOnQuit": false,
+                      "sessionHost": "herdr", "session": "pixie", "herdrPath": nil, "port": 4000, "keepPanesOnQuit": false,
                       "permissionTimeoutSecs": 30, "notifyPerMinute": 6],
             "canvas": ["autoOpen": true, "keep": 50],
         ]
@@ -316,7 +316,7 @@ final class SettingsLayoutTests: XCTestCase {
     }
 
     func test_extra_rows_match_the_web_page() {
-        guard case .button(_, _, let title, let action)? = L.extras(.mascot).first, L.extras(.mascot).count == 1
+        guard case .button(_, _, let title, let action)? = L.extras(.pixie).first, L.extras(.pixie).count == 1
         else { return XCTFail() }
         XCTAssertEqual(title, "Reset Position")
         XCTAssertEqual(action, .resetPosition)

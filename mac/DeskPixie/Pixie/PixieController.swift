@@ -6,24 +6,24 @@ import os
 ///
 /// Usage (coordinator, main actor):
 /// ```swift
-/// let settings = MascotSettings.fromSnapshot(try engine.call("settings.snapshot")) ?? .defaults
-/// guard let mascot = MascotController.load(engine: engine, settings: settings) else { ... }
-/// mascot.onDoubleClick = { coordinator.talk() }
-/// mascot.show()
+/// let settings = PixieSettings.fromSnapshot(try engine.call("settings.snapshot")) ?? .defaults
+/// guard let pixie = PixieController.load(engine: engine, settings: settings) else { ... }
+/// pixie.onDoubleClick = { coordinator.talk() }
+/// pixie.show()
 /// // .state → setState, .mouth → setMouth, .pack → applyPack, .position → moveTo,
 /// // settings.changed → apply(settings:)
 /// ```
-/// Gestures (ai-mascot player.js): a single click calls `mascot.click` (agent terminal), a
+/// Gestures (ai-mascot player.js): a single click calls `pixie.click` (agent terminal), a
 /// double-click runs `onDoubleClick` (the voice hotkey), a drag moves the panel. A move by the
-/// user (drag, or keep-feet on a size change) is reported with `mascot.moved {x,y}` once it has
+/// user (drag, or keep-feet on a size change) is reported with `pixie.moved {x,y}` once it has
 /// settled for 400 ms; placements the core asked for (`position` event, launch) are not.
 @MainActor
-final class MascotController {
+final class PixieController {
     static let cursorPollInterval: TimeInterval = 1.0 / 60.0
     /// A little past the 300 ms double-click window so timer jitter never expires it early.
     static let clickExpireDelay: TimeInterval = 0.31
 
-    nonisolated private static let log = Logger(subsystem: "com.sihekuang.deskpixie", category: "mascot")
+    nonisolated private static let log = Logger(subsystem: "com.sihekuang.deskpixie", category: "pixie")
 
     private let engine: CoreEngine
     private(set) var pack: Pack
@@ -32,11 +32,11 @@ final class MascotController {
     private(set) var scale: Int
     /// Bit's pixels in any frame (the `pack` event's mask, or built from the sheet at launch).
     private(set) var hitMask: HitMask
-    private(set) var settings: MascotSettings
-    private(set) var player: MascotPlayer
+    private(set) var settings: PixieSettings
+    private(set) var player: PixiePlayer
     private(set) var mouthLevel = 0
     /// Click / double-click / drag routing and the press state (DeskPixieCore, tested there).
-    private let gestures: MascotGestureRouter
+    private let gestures: PixieGestureRouter
     /// The opacity last applied to the view (actions.rs `last_opacity`).
     private var lastOpacity: CGFloat = 1.0
     private var moves = MoveDebounce()
@@ -49,8 +49,8 @@ final class MascotController {
         set { gestures.onDoubleClick = newValue }
     }
 
-    let panel: MascotPanel
-    let view: MascotView
+    let panel: PixiePanel
+    let view: PixieView
 
     /// Bit's panel frame (AppKit) after every move, drag or placement (the updates bubble follows it).
     var onFrameChange: ((NSRect) -> Void)?
@@ -65,7 +65,7 @@ final class MascotController {
     private var moveObserver: NSObjectProtocol?
 
     init(engine: CoreEngine, pack: Pack, sheet: SpriteSheet, sheetPath: String?, scale: Int, hitMask: HitMask?,
-         settings: MascotSettings) {
+         settings: PixieSettings) {
         self.engine = engine
         currentSheetPath = sheetPath
         self.pack = pack
@@ -73,12 +73,12 @@ final class MascotController {
         self.scale = scale
         self.hitMask = hitMask ?? HitMask.union(pack: pack, sheet: sheet)
         self.settings = settings
-        player = MascotPlayer()
-        gestures = MascotGestureRouter(engine: engine)
+        player = PixiePlayer()
+        gestures = PixieGestureRouter(engine: engine)
         let size = Layout.windowSize(pack: pack, scale: scale)
         let topLeft = Layout.restorePosition(settings.position, size: size, displays: ScreenDisplays())
-        panel = MascotPanel(frame: ScreenDisplays.appKitFrame(topLeft: topLeft, size: size))
-        view = MascotView(frame: NSRect(origin: .zero, size: size))
+        panel = PixiePanel(frame: ScreenDisplays.appKitFrame(topLeft: topLeft, size: size))
+        view = PixieView(frame: NSRect(origin: .zero, size: size))
         panel.contentView = view
         view.onMouseDown = { [weak self] in self?.mouseDown($0) }
         view.onMouseDragged = { [weak self] in self?.mouseDragged($0) }
@@ -92,7 +92,7 @@ final class MascotController {
 
     /// Reads `engine.packJSON()` and loads the sheet; nil (logged) on failure. The scale is the
     /// payload's, else the saved one, else ×8; the hit mask is the payload's, else built here.
-    static func load(engine: CoreEngine, settings: MascotSettings) -> MascotController? {
+    static func load(engine: CoreEngine, settings: PixieSettings) -> PixieController? {
         guard let json = engine.packJSON(), let payload = PackPayload.decode(json) else {
             log.error("no usable pack from the core")
             return nil
@@ -106,7 +106,7 @@ final class MascotController {
             HitMask(width: payload.pack.cellWidth, height: payload.pack.cellHeight, bits: $0)
         }
         log.info("ready: \(payload.pack.name, privacy: .public) \(payload.pack.cellWidth)x\(payload.pack.cellHeight) scale \(scale)")
-        return MascotController(engine: engine, pack: payload.pack, sheet: sheet, sheetPath: payload.sheetPath, scale: scale,
+        return PixieController(engine: engine, pack: payload.pack, sheet: sheet, sheetPath: payload.sheetPath, scale: scale,
                                 hitMask: mask, settings: settings)
     }
 
@@ -135,7 +135,7 @@ final class MascotController {
     func setState(_ name: String) {
         let next = player.setting(name, pack: pack)
         if next == player, pack.states[name] == nil {
-            Self.log.warning("unknown mascot state \(name, privacy: .public)")
+            Self.log.warning("unknown pixie state \(name, privacy: .public)")
         }
         player = next
         redraw()
@@ -143,7 +143,7 @@ final class MascotController {
 
     /// `EngineEvent.mouth`: level 0…levels-1 (clamped).
     func setMouth(_ level: Int) {
-        let l = MascotPlayer.clampLevel(level, pack: pack)
+        let l = PixiePlayer.clampLevel(level, pack: pack)
         guard l != mouthLevel else { return }
         mouthLevel = l
         redraw()
@@ -170,8 +170,8 @@ final class MascotController {
         currentSheetPath = ev.sheetPath
         scale = ev.scale > 0 ? ev.scale : scale
         hitMask = HitMask.forEvent(ev) ?? HitMask.union(pack: pack, sheet: sheet)
-        player = MascotPlayer(state: pack.states[player.state] != nil ? player.state : "idle")
-        mouthLevel = MascotPlayer.clampLevel(mouthLevel, pack: pack)
+        player = PixiePlayer(state: pack.states[player.state] != nil ? player.state : "idle")
+        mouthLevel = PixiePlayer.clampLevel(mouthLevel, pack: pack)
         let newSize = Layout.windowSize(pack: pack, scale: scale)
         if newSize != oldSize {
             let top = ScreenDisplays.desktopRect(panel.frame).origin
@@ -201,7 +201,7 @@ final class MascotController {
 
     /// New settings (`settings.changed`): fade on/off and radius take effect at the next poll.
     /// The position and scale are driven by `position` / `pack` events, not re-applied here.
-    func apply(settings s: MascotSettings) {
+    func apply(settings s: PixieSettings) {
         settings = s
     }
 
@@ -221,7 +221,7 @@ final class MascotController {
     }
 
     /// actions.rs `save_position_after_drag`: once the panel has stood still for 400 ms, its
-    /// logical top-left goes to the core (`mascot.moved`), which saves it as `position`.
+    /// logical top-left goes to the core (`pixie.moved`), which saves it as `position`.
     private func reportMoveIfSettled() {
         guard moves.takeSettled(now: ProcessInfo.processInfo.systemUptime) else { return }
         let top = ScreenDisplays.desktopRect(panel.frame).origin
@@ -229,9 +229,9 @@ final class MascotController {
         let engine = engine
         Task.detached {
             do {
-                _ = try engine.call("mascot.moved", args)
+                _ = try engine.call("pixie.moved", args)
             } catch {
-                Self.log.error("mascot.moved: \(String(describing: error), privacy: .public)")
+                Self.log.error("pixie.moved: \(String(describing: error), privacy: .public)")
             }
         }
     }
@@ -272,7 +272,7 @@ final class MascotController {
     private func redraw() {
         let bob = player.bobOffset(pack: pack)
         let body = player.bodyRect(pack: pack)
-        let mouth = MascotPlayer.mouthRect(level: mouthLevel, pack: pack)
+        let mouth = PixiePlayer.mouthRect(level: mouthLevel, pack: pack)
         let at = player.mouthPos(pack: pack)
         view.render(body: sheet.crop(body),
                     bodyFrame: viewRect(x: 0, y: 0, w: body.width, h: body.height, bob: bob),
@@ -330,7 +330,7 @@ final class MascotController {
         }
     }
 
-    /// A single click (no second press within 300 ms): `mascot.click` opens the agent terminal.
+    /// A single click (no second press within 300 ms): `pixie.click` opens the agent terminal.
     private func expireClick() {
         _ = gestures.expire(now: ProcessInfo.processInfo.systemUptime)
     }

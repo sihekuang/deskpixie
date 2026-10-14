@@ -4,13 +4,13 @@ import os
 import SwiftUI
 
 /// The updates bubble beside Bit (spec docs/specs/2026-10-14-updates-bubble-design.md): a child
-/// panel of the mascot panel showing `UpdatesBubbleModel`'s phase. It pops when an update
+/// panel of the pixie panel showing `UpdatesBubbleModel`'s phase. It pops when an update
 /// arrives, shrinks to a count badge, opens under the pointer, and tells the core what was seen
 /// (`agent.updatesSeen`) and which line was clicked (`agent.focusJob`).
 ///
 /// Usage (coordinator, main actor):
 /// ```swift
-/// let bubble = UpdatesBubbleController(engine: engine, worker: worker, mascot: mascot)
+/// let bubble = UpdatesBubbleController(engine: engine, worker: worker, pixie: pixie)
 /// bubble.onTalk = { coordinator.talk() }
 /// // .updates → apply(lines:), settings.changed → apply(settings:), presence → presence(present:)
 /// ```
@@ -24,8 +24,8 @@ final class UpdatesBubbleController {
 
     private let engine: CoreEngine
     private let worker: CoreWorker
-    private let mascot: MascotController
-    private let panel: MascotPanel
+    private let pixie: PixieController
+    private let panel: PixiePanel
     private let hosting: BubbleHostingView
 
     private(set) var model = UpdatesBubbleModel()
@@ -40,14 +40,14 @@ final class UpdatesBubbleController {
     /// Counts `updates` events, so a slower `agent.updates` read never overwrites a newer list.
     private var eventsApplied = 0
 
-    init(engine: CoreEngine, worker: CoreWorker, mascot: MascotController) {
+    init(engine: CoreEngine, worker: CoreWorker, pixie: PixieController) {
         self.engine = engine
         self.worker = worker
-        self.mascot = mascot
-        panel = MascotPanel(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
+        self.pixie = pixie
+        panel = PixiePanel(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
         hosting = BubbleHostingView(rootView: AnyView(EmptyView()))
         panel.contentView = hosting
-        mascot.onFrameChange = { [weak self] _ in self?.layout() }
+        pixie.onFrameChange = { [weak self] _ in self?.layout() }
         timer = Timer.scheduledTimer(withTimeInterval: Self.pollInterval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.poll() }
         }
@@ -149,7 +149,7 @@ final class UpdatesBubbleController {
     /// or while Bit is hidden.
     private func popPermission() -> PopPermission {
         if !present { return .hold }
-        if !mascot.isShown || Self.fullscreenAppInFront() { return .badgeOnly }
+        if !pixie.isShown || Self.fullscreenAppInFront() { return .badgeOnly }
         return .allowed
     }
 
@@ -191,7 +191,7 @@ final class UpdatesBubbleController {
     /// Sizes the panel to its content and places it beside Bit (BubblePlacement, desktop space),
     /// or hides it.
     private func layout() {
-        guard model.phase != .hidden, settings.enabled, mascot.isShown else {
+        guard model.phase != .hidden, settings.enabled, pixie.isShown else {
             hide()
             return
         }
@@ -201,25 +201,25 @@ final class UpdatesBubbleController {
             return
         }
         let top = ScreenDisplays.primaryMaxY
-        let bit = mascot.panel.frame
+        let bit = pixie.panel.frame
         let screen = NSScreen.screens.first { $0.frame.contains(NSPoint(x: bit.midX, y: bit.midY)) }
-            ?? mascot.panel.screen ?? NSScreen.main
+            ?? pixie.panel.screen ?? NSScreen.main
         let area = DesktopSpace.desktopRect(screen?.visibleFrame ?? bit, primaryMaxY: top)
         // The side comes from the open bubble's width in every phase: the badge and the bubble
         // that opens from it stay on the same side, next to Bit (no flip under the pointer).
-        let (rect, _) = BubblePlacement.frame(mascot: DesktopSpace.desktopRect(bit, primaryMaxY: top),
+        let (rect, _) = BubblePlacement.frame(pixie: DesktopSpace.desktopRect(bit, primaryMaxY: top),
                                               bubble: size, screen: area,
                                               sideWidth: UpdatesBubbleView.width)
         panel.setFrame(ScreenDisplays.appKitFrame(topLeft: rect.origin, size: rect.size), display: true)
         if panel.parent == nil {
-            mascot.panel.addChildWindow(panel, ordered: .above)
+            pixie.panel.addChildWindow(panel, ordered: .above)
         }
         if !panel.isVisible { panel.orderFrontRegardless() }
         updateAlpha()
     }
 
     private func hide() {
-        if panel.parent != nil { mascot.panel.removeChildWindow(panel) }
+        if panel.parent != nil { pixie.panel.removeChildWindow(panel) }
         if panel.isVisible { panel.orderOut(nil) }
         // Hidden under the pointer (bubble turned off, Bit hidden): it was not looked at.
         if pointerInside {

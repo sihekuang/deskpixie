@@ -44,13 +44,13 @@ func TestAClaudeWorkerGetsTrustAPrivateMcpConfigAndItsArgs(t *testing.T) {
 	if err := json.Unmarshal([]byte(mustRead(t, config)), &v); err != nil {
 		t.Fatal(err)
 	}
-	if v.McpServers["mascot"].Headers["Authorization"] != "Bearer secret-token" || v.McpServers["mascot"].URL != "http://127.0.0.1:48217/mcp" {
+	if v.McpServers["pixie"].Headers["Authorization"] != "Bearer secret-token" || v.McpServers["pixie"].URL != "http://127.0.0.1:48217/mcp" {
 		t.Fatal(v)
 	}
 	if p.Spec.Cwd != "/projects/focus/.worktrees/fix" {
 		t.Fatal(p.Spec.Cwd)
 	}
-	if !reflect.DeepEqual(p.Spec.Env, []agent.EnvVar{{Key: "MASCOT_AGENT_TOKEN", Value: "secret-token"}}) {
+	if !reflect.DeepEqual(p.Spec.Env, []agent.EnvVar{{Key: "PIXIE_AGENT_TOKEN", Value: "secret-token"}}) {
 		t.Fatal(p.Spec.Env)
 	}
 	settings := filepath.Join(d, "worker-settings.json")
@@ -149,7 +149,7 @@ func codexRecipes(d string) *FileWorkerRecipes {
 func TestACodexWorkerNeedsNoFileAndNeverTrustsAFolder(t *testing.T) {
 	d := tempDir(t)
 	_, git, l := gitLayout(t, d, "fix")
-	for _, sub := range []string{"refs/heads/mascot", "logs/refs/heads/mascot"} {
+	for _, sub := range []string{"refs/heads/pixie", "logs/refs/heads/pixie"} {
 		mustMkdir(t, filepath.Join(git, sub))
 	}
 	trust := &recordingTrust{}
@@ -167,7 +167,7 @@ func TestACodexWorkerNeedsNoFileAndNeverTrustsAFolder(t *testing.T) {
 	if p.Spec.Kind != agent.Codex {
 		t.Fatal(p.Spec.Kind)
 	}
-	want := []string{git + "/objects", git + "/worktrees/fix", git + "/refs/heads/mascot", git + "/logs/refs/heads/mascot"}
+	want := []string{git + "/objects", git + "/worktrees/fix", git + "/refs/heads/pixie", git + "/logs/refs/heads/pixie"}
 	if !reflect.DeepEqual(added(p), want) {
 		t.Fatalf("%v", added(p))
 	}
@@ -182,7 +182,7 @@ func TestACodexWorkerNeedsNoFileAndNeverTrustsAFolder(t *testing.T) {
 			t.Fatal("token in argv")
 		}
 	}
-	if !reflect.DeepEqual(p.Spec.Env, []agent.EnvVar{{Key: "MASCOT_AGENT_TOKEN", Value: "secret-token"}}) {
+	if !reflect.DeepEqual(p.Spec.Env, []agent.EnvVar{{Key: "PIXIE_AGENT_TOKEN", Value: "secret-token"}}) {
 		t.Fatal(p.Spec.Env)
 	}
 	if p.Refusal == nil {
@@ -233,7 +233,7 @@ func TestACodexWorkerNeedsNoFileAndNeverTrustsAFolder(t *testing.T) {
 	}
 }
 
-func TestACodexWorkerFollowsAGitdirFileAndCreatesTheMascotRefDirs(t *testing.T) {
+func TestACodexWorkerFollowsAGitdirFileAndCreatesThePixieRefDirs(t *testing.T) {
 	d := tempDir(t)
 	repo, real := filepath.Join(d, "focus"), filepath.Join(d, "real.git")
 	mustMkdir(t, repo)
@@ -245,26 +245,26 @@ func TestACodexWorkerFollowsAGitdirFileAndCreatesTheMascotRefDirs(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{real + "/objects", real + "/refs/heads/mascot", real + "/logs/refs/heads/mascot"}
+	want := []string{real + "/objects", real + "/refs/heads/pixie", real + "/logs/refs/heads/pixie"}
 	if !reflect.DeepEqual(added(p), want) {
 		t.Fatal(added(p))
 	}
 }
 
-func TestTheMascotRefDirsAreMadeAgainAfterGitPrunedThem(t *testing.T) {
+func TestThePixieRefDirsAreMadeAgainAfterGitPrunedThem(t *testing.T) {
 	d := tempDir(t)
 	_, git, l := gitLayout(t, d, "fix")
-	if exists(filepath.Join(git, "refs/heads/mascot")) || exists(filepath.Join(git, "logs")) {
+	if exists(filepath.Join(git, "refs/heads/pixie")) || exists(filepath.Join(git, "logs")) {
 		t.Fatal("precondition")
 	}
 	p, err := codexRecipes(d).Prepare(l)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !isDir(filepath.Join(git, "refs/heads/mascot")) || !isDir(filepath.Join(git, "logs/refs/heads/mascot")) {
+	if !isDir(filepath.Join(git, "refs/heads/pixie")) || !isDir(filepath.Join(git, "logs/refs/heads/pixie")) {
 		t.Fatal("ref dirs not made")
 	}
-	want := []string{git + "/objects", git + "/worktrees/fix", git + "/refs/heads/mascot", git + "/logs/refs/heads/mascot"}
+	want := []string{git + "/objects", git + "/worktrees/fix", git + "/refs/heads/pixie", git + "/logs/refs/heads/pixie"}
 	if !reflect.DeepEqual(added(p), want) {
 		t.Fatal(added(p))
 	}
@@ -357,7 +357,7 @@ func TestATamperedWorktreeGitFileCannotPointOutsideTheGitDir(t *testing.T) {
 	l := launch(agent.Codex)
 	l.Repo, l.Worktree = repo, filepath.Join(repo, ".worktrees/fix")
 	git := filepath.Join(repo, ".git")
-	refs := []string{git + "/objects", git + "/refs/heads/mascot", git + "/logs/refs/heads/mascot"}
+	refs := []string{git + "/objects", git + "/refs/heads/pixie", git + "/logs/refs/heads/pixie"}
 	for _, target := range []string{outside, filepath.Join(repo, ".git/worktrees"), filepath.Join(repo, ".git")} {
 		mustWrite(t, filepath.Join(l.Worktree, ".git"), "gitdir: "+target+"\n")
 		p, err := r.Prepare(l)

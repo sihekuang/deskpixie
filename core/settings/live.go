@@ -7,7 +7,7 @@ type Route int
 const (
 	// RouteHotkey: Swift binds the shortcut (the `hotkey` event); on failure the old one stays.
 	RouteHotkey Route = iota + 1
-	// RoutePack: Tray ▸ Mascot.
+	// RoutePack: Tray ▸ Pixie.
 	RoutePack
 	// RouteScale: Tray ▸ Size.
 	RouteScale

@@ -30,7 +30,7 @@ func Phrase(toolName string, toolInput any) (string, bool) {
 			return "", false
 		}
 		text = "editing " + name
-	case "mcp__mascot__start_worker":
+	case "mcp__pixie__start_worker", "mcp__mascot__start_worker": // the old name: an agent kept over the #68 rename
 		// Only the final path component: never speak a full path.
 		if name, ok := pathFileName(Clean(stringField(toolInput, "repo"))); ok {
 			text = "starting a worker in " + name

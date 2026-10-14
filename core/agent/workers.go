@@ -69,7 +69,7 @@ func InputStateOf(kind AgentKind, screen, sent string) InputState {
 	}
 	// Codex asking to run one of our tools: the prompt arrived, and it is blocked mid-turn.
 	for _, l := range ScreenBottom(screen, ScreenBottomLines) {
-		if strings.Contains(l, CodexMcpApprovalMarker) {
+		if containsAny(l, CodexMcpApprovalMarkers) {
 			return InputBusy
 		}
 	}
@@ -148,7 +148,7 @@ type Nudge struct {
 // WorkerPlan is what admission decided for a start_worker call.
 type WorkerPlan struct {
 	Name string
-	// Slug is the worktree folder and branch name (`mascot/<slug>`).
+	// Slug is the worktree folder and branch name (`pixie/<slug>`).
 	Slug string
 	Kind AgentKind
 	// Repo is the canonical repository root.

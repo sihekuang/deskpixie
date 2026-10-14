@@ -10,11 +10,11 @@ import (
 	"github.com/sihekuang/deskpixie/core/packs"
 )
 
-// bundledMascots is the repo's mascots/ folder (Rust uses gen_bit's manifest; the bundled Bit is
+// bundledPixies is the repo's pixies/ folder (Rust uses gen_bit's manifest; the bundled Bit is
 // the same pack).
-func bundledMascots(t *testing.T) string {
+func bundledPixies(t *testing.T) string {
 	t.Helper()
-	p, err := filepath.Abs("../../mascots")
+	p, err := filepath.Abs("../../pixies")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -23,7 +23,7 @@ func bundledMascots(t *testing.T) string {
 
 func bit(t *testing.T) *packs.Pack {
 	t.Helper()
-	found, _ := packs.Load(bundledMascots(t))
+	found, _ := packs.Load(bundledPixies(t))
 	p, ok := found["bit"]
 	if !ok {
 		t.Fatal("no bit pack")
@@ -48,14 +48,14 @@ func bitWithOneShots(t *testing.T, names ...string) *packs.Pack {
 }
 
 func TestStartsIdleAndSilent(t *testing.T) {
-	s := NewMascotState()
+	s := NewPixieState()
 	if s.State != "idle" || s.Talking {
 		t.Fatalf("got %q %v", s.State, s.Talking)
 	}
 }
 
 func TestHotkeyTogglesIdleAndListening(t *testing.T) {
-	s := NewMascotState()
+	s := NewPixieState()
 	if got := s.ToggleListening(); got != "listening" {
 		t.Fatal(got)
 	}
@@ -65,7 +65,7 @@ func TestHotkeyTogglesIdleAndListening(t *testing.T) {
 }
 
 func TestHotkeyFromAnyOtherStateStartsListening(t *testing.T) {
-	s := NewMascotState()
+	s := NewPixieState()
 	s.SetState("thinking")
 	if got := s.ToggleListening(); got != "listening" {
 		t.Fatal(got)
@@ -73,7 +73,7 @@ func TestHotkeyFromAnyOtherStateStartsListening(t *testing.T) {
 }
 
 func TestSetStateRejectsUnknownNames(t *testing.T) {
-	s := NewMascotState()
+	s := NewPixieState()
 	if s.SetState("dancing") {
 		t.Fatal("accepted dancing")
 	}
@@ -86,7 +86,7 @@ func TestSetStateRejectsUnknownNames(t *testing.T) {
 }
 
 func TestAOneShotStateEndsWhenThePlayerFinishesIt(t *testing.T) {
-	s := NewMascotState()
+	s := NewPixieState()
 	s.SetState("happy")
 	// Bit's happy: 8 frames at 8 fps, plus one frame of slack for the player's timer.
 	seq, after, ok := s.OneShot(bit(t))
@@ -105,7 +105,7 @@ func TestAOneShotStateEndsWhenThePlayerFinishesIt(t *testing.T) {
 }
 
 func TestLoopingStatesNeverEndOnTheirOwn(t *testing.T) {
-	s := NewMascotState()
+	s := NewPixieState()
 	if _, _, ok := s.OneShot(bit(t)); ok {
 		t.Fatal("idle")
 	}
@@ -116,7 +116,7 @@ func TestLoopingStatesNeverEndOnTheirOwn(t *testing.T) {
 }
 
 func TestANewerStateChangeCancelsThePendingEnd(t *testing.T) {
-	s := NewMascotState()
+	s := NewPixieState()
 	s.SetState("happy")
 	seq, _, _ := s.OneShot(bit(t))
 	s.SetState("listening")
@@ -135,7 +135,7 @@ func TestANewerStateChangeCancelsThePendingEnd(t *testing.T) {
 }
 
 func TestAStaleCelebrationCannotCutANewerOneShort(t *testing.T) {
-	s := NewMascotState()
+	s := NewPixieState()
 	first, ok := s.Celebrate(bit(t))
 	if !ok {
 		t.Fatal("from idle")
@@ -160,7 +160,7 @@ func TestAStaleCelebrationCannotCutANewerOneShort(t *testing.T) {
 }
 
 func TestALoopingHappyIsHeldForTwoSeconds(t *testing.T) {
-	s := NewMascotState()
+	s := NewPixieState()
 	looping := bitWithOneShots(t)
 	st := looping.States["happy"]
 	st.Loop = true
@@ -178,7 +178,7 @@ func TestALoopingHappyIsHeldForTwoSeconds(t *testing.T) {
 
 func TestANonLoopingErrorFlashRestoresDelegating(t *testing.T) {
 	pack := bitWithOneShots(t, "error")
-	s := NewMascotState()
+	s := NewPixieState()
 	s.SetState("delegating")
 	h, ok := s.FlashError(pack)
 	if !ok {
@@ -196,7 +196,7 @@ func TestANonLoopingErrorFlashRestoresDelegating(t *testing.T) {
 }
 
 func TestAnErrorFlashFromIdleHoldsALoopingErrorForTwoSeconds(t *testing.T) {
-	s := NewMascotState()
+	s := NewPixieState()
 	h, _ := s.FlashError(bit(t))
 	if h.Then != "idle" || h.After != Hold {
 		t.Fatalf("%+v", h)
@@ -213,7 +213,7 @@ func TestAnErrorFlashFromIdleHoldsALoopingErrorForTwoSeconds(t *testing.T) {
 func TestNonLoopingConversationStatesStayHeldSoNothingInterruptsThem(t *testing.T) {
 	pack := bitWithOneShots(t, "listening", "thinking", "delegating")
 	for _, name := range []string{"listening", "thinking", "delegating"} {
-		s := NewMascotState()
+		s := NewPixieState()
 		s.SetState(name)
 		if _, _, ok := s.OneShot(pack); ok {
 			t.Errorf("%s is held by its owner, not mirrored to idle", name)

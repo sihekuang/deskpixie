@@ -1,8 +1,8 @@
 import CoreGraphics
 
-/// Pure mascot playback logic: a port of ai-mascot ui/mascot/player-core.js.
+/// Pure pixie playback logic: a port of ai-mascot ui/mascot/player-core.js.
 /// All rects and points are in sheet (or cell) pixels with a top-left origin.
-public struct MascotPlayer: Equatable, Sendable {
+public struct PixiePlayer: Equatable, Sendable {
     public var state: String
     public var frame: Int
     public var tick: Int
@@ -15,7 +15,7 @@ public struct MascotPlayer: Equatable, Sendable {
 
     /// setState: an unknown state or the current state leaves the player unchanged;
     /// otherwise switches immediately, starting at frame 0 (tick keeps counting).
-    public func setting(_ name: String, pack: Pack) -> MascotPlayer {
+    public func setting(_ name: String, pack: Pack) -> PixiePlayer {
         guard pack.states[name] != nil, name != state else { return self }
         var p = self
         p.state = name
@@ -24,7 +24,7 @@ public struct MascotPlayer: Equatable, Sendable {
     }
 
     /// step: next frame; a looping state wraps, a non-looping one ends in idle.
-    public func stepped(pack: Pack) -> MascotPlayer {
+    public func stepped(pack: Pack) -> PixiePlayer {
         var p = self
         p.tick = tick + 1
         guard let spec = pack.states[state] else {

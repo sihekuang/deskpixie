@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -35,7 +36,7 @@ func TestEditsNameTheFileOnly(t *testing.T) {
 
 func TestStartWorkerSpeaksOnlyTheLastPathComponent(t *testing.T) {
 	p := func(repo string) string {
-		s, ok := Phrase("mcp__mascot__start_worker", map[string]any{"repo": repo})
+		s, ok := Phrase("mcp__pixie__start_worker", map[string]any{"repo": repo})
 		if !ok {
 			t.Fatalf("%q: none", repo)
 		}
@@ -87,5 +88,15 @@ func TestNarrationIsGatedToOncePer30SecondsPerJob(t *testing.T) {
 	n.Forget(a)
 	if !n.Allow(a, 30_001) {
 		t.Fatal("after forget")
+	}
+}
+
+func TestAKeptAgentsPreRenameStartWorkerToolIsStillSpoken(t *testing.T) {
+	// An agent left running over the #68 rename still calls its tools mcp__mascot__*.
+	if s, ok := Phrase("mcp__mascot__start_worker", map[string]any{"repo": "/x/focus"}); !ok || s != "starting a worker in focus" {
+		t.Fatal(s, ok)
+	}
+	if got := McpToolNames("start_worker"); !slices.Equal(got, []string{"mcp__pixie__start_worker", "mcp__mascot__start_worker"}) {
+		t.Fatal(got)
 	}
 }

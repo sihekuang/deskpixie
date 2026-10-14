@@ -11,7 +11,7 @@ final class AppState {
     var core: TrayAppState?
     /// Launch progress: "Starting…" (and the permission hint) until the core is configured.
     var startup = StartupPhase.starting
-    var mascotState = "idle"
+    var pixieState = "idle"
     var hotkeyError: String?
     var engineError: String?
     var audioError: String?

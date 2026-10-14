@@ -79,7 +79,7 @@ func TestStartWorkerAsksForAShortNameAndKeepsItOptional(t *testing.T) {
 	if slices.Contains(v.InputSchema.Required, "name") {
 		t.Fatal("older coordinators still work")
 	}
-	if !strings.Contains(v.Description, "a `mascot/…` branch") || strings.Contains(v.Description, "<name>") {
+	if !strings.Contains(v.Description, "a `pixie/…` branch") || strings.Contains(v.Description, "<name>") {
 		t.Fatal(v.Description)
 	}
 }

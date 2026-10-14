@@ -44,9 +44,9 @@ final class SpriteSheetTests: XCTestCase {
     func testLoadsARealSheetFromAURL() throws {
         // The bundled Bit sheet: 8 columns × 6 rows of 32 px cells.
         let url = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().appendingPathComponent("../../../../../mascots/bit/sheet.png")
+            .deletingLastPathComponent().appendingPathComponent("../../../../../pixies/bit/sheet.png")
             .standardizedFileURL
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: url.path), "mascots/ not present")
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: url.path), "pixies/ not present")
         let sheet = try XCTUnwrap(SpriteSheet(url: url))
         XCTAssertEqual(sheet.width, 256)
         XCTAssertEqual(sheet.height, 192)

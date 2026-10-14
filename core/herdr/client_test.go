@@ -73,12 +73,12 @@ func TestWorkspacesAndTabs(t *testing.T) {
 	if id, tab, err := c.CreateWorkspace(bg, "ai-mascot", "/Users/x"); err != nil || id != "w1" || tab != "w1:t1" {
 		t.Fatalf("%q %q %v", id, tab, err)
 	}
-	env := []agent.EnvVar{{Key: "MASCOT_AGENT_TOKEN", Value: "tok"}}
+	env := []agent.EnvVar{{Key: "PIXIE_AGENT_TOKEN", Value: "tok"}}
 	if pane, tab, err := c.CreateTab(bg, "w1", "coordinator", "/ws", env); err != nil || pane != "w1:p2" || tab != "w1:t2" {
 		t.Fatalf("%q %q %v", pane, tab, err)
 	}
 	assertJSON(t, tr.sentFor("tab.create")[0],
-		`{"workspace_id":"w1","label":"coordinator","cwd":"/ws","env":{"MASCOT_AGENT_TOKEN":"tok"},"focus":false}`)
+		`{"workspace_id":"w1","label":"coordinator","cwd":"/ws","env":{"PIXIE_AGENT_TOKEN":"tok"},"focus":false}`)
 }
 
 func TestTabRenameCloseAndMetadata(t *testing.T) {

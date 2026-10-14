@@ -28,9 +28,9 @@ const excludeLine = ".worktrees/"
 const EnsureBudget = 55 * time.Second
 
 // GitWorktrees is agent.WorktreeFs over git (spec §5.5, #82): workers work in
-// `<repo>/.worktrees/<slug>` on branch `mascot/<slug>`. Besides git's own bookkeeping under
-// `.git/`, the only things written into a user's repository are that worktree and one
-// `.worktrees/` line in `.git/info/exclude`.
+// `<repo>/.worktrees/<slug>` on branch `pixie/<slug>` (pre-#68 workers: `mascot/<slug>`).
+// Besides git's own bookkeeping under `.git/`, the only things written into a user's
+// repository are that worktree and one `.worktrees/` line in `.git/info/exclude`.
 type GitWorktrees struct {
 	root      string // agent.projectsRoot (with ~ expanded)
 	workspace string // the coordinator's workspace: never a worker's repo
@@ -170,10 +170,10 @@ func (g *GitWorktrees) git(by time.Time, dir string, args ...string) (string, er
 }
 
 // removeStaleBranchLock: after a failed or timed-out `worktree add` (its git was killed with
-// its whole process group), removes exactly `<common>/refs/heads/mascot/<slug>.lock` if it is a
-// plain file, so the next add of that branch isn't blocked. No other lock is ever touched; slug
-// was validated by Ensure.
-func (g *GitWorktrees) removeStaleBranchLock(repo, slug string) {
+// its whole process group), removes exactly `<common>/refs/heads/<branch>.lock` (branch is
+// `pixie/<slug>`, or `mascot/<slug>` for a pre-#68 worker) if it is a plain file, so the next add
+// of that branch isn't blocked. No other lock is ever touched; slug was validated by Ensure.
+func (g *GitWorktrees) removeStaleBranchLock(repo, branch string) {
 	out, err := g.cleanup.Run(argv(repo, "rev-parse", "--git-common-dir"), g.env)
 	if err != nil {
 		return
@@ -183,10 +183,27 @@ func (g *GitWorktrees) removeStaleBranchLock(repo, slug string) {
 		return
 	}
 	common = joinPath(repo, common)
-	lock := filepath.Join(common, "refs/heads/mascot", slug+".lock")
+	lock := filepath.Join(common, "refs/heads", filepath.FromSlash(branch)+".lock")
 	if m, err := os.Lstat(lock); err == nil && m.Mode().IsRegular() && os.Remove(lock) == nil {
-		fmt.Fprintf(os.Stderr, "agent: removed a stale branch lock left by a killed git for worktree %s\n", slug)
+		fmt.Fprintf(os.Stderr, "agent: removed a stale branch lock left by a killed git for branch %s\n", branch)
 	}
+}
+
+// onWorkerBranch: ref (`refs/heads/<branch>`) is slug's worker branch, `pixie/<slug>` or the
+// pre-#68 `mascot/<slug>`.
+func onWorkerBranch(ref, slug string) bool {
+	for _, p := range agent.BranchPrefixes {
+		if ref == "refs/heads/"+p+slug {
+			return true
+		}
+	}
+	return false
+}
+
+// headOnWorkerBranch: a HEAD file's contents name slug's worker branch (either prefix).
+func headOnWorkerBranch(head []byte, slug string) bool {
+	ref, ok := strings.CutPrefix(string(trimASCIIEnd(head)), "ref: ")
+	return ok && onWorkerBranch(ref, slug)
 }
 
 // exclude makes the repo's `info/exclude` hold `.worktrees/` (added once).
@@ -242,9 +259,10 @@ func isASCIIDigits(s string) bool {
 // adminOf returns the worktree's admin folder, and whether it is positively ours: the one this
 // run identified before, else the single folder under `<common>/worktrees/` that git may have
 // named for slug (slug, or slug plus a number) whose `gitdir` names this worktree; either only
-// while it is on `mascot/<slug>` (else it is the user's own).
+// while it is on its worker branch, `pixie/<slug>` or the pre-#68 `mascot/<slug>` (else it is the
+// user's own).
 // Failing both (a worker rewrote its `gitdir`), the only candidate, named exactly slug, is taken
-// but not positively: only if it is on `mascot/<slug>` and is not a live worktree elsewhere (its
+// but not positively: only if it is on its worker branch and is not a live worktree elsewhere (its
 // `gitdir` names a `.git` file pointing back at it). A sandboxed worker can write only its own
 // admin folder, never create or rename one.
 func (g *GitWorktrees) adminOf(common, worktree, slug string) (string, bool, error) {
@@ -258,9 +276,9 @@ func (g *GitWorktrees) adminOf(common, worktree, slug string) (string, bool, err
 	}
 	onBranch := func(a string) bool {
 		h, err := os.ReadFile(filepath.Join(a, "HEAD"))
-		return err == nil && string(trimASCIIEnd(h)) == "ref: refs/heads/mascot/"+slug
+		return err == nil && headOnWorkerBranch(h, slug)
 	}
-	notOnBranch := func() error { return werr("That worktree isn't on its mascot branch; I won't reuse it.") }
+	notOnBranch := func() error { return werr("That worktree isn't on its pixie branch; I won't reuse it.") }
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if a, ok := g.admins[worktree]; ok {
@@ -464,7 +482,7 @@ func put(path string, content []byte) (bool, error) {
 	}
 	fail := func(e error) (bool, error) { return false, fmt.Errorf("cannot repair %s: %v", path, e) }
 	// Unique per process and call, so two audits never share a temp file.
-	tmp := fmt.Sprintf("%s.mascot-audit.%d.%d", path, os.Getpid(), putCounter.Add(1)-1)
+	tmp := fmt.Sprintf("%s.pixie-audit.%d.%d", path, os.Getpid(), putCounter.Add(1)-1)
 	if _, err := removeAny(tmp); err != nil {
 		return fail(err)
 	}
@@ -592,8 +610,10 @@ func (g *GitWorktrees) ResolveRepo(repo string) (string, error) {
 	return real, nil
 }
 
-// Ensure: `<repo>/.worktrees/<slug>` on branch `mascot/<slug>` (an existing one is reused),
-// with `.worktrees/` in the repo's `.git/info/exclude`. Returns the worktree's canonical path.
+// Ensure: `<repo>/.worktrees/<slug>` on branch `pixie/<slug>` (an existing one is reused, also
+// one on a pre-#68 `mascot/<slug>` branch; with no worktree, an existing `pixie/<slug>` branch,
+// else an existing `mascot/<slug>` one, is checked out again, else `pixie/<slug>` is made), with
+// `.worktrees/` in the repo's `.git/info/exclude`. Returns the worktree's canonical path.
 func (g *GitWorktrees) Ensure(repo, slug string) (string, error) {
 	by := g.deadline()
 	if !agent.IsWorkerName(slug) {
@@ -635,7 +655,7 @@ func (g *GitWorktrees) Ensure(repo, slug string) (string, error) {
 		}
 		// A worker may have rewritten its git links (it can write its admin folder): put
 		// them back before git runs in it, or refuse it. The audit first checks that the admin
-		// folder is on `mascot/<slug>`: a worktree of the user's own is never touched.
+		// folder is on its worker branch: a worktree of the user's own is never touched.
 		if err := g.auditLinks(by, repo, slug); err != nil {
 			return "", err
 		}
@@ -661,7 +681,7 @@ func (g *GitWorktrees) Ensure(repo, slug string) (string, error) {
 		}
 		onBranch, locked := false, false
 		for _, l := range rustLines(entry) {
-			if l == "branch refs/heads/mascot/"+slug {
+			if ref, ok := strings.CutPrefix(l, "branch "); ok && onWorkerBranch(ref, slug) {
 				onBranch = true
 			}
 			if l == "locked" || strings.HasPrefix(l, "locked ") {
@@ -669,7 +689,7 @@ func (g *GitWorktrees) Ensure(repo, slug string) (string, error) {
 			}
 		}
 		if !onBranch {
-			return "", werr("That worktree isn't on its mascot branch; I won't reuse it.")
+			return "", werr("That worktree isn't on its pixie branch; I won't reuse it.")
 		}
 		if locked {
 			return "", werr("%s is locked (still being set up?); remove it with `git worktree remove -f -f %s` and try again.", worktree, worktree)
@@ -702,13 +722,20 @@ func (g *GitWorktrees) Ensure(repo, slug string) (string, error) {
 	}
 	// Drop registrations whose folders are gone (nothing else).
 	_, _ = g.run(by, repo, "worktree", "prune")
-	branch := "mascot/" + slug
-	hasBranch, err := g.run(by, repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
-	if err != nil {
-		return "", err
+	// The current prefix first: a worker's pre-#68 branch is reused only when it has no new one.
+	branch, found := agent.BranchPrefix+slug, false
+	for _, p := range agent.BranchPrefixes {
+		has, err := g.run(by, repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+p+slug)
+		if err != nil {
+			return "", err
+		}
+		if has.Status == 0 {
+			branch, found = p+slug, true
+			break
+		}
 	}
 	var added error
-	if hasBranch.Status == 0 {
+	if found {
 		_, added = g.git(by, repo, "worktree", "add", worktree, branch)
 	} else {
 		_, added = g.git(by, repo, "worktree", "add", "-b", branch, worktree, "HEAD")
@@ -717,7 +744,7 @@ func (g *GitWorktrees) Ensure(repo, slug string) (string, error) {
 		// A failed or timed-out add must not leave a half-made worktree to be reused later.
 		// -f -f also removes a worktree a killed add left locked; the path did not exist before this add.
 		_, _ = g.cleanup.Run(argv(repo, "worktree", "remove", "-f", "-f", worktree), g.env)
-		g.removeStaleBranchLock(repo, slug)
+		g.removeStaleBranchLock(repo, branch)
 		return "", added
 	}
 	c, err := canonicalize(worktree)
@@ -744,7 +771,8 @@ func (g *GitWorktrees) Audit(repo, slug string) error {
 	return g.auditLinks(g.deadline(), repo, slug)
 }
 
-// ForeignSlugs: names in `<repo>/.worktrees/` that are not a worktree on `mascot/<name>`.
+// ForeignSlugs: names in `<repo>/.worktrees/` that are not a worktree on `pixie/<name>` (or the
+// pre-#68 `mascot/<name>`).
 func (g *GitWorktrees) ForeignSlugs(repo string) []string {
 	entries, err := os.ReadDir(filepath.Join(repo, WorktreesDir))
 	if err != nil {
@@ -757,7 +785,7 @@ func (g *GitWorktrees) ForeignSlugs(repo string) []string {
 		ok := false
 		if a, found := linkedAdmin(dotGit); found {
 			if h, err := os.ReadFile(filepath.Join(a, "HEAD")); err == nil {
-				ok = string(trimASCIIEnd(h)) == "ref: refs/heads/mascot/"+slug
+				ok = headOnWorkerBranch(h, slug)
 			}
 		}
 		if !ok {

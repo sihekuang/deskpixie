@@ -21,7 +21,7 @@ type AppState struct {
 	Hotkey       string       `json:"hotkey"`
 }
 
-// PackRef is one Tray ▸ Mascot row.
+// PackRef is one Tray ▸ Pixie row.
 type PackRef struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`

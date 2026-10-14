@@ -11,7 +11,7 @@ enum SettingsFixture {
 [
  {
   "path": "hotkey",
-  "section": "Mascot",
+  "section": "Pixie",
   "label": "Voice hotkey",
   "help": "Starts or ends a conversation with Bit from any app.",
   "kind": {
@@ -26,9 +26,9 @@ enum SettingsFixture {
  },
  {
   "path": "pack",
-  "section": "Mascot",
-  "label": "Mascot",
-  "help": "Which mascot pack is shown.",
+  "section": "Pixie",
+  "label": "Pixie",
+  "help": "Which pixie pack is shown.",
   "kind": {
    "type": "choice",
    "options": [
@@ -61,7 +61,7 @@ enum SettingsFixture {
  },
  {
   "path": "scale",
-  "section": "Mascot",
+  "section": "Pixie",
   "label": "Size",
   "help": "Whole-number sizes keep the pixel art crisp.",
   "kind": {
@@ -79,7 +79,7 @@ enum SettingsFixture {
  },
  {
   "path": "proximityFade.enabled",
-  "section": "Mascot",
+  "section": "Pixie",
   "label": "Fade near the pointer",
   "help": "Bit fades as the pointer comes close, so it never blocks your work.",
   "kind": {
@@ -94,7 +94,7 @@ enum SettingsFixture {
  },
  {
   "path": "proximityFade.radius",
-  "section": "Mascot",
+  "section": "Pixie",
   "label": "Fade distance",
   "help": "How far from Bit, in points, the fading starts.",
   "kind": {

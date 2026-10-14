@@ -42,18 +42,18 @@ var (
 // settings.json in AppSupport (P14). Example:
 //
 //	{"appSupport":"/Users/me/Library/Application Support/com.sihekuang.deskpixie",
-//	 "bundledMascots":"/Applications/DeskPixie.app/Contents/Resources/mascots",
+//	 "bundledPixies":"/Applications/DeskPixie.app/Contents/Resources/pixies",
 //	 "designSystem":"/Applications/DeskPixie.app/Contents/Resources/design-system",
 //	 "dfn3ModelPath":"/Applications/DeskPixie.app/Contents/Resources/DeepFilterNet3.tar.gz",
 //	 "platform":"macos"}
 //
 // Phase 3's config ({apiKey, model, voice, personaPath, idleTimeoutSecs, pack, packRoots,
-// noisyRoom}) is still accepted while Swift moves over: packRoots[0] becomes bundledMascots
+// noisyRoom}) is still accepted while Swift moves over: packRoots[0] becomes bundledPixies
 // and the folder above the last root becomes appSupport; the other old keys are ignored
 // (settings.json and env/.env own them now).
 type Config struct {
 	app.Paths
-	// PackRoots is Phase 3's [bundled, user] mascot roots (deprecated).
+	// PackRoots is Phase 3's [bundled, user] pixie roots (deprecated).
 	PackRoots []string `json:"packRoots"`
 }
 
@@ -61,8 +61,8 @@ type Config struct {
 func (c Config) paths() app.Paths {
 	p := c.Paths
 	if len(c.PackRoots) > 0 {
-		if p.BundledMascots == "" && len(c.PackRoots) > 1 {
-			p.BundledMascots = c.PackRoots[0]
+		if p.BundledPixies == "" && len(c.PackRoots) > 1 {
+			p.BundledPixies = c.PackRoots[0]
 		}
 		if p.AppSupport == "" {
 			p.AppSupport = filepath.Dir(filepath.Clean(c.PackRoots[len(c.PackRoots)-1]))

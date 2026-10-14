@@ -24,7 +24,7 @@ public struct MoveDebounce: Sendable {
     }
 }
 
-/// `mascot.moved` arguments: the window's logical top-left in desktop coordinates
+/// `pixie.moved` arguments: the window's logical top-left in desktop coordinates
 /// (`DesktopSpace`), which the core saves as settings `position`.
 public struct MovedArgs: Encodable, Sendable, Equatable {
     public let x: Double
@@ -36,9 +36,9 @@ public struct MovedArgs: Encodable, Sendable, Equatable {
     }
 }
 
-/// The settings the mascot window follows, read from `settings.snapshot` `values`
+/// The settings the pixie window follows, read from `settings.snapshot` `values`
 /// (settings.json: `position`, `scale`, `proximityFade.{enabled,radius}`).
-public struct MascotSettings: Equatable, Sendable {
+public struct PixieSettings: Equatable, Sendable {
     /// Saved top-left in desktop coordinates; nil = the default spot.
     public var position: CGPoint?
     /// nil when unset (the pack event or the default ×8 decides).
@@ -56,7 +56,7 @@ public struct MascotSettings: Equatable, Sendable {
     }
 
     /// config.rs defaults: no position, fade on, radius 150.
-    public static let defaults = MascotSettings(position: nil, scale: nil, fadeEnabled: true, fadeRadius: 150)
+    public static let defaults = PixieSettings(position: nil, scale: nil, fadeEnabled: true, fadeRadius: 150)
 
     private struct Snapshot: Decodable {
         struct Fade: Decodable {
@@ -84,7 +84,7 @@ public struct MascotSettings: Equatable, Sendable {
     }
 
     /// nil when the JSON is not a snapshot.
-    public static func fromSnapshot(_ json: Data) -> MascotSettings? {
+    public static func fromSnapshot(_ json: Data) -> PixieSettings? {
         guard let v = try? JSONDecoder().decode(Snapshot.self, from: json).values else { return nil }
         var s = defaults
         if let p = v.position, p.count == 2 { s.position = CGPoint(x: p[0], y: p[1]) }

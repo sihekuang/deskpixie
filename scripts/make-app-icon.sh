@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Regenerate DeskPixie's app icon from Bit's sprite sheet (mascots/bit/sheet.png).
+# Regenerate DeskPixie's app icon from Bit's sprite sheet (pixies/bit/sheet.png).
 #
 # Usage (any directory):  scripts/make-app-icon.sh
 #
@@ -12,7 +12,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-PACK=mascots/bit
+PACK=pixies/bit
 MASTER=mac/Icon/AppIcon-1024.png
 SET=mac/DeskPixie/Assets.xcassets/AppIcon.appiconset
 

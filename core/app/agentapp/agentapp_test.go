@@ -39,7 +39,7 @@ func TestTheDelegationToolsAndRecallAreRegistered(t *testing.T) {
 		Host:     agent.NewAgentHost(agenttest.NewFakeSessionHost(), clock, agent.CoordinatorRecipe{Cwd: "/w"}),
 		Voice:    &agenttest.RecordingVoiceLink{},
 		Notifier: &agenttest.RecordingNotifier{},
-		Mascot:   &agenttest.RecordingNotifier{},
+		Pixie:    &agenttest.RecordingNotifier{},
 		Status:   &agenttest.RecordingStatus{},
 		Launcher: &agenttest.FakeLauncher{},
 		Store:    &agenttest.MemStore{},

@@ -6,7 +6,7 @@ package voice_test
 //   - Swift pushes the mic (PushMic) and pulls playback (PullPlayback), so the rig drives a
 //     voicetest.FakeMic (which, like a real mic, sends silence while on) and a
 //     voicetest.Player; "PlayEvent" comes from the playback queue's enqueue/flush hook.
-//   - The mascot sink is the UI event stream (voicetest.Sink).
+//   - The pixie sink is the UI event stream (voicetest.Sink).
 
 import (
 	"context"
@@ -134,7 +134,7 @@ func wait(ms int) { time.Sleep(time.Duration(ms) * time.Millisecond) }
 
 func chimeLen(k voice.Chime) int { return len(voice.ChimeSamples(k)) }
 
-func eqStates(t *testing.T, got []voice.MascotState, want ...voice.MascotState) {
+func eqStates(t *testing.T, got []voice.PixieState, want ...voice.PixieState) {
 	t.Helper()
 	if !slices.Equal(got, want) {
 		t.Fatalf("states %v, want %v", got, want)
@@ -149,7 +149,7 @@ func last[T any](s []T) (T, bool) {
 	return s[len(s)-1], true
 }
 
-func lastState(r *rig) voice.MascotState { s, _ := last(r.sink.States()); return s }
+func lastState(r *rig) voice.PixieState { s, _ := last(r.sink.States()); return s }
 
 func hasStatus(r *rig, s string) bool { return slices.Contains(r.sink.Statuses(), s) }
 

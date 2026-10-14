@@ -68,7 +68,7 @@ type Deps struct {
 	Host     *AgentHost
 	Voice    VoiceLink
 	Notifier Notifier
-	Mascot   MascotCue
+	Pixie    PixieCue
 	Status   StatusSink
 	Launcher TerminalLauncher
 	// TerminalDir is the folder the agent terminal starts in (the projects folder, else home).
@@ -745,7 +745,7 @@ func (h *AgentHandle) hook(ev HookEvent) {
 	}
 }
 
-// mcp answers a mascot MCP tool call.
+// mcp answers a pixie MCP tool call.
 func (h *AgentHandle) mcp(agent string, call McpCall) McpReply {
 	if h.quitting() {
 		return McpReply{Err: errQuitting}
@@ -1201,7 +1201,7 @@ func (h *AgentHandle) apply(e Effect) {
 	case EfNotify:
 		d.Notifier.Notify("Bit", e.Text)
 	case EfCue:
-		d.Mascot.Cue(e.Cue)
+		d.Pixie.Cue(e.Cue)
 	case EfDecide:
 		h.repliesMu.Lock()
 		tx, ok := h.replies[e.ID]

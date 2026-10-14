@@ -13,11 +13,11 @@ import (
 	"github.com/sihekuang/deskpixie/core/voice"
 )
 
-const mascots = "../../mascots"
+const pixies = "../../pixies"
 
-func absMascots(t *testing.T) string {
+func absPixies(t *testing.T) string {
 	t.Helper()
-	p, err := filepath.Abs(mascots)
+	p, err := filepath.Abs(pixies)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,12 +30,12 @@ func cfgJSON(t *testing.T, extra string) []byte {
 	return cfgIn(t, t.TempDir(), extra)
 }
 
-// cfgIn is a dp_configure config for appSupport dir (bundled mascots and design system from
+// cfgIn is a dp_configure config for appSupport dir (bundled pixies and design system from
 // the repo).
 func cfgIn(t *testing.T, dir, extra string) []byte {
 	t.Helper()
 	ds, _ := filepath.Abs("../../design-system")
-	m := map[string]string{"appSupport": dir, "bundledMascots": absMascots(t), "designSystem": ds, "platform": "macos"}
+	m := map[string]string{"appSupport": dir, "bundledPixies": absPixies(t), "designSystem": ds, "platform": "macos"}
 	b, _ := json.Marshal(m)
 	s := string(b)
 	if extra != "" {
@@ -141,7 +141,7 @@ func TestBridgeConfigureBadJSON(t *testing.T) {
 
 func TestBridgeConfigureNoPackIsBuildError(t *testing.T) {
 	e := newEngine(t, Options{})
-	err := e.Configure([]byte(`{"appSupport":"` + t.TempDir() + `","bundledMascots":"` + t.TempDir() + `"}`))
+	err := e.Configure([]byte(`{"appSupport":"` + t.TempDir() + `","bundledPixies":"` + t.TempDir() + `"}`))
 	if err == nil || errors.Is(err, ErrBadJSON) || errors.Is(err, ErrNotInit) {
 		t.Fatalf("err = %v, want a build error", err)
 	}
@@ -152,30 +152,30 @@ func TestBridgeConfigureNoPackIsBuildError(t *testing.T) {
 
 func TestBridgeConfigPaths(t *testing.T) {
 	var c Config
-	if err := json.Unmarshal([]byte(`{"appSupport":"/a","bundledMascots":"/b","designSystem":"/d","dfn3ModelPath":"/m","platform":"macos"}`), &c); err != nil {
+	if err := json.Unmarshal([]byte(`{"appSupport":"/a","bundledPixies":"/b","designSystem":"/d","dfn3ModelPath":"/m","platform":"macos"}`), &c); err != nil {
 		t.Fatal(err)
 	}
 	p := c.paths()
-	if p.AppSupport != "/a" || p.BundledMascots != "/b" || p.DesignSystem != "/d" || p.DFN3ModelPath != "/m" || p.Platform != "macos" {
+	if p.AppSupport != "/a" || p.BundledPixies != "/b" || p.DesignSystem != "/d" || p.DFN3ModelPath != "/m" || p.Platform != "macos" {
 		t.Errorf("camelCase keys not decoded: %+v", p)
 	}
 }
 
 func TestBridgeLegacyConfigDerivesThePaths(t *testing.T) {
 	var c Config
-	legacy := `{"apiKey":"k","model":"m","packRoots":["/App/Resources/mascots","/Support/com.sihekuang.deskpixie/mascots"],"noisyRoom":true}`
+	legacy := `{"apiKey":"k","model":"m","packRoots":["/App/Resources/pixies","/Support/com.sihekuang.deskpixie/pixies"],"noisyRoom":true}`
 	if err := json.Unmarshal([]byte(legacy), &c); err != nil {
 		t.Fatal(err)
 	}
 	p := c.paths()
-	if p.BundledMascots != "/App/Resources/mascots" || p.AppSupport != "/Support/com.sihekuang.deskpixie" {
+	if p.BundledPixies != "/App/Resources/pixies" || p.AppSupport != "/Support/com.sihekuang.deskpixie" {
 		t.Errorf("%+v", p)
 	}
 }
 
 func TestBridgeConfigNeedsAppSupport(t *testing.T) {
 	e := newEngine(t, Options{})
-	if err := e.Configure([]byte(`{"bundledMascots":"/b"}`)); !errors.Is(err, ErrBadJSON) {
+	if err := e.Configure([]byte(`{"bundledPixies":"/b"}`)); !errors.Is(err, ErrBadJSON) {
 		t.Fatalf("err = %v", err)
 	}
 }

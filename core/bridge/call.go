@@ -48,7 +48,7 @@ func Register(method string, fn Handler) { pkgHandlers.set(method, fn) }
 func unregisterPackage(method string) { pkgHandlers.set(method, nil) }
 
 // Register adds (or replaces) a method on this engine. Configure registers the app core's
-// methods (settings.*, app.*, mascot.*, canvas.*, audio.*) this way.
+// methods (settings.*, app.*, pixie.*, canvas.*, audio.*) this way.
 func (e *Engine) Register(method string, fn Handler) { e.calls.set(method, fn) }
 
 // Call runs method with args (JSON; empty = `{}`) and returns the envelope
