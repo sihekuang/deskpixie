@@ -111,6 +111,7 @@ type App struct {
 	setupFail *voice.Failure
 	cleaner   *denoise.Cleaner
 	recordDir string
+	memory    *memoryRecorder // nil when voice.shortTermMemory is off
 
 	agent Agent // nil when delegation is off
 
@@ -252,9 +253,18 @@ func (a *App) buildVoice(cfg settings.Config) {
 		home = *cfg.Voice.HomeCity
 	}
 	reg := LocalTools(home, &TimerAlarm{Voice: a.voiceLink, Notify: a.notify})
+	var facts voice.SessionFacts = tools.LocalFacts{Clock: tools.SystemClock{}, Home: home}
+	var onInject func(string)
+	if cfg.Voice.ShortTermMemory {
+		rec := &memoryRecorder{mem: voice.NewMemory(voice.MemoryPath(a.paths.AppSupport), nil)}
+		a.memory = rec
+		reg.Register(rec.forgetTool())
+		facts = sessionFacts{facts, rec.mem}
+		onInject = rec.notice
+	}
 	extra, extraPersona := a.voiceExtras()
 	for _, t := range extra {
-		reg.Register(t)
+		reg.Register(a.memory.wrap(t))
 	}
 	persona := ""
 	if cfg.Voice.PersonaPath != nil {
@@ -267,12 +277,13 @@ func (a *App) buildVoice(cfg settings.Config) {
 		Session:      SessionConfig(cfg.Voice, Instructions(voice.Instructions(persona), extraPersona)),
 		Secrets:      a.deps.Secrets,
 		Tools:        reg,
-		Facts:        tools.LocalFacts{Clock: tools.SystemClock{}, Home: home},
+		Facts:        facts,
 		Chimes:       cfg.Voice.Chimes,
 		RecordDir:    a.recordDir,
 		MouthLevels:  MouthLevels(levels, ok),
 		Conversation: voice.ConversationConfig{IdleTimeout: idle, HoldTimeout: hold},
 		OnMicSent:    a.deps.OnMicSent,
+		OnInject:     onInject,
 	}, a.onVoiceEvent)
 	a.mu.Lock()
 	a.meter = a.rt
@@ -290,6 +301,9 @@ func (a *App) buildVoice(cfg settings.Config) {
 				a.setVoiceActive(true)
 			case voice.SigClosed:
 				a.setVoiceActive(false)
+				if a.memory != nil {
+					a.memory.muted.Store(false) // a "forget" lasts to the end of its conversation
+				}
 			}
 		}
 	}()
@@ -401,6 +415,8 @@ func (a *App) onVoiceEvent(ev voice.UIEvent) {
 			a.pushTray()
 		}
 		return
+	case "transcript":
+		a.memory.transcript(ev.Role, ev.Text)
 	case "mouth":
 		// Non-zero only while Bit's reply is audibly playing: feeds the agent's echo gate.
 		if a.agent != nil {
@@ -742,6 +758,8 @@ func (a *App) action(id string) error {
 			return errors.New("the canvas is unavailable")
 		}
 		return a.canvas.OpenLast()
+	case "memory:forget":
+		return a.ForgetMemory()
 	case "canvas:folder":
 		if a.pagesDir == "" {
 			return errors.New("the canvas is unavailable")
