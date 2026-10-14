@@ -8,7 +8,7 @@ import (
 	"github.com/sihekuang/deskpixie/core/agent"
 )
 
-// `POST /mcp`: the mascot MCP server (Rust: crates/agent-http/src/mcp.rs), stateless
+// `POST /mcp`: the pixie MCP server (Rust: crates/agent-http/src/mcp.rs), stateless
 // Streamable HTTP.
 //
 // The subset served: JSON-RPC 2.0 single messages (no batches) with `initialize`, `ping`,

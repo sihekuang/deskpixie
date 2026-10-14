@@ -45,12 +45,12 @@ func newRig(t *testing.T) rig {
 func claudeSpec(name string) agent.AgentSpec {
 	return agent.AgentSpec{Name: name, Kind: agent.Claude, Cwd: "/data/agent/workspace",
 		Args: []string{"--permission-mode", "auto", "--settings", "/data/agent/coordinator-settings.json"},
-		Env:  []agent.EnvVar{{Key: "MASCOT_AGENT_TOKEN", Value: "tok"}}}
+		Env:  []agent.EnvVar{{Key: "PIXIE_AGENT_TOKEN", Value: "tok"}}}
 }
 
 func codexSpec(name string) agent.AgentSpec {
 	return agent.AgentSpec{Name: name, Kind: agent.Codex, Cwd: "/p/repo/.worktrees/x", Args: []string{"-s", "workspace-write"},
-		Env: []agent.EnvVar{{Key: "MASCOT_AGENT_TOKEN", Value: "w"}}}
+		Env: []agent.EnvVar{{Key: "PIXIE_AGENT_TOKEN", Value: "w"}}}
 }
 
 // next waits for the next event on rx.
@@ -153,7 +153,7 @@ func TestStartAgentOpensANamedWindowRunningTheAgentDirectly(t *testing.T) {
 	}
 	nw := r.run.CallsOf("new-window")
 	want := []string{"-L", "deskpixie", "new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "=deskpixie:", "-n", "coordinator",
-		"-c", "/data/agent/workspace", "-e", "MASCOT_AGENT_TOKEN=tok",
+		"-c", "/data/agent/workspace", "-e", "PIXIE_AGENT_TOKEN=tok",
 		"--", "claude", "--permission-mode", "auto", "--settings", "/data/agent/coordinator-settings.json"}
 	if len(nw) != 1 || !reflect.DeepEqual(nw[0], want) {
 		t.Fatalf("%q", nw)
@@ -187,7 +187,7 @@ func TestAClaudeTrustDialogCountsAsStarted(t *testing.T) {
 
 func TestCodexIsStartedAtItsReadyMarker(t *testing.T) {
 	r := newRig(t)
-	r.srv.OnStart = func(p *FakePane) { p.Screen = "Booting MCP server: mascot" }
+	r.srv.OnStart = func(p *FakePane) { p.Screen = "Booting MCP server: pixie" }
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 		r.srv.SetScreen("%1", codexIdle)

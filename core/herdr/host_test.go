@@ -53,7 +53,7 @@ func spec(name string) agent.AgentSpec {
 		Kind: agent.Claude,
 		Cwd:  "/data/ws",
 		Args: []string{"--model", "haiku"},
-		Env:  []agent.EnvVar{{Key: "MASCOT_AGENT_TOKEN", Value: "tok"}},
+		Env:  []agent.EnvVar{{Key: "PIXIE_AGENT_TOKEN", Value: "tok"}},
 	}
 }
 
@@ -346,7 +346,7 @@ func TestTheWorkspaceIsCreatedOnceAndTabsCarryTheTokenEnv(t *testing.T) {
 	if tab["label"] != "coordinator" {
 		t.Fatal(tab)
 	}
-	assertJSON(t, tab["env"], `{"MASCOT_AGENT_TOKEN":"tok"}`)
+	assertJSON(t, tab["env"], `{"PIXIE_AGENT_TOKEN":"tok"}`)
 	assertJSON(t, server.Requests("agent.start")[0].(map[string]any)["args"], `["--model","haiku"]`)
 }
 
@@ -383,7 +383,7 @@ func TestAWorkerTabCarriesItsLabelAndMetadata(t *testing.T) {
 		t.Fatalf("%q", got)
 	}
 	title, meta := server.Metadata("deskpixie-fix-it")
-	wantMeta := map[string]string{"role": "worker", "job": "job_7", "repo": "deskpixie", "branch": "mascot/fix-it",
+	wantMeta := map[string]string{"role": "worker", "job": "job_7", "repo": "deskpixie", "branch": "pixie/fix-it",
 		"task": "Fix the tray icon so that it never flickers when the app restarts at night"}
 	if title != "" || !reflect.DeepEqual(meta, wantMeta) {
 		t.Fatalf("%q %v", title, meta)

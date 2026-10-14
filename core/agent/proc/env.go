@@ -13,7 +13,8 @@ import (
 // the subscription, never on an API key, and never think they are inside another Claude Code or
 // Herdr session. Every voice provider's key (OPENAI_API_KEY, GEMINI_API_KEY, …) is scrubbed
 // too, from voice's provider table (voice.KeyVars).
-var scrubExact = []string{"CLAUDECODE", "CLAUDE_PID", "CLAUDE_EFFORT"}
+// An agent's own bearer (under its current and its pre-#68 name) is set per tab, never inherited.
+var scrubExact = append([]string{"CLAUDECODE", "CLAUDE_PID", "CLAUDE_EFFORT"}, agent.TokenEnvs...)
 
 // ANTHROPIC_* covers keys, tokens, base URLs, custom headers and ANTHROPIC_FOUNDRY_*;
 // CLAUDE_CODE_* covers CLAUDE_CODE_USE_{BEDROCK,VERTEX,FOUNDRY} and a parent session's ids;

@@ -1,1 +1,1 @@
-{"id":"p1","result":{"type":"pane_read","read":{"pane_id":"w1:p2","workspace_id":"w1","tab_id":"w1:t2","source":"visible","format":"text","text":"➜  ws echo TOKLEN=${#MASCOT_AGENT_TOKEN}\nTOKLEN=15\n➜  ws\n","revision":0,"truncated":false}}}
+{"id":"p1","result":{"type":"pane_read","read":{"pane_id":"w1:p2","workspace_id":"w1","tab_id":"w1:t2","source":"visible","format":"text","text":"➜  ws echo TOKLEN=${#PIXIE_AGENT_TOKEN}\nTOKLEN=15\n➜  ws\n","revision":0,"truncated":false}}}

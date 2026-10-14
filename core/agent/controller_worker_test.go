@@ -250,7 +250,7 @@ func TestTheBriefGoesOutWhenTheWorkerIsUpAndIdle(t *testing.T) {
 			break
 		}
 	}
-	if !strings.Contains(brief, "branch mascot/upload") || !strings.HasSuffix(brief, "Your task:\nFix the flaky upload test.") {
+	if !strings.Contains(brief, "branch pixie/upload") || !strings.HasSuffix(brief, "Your task:\nFix the flaky upload test.") {
 		t.Fatalf("the brief: %q", brief)
 	}
 	wantRows(t, c, rowView{workerName, WorkerRunning})

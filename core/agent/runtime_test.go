@@ -51,7 +51,7 @@ func build(t *testing.T, store *agenttest.MemStore, cfg RuntimeConfig, wrap func
 		launch = r.launcher
 	}
 	deps := Deps{
-		Host: NewAgentHost(session, clock, recipe), Voice: r.voice, Notifier: r.alerts, Mascot: r.alerts,
+		Host: NewAgentHost(session, clock, recipe), Voice: r.voice, Notifier: r.alerts, Pixie: r.alerts,
 		Status: r.status, Launcher: launch, TerminalDir: "/home/me/Projects", Store: store, Clock: clock, IDs: &agenttest.SeqIds{},
 		Updates: r.updates,
 	}

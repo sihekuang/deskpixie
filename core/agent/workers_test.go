@@ -554,7 +554,7 @@ func TestACodexScreenWithoutThePlaceholderAtTheDeadlineMeansItsPromptArrived(t *
 
 func TestCodexSMcpApprovalPromptIsNeverReadAsAnEmptyBox(t *testing.T) {
 	// Codex 0.162 blocked on our own report tool (live run 8, before the approval override).
-	prompt := "› Ask Codex to do anything\n\n  Allow the mascot MCP server to run tool report_progress?\n\n› 1. Allow\n  2. Allow for this session\n  3. Always allow\n  4. Cancel\n\n  Press enter to confirm"
+	prompt := "› Ask Codex to do anything\n\n  Allow the pixie MCP server to run tool report_progress?\n\n› 1. Allow\n  2. Allow for this session\n  3. Always allow\n  4. Cancel\n\n  Press enter to confirm"
 	if InputStateOf(Codex, prompt, "Your task:\nFix it.") != InputBusy {
 		t.Fatal("the prompt arrived; nothing is typed into it")
 	}
@@ -628,5 +628,13 @@ func TestAWorkerBeingStoppedGetsNothing(t *testing.T) {
 	}
 	if !w.IsEmpty() {
 		t.Fatal("empty")
+	}
+}
+
+func TestAKeptCodexSPreRenameMcpApprovalPromptIsStillBusy(t *testing.T) {
+	// A Codex left running over the #68 rename still calls the server "mascot".
+	prompt := "› Ask Codex to do anything\n\n  Allow the mascot MCP server to run tool report_progress?\n\n› 1. Allow\n  2. Allow for this session\n  3. Always allow\n  4. Cancel\n\n  Press enter to confirm"
+	if InputStateOf(Codex, prompt, "Your task:\nFix it.") != InputBusy {
+		t.Fatal("the prompt arrived; nothing is typed into it")
 	}
 }

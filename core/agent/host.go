@@ -28,7 +28,7 @@ type CoordinatorRecipe struct {
 	Cwd string
 	// Args are Claude Code arguments, e.g. `--permission-mode auto --settings … --add-dir …`.
 	Args []string
-	// Env is [MASCOT_AGENT_TOKEN=<token>].
+	// Env is [PIXIE_AGENT_TOKEN=<token>].
 	Env []EnvVar
 	// AdoptEarlier: Env's token was kept from the run before (agent.keepPanesOnQuit), so a
 	// coordinator found running from that run still holds it and is adopted as it is.
@@ -70,10 +70,11 @@ func NewAgentHost(host SessionHost, clock Clock, recipe CoordinatorRecipe) *Agen
 	return h
 }
 
-// Token is the coordinator's bearer token (its recipe's MASCOT_AGENT_TOKEN), "" if none.
+// Token is the coordinator's bearer token (its recipe's PIXIE_AGENT_TOKEN, or the pre-#68
+// MASCOT_AGENT_TOKEN), "" if none.
 func (h *AgentHost) Token() string {
 	for _, e := range h.recipe.Env {
-		if e.Key == "MASCOT_AGENT_TOKEN" {
+		if slices.Contains(TokenEnvs, e.Key) {
 			return e.Value
 		}
 	}

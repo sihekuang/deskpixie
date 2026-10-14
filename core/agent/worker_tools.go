@@ -8,7 +8,7 @@ import (
 	"unicode/utf8"
 )
 
-// The mascot MCP tools (port of worker_tools.rs): the coordinator's worker tools and the
+// The pixie MCP tools (port of worker_tools.rs): the coordinator's worker tools and the
 // workers' report tools, as data. The transport (JSON-RPC over HTTP) lives in the HTTP adapter;
 // this file says which identity may call what, checks and cleans the arguments, and words the
 // lines the coordinator's inbox gets. All agent text is data: cleaned, capped, never interpreted.
@@ -90,7 +90,7 @@ func Catalog(role Role) []map[string]any {
 		return []map[string]any{
 			{
 				"name":        "start_worker",
-				"description": "Start a worker agent on a repository: it gets its own git worktree under <repo>/.worktrees/ on a `mascot/…` branch, works there, and reports back to you as a message. Returns {name, worktree} or an error.",
+				"description": "Start a worker agent on a repository: it gets its own git worktree under <repo>/.worktrees/ on a `pixie/…` branch, works there, and reports back to you as a message. Returns {name, worktree} or an error.",
 				"inputSchema": objectSchema(map[string]any{
 					"kind":   map[string]any{"type": "string", "enum": []string{"claude", "codex"}, "description": "Which agent: claude or codex."},
 					"repo":   map[string]any{"type": "string", "description": "The repository: its folder name under the projects root (e.g. focus), or its path."},

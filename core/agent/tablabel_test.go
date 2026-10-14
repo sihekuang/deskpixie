@@ -29,7 +29,7 @@ func TestWorkerTabPutsTheNameFirst(t *testing.T) {
 	if tab.Label != "focus-upload · job_000000000001 · Fix the flaky upload test." {
 		t.Fatalf("%q", tab.Label)
 	}
-	want := map[string]string{"role": "worker", "job": "job_000000000001", "repo": "focus", "branch": "mascot/upload", "task": "Fix the flaky upload test."}
+	want := map[string]string{"role": "worker", "job": "job_000000000001", "repo": "focus", "branch": "pixie/upload", "task": "Fix the flaky upload test."}
 	for k, v := range want {
 		if tab.Meta[k] != v {
 			t.Fatalf("%s = %q", k, tab.Meta[k])

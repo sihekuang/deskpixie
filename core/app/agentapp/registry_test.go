@@ -123,7 +123,7 @@ func TestASharedOrMalformedSessionNameIsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	runner := &agenttest.FakeRunner{}
-	for _, session := range []string{"default", "", "Ai Mascot"} {
+	for _, session := range []string{"default", "", "Ai Pixie"} {
 		s := settings.Default().Agent
 		s.HerdrPath = &bin
 		s.Session = session

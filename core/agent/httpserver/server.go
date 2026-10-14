@@ -1,7 +1,7 @@
 // Package httpserver is the loopback hook and MCP server (Rust: ai-mascot crates/agent-http;
 // spec §5.5, §5.6). Claude Code posts its Stop, PermissionRequest and PostToolUse hooks here
-// (`type: "http"`) with `Authorization: Bearer $MASCOT_AGENT_TOKEN`, and the coordinator and
-// workers call the mascot MCP tools at `POST /mcp` with the same bearer. The bearer says which
+// (`type: "http"`) with `Authorization: Bearer $PIXIE_AGENT_TOKEN`, and the coordinator and
+// workers call the pixie MCP tools at `POST /mcp` with the same bearer. The bearer says which
 // agent is calling; it is checked before the body is read.
 //
 // Routes: `POST /hooks/{stop,permission,post-tool,state}` and `POST /mcp` (other methods on /mcp and

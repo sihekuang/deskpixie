@@ -252,7 +252,7 @@ func TestLiveAgentSmoke(t *testing.T) {
 	args := []string{"--model", "haiku", "--permission-mode", "auto", "--settings", settingsPath}
 	spec := func(name string) agent.AgentSpec {
 		return agent.AgentSpec{Name: name, Kind: agent.Claude, Cwd: ws, Args: args,
-			Env: []agent.EnvVar{{Key: "MASCOT_AGENT_TOKEN", Value: token}}}
+			Env: []agent.EnvVar{{Key: "PIXIE_AGENT_TOKEN", Value: token}}}
 	}
 	_, err = host.StartAgent(ctx, spec(agent.Coordinator))
 	stopWatch()
@@ -532,7 +532,7 @@ func (s *workerSmoke) gone(name string, limit time.Duration) bool {
 	return false
 }
 
-// committed: the worker's worktree has file committed on mascot/<slug>, and the main checkout
+// committed: the worker's worktree has file committed on pixie/<slug>, and the main checkout
 // is untouched.
 func (s *workerSmoke) committed(slug, file string) error {
 	wt := filepath.Join(s.repo, ".worktrees", slug)
@@ -540,8 +540,8 @@ func (s *workerSmoke) committed(slug, file string) error {
 	if err != nil {
 		return err
 	}
-	if branch != "mascot/"+slug {
-		return fmt.Errorf("the worktree is on %s, not mascot/%s", branch, slug)
+	if branch != "pixie/"+slug {
+		return fmt.Errorf("the worktree is on %s, not pixie/%s", branch, slug)
 	}
 	if log, err := gitIn(wt, s.home, "log", "--oneline", "-1", "--", file); err != nil || log == "" {
 		return fmt.Errorf("%s was not committed in the worktree (%v)", file, err)
@@ -726,13 +726,13 @@ func TestLiveWorkerSmoke(t *testing.T) {
 	recipe := agent.CoordinatorRecipe{
 		Cwd:  paths.Workspace,
 		Args: agentapp.CoordinatorArgs(paths, model, true),
-		Env:  []agent.EnvVar{{Key: "MASCOT_AGENT_TOKEN", Value: coordinatorToken}},
+		Env:  []agent.EnvVar{{Key: "PIXIE_AGENT_TOKEN", Value: coordinatorToken}},
 	}
 	deps := agent.Deps{
 		Host:     agent.NewAgentHost(host, wallClock{}, recipe),
 		Voice:    &agenttest.RecordingVoiceLink{},
 		Notifier: &agenttest.RecordingNotifier{},
-		Mascot:   &agenttest.RecordingNotifier{},
+		Pixie:    &agenttest.RecordingNotifier{},
 		Status:   &agenttest.RecordingStatus{},
 		Launcher: &agenttest.FakeLauncher{},
 		Store:    &agenttest.MemStore{},
@@ -813,7 +813,7 @@ func (s *workerSmoke) scenarios(codex bool) error {
 	if err := s.committed(slug, "HELLO.txt"); err != nil {
 		return err
 	}
-	ok(t, fmt.Sprintf("claude worker %s: HELLO.txt committed on mascot/%s; the main checkout is untouched; .worktrees/ excluded", worker, slug))
+	ok(t, fmt.Sprintf("claude worker %s: HELLO.txt committed on pixie/%s; the main checkout is untouched; .worktrees/ excluded", worker, slug))
 	if !s.gone(worker, 20*time.Second) {
 		return fmt.Errorf("%s's pane is still open after its job ended", worker)
 	}
@@ -969,7 +969,7 @@ func (s *workerSmoke) codexPart() error {
 	for _, tool := range []string{"report_result", "report_progress", "ask_coordinator", "report_blocked"} {
 		reported = reported || s.saw(worker+" "+tool)
 	}
-	info(t, "codex: -c mcp_servers.mascot.* reached the app with its bearer", map[bool]string{true: "yes", false: "no (it reported in plain text; the app read its screen)"}[reported])
+	info(t, "codex: -c mcp_servers.pixie.* reached the app with its bearer", map[bool]string{true: "yes", false: "no (it reported in plain text; the app read its screen)"}[reported])
 	slug := strings.TrimPrefix(worker, "demo-")
 	committed := s.committed(slug, "CODEX.txt")
 	info(t, "codex: the workspace-write sandbox let it commit in the worktree", fmt.Sprint(committed == nil, " ", committed))
@@ -983,6 +983,6 @@ func (s *workerSmoke) codexPart() error {
 	if !s.gone(worker, 20*time.Second) {
 		return fmt.Errorf("%s's pane is still open after its job ended", worker)
 	}
-	ok(t, fmt.Sprintf("codex worker %s: CODEX.txt committed on mascot/%s; stopped with its job", worker, slug))
+	ok(t, fmt.Sprintf("codex worker %s: CODEX.txt committed on pixie/%s; stopped with its job", worker, slug))
 	return nil
 }

@@ -53,7 +53,7 @@ func WorkerTab(plan WorkerPlan) TabLabel {
 	}
 	meta := map[string]string{"role": "worker", "job": plan.Job.String(), "repo": plan.RepoName, "task": oneLine(plan.Task)}
 	if plan.Slug != "" {
-		meta["branch"] = "mascot/" + plan.Slug
+		meta["branch"] = BranchPrefix + plan.Slug
 	}
 	return TabLabel{Label: strings.Join(parts, TabSep), Meta: meta}
 }

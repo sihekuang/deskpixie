@@ -255,7 +255,7 @@ func Build(c Config) *Agent {
 	recipe := agent.CoordinatorRecipe{
 		Cwd:  paths.Workspace,
 		Args: CoordinatorArgs(paths, model, workersOn),
-		Env:  []agent.EnvVar{{Key: "MASCOT_AGENT_TOKEN", Value: coordinatorToken}},
+		Env:  []agent.EnvVar{{Key: agent.TokenEnv, Value: coordinatorToken}},
 		// A coordinator found running is the kept one: adopted as it is.
 		AdoptEarlier: kept.CoordinatorToken != "",
 		ResumeLast:   true,
@@ -264,7 +264,7 @@ func Build(c Config) *Agent {
 		Host:        agent.NewAgentHost(session, c.Clock, recipe),
 		Voice:       a.link,
 		Notifier:    NewNotifier(c.Runner, c.Hooks.Notify),
-		Mascot:      mascotCue{c.Hooks},
+		Pixie:       pixieCue{c.Hooks},
 		Status:      statusSink{a},
 		Launcher:    termFactory(c.Runner, c.Home),
 		TerminalDir: TerminalDir(s.ProjectsRoot, c.Home),

@@ -85,7 +85,8 @@ func gitCommonDir(repo string) (string, bool) {
 }
 
 // codexWritable: the only parts of git's folder a commit in the worktree writes: the object
-// store, this worktree's own admin folder, and the `mascot/*` branch refs and their reflogs.
+// store, this worktree's own admin folder, and the `pixie/*` branch refs and their reflogs (and the
+// pre-#68 `mascot/*` ones, for a worker still on such a branch).
 // `hooks/`, `config`, `info/` and `packed-refs` stay read-only. Empty when there is no object store.
 func codexWritable(repo, worktree string) []string {
 	c, ok := gitCommonDir(repo)
@@ -109,10 +110,6 @@ func codexWritable(repo, worktree string) []string {
 	if !ok {
 		return nil
 	}
-	// A commit writes these; `git pack-refs` may have removed them while empty.
-	for _, dir := range []string{"refs/heads/mascot", "logs/refs/heads/mascot"} {
-		_ = os.MkdirAll(filepath.Join(common, dir), 0o777)
-	}
 	// The worktree's `.git` file names its admin folder exactly (git may have suffixed the name),
 	// relative to the worktree. It must be `<common>/worktrees/<name>`, and that folder's own
 	// `gitdir` must name this worktree (not another worktree's admin folder).
@@ -127,11 +124,28 @@ func codexWritable(repo, worktree string) []string {
 	if !have {
 		adminPath, have = filepath.Join(common, "worktrees", filepath.Base(worktree)), true
 	}
-	out := []string{objects}
-	if a, ok := inside(adminPath); ok && filepath.Dir(a) == filepath.Join(common, "worktrees") && namesWorktree(a, dotGit) {
-		out = append(out, a)
+	admin, adminOK := inside(adminPath)
+	adminOK = adminOK && filepath.Dir(admin) == filepath.Join(common, "worktrees") && namesWorktree(admin, dotGit)
+	// A commit writes these; `git pack-refs` may have removed them while empty. The pre-#68
+	// prefix's are writable (and made) only for a worktree still on such a branch.
+	prefixes := []string{agent.BranchPrefix}
+	if h, err := os.ReadFile(filepath.Join(admin, "HEAD")); adminOK && err == nil &&
+		strings.HasPrefix(string(trimASCIIEnd(h)), "ref: refs/heads/"+agent.LegacyBranchPrefix) {
+		prefixes = append(prefixes, agent.LegacyBranchPrefix)
 	}
-	for _, p := range []string{"refs/heads/mascot", "logs/refs/heads/mascot"} {
+	var refDirs []string
+	for _, p := range prefixes {
+		p = strings.TrimSuffix(p, "/")
+		refDirs = append(refDirs, "refs/heads/"+p, "logs/refs/heads/"+p)
+	}
+	for _, dir := range refDirs {
+		_ = os.MkdirAll(filepath.Join(common, dir), 0o777)
+	}
+	out := []string{objects}
+	if adminOK {
+		out = append(out, admin)
+	}
+	for _, p := range refDirs {
 		if c, ok := inside(filepath.Join(common, p)); ok {
 			out = append(out, c)
 		}

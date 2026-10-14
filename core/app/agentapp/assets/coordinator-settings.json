@@ -13,7 +13,7 @@
       "Edit(**/.env*)"
     ],
     "deny": ["AskUserQuestion"],
-    "allow": ["mcp__mascot"]
+    "allow": ["mcp__pixie", "mcp__mascot"]
   },
   "hooks": {
     "Stop": [
@@ -23,8 +23,8 @@
             "type": "http",
             "url": "http://127.0.0.1:{{PORT}}/hooks/stop",
             "timeout": 5,
-            "headers": { "Authorization": "Bearer $MASCOT_AGENT_TOKEN" },
-            "allowedEnvVars": ["MASCOT_AGENT_TOKEN"]
+            "headers": { "Authorization": "Bearer $PIXIE_AGENT_TOKEN" },
+            "allowedEnvVars": ["PIXIE_AGENT_TOKEN"]
           }
         ]
       }
@@ -36,22 +36,22 @@
             "type": "http",
             "url": "http://127.0.0.1:{{PORT}}/hooks/permission",
             "timeout": 125,
-            "headers": { "Authorization": "Bearer $MASCOT_AGENT_TOKEN" },
-            "allowedEnvVars": ["MASCOT_AGENT_TOKEN"]
+            "headers": { "Authorization": "Bearer $PIXIE_AGENT_TOKEN" },
+            "allowedEnvVars": ["PIXIE_AGENT_TOKEN"]
           }
         ]
       }
     ],
     "PostToolUse": [
       {
-        "matcher": "Bash|Edit|Write|mcp__mascot__start_worker",
+        "matcher": "Bash|Edit|Write|mcp__pixie__start_worker|mcp__mascot__start_worker",
         "hooks": [
           {
             "type": "http",
             "url": "http://127.0.0.1:{{PORT}}/hooks/post-tool",
             "timeout": 5,
-            "headers": { "Authorization": "Bearer $MASCOT_AGENT_TOKEN" },
-            "allowedEnvVars": ["MASCOT_AGENT_TOKEN"]
+            "headers": { "Authorization": "Bearer $PIXIE_AGENT_TOKEN" },
+            "allowedEnvVars": ["PIXIE_AGENT_TOKEN"]
           }
         ]
       }

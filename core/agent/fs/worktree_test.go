@@ -172,7 +172,7 @@ func TestEnsureMakesAWorktreeOnItsBranchAndHidesItFromTheRepo(t *testing.T) {
 	if mustRead(t, filepath.Join(wt, "README.md")) != "hi\n" {
 		t.Fatal("README")
 	}
-	if b := f.git(wt, "rev-parse", "--abbrev-ref", "HEAD"); b != "mascot/fix-upload" {
+	if b := f.git(wt, "rev-parse", "--abbrev-ref", "HEAD"); b != "pixie/fix-upload" {
 		t.Fatal(b)
 	}
 	if n := countLine(mustRead(t, filepath.Join(r, ".git/info/exclude")), ".worktrees/"); n != 1 {
@@ -207,7 +207,7 @@ func TestAnExistingWorktreeOrBranchIsReused(t *testing.T) {
 	if err != nil || again != wt {
 		t.Fatalf("the branch is checked out again: %q %v", again, err)
 	}
-	if b := f.git(wt, "rev-parse", "--abbrev-ref", "HEAD"); b != "mascot/fix" {
+	if b := f.git(wt, "rev-parse", "--abbrev-ref", "HEAD"); b != "pixie/fix" {
 		t.Fatal(b)
 	}
 }
@@ -348,7 +348,7 @@ func TestAFailedAddLeavesNoHalfMadeWorktree(t *testing.T) {
 	f := newFixture(t)
 	r := f.repo("focus")
 	// The branch exists and is checked out in the main repo, so `worktree add <path> <branch>` fails.
-	f.git(r, "branch", "-m", "mascot/fix")
+	f.git(r, "branch", "-m", "pixie/fix")
 	_, err := f.fs().Ensure(r, "fix")
 	wantContains(t, errText(t, err), "git worktree")
 	if exists(filepath.Join(r, ".worktrees/fix")) {
@@ -364,7 +364,7 @@ func TestConfigIncludesAreRefusedEvenWhenTheyOnlyApplyInTheWorktree(t *testing.T
 	s := f.script("smudge.sh", "smudge-ran")
 	inc := filepath.Join(f.dir, "extra.conf")
 	mustWrite(t, inc, fmt.Sprintf("[filter \"x\"]\n\tsmudge = %s\n\tclean = cat\n", s))
-	for _, c := range [][2]string{{"path", "include.path"}, {"onbranch", "includeIf.onbranch:mascot/**.path"}, {"gitdir", "includeIf.gitdir:/**.path"}} {
+	for _, c := range [][2]string{{"path", "include.path"}, {"onbranch", "includeIf.onbranch:pixie/**.path"}, {"gitdir", "includeIf.gitdir:/**.path"}} {
 		r := f.repo(c[0])
 		mustWrite(t, filepath.Join(r, ".gitattributes"), "* filter=x\n")
 		f.git(r, "add", ".gitattributes")
@@ -483,8 +483,8 @@ func TestAKilledAddLeavesNoStaleLockOnItsOwnBranchOnly(t *testing.T) {
 	f := newFixture(t)
 	r := f.repo("focus")
 	git := filepath.Join(r, ".git")
-	own := filepath.Join(git, "refs/heads/mascot/fix.lock")
-	others := []string{filepath.Join(git, "refs/heads/mine.lock"), filepath.Join(git, "refs/heads/mascot/other.lock"), filepath.Join(git, "index.lock"), filepath.Join(git, "packed-refs.lock")}
+	own := filepath.Join(git, "refs/heads/pixie/fix.lock")
+	others := []string{filepath.Join(git, "refs/heads/mine.lock"), filepath.Join(git, "refs/heads/pixie/other.lock"), filepath.Join(git, "index.lock"), filepath.Join(git, "packed-refs.lock")}
 	planted := append([]string{own}, others...)
 	killed := f.fsWith(killedAdd{locks: planted})
 	_, err := killed.Ensure(r, "fix")
@@ -510,7 +510,7 @@ func TestASymlinkedBranchLockIsNotFollowedOrRemoved(t *testing.T) {
 	r := f.repo("focus")
 	target := filepath.Join(f.dir, "keep")
 	mustWrite(t, target, "x")
-	own := filepath.Join(r, ".git/refs/heads/mascot/fix.lock")
+	own := filepath.Join(r, ".git/refs/heads/pixie/fix.lock")
 	mustMkdir(t, filepath.Dir(own))
 	if err := os.Symlink(target, own); err != nil {
 		t.Fatal(err)
@@ -708,7 +708,7 @@ func TestAuditRestoresExactlyWhatGitWroteAndAPlantedFsmonitorNeverRuns(t *testin
 	if exists(ran) {
 		t.Fatal("the planted fsmonitor ran after the audit")
 	}
-	if b := f.git(wt, "rev-parse", "--abbrev-ref", "HEAD"); b != "mascot/fix" {
+	if b := f.git(wt, "rev-parse", "--abbrev-ref", "HEAD"); b != "pixie/fix" {
 		t.Fatal(b)
 	}
 	// Nothing to repair: unchanged.
@@ -879,8 +879,8 @@ func snapshot(t *testing.T, dir string) map[string]string {
 }
 
 func TestAUsersOwnWorktreeNamedLikeTheSlugIsNeverTakenOver(t *testing.T) {
-	// Its branch is the user's own, or even `mascot/fix`: either way it is a live worktree elsewhere.
-	for _, c := range [][2]string{{"user", "mine"}, {"mascotbranch", "mascot/fix"}} {
+	// Its branch is the user's own, or even `pixie/fix`: either way it is a live worktree elsewhere.
+	for _, c := range [][2]string{{"user", "mine"}, {"pixiebranch", "pixie/fix"}, {"mascotbranch", "mascot/fix"}} {
 		f := newFixture(t)
 		r := f.repo("focus")
 		theirs := filepath.Join(f.dir, "elsewhere/fix")
@@ -917,7 +917,7 @@ func TestAUsersOwnWorktreeNamedLikeTheSlugIsNeverTakenOver(t *testing.T) {
 	}
 }
 
-func TestARememberedAdminFolderOffTheMascotBranchIsNotTrusted(t *testing.T) {
+func TestARememberedAdminFolderOffThePixieBranchIsNotTrusted(t *testing.T) {
 	f := newFixture(t)
 	r := f.repo("focus")
 	g := f.fs()
@@ -931,7 +931,7 @@ func TestARememberedAdminFolderOffTheMascotBranchIsNotTrusted(t *testing.T) {
 	mustWrite(t, filepath.Join(admin, "config.worktree"), "[core]\n\tbare = false\n")
 	mustWrite(t, filepath.Join(admin, "gitdir"), "/somewhere/else/.git\n")
 	before := snapshot(t, admin)
-	if e := errText(t, g.Audit(r, "fix")); e != "That worktree isn't on its mascot branch; I won't reuse it." {
+	if e := errText(t, g.Audit(r, "fix")); e != "That worktree isn't on its pixie branch; I won't reuse it." {
 		t.Fatal(e)
 	}
 	if !reflect.DeepEqual(snapshot(t, admin), before) {
@@ -939,7 +939,7 @@ func TestARememberedAdminFolderOffTheMascotBranchIsNotTrusted(t *testing.T) {
 	}
 }
 
-func TestAWorktreeOffItsMascotBranchIsNotReused(t *testing.T) {
+func TestAWorktreeOffItsPixieBranchIsNotReused(t *testing.T) {
 	f := newFixture(t)
 	r := f.repo("focus")
 	g := f.fs()
@@ -949,7 +949,7 @@ func TestAWorktreeOffItsMascotBranchIsNotReused(t *testing.T) {
 	}
 	f.git(wt, "switch", "-q", "-c", "elsewhere")
 	_, err = g.Ensure(r, "fix")
-	if e := errText(t, err); e != "That worktree isn't on its mascot branch; I won't reuse it." {
+	if e := errText(t, err); e != "That worktree isn't on its pixie branch; I won't reuse it." {
 		t.Fatal(e)
 	}
 }
@@ -1042,7 +1042,7 @@ func TestConcurrentRepairsOfOneFileNeverCollide(t *testing.T) {
 	}
 	entries, _ := os.ReadDir(f.dir)
 	for _, e := range entries {
-		if strings.Contains(e.Name(), "mascot-audit") {
+		if strings.Contains(e.Name(), "pixie-audit") {
 			t.Fatalf("temp file left: %s", e.Name())
 		}
 	}

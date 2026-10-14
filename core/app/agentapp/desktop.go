@@ -53,10 +53,10 @@ func (n *Notifier) Notify(title, body string) {
 	}
 }
 
-// mascotCue: Happy → Bit celebrates, Error → Bit flashes the error state.
-type mascotCue struct{ hooks app.AgentHooks }
+// pixieCue: Happy → Bit celebrates, Error → Bit flashes the error state.
+type pixieCue struct{ hooks app.AgentHooks }
 
-func (m mascotCue) Cue(cue agent.Cue) {
+func (m pixieCue) Cue(cue agent.Cue) {
 	switch cue {
 	case agent.CueHappy:
 		call(m.hooks.Celebrate)

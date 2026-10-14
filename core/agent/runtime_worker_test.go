@@ -62,11 +62,11 @@ func rigBuild(t *testing.T, workers, keep bool, store *agenttest.MemStore, wt *a
 	if kept.CoordinatorToken != "" {
 		token = kept.CoordinatorToken
 	}
-	recipe := CoordinatorRecipe{Cwd: "/data/agent/workspace", Env: []EnvVar{{Key: "MASCOT_AGENT_TOKEN", Value: token}}, AdoptEarlier: kept.CoordinatorToken != ""}
+	recipe := CoordinatorRecipe{Cwd: "/data/agent/workspace", Env: []EnvVar{{Key: "PIXIE_AGENT_TOKEN", Value: token}}, AdoptEarlier: kept.CoordinatorToken != ""}
 	notifier := &agenttest.RecordingNotifier{}
 	deps := Deps{
 		Host: NewAgentHost(host, clock, recipe), Voice: &agenttest.RecordingVoiceLink{}, Notifier: notifier,
-		Mascot: &agenttest.RecordingNotifier{}, Status: &agenttest.RecordingStatus{}, Launcher: &agenttest.FakeLauncher{},
+		Pixie: &agenttest.RecordingNotifier{}, Status: &agenttest.RecordingStatus{}, Launcher: &agenttest.FakeLauncher{},
 		Store: store, Clock: clock, IDs: &agenttest.SeqIds{}, Kept: &agenttest.FakeKept{},
 	}
 	r := &wRig{host: host, worktrees: wt, tokens: &agenttest.FakeTokens{}, recipes: &agenttest.FakeRecipes{}, clock: clock, kept: deps.Kept.(*agenttest.FakeKept)}
@@ -152,10 +152,10 @@ func TestStartWorkerMakesAWorktreeStartsThePaneAndSendsTheBrief(t *testing.T) {
 		if spec.Cwd != "/projects/focus/.worktrees/upload" {
 			t.Fatal(spec.Cwd)
 		}
-		if spec.Tab.Label != wName+" · job_000000000001 · Fix the flaky upload test." || spec.Tab.Meta["branch"] != "mascot/upload" {
+		if spec.Tab.Label != wName+" · job_000000000001 · Fix the flaky upload test." || spec.Tab.Meta["branch"] != "pixie/upload" {
 			t.Fatalf("%+v", spec.Tab)
 		}
-		if !slices.Equal(spec.Env, []EnvVar{{Key: "MASCOT_AGENT_TOKEN", Value: "tok-focus-upload"}}) {
+		if !slices.Equal(spec.Env, []EnvVar{{Key: "PIXIE_AGENT_TOKEN", Value: "tok-focus-upload"}}) {
 			t.Fatal(spec.Env)
 		}
 		if r.recipes.Prepared()[0].Token != "tok-focus-upload" {
@@ -378,7 +378,7 @@ func TestTheStartWaitsForTheInputBoxBeforeTheBrief(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		r := withJob(t, true)
 		codexLike(r)
-		r.host.SetScreen(wName, "Booting MCP server: mascot")
+		r.host.SetScreen(wName, "Booting MCP server: pixie")
 		host := r.host
 		bad := make(chan string, 1)
 		go func() {
@@ -412,9 +412,9 @@ func TestAStartWhoseInputBoxNeverShowsFails(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		r := withJob(t, true)
 		codexLike(r)
-		r.host.SetScreen(wName, "Starting MCP servers (0/1): mascot\n\n  \x1b[2m⠋ Booting\x07 the mascot MCP server, which takes a long while to come up, longer than it should\n\n")
+		r.host.SetScreen(wName, "Starting MCP servers (0/1): pixie\n\n  \x1b[2m⠋ Booting\x07 the pixie MCP server, which takes a long while to come up, longer than it should\n\n")
 		began := time.Now()
-		why := "Codex didn't become ready (its screen ends with \"[2m⠋ Booting the mascot MCP server, which takes a long while to come up, longer \"); open Codex in /projects/focus to see why."
+		why := "Codex didn't become ready (its screen ends with \"[2m⠋ Booting the pixie MCP server, which takes a long while to come up, longer t\"); open Codex in /projects/focus to see why."
 		// The last line, control characters dropped, 80 chars.
 		wantErr(t, call(r, Coordinator, startCall("focus")), why)
 		// Inside the start budget: until ReadyWindow after the start began (the fake starts at once).
@@ -484,7 +484,7 @@ func TestTheInputBoxMustShowOnEveryReadForTheSettle(t *testing.T) {
 		host := r.host
 		go func() {
 			time.Sleep(2 * time.Second)
-			host.SetScreen(wName, "Booting MCP server: mascot")
+			host.SetScreen(wName, "Booting MCP server: pixie")
 			time.Sleep(time.Second)
 			host.SetScreen(wName, box)
 		}()
@@ -501,7 +501,7 @@ func TestASettleBegunNearTheDeadlineRunsToItsEnd(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		r := withJob(t, true)
 		codexLike(r)
-		r.host.SetScreen(wName, "Booting MCP server: mascot")
+		r.host.SetScreen(wName, "Booting MCP server: pixie")
 		host := r.host
 		go func() {
 			time.Sleep(ReadyWindow - time.Second)

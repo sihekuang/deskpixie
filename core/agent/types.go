@@ -334,7 +334,7 @@ type AgentSpec struct {
 	Kind AgentKind
 	Cwd  string
 	Args []string
-	// Env is the per-tab environment. Only MASCOT_AGENT_TOKEN.
+	// Env is the per-tab environment. Only PIXIE_AGENT_TOKEN.
 	Env []EnvVar
 	// Tab is what the tab shows (label "" = Name), where the host supports it.
 	Tab TabLabel
@@ -429,7 +429,7 @@ type WorkerLaunch struct {
 	Repo string
 	// Worktree is `<repo>/.worktrees/<slug>`: the worker's cwd.
 	Worktree string
-	// Token is the worker's bearer (MASCOT_AGENT_TOKEN).
+	// Token is the worker's bearer (PIXIE_AGENT_TOKEN).
 	Token string
 }
 
@@ -559,7 +559,7 @@ const (
 	CallReportBlocked
 )
 
-// McpCall is one mascot MCP tool call, arguments checked and cleaned. Only the fields of its
+// McpCall is one pixie MCP tool call, arguments checked and cleaned. Only the fields of its
 // Kind are set: StartWorker → Worker; MessageWorker → Name, Text; StopWorker → Name;
 // ReportProgress → Summary; ReportResult → Outcome, Summary, Evidence; AskCoordinator →
 // Question, Options; ReportBlocked → Reason.
@@ -600,7 +600,7 @@ const (
 	HookStop HookEventKind = iota
 	HookPermission
 	HookPostTool
-	// HookMcp is a mascot MCP tool call; answered on McpReply.
+	// HookMcp is a pixie MCP tool call; answered on McpReply.
 	HookMcp
 	// HookState is the agent's own status report (Claude Code hooks on the tmux session host,
 	// which detects no status itself): Status is Working, Idle or Blocked.
@@ -623,7 +623,7 @@ type HookEvent struct {
 	McpReply  chan<- McpReply
 }
 
-// Cue is a one-shot mascot animation the delegation side asks for.
+// Cue is a one-shot pixie animation the delegation side asks for.
 type Cue int
 
 const (

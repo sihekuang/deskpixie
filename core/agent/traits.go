@@ -105,7 +105,7 @@ type Notifier interface {
 	Notify(title, body string)
 }
 
-type MascotCue interface {
+type PixieCue interface {
 	Cue(cue Cue)
 }
 
@@ -130,13 +130,13 @@ type WorktreeFs interface {
 	// ResolveRepo: repo (a folder name under the projects root, or a path) as a canonical git
 	// repository root strictly inside the projects root, and not the coordinator's workspace.
 	ResolveRepo(repo string) (string, error) // WorktreeError
-	// Ensure: `<repo>/.worktrees/<slug>` on branch `mascot/<slug>` (an existing one is reused),
+	// Ensure: `<repo>/.worktrees/<slug>` on branch `pixie/<slug>` (an existing one is reused),
 	// with `.worktrees/` in the repo's `.git/info/exclude`. Returns the worktree's canonical path.
 	Ensure(repo, slug string) (string, error) // WorktreeError
 	// Audit re-checks the git links of `<repo>/.worktrees/<slug>`, which a sandboxed worker
 	// could write; an error when the admin folder can't be identified safely (nothing changed).
 	Audit(repo, slug string) error
-	// ForeignSlugs: names in `<repo>/.worktrees/` that are not a worktree on `mascot/<name>`.
+	// ForeignSlugs: names in `<repo>/.worktrees/` that are not a worktree on `pixie/<name>`.
 	ForeignSlugs(repo string) []string
 }
 

@@ -79,8 +79,8 @@ func WithStateHooks(text string) (string, error) {
 			"type":           "http",
 			"url":            base + "/state",
 			"timeout":        json.Number(strconv.FormatUint(h.Secs, 10)),
-			"headers":        map[string]any{"Authorization": "Bearer $MASCOT_AGENT_TOKEN"},
-			"allowedEnvVars": []any{"MASCOT_AGENT_TOKEN"},
+			"headers":        map[string]any{"Authorization": "Bearer $PIXIE_AGENT_TOKEN"},
+			"allowedEnvVars": []any{"PIXIE_AGENT_TOKEN"},
 		}}}
 		if h.Event == "Notification" {
 			group["matcher"] = stateNotifications
@@ -115,7 +115,7 @@ func ValidateStateHooks(text string, port uint16) error {
 				hook, _ := item.(map[string]any)
 				env, _ := hook["allowedEnvVars"].([]any)
 				found = found || (hook["type"] == "http" && hook["url"] == url &&
-					get(hook, "headers", "Authorization") == "Bearer $MASCOT_AGENT_TOKEN" && len(env) == 1 && env[0] == "MASCOT_AGENT_TOKEN")
+					get(hook, "headers", "Authorization") == "Bearer $PIXIE_AGENT_TOKEN" && len(env) == 1 && env[0] == "PIXIE_AGENT_TOKEN")
 			}
 		}
 		if !found {
@@ -181,7 +181,7 @@ func isSpace(r rune) bool { return r == ' ' || r == '\n' || r == '\t' || r == '\
 
 // ValidateSettings: the settings must be valid JSON whose hooks are exactly hooks' events, as
 // loopback HTTP hooks on port that carry the bearer only by env reference, each with its
-// timeout; they must deny AskUserQuestion (#91) and allow the mascot MCP tools.
+// timeout; they must deny AskUserQuestion (#91) and allow the pixie MCP tools.
 func ValidateSettings(text string, port uint16, hooks []HookTimeout) error {
 	dec := json.NewDecoder(strings.NewReader(text))
 	dec.UseNumber()
@@ -216,8 +216,8 @@ func ValidateSettings(text string, port uint16, hooks []HookTimeout) error {
 			return fmt.Errorf("%s hook is not http://127.0.0.1:%d", h.Event, port)
 		}
 		env, _ := hook["allowedEnvVars"].([]any)
-		if get(hook, "headers", "Authorization") != "Bearer $MASCOT_AGENT_TOKEN" || len(env) != 1 || env[0] != "MASCOT_AGENT_TOKEN" {
-			return fmt.Errorf("%s hook must send Bearer $MASCOT_AGENT_TOKEN", h.Event)
+		if get(hook, "headers", "Authorization") != "Bearer $PIXIE_AGENT_TOKEN" || len(env) != 1 || env[0] != "PIXIE_AGENT_TOKEN" {
+			return fmt.Errorf("%s hook must send Bearer $PIXIE_AGENT_TOKEN", h.Event)
 		}
 		n, ok := hook["timeout"].(json.Number)
 		secs, err := strconv.ParseUint(string(n), 10, 64)
@@ -230,8 +230,8 @@ func ValidateSettings(text string, port uint16, hooks []HookTimeout) error {
 		return errors.New("permissions.deny must include AskUserQuestion")
 	}
 	allow, _ := get(v, "permissions", "allow").([]any)
-	if !slices.Contains(allow, any("mcp__mascot")) {
-		return errors.New("permissions.allow must include mcp__mascot")
+	if !slices.Contains(allow, any("mcp__pixie")) {
+		return errors.New("permissions.allow must include mcp__pixie")
 	}
 	return nil
 }
@@ -322,7 +322,7 @@ func InstallFor(paths Paths, port uint16, projectsRoot string, stateHooks bool) 
 }
 
 // CoordinatorArgs are Claude Code's arguments for the coordinator (AgentHost adds --continue
-// on re-creation). With workers on it also gets the mascot MCP server (--mcp-config). A blank
+// on re-creation). With workers on it also gets the pixie MCP server (--mcp-config). A blank
 // model is none.
 func CoordinatorArgs(paths Paths, model string, workers bool) []string {
 	args := []string{"--permission-mode", "auto", "--settings", paths.Settings, "--add-dir", paths.Canvas}
