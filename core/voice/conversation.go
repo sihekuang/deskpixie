@@ -135,6 +135,9 @@ type Effect struct {
 type ConversationConfig struct {
 	IdleTimeout time.Duration // silence timeout while listening
 	HoldTimeout time.Duration // silence timeout while a hold is on; 0 = IdleTimeout
+	// ProviderTurns: the provider decides whether to speak after a tool result
+	// (Capabilities.OwnsTurnTaking), so a finished tool doesn't make the turn wait for a reply.
+	ProviderTurns bool
 }
 
 // DefaultConversationConfig: 7 s idle, 180 s hold-open.
@@ -154,6 +157,8 @@ type Conversation struct {
 	idleTimeout time.Duration
 	holdTimeout time.Duration
 	held        bool
+	// providerTurns: ConversationConfig.ProviderTurns.
+	providerTurns bool
 
 	openResponses        int  // ResponseCreated minus ResponseDone
 	responseAudioPending bool // a response was created and its first audio has not arrived
@@ -177,11 +182,12 @@ func NewConversation(cfg ConversationConfig) *Conversation {
 		hold = cfg.IdleTimeout
 	}
 	return &Conversation{
-		phase:        PhaseIdle,
-		idleTimeout:  cfg.IdleTimeout,
-		holdTimeout:  hold,
-		playbackIdle: true,
-		toolTurns:    map[string]uint64{},
+		phase:         PhaseIdle,
+		idleTimeout:   cfg.IdleTimeout,
+		holdTimeout:   hold,
+		providerTurns: cfg.ProviderTurns,
+		playbackIdle:  true,
+		toolTurns:     map[string]uint64{},
 	}
 }
 
@@ -322,8 +328,11 @@ func (c *Conversation) Step(in Input, now time.Time) []Effect {
 					// Ends once the reply below has played; the user talking cancels it.
 					c.ending = true
 				}
-				// The adapter asks the model for a reply that uses the result.
-				c.turnReplySeen = false
+				// The adapter asks the model for a reply that uses the result. A provider that
+				// owns turn-taking may not reply; its next reply opens a response anyway.
+				if !c.providerTurns {
+					c.turnReplySeen = false
+				}
 				if c.phase == PhaseThinking {
 					// The follow-up reply gets a full watchdog period.
 					c.thinkingSince = now
@@ -416,7 +425,11 @@ func (c *Conversation) onModel(ev Event, now time.Time, fx []Effect) []Effect {
 		}
 	case EvError:
 		if ev.Fatal {
-			fx = c.fail(Failure{Kind: FailModelError}, now, fx)
+			f := Failure{Kind: FailModelError}
+			if ev.Failure != nil {
+				f = *ev.Failure
+			}
+			fx = c.fail(f, now, fx)
 		}
 	}
 	return fx

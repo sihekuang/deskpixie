@@ -10,6 +10,7 @@ package voice
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"os"
 	"strings"
@@ -237,6 +238,9 @@ func NewRuntime(m Model, c audio.Cleaner, cfg RuntimeConfig, emit func(UIEvent))
 		tools = DefaultTools()
 	}
 	cfg.Session.Tools = tools.Specs()
+	if CapabilitiesOf(m).OwnsTurnTaking {
+		cfg.Conversation.ProviderTurns = true
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	r := &Runtime{
 		model:     m,
@@ -610,7 +614,12 @@ func (r *Runtime) onConnected(c connectResult) {
 		go func() { _ = c.sess.Close() }() // a stale attempt
 	case current:
 		r.emit(UIEvent{Kind: "error", Text: "connect: " + c.err.Error()})
-		r.input(FailedInput(Failure{Kind: FailConnectionLost}))
+		f := Failure{Kind: FailConnectionLost}
+		var fe FailureError
+		if errors.As(c.err, &fe) {
+			f = fe.Failure()
+		}
+		r.input(FailedInput(f))
 	}
 }
 

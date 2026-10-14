@@ -38,6 +38,9 @@ type SessionConfig struct {
 	TurnDetection              TurnDetection
 	NoisyRoom                  bool
 	ProviderNoiseReduction     bool
+	// BackendModel and BackendInstructions are for providers that run tools on a separate
+	// backend model (GPT-Live's Responses delegation); the others ignore them.
+	BackendModel, BackendInstructions string
 }
 
 type EventKind int
@@ -65,6 +68,7 @@ type Event struct {
 	Text     string          // EvTranscript
 	Fatal    bool            // EvError
 	Message  string          // EvError
+	Failure  *Failure        // EvError with Fatal: the status line to show; nil = FailModelError
 }
 
 type CommandKind int
@@ -92,6 +96,26 @@ type Session interface {
 	Send(Command) error
 	Events() <-chan Event
 	Close() error
+}
+
+// Capabilities are what a provider can and can't do; see CapabilityReporter.
+type Capabilities struct {
+	// Truncate: CmdCancelResponse.HeardMs is meaningful (the model forgets what wasn't heard).
+	Truncate bool
+	// OwnsTurnTaking: the provider decides barge-in and whether to speak after a tool result;
+	// its speech and response events are synthesized.
+	OwnsTurnTaking bool
+}
+
+// CapabilityReporter is optional for a Model; models without it get {Truncate: true}.
+type CapabilityReporter interface{ Capabilities() Capabilities }
+
+// CapabilitiesOf is m's capabilities.
+func CapabilitiesOf(m Model) Capabilities {
+	if r, ok := m.(CapabilityReporter); ok {
+		return r.Capabilities()
+	}
+	return Capabilities{Truncate: true}
 }
 
 // Model is a speech-to-speech provider.
