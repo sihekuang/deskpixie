@@ -34,6 +34,7 @@ struct SettingsWindowView: View {
             }
             .listStyle(.sidebar)
             .frame(width: 200)
+            .ignoresSafeArea(edges: .top)
 
             SettingsDetailView(model: model, tab: SettingsLayout.tabs[selectedIndex])
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -144,6 +145,11 @@ private final class WindowObservers {
         window.identifier = NSUserInterfaceItemIdentifier("settings")
         window.setFrameAutosaveName(SettingsWindowView.frameName)
         window.level = .normal
+        // The sidebar and the page run up under a clear title bar (no grey strip above them);
+        // the page header names the page, so the window title is hidden.
+        window.styleMask.insert(.fullSizeContentView)
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
         window.collectionBehavior.insert([.moveToActiveSpace, .fullScreenAuxiliary])
         // First open: the window exists only now; bring it in front of other apps' windows.
         WindowFocus.bringForward(window, app: NSApp, showInDock: true)
