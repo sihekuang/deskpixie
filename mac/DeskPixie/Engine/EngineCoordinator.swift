@@ -31,6 +31,9 @@ final class EngineCoordinator {
     private lazy var canvas = CanvasWindowController(engine: engine, worker: worker)
 
     private(set) var mascot: MascotController?
+    /// The updates bubble beside Bit, and the presence that holds its pops (both once Bit is up).
+    private var bubble: UpdatesBubbleController?
+    private var presence: PresenceMonitor?
     /// The combo the Carbon hotkey is bound to right now (nil = none).
     var boundCombo: String? { hotkeys.boundCombo }
     /// Settings platform, for formatting combos in status lines.
@@ -95,6 +98,7 @@ final class EngineCoordinator {
                 mascot = m
                 m.onDoubleClick = { [weak self] in self?.talk() }
                 m.show()
+                startBubble(mascot: m, settings: snapshot.flatMap(BubbleSettingsValues.fromSnapshot) ?? .defaults)
             } else {
                 appState.engineError = "Could not load the mascot pack"
             }
@@ -120,6 +124,8 @@ final class EngineCoordinator {
         hotkeys.stop()
         pump.stop()
         voiceIO.stop()
+        presence?.stop()
+        bubble?.stop()
         mascot?.stop()
         // Quitting while the core is still starting: dp_configure may be blocked on another
         // thread; tearing the core down under it is unsafe, and there is nothing to save.
@@ -384,8 +390,8 @@ final class EngineCoordinator {
             notifier.handle(ev)
         case .canvasOpen(let url, let title):
             canvas.show(url: url, title: title)
-        case .updates:
-            break // Not shown yet: the updates bubble window is still to come.
+        case .updates(let lines):
+            bubble?.apply(lines: lines)
         }
     }
 
@@ -407,6 +413,35 @@ final class EngineCoordinator {
             // nil: the worker closed (quitting); leave the mascot alone.
             guard let snapshot else { return }
             self?.mascot?.apply(settings: snapshot.flatMap(MascotSettings.fromSnapshot) ?? .defaults)
+            self?.applyBubbleSettings(snapshot.flatMap(BubbleSettingsValues.fromSnapshot) ?? .defaults)
+        }
+    }
+
+    /// The updates bubble and presence (`notifications.bubble.*`, `notifications.awayAfterMins`).
+    private func applyBubbleSettings(_ s: BubbleSettingsValues) {
+        bubble?.apply(settings: s)
+        presence?.awayAfterMins = s.awayAfterMins
+    }
+
+    /// Creates the updates bubble beside Bit and the presence monitor. Away/back goes to the
+    /// bubble (held pops) and to the core (`presence.set`: no chime, no conversation by Bit).
+    private func startBubble(mascot m: MascotController, settings: BubbleSettingsValues) {
+        let b = UpdatesBubbleController(engine: engine, worker: worker, mascot: m)
+        b.onTalk = { [weak self] in self?.talk() }
+        bubble = b
+        let p = PresenceMonitor()
+        presence = p
+        applyBubbleSettings(settings)
+        let engine = engine, worker = worker
+        p.onChange = { [weak self] away in
+            self?.bubble?.presence(present: !away)
+            worker.async {
+                do {
+                    _ = try engine.call("presence.set", PresenceArgs(away: away))
+                } catch {
+                    Self.log.error("presence.set: \(String(describing: error), privacy: .public)")
+                }
+            }
         }
     }
 
@@ -431,4 +466,9 @@ final class EngineCoordinator {
         default: return String(describing: error)
         }
     }
+}
+
+/// `presence.set` arguments.
+private struct PresenceArgs: Encodable, Sendable {
+    let away: Bool
 }
