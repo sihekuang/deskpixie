@@ -14,13 +14,22 @@ const (
 	FailAudioDeviceChanged
 	// FailSetup: setup problems such as an unknown provider name; Failure.Msg follows "Voice: ".
 	FailSetup
+	// FailNoAccess: the key is valid but has no access to the model; Failure.Msg names it.
+	FailNoAccess
 )
 
 // Failure is why a conversation failed; each maps to one tray status line (spec §7).
 type Failure struct {
 	Kind FailureKind
 	Var  string // FailNoAPIKey: env var name, "" when unknown (Rust's None)
-	Msg  string // FailSetup
+	Msg  string // FailSetup, FailNoAccess, and FailModelError when set
+}
+
+// FailureError is an error that knows its tray status line. Runtime uses it for Connect errors;
+// any other error is FailConnectionLost.
+type FailureError interface {
+	error
+	Failure() Failure
 }
 
 // NoAPIKey builds FailNoAPIKey; pass "" when the variable name is unknown.
@@ -44,11 +53,16 @@ func (f Failure) Status() string {
 	case FailConnectionLost:
 		return "Voice: connection lost"
 	case FailModelError:
+		if f.Msg != "" {
+			return "Voice: " + f.Msg
+		}
 		return "Voice: model error"
 	case FailAudioDeviceChanged:
 		return "Voice: audio device changed"
 	case FailSetup:
 		return "Voice: " + f.Msg
+	case FailNoAccess:
+		return "Voice: this API key has no " + f.Msg + " access"
 	}
 	return "Voice: error"
 }

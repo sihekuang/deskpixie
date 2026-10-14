@@ -5,6 +5,7 @@ package voice
 
 import (
 	"os"
+	"slices"
 	"strings"
 )
 
@@ -17,7 +18,7 @@ type SecretSource interface {
 }
 
 // providerKeys: provider registry name → the environment variable that holds its key.
-var providerKeys = [...][2]string{{"openai-realtime", "OPENAI_API_KEY"}, {"gemini-live", "GEMINI_API_KEY"}}
+var providerKeys = [...][2]string{{"openai-realtime", "OPENAI_API_KEY"}, {"gemini-live", "GEMINI_API_KEY"}, {"openai-live", "OPENAI_API_KEY"}}
 
 // VarFor is the environment variable holding provider's key.
 func VarFor(provider string) (string, bool) {
@@ -29,11 +30,14 @@ func VarFor(provider string) (string, bool) {
 	return "", false
 }
 
-// KeyVars lists every provider key variable, e.g. for scrubbing child-process environments.
+// KeyVars lists every provider key variable once, e.g. for scrubbing child-process
+// environments.
 func KeyVars() []string {
 	out := make([]string, 0, len(providerKeys))
 	for _, p := range providerKeys {
-		out = append(out, p[1])
+		if !slices.Contains(out, p[1]) {
+			out = append(out, p[1])
+		}
 	}
 	return out
 }

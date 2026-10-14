@@ -34,6 +34,7 @@ import (
 	"github.com/sihekuang/deskpixie/core/voice"
 	"github.com/sihekuang/deskpixie/core/voice/gemini"
 	"github.com/sihekuang/deskpixie/core/voice/openai"
+	"github.com/sihekuang/deskpixie/core/voice/openailive"
 )
 
 const appSupportID = "com.sihekuang.deskpixie"
@@ -383,6 +384,11 @@ func liveProviders() []liveProvider {
 			model: func(_ *liveWireLog, _ *testing.T) voice.Model { return gemini.New("") },
 			cfg:   voice.SessionConfig{Model: gemini.DefaultModel, Voice: gemini.DefaultVoice, TurnDetection: voice.TurnSemantic},
 		},
+		{
+			name:  openailive.Name,
+			model: func(_ *liveWireLog, _ *testing.T) voice.Model { return openailive.New("") },
+			cfg:   voice.SessionConfig{Model: openailive.DefaultModel, Voice: openailive.DefaultVoice},
+		},
 	}
 }
 
@@ -438,6 +444,16 @@ func TestLiveVoiceProviders(t *testing.T) {
 					return
 				}
 				r.say(question) // talk over Bit
+				if p.name == openailive.Name {
+					// GPT-Live owns barge-in: it yields, then the user's turn starts.
+					started := r.liveSpy.count(voice.EvSpeechStarted)
+					r.waitFor("GPT-Live yields and the user's turn starts", 10*time.Second, func() bool {
+						return r.liveSpy.count(voice.EvSpeechStarted) > started
+					})
+					r.rt.Hotkey()
+					t.Logf("%s played=%d ms flushes=%d", r.liveSpy.summary(), r.playedMs(), r.flushed())
+					return
+				}
 				r.waitFor("an interrupt (cancel sent and playback flushed)", 8*time.Second, func() bool {
 					return len(r.liveSpy.cancelled()) > 0 && r.flushed() > 0
 				})

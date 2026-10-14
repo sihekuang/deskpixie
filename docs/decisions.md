@@ -31,3 +31,8 @@
 ## 2026-10-13 — Keep agents running when the app quits
 **Decision:** `agent.keepPanesOnQuit` defaults to on. A quit saves the coordinator's and live workers' tokens and plans to a private `agent/kept.json`; the next start restores the tokens, adopts the still-running coordinator (no replace, no `--continue`) and workers, keeps their jobs open, and asks them to re-send results lost while the app was down (spec `docs/superpowers/specs/2026-10-13-keep-agents-on-quit.md`).
 **Basis:** User's choice.
+
+## 2026-10-13 — GPT-Live adapter mechanics
+**Decision:** Backend model travels in SessionConfig (no ModelFactory change); the backend prompt reuses Bit's full instructions instead of splitting delegation.md; unanswered tool calls don't hold a reply open.
+**Trigger:** Implementing the approved GPT-Live spec (PR #50).
+**Basis:** Existing project convention: the conformance suite (core/voice/voicetest/conformance.go) and runtime answer tool calls after ResponseDone; SessionConfig already carries per-session provider settings (core/voice/types.go).

@@ -81,7 +81,7 @@ func TestKeyVarsListsEveryProvidersVariable(t *testing.T) {
 	if !slices.Equal(vars, []string{"OPENAI_API_KEY", "GEMINI_API_KEY"}) {
 		t.Fatalf("got %v", vars)
 	}
-	for _, p := range []string{"openai-realtime", "gemini-live"} {
+	for _, p := range []string{"openai-realtime", "gemini-live", "openai-live"} {
 		v, ok := VarFor(p)
 		if !ok || !slices.Contains(vars, v) {
 			t.Errorf("%s -> %q", p, v)
