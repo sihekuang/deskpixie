@@ -109,7 +109,7 @@ func (c *AgentController) expireQuestion(j Job, now Millis, fx *[]Effect) {
 		return
 	}
 	*fx = append(*fx, logEffect(fmt.Sprintf("job %s: question unanswered for 30 minutes, closed", j.ID)))
-	c.narrator.Forget(j.ID)
+	c.forgetUpdates(j.ID)
 	c.stopJobWorkers(j.ID, fx)
 	c.saveJob(j.ID, fx)
 	c.deliver(NewLine(LineInfo, "Agent: closed a question you didn't answer: "+short(j.Task)), now, fx)

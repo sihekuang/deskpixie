@@ -492,8 +492,8 @@ func TestProgressIsRecordedAndNarratedOnlyWhileOpen(t *testing.T) {
 		t.Fatal(got)
 	}
 	c.Step(voiceOpened(), T0)
-	_, _, fx = mcp(t, c, workerName, McpCall{Kind: CallReportProgress, Summary: "writing the fix"}, T0+1)
-	wantContains(t, fx, eInject("Agent progress: writing the fix"))
+	mcp(t, c, workerName, McpCall{Kind: CallReportProgress, Summary: "writing the fix"}, T0+1)
+	wantContains(t, c.Step(TickInput(), T0+1+UpdateQuietMs), eInject("Agent progress: writing the fix"))
 }
 
 func TestAReportAfterTheJobEndedIsRefused(t *testing.T) {
@@ -649,8 +649,11 @@ func TestAResultIsSpokenToTheUserAtOnceAndStillReachesTheCoordinator(t *testing.
 	call := McpCall{Kind: CallReportResult, Outcome: OutcomeDone, Summary: "Fixed the flaky test", Evidence: "go test passed; commit abc123"}
 	v, err, fx := mcp(t, c, workerName, call, T0)
 	wantToolOK(t, v, err, map[string]any{"ok": true})
-	wantContains(t, fx, eInject("The upload worker in focus says it's done: Fixed the flaky test."))
-	fx = coordinatorTurnEnds(c, T0+10)
+	if anyKind(fx, EfInject) {
+		t.Fatalf("held until the job is quiet: %s", fmtEffects(fx))
+	}
+	wantContains(t, c.Step(TickInput(), T0+UpdateQuietMs), eInject("The upload worker in focus says it's done: Fixed the flaky test."))
+	fx = coordinatorTurnEnds(c, T0+UpdateQuietMs+10)
 	wantPrompts(t, fx, fmt.Sprintf("Worker focus-upload reports done: \"Fixed the flaky test\" Evidence: \"go test passed; commit abc123\"\n[ref %s]", job(1)))
 }
 
@@ -659,23 +662,24 @@ func TestAFailedResultIsSpokenAsTheWorkersOwnWord(t *testing.T) {
 	running(t, c)
 	c.Step(voiceOpened(), T0)
 	call := McpCall{Kind: CallReportResult, Outcome: OutcomeFailed, Summary: "The test needs a network", Evidence: "none given"}
-	_, _, fx := mcp(t, c, workerName, call, T0)
-	wantContains(t, fx, eInject("The upload worker in focus couldn't finish: The test needs a network."))
+	mcp(t, c, workerName, call, T0)
+	wantContains(t, c.Step(TickInput(), T0+UpdateQuietMs), eInject("The upload worker in focus couldn't finish: The test needs a network."))
 }
 
 func TestABlockIsSpokenToo(t *testing.T) {
 	c := speakingCtl()
 	running(t, c)
 	c.Step(voiceOpened(), T0)
-	_, _, fx := mcp(t, c, workerName, McpCall{Kind: CallReportBlocked, Reason: "I need a login for the staging server"}, T0)
-	wantContains(t, fx, eInject("The upload worker in focus is stuck: I need a login for the staging server."))
+	mcp(t, c, workerName, McpCall{Kind: CallReportBlocked, Reason: "I need a login for the staging server"}, T0)
+	wantContains(t, c.Step(TickInput(), T0+UpdateQuietMs), eInject("The upload worker in focus is stuck: I need a login for the staging server."))
 }
 
 func TestAResultWithTheConversationClosedIsANotificationAndOutboxed(t *testing.T) {
 	c := speakingCtl()
 	running(t, c)
 	call := McpCall{Kind: CallReportResult, Outcome: OutcomeDone, Summary: "Fixed the flaky test", Evidence: "x"}
-	_, _, fx := mcp(t, c, workerName, call, T0)
+	mcp(t, c, workerName, call, T0)
+	fx := c.Step(TickInput(), T0+UpdateQuietMs)
 	wantContains(t, fx, eNotify("The upload worker in focus says it's done: Fixed the flaky test."))
 	if !anyKind(fx, EfAppend) || anyKind(fx, EfInject) {
 		t.Fatal(fmtEffects(fx))

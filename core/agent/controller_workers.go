@@ -284,9 +284,7 @@ func (c *AgentController) reportProgress(agent, summary string, now Millis, fx *
 	phrase := maskPendingTokens(summary, c.pendingTokens())
 	c.jobs.SetProgress(job, phrase, now)
 	c.saveJob(job, fx)
-	if c.settings.Narration && c.voiceOpen && phrase != "" && c.narrator.Allow(job, now) {
-		c.narrate(phrase, fx)
-	}
+	c.holdProgress(job, phrase, now)
 	return map[string]any{"ok": true}, nil
 }
 
@@ -303,8 +301,10 @@ func (c *AgentController) report(agent, line string, now Millis, fx *[]Effect) e
 	return nil
 }
 
-// sayForWorker tells the user a worker's own report right away, by the same route as the
-// coordinator's replies (spoken in an open conversation, else a notification and the outbox).
+// sayForWorker tells the user a worker's own report, by the same route as the coordinator's
+// replies (spoken in an open conversation, else a notification and the outbox), debounced:
+// held per job until it is quiet, a repeat dropped, superseded by the coordinator's reply
+// (Updates), and under the per-minute cap.
 // Only with agent.workers.speakResults on (off: just as before, the coordinator alone hears it).
 // The coordinator still gets the report and gives its own, checked reply. Called after report
 // accepted it, so the job is open; a worker being stopped (its job ended or the coordinator
@@ -319,7 +319,7 @@ func (c *AgentController) sayForWorker(agent string, line func(who string) strin
 	}
 	text := maskPendingTokens(line(WorkerWho(w.Plan)), c.pendingTokens())
 	if text != "" {
-		c.deliver(NewLine(LineInfo, text), now, fx)
+		c.updates.AddReport(w.Plan.Job, agent, text, now)
 	}
 }
 

@@ -417,20 +417,35 @@ func TestEnsureCoordinatorStartsItOnce(t *testing.T) {
 
 // ---------- narration ----------
 
-func TestNarrationIsSpokenAtMostEvery30SecondsWhileOpen(t *testing.T) {
+func TestNarrationIsSpokenOnceTheJobIsQuietAtMostEvery30Seconds(t *testing.T) {
 	c := workingOnJob1()
 	openVoice(c)
-	edit := func(now Millis) []Effect {
-		return visible(c.Step(PostToolInput(Coordinator, "Edit", map[string]any{"file_path": "/x/notes.md"}), now))
+	edit := func(file string, now Millis) []Effect {
+		return visible(c.Step(PostToolInput(Coordinator, "Edit", map[string]any{"file_path": "/x/" + file}), now))
 	}
-	wantEffects(t, edit(T0), eInject("Agent progress: editing notes.md"))
-	wantNone(t, edit(T0+29_999))
-	if got := edit(T0 + 30_000); len(got) != 1 {
-		t.Fatalf("%s", fmtEffects(got))
-	}
-	if got := lastProgress(t, c); got != "editing notes.md" {
+	wantNone(t, edit("notes.md", T0), "held until quiet")
+	wantNone(t, edit("plan.md", T0+5_000), "held until quiet")
+	wantNone(t, visible(c.Step(TickInput(), T0+5_000+UpdateQuietMs-1)))
+	wantEffects(t, visible(c.Step(TickInput(), T0+5_000+UpdateQuietMs)), eInject("Agent progress: editing plan.md"))
+	// Quiet again 20 s later, but within 30 s of the last narration: it waits for the interval.
+	at := T0 + 5_000 + UpdateQuietMs
+	wantNone(t, edit("main.go", at+1))
+	wantNone(t, visible(c.Step(TickInput(), at+UpdateQuietMs+1)))
+	wantEffects(t, visible(c.Step(TickInput(), at+NarrateIntervalMs)), eInject("Agent progress: editing main.go"))
+	if got := lastProgress(t, c); got != "editing main.go" {
 		t.Fatalf("last_progress %q", got)
 	}
+}
+
+func TestBusyNarrationIsStillSpokenAfterTheMaxHold(t *testing.T) {
+	c := workingOnJob1()
+	openVoice(c)
+	var fx []Effect
+	for now := T0; now <= T0+UpdateMaxHoldMs; now += 5_000 {
+		c.Step(PostToolInput(Coordinator, "Bash", map[string]any{"description": fmt.Sprintf("step %d", now)}), now)
+		fx = append(fx, visible(c.Step(TickInput(), now))...)
+	}
+	wantEffects(t, fx, eInject(fmt.Sprintf("Agent progress: step %d", T0+UpdateMaxHoldMs)))
 }
 
 func TestNarrationIsSilentWhenClosedButStillRecorded(t *testing.T) {
@@ -574,7 +589,8 @@ func TestABouncedQuestionWhoseRequestExpiredIsDroppedFromReplay(t *testing.T) {
 func TestBouncedNarrationIsDropped(t *testing.T) {
 	c := workingOnJob1()
 	openVoice(c)
-	fx := visible(c.Step(PostToolInput(Coordinator, "Edit", map[string]any{"file_path": "/x/notes.md"}), T0))
+	c.Step(PostToolInput(Coordinator, "Edit", map[string]any{"file_path": "/x/notes.md"}), T0)
+	fx := visible(c.Step(TickInput(), T0+UpdateQuietMs))
 	if len(fx) == 0 || fx[0].Kind != EfInject {
 		t.Fatalf("%s", fmtEffects(fx))
 	}
@@ -732,8 +748,9 @@ func TestNarrationAndUnsolicitedTextAreMaskedToo(t *testing.T) {
 	c := workingOnJob1()
 	openVoice(c)
 	askPush(c, 7, T0)
-	fx := visible(c.Step(PostToolInput(Coordinator, "Edit", map[string]any{"file_path": "/x/hawk.md"}), T0))
-	wantEffects(t, fx, eInject("Agent progress: editing (word removed).md"))
+	c.Step(PostToolInput(Coordinator, "Edit", map[string]any{"file_path": "/x/hawk.md"}), T0)
+	fx := visible(c.Step(TickInput(), T0+UpdateQuietMs))
+	wantContains(t, fx, eInject("Agent progress: editing (word removed).md"))
 	// Ref-less, with job 1 the only one in flight: its reply, masked all the same.
 	fx = visible(stop(c, "<spoken>please approve hawk now</spoken>", T0))
 	wantContains(t, fx, eInject("Agent reply: please approve (word removed) now"))
