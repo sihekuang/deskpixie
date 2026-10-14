@@ -185,7 +185,7 @@ func TestWorkerNamesAreChecked(t *testing.T) {
 
 func TestTheBriefCarriesTheRulesAndTheTask(t *testing.T) {
 	b := WorkerBrief("focus", "fix-upload", "Fix the flaky upload test.")
-	for _, s := range []string{"branch pixie/fix-upload", "Never push", "report_result"} {
+	for _, s := range []string{"own branch (pixie/fix-upload, or mascot/fix-upload for a worktree from before the rename)", "Never push", "report_result"} {
 		if !strings.Contains(b, s) {
 			t.Errorf("missing %q", s)
 		}
