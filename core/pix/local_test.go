@@ -28,7 +28,7 @@ func (f *fakeLocal) Hook(ev string, p map[string]any) string {
 func (f *fakeLocal) SetDescription(s string) error { f.mu.Lock(); f.desc = s; f.mu.Unlock(); return nil }
 
 func serveFake(t *testing.T, f *fakeLocal) string {
-	sock := filepath.Join(t.TempDir(), "l.sock")
+	sock := filepath.Join(sockDir(t), "l.sock")
 	stop, err := ServeLocal(sock, f)
 	if err != nil {
 		t.Fatal(err)

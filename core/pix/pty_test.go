@@ -83,3 +83,13 @@ func TestHangupEndsChild(t *testing.T) {
 		t.Fatal("child still alive")
 	}
 }
+
+// sockDir is a short temp folder: Unix socket paths must stay under 104 bytes.
+func sockDir(t *testing.T) string {
+	d, err := os.MkdirTemp("/tmp", "pt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(d) })
+	return d
+}

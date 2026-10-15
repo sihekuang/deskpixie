@@ -14,7 +14,7 @@ func TestFindClaudeRecordAndPost(t *testing.T) {
 	home := t.TempDir()
 	sess := filepath.Join(home, ".claude", "sessions")
 	os.MkdirAll(sess, 0o700)
-	sock := filepath.Join(t.TempDir(), "c.sock")
+	sock := filepath.Join(sockDir(t), "c.sock")
 	l, err := net.Listen("unix", sock)
 	if err != nil {
 		t.Fatal(err)
