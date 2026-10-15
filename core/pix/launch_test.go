@@ -62,7 +62,7 @@ func TestPlanLaunchClaude(t *testing.T) {
 		t.Fatal(err)
 	}
 	hooks := settings["hooks"].(map[string]any)
-	for _, ev := range []string{"UserPromptSubmit", "PostToolUse", "Stop", "Notification"} {
+	for _, ev := range []string{"SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "Notification"} {
 		if hooks[ev] == nil {
 			t.Errorf("no %s hook", ev)
 		}

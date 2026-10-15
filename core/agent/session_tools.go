@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
+	"time"
 )
 
 // SessionTools are the coordinator's tools for the sessions you start yourself with pix
@@ -20,12 +22,12 @@ func SessionCatalog() []map[string]any {
 	return []map[string]any{
 		{
 			"name":        "list_sessions",
-			"description": "Claude Code and Codex sessions the user started themselves with pix (in WebStorm, iTerm, …): name, description, past descriptions, tool, repo, where, status. Match what the user says to a description; ask which one if several fit.",
+			"description": "Claude Code and Codex sessions the user started themselves with pix (in WebStorm, iTerm, …): name, description, past descriptions, tool, repo, folder, where, status, when it started and was last active. Match what the user says to a description; if several fit, ask which one by description (and where it runs or when it started), never by name.",
 			"inputSchema": objectSchema(map[string]any{}),
 		},
 		{
 			"name":        "message_session",
-			"description": "Send a message to a session the user started. It arrives as if the user typed it, when the session can take it.",
+			"description": "Send a message to a session the user started. It arrives as if the user typed it, when the session can take it. Only a reply with status \"sent\" means it was delivered.",
 			"inputSchema": objectSchema(stringProps(name, [2]string{"text", "The message."}), "name", "text"),
 		},
 		{
@@ -53,9 +55,24 @@ type SessionRow struct {
 	PastDescriptions []string `json:"past_descriptions,omitempty"`
 	Tool             string   `json:"tool"`
 	Repo             string   `json:"repo,omitempty"`
+	Cwd              string   `json:"cwd,omitempty"`
 	Where            string   `json:"where"`
 	Status           string   `json:"status"`
 	Reachable        bool     `json:"reachable"`
+	Started          string   `json:"started,omitempty"`     // "1h30m ago"
+	LastActive       string   `json:"last_active,omitempty"` // "3m ago"
+}
+
+// ago is how long before now t was, as list_sessions shows it ("" for no time).
+func ago(t, now time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	d := now.Sub(t).Truncate(time.Minute)
+	if d < time.Minute {
+		return "just now"
+	}
+	return strings.TrimSuffix(d.String(), "0s") + " ago" // 1h30m0s → 1h30m
 }
 
 // Describer sets your own description of a session.
@@ -86,14 +103,20 @@ func sessionTool(ctx context.Context, host SessionHost, call McpCall) McpReply {
 		if err != nil {
 			return McpReply{Err: err}
 		}
-		rows := []SessionRow{}
-		for _, a := range list {
-			if a.Origin != OriginUser || a.User == nil {
-				continue
+		rows, now := []SessionRow{}, time.Now()
+		list = slices.DeleteFunc(list, func(a AgentInfo) bool { return a.Origin != OriginUser || a.User == nil })
+		// The same project's sessions next to each other, oldest first.
+		slices.SortStableFunc(list, func(a, b AgentInfo) int {
+			if a.User.Repo != b.User.Repo {
+				return strings.Compare(a.User.Repo, b.User.Repo)
 			}
+			return a.User.Started.Compare(b.User.Started)
+		})
+		for _, a := range list {
 			u := a.User
 			rows = append(rows, SessionRow{Name: a.Name, Description: u.Description, PastDescriptions: u.PastDescriptions,
-				Tool: u.Tool, Repo: u.Repo, Where: u.Where, Status: a.Status.String(), Reachable: u.Reachable})
+				Tool: u.Tool, Repo: u.Repo, Cwd: a.Cwd, Where: u.Where, Status: a.Status.String(), Reachable: u.Reachable,
+				Started: ago(u.Started, now), LastActive: ago(u.LastActive, now)})
 		}
 		return McpReply{Value: map[string]any{"sessions": rows}}
 	}

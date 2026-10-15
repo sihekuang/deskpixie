@@ -49,15 +49,28 @@ func TestDescriptionPrecedence(t *testing.T) {
 	}
 }
 
-func TestAgentRateLimit(t *testing.T) {
+func TestQuickAgentUpdatesReplaceWithoutHistory(t *testing.T) {
 	var d Descriptions
 	t0 := time.Unix(0, 0)
 	d.Set(SourceAgent, "one", t0)
-	if d.Set(SourceAgent, "two", t0.Add(30*time.Second)) {
-		t.Fatal("second agent update within a minute must be ignored")
+	if !d.Set(SourceAgent, "two", t0.Add(30*time.Second)) || d.Current() != "two" {
+		t.Fatalf("an agent update within a minute still replaces the description: %q", d.Current())
 	}
-	if !d.Set(SourceAgent, "three", t0.Add(61*time.Second)) {
-		t.Fatal("after a minute it is accepted")
+	if len(d.Past()) != 0 {
+		t.Fatalf("but leaves no history: %v", d.Past())
+	}
+	d.Set(SourceAgent, "three", t0.Add(2*time.Minute))
+	if got := strings.Join(d.Past(), ","); got != "two" {
+		t.Fatal(got)
+	}
+}
+
+func TestMessageFragmentsAreNeverADescription(t *testing.T) {
+	var d Descriptions
+	t0 := time.Unix(0, 0)
+	d.Set(SourceAuto, "fix login", t0)
+	if d.Set(SourceAgent, `<agent-message from="a91706fc445c4c179"> [Subagent`, t0) || d.Current() != "fix login" {
+		t.Fatalf("%q", d.Current())
 	}
 }
 
@@ -76,13 +89,7 @@ func TestCleanDescription(t *testing.T) {
 	if got := CleanDescription("  two\nlines\t here "); got != "two lines here" {
 		t.Fatalf("%q", got)
 	}
-	if got := CleanDescription(strings.Repeat("é", 80)); len([]rune(got)) != 60 {
+	if got := CleanDescription(strings.Repeat("é", 80)); len([]rune(got)) != MaxDescription {
 		t.Fatalf("len %d", len([]rune(got)))
-	}
-}
-
-func TestAutoDescription(t *testing.T) {
-	if got := AutoDescription("Please fix the login redirect loop in this repo"); got != "fix login redirect" {
-		t.Fatalf("%q", got)
 	}
 }
