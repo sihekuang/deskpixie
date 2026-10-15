@@ -224,6 +224,7 @@ func New(d Deps) (*App, error) {
 			RefreshTray: a.pushTray,
 			Notify:      func(title, body string) { a.emit("notify", map[string]any{"title": title, "body": body}) },
 			Updates:     func(items any) { a.emit("updates", map[string]any{"lines": items}) },
+			Roster:      func(view any) { a.emit("agents", map[string]any{"roster": view}) },
 		})
 	}
 	a.buildVoice(cfg)
@@ -1134,6 +1135,31 @@ func (a *App) Register(r Registrar) {
 		}
 		if a.agent != nil {
 			a.agent.FocusJob(in.Job, in.Worker)
+		}
+		return struct{}{}, nil
+	})
+	r.Register("agent.roster", func(json.RawMessage) (any, error) {
+		// A struct, not a map, so the keys keep this order on the wire.
+		var view any = struct {
+			Agents     []any `json:"agents"`
+			Yours      []any `json:"yours"`
+			AgentCount int   `json:"agent_count"`
+			YourCount  int   `json:"your_count"`
+		}{Agents: []any{}, Yours: []any{}}
+		if a.agent != nil {
+			view = a.agent.Roster()
+		}
+		return map[string]any{"roster": view}, nil
+	})
+	r.Register("agent.focusAgent", func(args json.RawMessage) (any, error) {
+		var in struct {
+			Name string `json:"name"`
+		}
+		if err := decodeArgs("agent.focusAgent", args, &in); err != nil {
+			return nil, err
+		}
+		if a.agent != nil && in.Name != "" {
+			a.agent.FocusAgent(in.Name)
 		}
 		return struct{}{}, nil
 	})

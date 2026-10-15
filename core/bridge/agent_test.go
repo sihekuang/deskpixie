@@ -29,6 +29,8 @@ func (b *bridgeAgent) UpdatesSeen([]uint64)       {}
 func (b *bridgeAgent) Updates() any               { return []any{} }
 func (b *bridgeAgent) SetAway(bool)               {}
 func (b *bridgeAgent) FocusJob(string, string)    {}
+func (b *bridgeAgent) Roster() any                { return struct{}{} }
+func (b *bridgeAgent) FocusAgent(string)          {}
 
 func TestTheEngineBuildsTheAgentAndCloseShutsItDown(t *testing.T) {
 	ag := &bridgeAgent{}

@@ -74,6 +74,14 @@ func (u updatesSink) Updates(items []agent.UpdateItem) {
 	}
 }
 
+type rosterSink struct{ hooks app.AgentHooks }
+
+func (r rosterSink) Roster(v agent.RosterView) {
+	if r.hooks.Roster != nil {
+		r.hooks.Roster(v)
+	}
+}
+
 func call(f func()) {
 	if f != nil {
 		f()
