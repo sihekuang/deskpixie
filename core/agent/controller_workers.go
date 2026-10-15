@@ -150,6 +150,7 @@ func (c *AgentController) workerFailed(name, _ string, now Millis, fx *[]Effect)
 	*fx = append(*fx, logEffect(fmt.Sprintf("worker %s did not start", name)))
 	c.setRow(name, WorkerFailed, now, fx)
 	*fx = append(*fx, Effect{Kind: EfForgetWorker, Name: name})
+	c.clearMode(name, fx)
 	c.denyConfirmsOf(name, "The worker stopped.", now, fx)
 }
 
@@ -186,6 +187,7 @@ func (c *AgentController) workerGone(name string, now Millis, fx *[]Effect) {
 	w, _ := c.workers.Remove(name)
 	c.setRow(name, WorkerStopped, now, fx)
 	*fx = append(*fx, Effect{Kind: EfForgetWorker, Name: name})
+	c.clearMode(name, fx)
 	c.denyConfirmsOf(name, "The worker stopped.", now, fx)
 	if !w.StopRequested {
 		c.tellCoordinator(w.Plan.Job, ExitedLine(name), now, fx)

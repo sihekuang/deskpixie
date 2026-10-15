@@ -1138,3 +1138,32 @@ func TestOnlyClaudeWorkersAreFlaggedManual(t *testing.T) {
 		t.Fatal("unknown agent flagged")
 	}
 }
+
+func TestAFlaggedWorkerEndingClearsItsFlag(t *testing.T) {
+	c := wctl()
+	p := admitOK(t, c, Claude)
+	up(c, p.Name, PaneIdle)
+	c.Step(ModeInput(p.Name, "default"), 1000)
+	fx := c.Step(PaneInput(PaneEvent{Kind: PaneEventExited, Agent: p.Name}), 2000)
+	if m := effectsOfKind(fx, EfManual); len(m) != 1 || m[0].Agent != p.Name || m[0].Manual {
+		t.Fatalf("%s", fmtEffects(fx))
+	}
+	p2 := admitOK(t, c, Claude)
+	up(c, p2.Name, PaneIdle)
+	if fx := c.Step(ModeInput(p2.Name, "default"), 3000); len(effectsOfKind(fx, EfManual)) != 1 {
+		t.Fatalf("not flagged again: %s", fmtEffects(fx))
+	}
+}
+
+func TestARestartedCoordinatorIsClearedAndFlaggedAgain(t *testing.T) {
+	c := NewAgentController(DefaultSettings())
+	c.Step(ModeInput(Coordinator, "default"), 1000)
+	fx := c.Step(RestartInput(), 2000)
+	if m := effectsOfKind(fx, EfManual); len(m) != 1 || m[0].Agent != Coordinator || m[0].Manual {
+		t.Fatalf("not cleared: %s", fmtEffects(fx))
+	}
+	fx = c.Step(ModeInput(Coordinator, "default"), 3000)
+	if len(effectsOfKind(fx, EfManual)) != 1 || saidManualNotice(fx) {
+		t.Fatalf("%s", fmtEffects(fx))
+	}
+}

@@ -479,6 +479,7 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 		case ev.Kind == PaneEventExited && ev.Agent == Coordinator:
 			fx = append(fx, logEffect("coordinator pane exited"))
 			c.coordinator = coordAbsent
+			c.clearMode(Coordinator, &fx)
 			// Its replacement gets the in-flight work again (nothing was typed there).
 			c.inbox.CoordinatorLost()
 			c.clearTimers()
@@ -541,6 +542,7 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 		running := c.coordinator != coordAbsent
 		c.disabled = ""
 		c.coordinator = coordAbsent
+		c.clearMode(Coordinator, &fx)
 		c.blocked = optMs{}
 		c.hinted = false
 		c.promptFailures = 0
@@ -794,6 +796,7 @@ func (c *AgentController) onCoordinatorStatus(status PaneStatus, now Millis, fx 
 
 func (c *AgentController) coordinatorFailed(err HostError, now Millis, fx *[]Effect) {
 	c.coordinator = coordAbsent
+	c.clearMode(Coordinator, fx)
 	*fx = append(*fx, logEffect("coordinator start failed: "+errorTag(err)))
 	switch err.Kind {
 	case HostNotFound:
@@ -1202,6 +1205,16 @@ const ManualNotice = "Heads up: the coordinator is asking before everything beca
 
 // onMode: a Claude agent launched with --permission-mode auto that reports "default" fell back
 // to Manual (#97). Codex agents never report it, and anything else is ignored.
+// clearMode forgets an agent's mode when it ends (a worker closes, the coordinator stops or
+// restarts) and clears its tray flag if it was on, so a later "default" flags it again.
+func (c *AgentController) clearMode(agent string, fx *[]Effect) {
+	was := c.modes[agent]
+	delete(c.modes, agent)
+	if was {
+		*fx = append(*fx, Effect{Kind: EfManual, Agent: agent, Manual: false})
+	}
+}
+
 func (c *AgentController) onMode(agent, mode string, now Millis, fx *[]Effect) {
 	if mode != "auto" && mode != "default" {
 		return
