@@ -40,7 +40,11 @@ func PlanLaunch(tool string, userArgs []string, self, sock, dir string) (Launch,
 				"type": "command", "command": strconv.Quote(self) + " hook " + ev, "timeout": 5,
 			}}}}
 		}
-		settings, err := writePrivate(dir, "settings.json", map[string]any{"hooks": hooks})
+		settings, err := writePrivate(dir, "settings.json", map[string]any{
+			"hooks": hooks,
+			// Only pix's own tool, so describing the work never stops to ask you.
+			"permissions": map[string]any{"allow": []string{"mcp__pixie__set_description"}},
+		})
 		if err != nil {
 			return Launch{}, err
 		}

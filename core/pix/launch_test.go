@@ -67,6 +67,10 @@ func TestPlanLaunchClaude(t *testing.T) {
 			t.Errorf("no %s hook", ev)
 		}
 	}
+	perms, _ := settings["permissions"].(map[string]any)
+	if allow, _ := perms["allow"].([]any); len(allow) != 1 || allow[0] != "mcp__pixie__set_description" {
+		t.Fatalf("set_description must not ask for permission (and nothing else is allowed): %v", settings["permissions"])
+	}
 	if !strings.Contains(string(b), `\"/app/pix\" hook`) {
 		t.Fatalf("hooks must call pix hook: %s", b)
 	}

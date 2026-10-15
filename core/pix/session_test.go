@@ -239,3 +239,26 @@ func TestReRegisterSendsAddressAndSessionID(t *testing.T) {
 	h.s.runner.Hangup()
 	h.s.finish()
 }
+
+func TestClaudeInterruptOnScreenMeansIdle(t *testing.T) {
+	// Claude fires no Stop hook when a turn is interrupted; its screen says so instead. The
+	// message arrives in two chunks, as PTY reads can split it.
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c",
+		`read x; printf '\033[1m⎿  Interrupted · What should Clau'; sleep 0.2; printf 'de do instead?\033[0m\n'; sleep 30`}})
+	h.s.setStatus("working")
+	waitEvent(t, h.d.events, "working", func(m wire.Msg) bool { return m.Event == "status" && m.Status == "working" })
+	h.stdinW.WriteString("go\n")
+	waitEvent(t, h.d.events, "idle after the interrupt", func(m wire.Msg) bool { return m.Event == "status" && m.Status == "idle" })
+	h.s.runner.Hangup()
+	h.s.finish()
+}
+
+func TestScreenMarkersDontFlipStatusTheWrongWay(t *testing.T) {
+	var w screenWatch
+	if w.saw("Interrupted · What should Claude do instead?", claudeInterrupted) != true {
+		t.Fatal("marker in one chunk")
+	}
+	if w.saw("nothing here", claudeInterrupted) {
+		t.Fatal("no marker, no match")
+	}
+}

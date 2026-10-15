@@ -239,11 +239,25 @@ Interrupt is `SendKeys(["Escape"])`, written straight to the PTY — what pressi
 
 ## To verify during implementation
 
-- JetBrains' terminal env var name; whether the JetBrains Claude Code plugin's launch command is
-  configurable.
-- Which Codex hook events exist on the shipped version and whether they need a feature flag; without
-  them Codex status falls back to reading output for the busy marker ("esc to interrupt") in `pix`.
-- Whether Claude fills the session record's `name` on its own.
+Findings (2026-10-15, Claude Code 2.1.300, Codex 0.162.1):
+
+- **Claude, live** (`go test -tags live -run Live ./pixhost/`): registers; a prompt through the
+  inbox socket starts a turn (Claude shows it as "Another Claude session sent a message");
+  hooks report working → idle; `set_description` reaches Bit's list; Esc interrupts; the
+  address survives a daemon restart; close ends the session.
+- **Claude fires no Stop hook on an interrupt.** pix watches the screen for "What should Claude
+  do instead?" and reports idle (`TestClaudeInterruptOnScreenMeansIdle`).
+- **MCP tools ask for permission by default**, so pix's per-run settings allow
+  `mcp__pixie__set_description` (only that).
+- **Claude's session record `name`** is a short folder id ("deskpixie-5f"), not a description of
+  the work: not used.
+- **Codex** accepts pix's `-c` overrides (`mcp_servers.pixie.*`, `developer_instructions`,
+  `notify`; checked with `codex mcp list`). Codex status: working from the busy marker on
+  screen, idle from `notify` at each turn's end. **Not yet run live.**
+- Not checked here: JetBrains' terminal variables (`TERMINAL_EMULATOR=JetBrains-JediTerm`,
+  `__CFBundleIdentifier`), whether the JetBrains Claude Code plugin's command is configurable,
+  and `permissions.ask` beating `allow: mcp__pixie` for `close_session` (Claude's documented
+  order is deny, then ask, then allow).
 
 ## Later (not in this spec)
 

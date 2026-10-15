@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -15,8 +16,32 @@ import (
 	"github.com/sihekuang/deskpixie/core/pix/wire"
 )
 
-// codexBusy is on Codex's screen while it works (the same marker DeskPixie's workers use).
-const codexBusy = "esc to interrupt"
+// Screen markers. Codex shows codexBusy while it works (the marker DeskPixie's workers use).
+// Claude fires no Stop hook when a turn is interrupted (Esc, yours or Pixie's); it shows
+// claudeInterrupted instead.
+const (
+	codexBusy         = "esc to interrupt"
+	claudeInterrupted = "What should Claude do instead?"
+)
+
+// ansi matches the escape sequences between the words on screen.
+var ansi = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07`)
+
+// screenWatch finds a marker in the agent's output, even split across reads.
+type screenWatch struct{ tail string }
+
+// saw adds chunk and reports whether marker is now on screen (once per appearance).
+func (w *screenWatch) saw(chunk, marker string) bool {
+	w.tail += ansi.ReplaceAllString(chunk, "")
+	if len(w.tail) > 1024 {
+		w.tail = w.tail[len(w.tail)-1024:]
+	}
+	if strings.Contains(w.tail, marker) {
+		w.tail = ""
+		return true
+	}
+	return false
+}
 
 type sessionOpts struct {
 	tool, description, daemonSock, home, where string
@@ -46,10 +71,22 @@ func newSession(o sessionOpts) *Session {
 	s := &Session{o: o, status: "idle", afterStop: true, userDesc: o.description}
 	s.runner = &Runner{Launch: o.agent, Stdin: o.stdin, Stdout: o.stdout,
 		OnInput: func(b []byte) { s.gate.Keys(b, time.Now()) }}
-	if o.tool == "codex" {
+	var watch screenWatch // only the PTY reader goroutine touches it
+	switch o.tool {
+	case "codex":
 		s.runner.OnOutput = func(b []byte) {
-			if strings.Contains(string(b), codexBusy) && s.currentStatus() != "working" {
+			if watch.saw(string(b), codexBusy) && s.currentStatus() != "working" {
 				s.setStatus("working")
+			}
+		}
+	case "claude":
+		s.runner.OnOutput = func(b []byte) {
+			if watch.saw(string(b), claudeInterrupted) && s.currentStatus() == "working" {
+				s.mu.Lock()
+				s.afterStop = true
+				s.mu.Unlock()
+				s.setStatus("idle")
+				s.flushSoon()
 			}
 		}
 	}

@@ -67,7 +67,8 @@ it moves on. Pixie only ever says descriptions, never internal names.
 
 ## What Pixie can do to your sessions
 
-- **Message it:** the message arrives as if you had typed it.
+- **Message it:** in Claude Code it shows as "Another Claude session sent a message: …", and
+  Claude answers it like any prompt; in Codex it is typed in for you.
 - **Interrupt it:** like pressing Esc. The session keeps running.
 - **Close it:** only when you ask, and you're asked to confirm.
 
@@ -76,6 +77,7 @@ Quitting DeskPixie never ends a session you started.
 ## Pixie never types over you
 
 For Claude Code, Pixie's messages go into Claude's own inbox, so your typing is never touched.
+Claude takes them at once when idle, or after its current turn.
 
 For Codex, pix has to type the message in. It waits until Codex is idle **and** you have typed
 nothing since your last Enter and have stopped typing for a moment. While a message waits, the
