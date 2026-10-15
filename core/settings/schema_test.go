@@ -465,3 +465,23 @@ func TestHandOffWhenUnsureField(t *testing.T) {
 		t.Fatalf("%q / %q", f.Label, f.Help)
 	}
 }
+
+func TestCheckClaimsField(t *testing.T) {
+	f := FieldByPath("voice.checkClaims")
+	if f == nil {
+		t.Fatal("voice.checkClaims has no field")
+	}
+	if f.Section != SectionVoice || f.Apply != ApplyRestart || f.Kind.Type != KindBool {
+		t.Fatalf("%+v", f)
+	}
+	if f.Label != "Check Bit's claims" ||
+		f.Help != "When Bit says it did something, like setting a timer or handing a task off, the app checks it really did and corrects it if not." {
+		t.Fatalf("%q / %q", f.Label, f.Help)
+	}
+	// It sits right after voice.handOffWhenUnsure.
+	for i, g := range Fields {
+		if g.Path == "voice.handOffWhenUnsure" && (i+1 >= len(Fields) || Fields[i+1].Path != "voice.checkClaims") {
+			t.Fatal("voice.checkClaims is not next to voice.handOffWhenUnsure")
+		}
+	}
+}

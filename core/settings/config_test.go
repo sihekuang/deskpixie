@@ -484,3 +484,18 @@ func TestHandOffWhenUnsureIsOnByDefault(t *testing.T) {
 		t.Fatal("false is read")
 	}
 }
+
+func TestCheckClaimsIsOnByDefault(t *testing.T) {
+	if !Default().Voice.CheckClaims {
+		t.Fatal("voice.checkClaims defaults to true")
+	}
+	if v := mustJSON(t, Default())["voice"].(map[string]any)["checkClaims"]; v != true {
+		t.Fatalf("checkClaims in JSON: %v", v)
+	}
+	if !parseConfig(t, `{"voice":{"chimes":false}}`).Voice.CheckClaims {
+		t.Fatal("a voice block without the key keeps the default")
+	}
+	if parseConfig(t, `{"voice":{"checkClaims":false}}`).Voice.CheckClaims {
+		t.Fatal("false is read")
+	}
+}
