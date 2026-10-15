@@ -234,7 +234,9 @@ func Build(c Config) *Agent {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		var names []string
-		if list, err := primary.List(ctx); err == nil {
+		// Passive: a stopped primary has no agents whose names could clash, and a pix hello
+		// must not start it.
+		if list, err := agent.ListRunning(ctx, primary); err == nil {
 			for _, ag := range list {
 				names = append(names, ag.Name)
 			}

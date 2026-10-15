@@ -86,11 +86,14 @@ func (c *CompositeHost) List(ctx context.Context) ([]AgentInfo, error) {
 
 // PassiveLister is a host that can list its agents without starting anything: ListRunning is
 // the agents if the host is already running; a host that isn't running lists none.
+// A wrapper around a SessionHost must forward ListRunning too, or its passive list silently
+// becomes an active one (ListRunning falls back to List, which may start the host).
 type PassiveLister interface {
 	ListRunning(ctx context.Context) ([]AgentInfo, error)
 }
 
-// ListRunning lists h passively when it can (PassiveLister), else with its List.
+// ListRunning lists h passively when it can (PassiveLister), else with its List. Wrappers
+// must implement PassiveLister by forwarding to this, or the fallback to List starts the host.
 func ListRunning(ctx context.Context, h SessionHost) ([]AgentInfo, error) {
 	if p, ok := h.(PassiveLister); ok {
 		return p.ListRunning(ctx)
