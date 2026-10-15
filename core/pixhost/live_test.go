@@ -13,6 +13,8 @@ package pixhost_test
 
 import (
 	"context"
+	"github.com/creack/pty"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -88,12 +90,17 @@ func TestLivePixWrapsClaude(t *testing.T) {
 	events := host.Subscribe()
 
 	screen, _ := os.Create(filepath.Join(root, "screen.log"))
-	stdin, toPix, _ := os.Pipe()
-	defer toPix.Close()
+	// A real terminal, as you have: with pipes pix just runs the tool (Passthrough).
+	ptmx, stdin, err := pty.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ptmx.Close()
+	go io.Copy(screen, ptmx)
 	cmd := exec.Command(filepath.Join(bin, "pix"), "claude", "--model", model)
 	cmd.Dir = work
 	cmd.Env = liveEnv("PATH="+bin+":"+os.Getenv("PATH"), "DESKPIXIE_PIX_SOCK="+sock)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, screen, screen
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdin, stdin
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}

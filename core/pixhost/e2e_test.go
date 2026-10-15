@@ -6,6 +6,7 @@ package pixhost_test
 import (
 	"bufio"
 	"context"
+	"github.com/creack/pty"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -89,8 +90,12 @@ func TestEndToEnd(t *testing.T) {
 	t.Cleanup(func() { host.Shutdown() })
 	events := host.Subscribe()
 
-	stdin, toPix, _ := os.Pipe()
-	fromPix, stdout, _ := os.Pipe()
+	// A real terminal, as you have: with pipes pix just runs the tool (Passthrough).
+	ptmx, tty, err := pty.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdin, stdout, toPix, fromPix := tty, tty, ptmx, ptmx
 	cmd := exec.Command(filepath.Join(bin, "pix"), "--description", "e2e session", "claude")
 	cmd.Dir = bin // not a git repo: the address is repo-…
 	cmd.Env = cleanEnv("PATH="+bin+":/usr/bin:/bin", "HOME="+bin, "DESKPIXIE_PIX_SOCK="+sock)
@@ -99,13 +104,12 @@ func TestEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { cmd.Process.Signal(syscall.SIGKILL) })
-	stdin.Close()
-	stdout.Close()
+	tty.Close()
 	lines := make(chan string, 100)
 	go func() {
 		s := bufio.NewScanner(fromPix)
 		for s.Scan() {
-			lines <- s.Text()
+			lines <- strings.TrimRight(s.Text(), "\r")
 		}
 		close(lines)
 	}()

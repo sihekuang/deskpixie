@@ -12,8 +12,10 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode"
 
 	"github.com/sihekuang/deskpixie/core/pix/wire"
+	"golang.org/x/term"
 )
 
 // Screen markers. Codex shows codexBusy while it works (the marker DeskPixie's workers use).
@@ -27,16 +29,26 @@ const (
 // ansi matches the escape sequences between the words on screen.
 var ansi = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07`)
 
+func noSpace(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
 // screenWatch finds a marker in the agent's output, even split across reads.
 type screenWatch struct{ tail string }
 
-// saw adds chunk and reports whether marker is now on screen (once per appearance).
+// saw adds chunk and reports whether marker is now on screen (once per appearance). Spaces
+// are ignored: a terminal UI often moves the cursor instead of printing one.
 func (w *screenWatch) saw(chunk, marker string) bool {
-	w.tail += ansi.ReplaceAllString(chunk, "")
+	w.tail += noSpace(ansi.ReplaceAllString(chunk, ""))
 	if len(w.tail) > 1024 {
 		w.tail = w.tail[len(w.tail)-1024:]
 	}
-	if strings.Contains(w.tail, marker) {
+	if strings.Contains(w.tail, noSpace(marker)) {
 		w.tail = ""
 		return true
 	}
@@ -326,7 +338,7 @@ func Run(args []string, env func(string) string, home string) int {
 		return 2
 	}
 	tool, rest := args[0], args[1:]
-	if Nested(env) {
+	if Nested(env) || Passthrough(tool, rest, term.IsTerminal(int(os.Stdin.Fd())), term.IsTerminal(int(os.Stdout.Fd()))) {
 		path, err := exec.LookPath(tool)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "pix:", err)
