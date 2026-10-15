@@ -208,11 +208,14 @@ type Conversation struct {
 	ending               bool   // end_conversation was called: end once the reply finished playing
 	endWhy               string // why ending was set ("goodbye", "after a hand-off")
 	endReason            string // why the last conversation ended (#71's voice log)
-	micLive              bool
-	micAskedAt           time.Time
-	turn                 uint64            // counts the user's turns (each SpeechStarted)
-	toolTurns            map[string]uint64 // running tool calls and the turn each was called in
-	injects              []Notice          // waiting for a quiet moment, oldest first
+	// checksOpen: "Check: " facts delegated in this conversation whose answer hasn't been
+	// read yet; reading the last one ends the conversation.
+	checksOpen int
+	micLive    bool
+	micAskedAt time.Time
+	turn       uint64            // counts the user's turns (each SpeechStarted)
+	toolTurns  map[string]uint64 // running tool calls and the turn each was called in
+	injects    []Notice          // waiting for a quiet moment, oldest first
 
 	// The hand-off safety net (#71), per user turn.
 	handOff     bool            // ConversationConfig.HandOff
@@ -549,6 +552,9 @@ func (c *Conversation) onModel(ev Event, now time.Time, fx []Effect) []Effect {
 			// (GPT-Live's backend) would start the same job twice.
 			inv.Canned = alreadyHandedOff
 		}
+		if inv.Canned == nil && (ev.ToolName == ClientDelegationTool || ev.ToolName == DelegateTool) && isCheckTask(inv.Args) {
+			c.checksOpen++
+		}
 		fx = append(fx, inv)
 	case EvTranscript:
 		if ev.Role == "user" {
@@ -618,6 +624,13 @@ func (c *Conversation) tryInject(now time.Time, fx []Effect) []Effect {
 	c.injects = c.injects[1:]
 	if isCoordinatorQuestion(n.Text) && !strings.Contains(n.Text, "Say confirm") {
 		c.questionAsked = true
+	}
+	if strings.HasPrefix(n.Text, coordinatorReplyPrefix) && c.checksOpen > 0 {
+		c.checksOpen--
+		if c.checksOpen == 0 {
+			// The answer the user was waiting for: end once Pixie has read it.
+			c.ending, c.endWhy = true, "after answering a check"
+		}
 	}
 	// What Pixie says next answers the notice, not the user's words.
 	c.hoSettled = true
@@ -694,6 +707,7 @@ func (c *Conversation) resetTurn() {
 	c.pendingTools = 0
 	clear(c.toolTurns)
 	c.ending, c.endWhy = false, ""
+	c.checksOpen = 0
 	c.micLive = false
 	c.micAskedAt = time.Time{}
 	c.newHandOffTurn()
@@ -813,6 +827,9 @@ func (c *Conversation) handOffTask(task string, claim bool, fx []Effect) []Effec
 	c.hoPending++
 	c.pendingTools++
 	c.hoHandedOff = true
+	if strings.HasPrefix(task, CheckPrefix) {
+		c.checksOpen++
+	}
 	answer := c.clientDelegation && c.answerTurn
 	if answer {
 		c.answerTurn = false
@@ -871,3 +888,15 @@ func (c *Conversation) clientDelegationArgs() json.RawMessage {
 var alreadyHandedOff = json.RawMessage(`{"status":"already handed off","note":"The app already gave this request to the coordinator. Don't hand it off again; just say you'll let the user know."}`)
 
 func pixieFx(s PixieState) Effect { return Effect{Kind: EfPixie, State: s} }
+
+// coordinatorReplyPrefix leads a job's result (agent routing's "Coordinator reply: ").
+const coordinatorReplyPrefix = "Coordinator reply: "
+
+// isCheckTask: a delegate call's arguments ask for a "Check: " fact.
+func isCheckTask(args json.RawMessage) bool {
+	var a struct {
+		Task string `json:"task"`
+	}
+	_ = json.Unmarshal(args, &a)
+	return strings.HasPrefix(a.Task, CheckPrefix)
+}
