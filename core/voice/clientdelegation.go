@@ -127,7 +127,8 @@ type routedHandOff struct{ router Tool }
 
 func (h routedHandOff) Invoke(ctx context.Context, raw json.RawMessage) ToolOutcome {
 	var r ClientDelegationResult
-	_ = json.Unmarshal(h.router.Invoke(ctx, raw).Output, &r)
+	routed := h.router.Invoke(ctx, raw)
+	_ = json.Unmarshal(routed.Output, &r)
 	out := map[string]string{}
 	switch {
 	case r.JobID != "":
@@ -136,7 +137,7 @@ func (h routedHandOff) Invoke(ctx context.Context, raw json.RawMessage) ToolOutc
 		out["error"] = r.Error
 	}
 	b, _ := json.Marshal(out)
-	return ToolOutcome{Output: b}
+	return ToolOutcome{Output: b, EndAfterReply: routed.EndAfterReply}
 }
 
 // goodbyes end a conversation when they are the whole utterance or its end (normalized).
