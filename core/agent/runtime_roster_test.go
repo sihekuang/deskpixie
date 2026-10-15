@@ -97,9 +97,9 @@ func newRosterRig(t *testing.T, warm bool) *rosterRig {
 	return r
 }
 
-func lastRoster(t *testing.T, r *rosterRig) RosterView {
+func lastRoster(t *testing.T, r interface{ Views() []RosterView }) RosterView {
 	t.Helper()
-	v := r.roster.Views()
+	v := r.Views()
 	if len(v) == 0 {
 		t.Fatal("no roster sent")
 	}
@@ -110,7 +110,7 @@ func TestTheRosterListsTheCoordinatorWithoutCountingIt(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		r := newRosterRig(t, true)
 		time.Sleep(time.Second)
-		v := lastRoster(t, r)
+		v := lastRoster(t, r.roster)
 		if v.AgentCount != 0 || len(v.Agents) != 1 || v.Agents[0].Kind != "coordinator" {
 			t.Fatalf("%+v", v)
 		}
@@ -126,7 +126,7 @@ func TestASessionConnectingWithoutAPaneEventUpdatesTheRoster(t *testing.T) {
 		time.Sleep(time.Second)
 		r.user.connect(t, "api-claude")
 		time.Sleep(time.Second)
-		v := lastRoster(t, r)
+		v := lastRoster(t, r.roster)
 		if v.YourCount != 1 || len(v.Yours) != 1 || v.Yours[0].App != "com.googlecode.iterm2" {
 			t.Fatalf("%+v", v)
 		}
@@ -179,6 +179,50 @@ func TestFocusAgentFocusesThatPaneAndAttaches(t *testing.T) {
 		want := []Attach{{Argv: []string{"fake-herdr", "session", "attach", "test"}, Dir: "/home/me/Projects"}}
 		if !reflect.DeepEqual(r.launcher.Attaches(), want) {
 			t.Fatal(r.launcher.Attaches())
+		}
+	})
+}
+
+func TestAStartedCoordinatorIsListedWithoutAPaneEvent(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRosterRig(t, false)
+		time.Sleep(time.Second)
+		if n := len(lastRoster(t, r.roster).Agents); n != 0 {
+			t.Fatalf("not started yet: %d", n)
+		}
+		if err := r.h.OpenTerminal(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(time.Second)
+		if v := lastRoster(t, r.roster); len(v.Agents) != 1 || v.Agents[0].Kind != "coordinator" {
+			t.Fatalf("%+v", v)
+		}
+	})
+}
+
+func TestAWorkerStartingAndStoppingShowsInTheRoster(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := withJob(t, true)
+		time.Sleep(time.Second)
+		okValue(t, call(r, Coordinator, startCall("focus")))
+		time.Sleep(RosterDebounce + 50*time.Millisecond)
+		v := lastRoster(t, r.roster)
+		if v.AgentCount != 1 {
+			t.Fatalf("%+v", v)
+		}
+		var w *RosterRow
+		for i := range v.Agents {
+			if v.Agents[i].Name == wName {
+				w = &v.Agents[i]
+			}
+		}
+		if w == nil || w.Kind != "worker" || w.Detail != "focus" {
+			t.Fatalf("%+v", v)
+		}
+		okValue(t, call(r, Coordinator, McpCall{Kind: CallStopWorker, Name: wName}))
+		time.Sleep(WorkerStopGrace + time.Second)
+		if v := lastRoster(t, r.roster); v.AgentCount != 0 {
+			t.Fatalf("the stopped worker is gone: %+v", v)
 		}
 	})
 }
