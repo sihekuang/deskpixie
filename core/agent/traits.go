@@ -125,6 +125,11 @@ type StatusSink interface {
 	SetStatus(line string)
 }
 
+// ModeSink is told when a Claude agent enters or leaves Manual mode (#97).
+type ModeSink interface {
+	ManualMode(agent string, manual bool)
+}
+
 // TrustStore pre-accepts the agent CLI's folder-trust dialog for dir; returns the paths it trusted.
 type TrustStore interface {
 	Grant(dir string) ([]string, error) // TrustError

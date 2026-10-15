@@ -642,6 +642,8 @@ const (
 	// HookState is the agent's own status report (Claude Code hooks on the tmux session host,
 	// which detects no status itself): Status is Working, Idle or Blocked.
 	HookState
+	// HookMode is the first prompt's report of the agent's permission mode (PermissionMode).
+	HookMode
 )
 
 // HookEvent is what the hook server reports, with the calling agent resolved from its bearer.
@@ -649,15 +651,17 @@ const (
 // Mcp → Call, McpReply; State → Status. Reply channels are one-shot: send at most once (buffer
 // them by 1).
 type HookEvent struct {
-	Kind      HookEventKind
-	Agent     string
-	Status    PaneStatus
-	Message   string
-	ToolName  string
-	ToolInput any
-	Reply     chan<- Decision
-	Call      McpCall
-	McpReply  chan<- McpReply
+	Kind  HookEventKind
+	Agent string
+	// PermissionMode is the "permission_mode" Claude Code's hook body carried ("" if none).
+	PermissionMode string
+	Status         PaneStatus
+	Message        string
+	ToolName       string
+	ToolInput      any
+	Reply          chan<- Decision
+	Call           McpCall
+	McpReply       chan<- McpReply
 }
 
 // Cue is a one-shot pixie animation the delegation side asks for.

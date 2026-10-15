@@ -73,6 +73,8 @@ type Deps struct {
 	Notifier Notifier
 	Pixie    PixieCue
 	Status   StatusSink
+	// Modes hears each Claude agent's Manual-mode changes (nil: ignored).
+	Modes    ModeSink
 	Launcher TerminalLauncher
 	// TerminalDir is the folder the agent terminal starts in (the projects folder, else home).
 	TerminalDir string
@@ -850,7 +852,12 @@ func (h *AgentHandle) runOpInner(ctx context.Context, op hostOp) {
 
 // hook handles one hook server event.
 func (h *AgentHandle) hook(ev HookEvent) {
+	// The mode first: a permission request is then decided knowing it.
+	if ev.PermissionMode != "" {
+		h.Input(ModeInput(ev.Agent, ev.PermissionMode))
+	}
 	switch ev.Kind {
+	case HookMode:
 	case HookStop:
 		h.Input(StopInput(ev.Agent, ev.Message))
 	case HookPostTool:
@@ -1431,6 +1438,10 @@ func (h *AgentHandle) apply(e Effect) {
 		d.Store.Rewrite(e.File, e.Lines)
 	case EfStatus:
 		d.Status.SetStatus(e.Text)
+	case EfManual:
+		if d.Modes != nil {
+			d.Modes.ManualMode(e.Agent, e.Manual)
+		}
 	case EfStopCoordinator:
 		h.queueOp(hostOp{kind: opStop})
 	case EfLabel:

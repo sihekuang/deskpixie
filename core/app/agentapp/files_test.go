@@ -118,7 +118,7 @@ func TestHookTimeoutsAreEnforced(t *testing.T) {
 	if !found {
 		t.Fatal("PermissionRequest must outlast PermissionLimit")
 	}
-	if !reflect.DeepEqual(HookTimeouts, []HookTimeout{{"Stop", 5}, {"PermissionRequest", 125}, {"PostToolUse", 5}}) {
+	if !reflect.DeepEqual(HookTimeouts, []HookTimeout{{"Stop", 5}, {"PermissionRequest", 125}, {"PostToolUse", 5}, {"UserPromptSubmit", 5}}) {
 		t.Fatal(HookTimeouts)
 	}
 	short := strings.ReplaceAll(RenderSettings(1), `"timeout": 125`, `"timeout": 120`)

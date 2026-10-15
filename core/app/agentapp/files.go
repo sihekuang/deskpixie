@@ -42,11 +42,11 @@ type HookTimeout struct {
 
 // HookTimeouts are the coordinator's hooks. PermissionRequest outlasts the hook server's own
 // PermissionLimit (122 s), so the app's decision always lands before Claude Code gives up.
-var HookTimeouts = []HookTimeout{{"Stop", 5}, {"PermissionRequest", 125}, {"PostToolUse", 5}}
+var HookTimeouts = []HookTimeout{{"Stop", 5}, {"PermissionRequest", 125}, {"PostToolUse", 5}, {"UserPromptSubmit", 5}}
 
 // WorkerHookTimeouts are a worker's hooks: no PostToolUse (only its report_progress is
 // narrated).
-var WorkerHookTimeouts = []HookTimeout{{"Stop", 5}, {"PermissionRequest", 125}}
+var WorkerHookTimeouts = []HookTimeout{{"Stop", 5}, {"PermissionRequest", 125}, {"UserPromptSubmit", 5}}
 
 // StateHookTimeouts are the status hooks a Claude agent also gets on a session host that
 // detects no status itself (tmux): UserPromptSubmit says working, Stop (a second hook, after

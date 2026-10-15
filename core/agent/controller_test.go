@@ -1057,3 +1057,84 @@ func TestANoticeShowsWhenTheStatusIsOtherwiseEmptyAndDisablesNothing(t *testing.
 		t.Fatalf("delegation still works: %s", fmtEffects(fx))
 	}
 }
+
+func effectsOfKind(fx []Effect, kind EffectKind) []Effect {
+	var out []Effect
+	for _, e := range fx {
+		if e.Kind == kind {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// saidManualNotice: does any effect carry Pixie's Manual-mode line (spoken, notified or kept)?
+func saidManualNotice(fx []Effect) bool {
+	for _, e := range fx {
+		if strings.Contains(e.Text, ManualNotice) || strings.Contains(e.Notice.Text, ManualNotice) || strings.Contains(e.Line, ManualNotice) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestAnAutoLaunchedClaudeAgentReportingDefaultIsInManual(t *testing.T) {
+	c := NewAgentController(DefaultSettings())
+	fx := c.Step(ModeInput(Coordinator, "default"), 1000)
+	m := effectsOfKind(fx, EfManual)
+	if len(m) != 1 || m[0].Agent != Coordinator || !m[0].Manual {
+		t.Fatalf("%s", fmtEffects(fx))
+	}
+	if !saidManualNotice(fx) {
+		t.Fatalf("no notice: %s", fmtEffects(fx))
+	}
+	if fx := c.Step(ModeInput(Coordinator, "default"), 2000); len(effectsOfKind(fx, EfManual)) != 0 || saidManualNotice(fx) {
+		t.Fatal("repeated")
+	}
+	fx = c.Step(ModeInput(Coordinator, "auto"), 3000)
+	if m := effectsOfKind(fx, EfManual); len(m) != 1 || m[0].Manual {
+		t.Fatalf("not cleared: %s", fmtEffects(fx))
+	}
+	// Back in Manual later: flagged again, but Pixie says it only once per app run.
+	fx = c.Step(ModeInput(Coordinator, "default"), 4000)
+	if len(effectsOfKind(fx, EfManual)) != 1 || saidManualNotice(fx) {
+		t.Fatalf("%s", fmtEffects(fx))
+	}
+}
+
+func TestAFirstAutoReportIsNotAChange(t *testing.T) {
+	c := NewAgentController(DefaultSettings())
+	if fx := c.Step(ModeInput(Coordinator, "auto"), 1000); len(effectsOfKind(fx, EfManual)) != 0 {
+		t.Fatalf("%s", fmtEffects(fx))
+	}
+	if fx := c.Step(ModeInput(Coordinator, "plan"), 2000); len(effectsOfKind(fx, EfManual)) != 0 {
+		t.Fatalf("an unknown mode flagged: %s", fmtEffects(fx))
+	}
+}
+
+func TestACodexAgentIsNeverFlaggedManual(t *testing.T) {
+	s := DefaultSettings()
+	s.CoordinatorKind = Codex
+	c := NewAgentController(s)
+	for _, m := range []string{"default", "", "on-request", "never"} {
+		if fx := c.Step(ModeInput(Coordinator, m), 1000); len(effectsOfKind(fx, EfManual)) != 0 {
+			t.Fatalf("%q flagged a Codex coordinator", m)
+		}
+	}
+}
+
+func TestOnlyClaudeWorkersAreFlaggedManual(t *testing.T) {
+	cc := wctl()
+	cl := admitOK(t, cc, Claude)
+	if fx := cc.Step(ModeInput(cl.Name, "default"), 1000); len(effectsOfKind(fx, EfManual)) != 1 {
+		t.Fatalf("claude worker not flagged: %s", fmtEffects(fx))
+	}
+	cx := wctl()
+	cp := admitOK(t, cx, Codex)
+	if fx := cx.Step(ModeInput(cp.Name, "default"), 1000); len(effectsOfKind(fx, EfManual)) != 0 {
+		t.Fatalf("codex worker flagged: %s", fmtEffects(fx))
+	}
+	if fx := cx.Step(ModeInput("nobody", "default"), 1000); len(effectsOfKind(fx, EfManual)) != 0 {
+		t.Fatal("unknown agent flagged")
+	}
+}

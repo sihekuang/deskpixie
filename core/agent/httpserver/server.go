@@ -4,7 +4,7 @@
 // workers call the pixie MCP tools at `POST /mcp` with the same bearer. The bearer says which
 // agent is calling; it is checked before the body is read.
 //
-// Routes: `POST /hooks/{stop,permission,post-tool,state}` and `POST /mcp` (other methods on /mcp and
+// Routes: `POST /hooks/{stop,permission,post-tool,state,mode}` and `POST /mcp` (other methods on /mcp and
 // /hooks/* answer 405 with `Allow: POST`; any other path is 404). Served on
 // 127.0.0.1:<agent.port> (Listen, Serve).
 package httpserver

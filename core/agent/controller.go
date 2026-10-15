@@ -130,6 +130,7 @@ const (
 	InOpenRefused                         // the voice loop was busy and did not start the conversation EfOpenConversation asked for
 	InUpdatesSeen                         // IDs: the updates bubble showed these lines long enough to count as heard
 	InPresence                            // Away: the user is away (screen locked, displays asleep or idle) or back
+	InMode                                // Agent, Mode: the permission_mode a Claude agent's hook reported
 )
 
 // Input is one stimulus for AgentController.Step. Build it with the *Input constructors.
@@ -145,6 +146,7 @@ type Input struct {
 	HostErr    HostError
 	Pane       PaneEvent
 	Agent      string
+	Mode       string
 	Message    string
 	RequestID  RequestID
 	ToolName   string
@@ -225,6 +227,7 @@ func WorkerClosedInput(name string) Input { return Input{Kind: InWorkerClosed, N
 func OpenRefusedInput() Input             { return Input{Kind: InOpenRefused} }
 func UpdatesSeenInput(ids []uint64) Input { return Input{Kind: InUpdatesSeen, IDs: ids} }
 func PresenceInput(away bool) Input       { return Input{Kind: InPresence, Away: away} }
+func ModeInput(agent, mode string) Input  { return Input{Kind: InMode, Agent: agent, Mode: mode} }
 func WorkerScreenInput(name, text string) Input {
 	return Input{Kind: InWorkerScreen, Name: name, Text: text}
 }
@@ -262,6 +265,7 @@ const (
 	EfLabel            // Tab: relabel the coordinator's tab (its current request, or idle)
 	EfOpenConversation // start a conversation if the voice loop is at rest (else answered with InOpenRefused)
 	EfUpdates          // Value: []UpdateItem: the updates bubble's list (sent when it changes)
+	EfManual           // Agent, Manual: a Claude agent is (or no longer is) in Manual mode
 )
 
 // Effect is one thing the caller must do, in order. Err set (non-empty) is the Err branch of
@@ -283,6 +287,8 @@ type Effect struct {
 	Err      string
 	Name     string
 	Tab      TabLabel
+	Agent    string
+	Manual   bool
 }
 
 type coordinatorState int
@@ -305,6 +311,10 @@ type watchdog struct {
 
 // AgentController holds the delegation state. Not safe for concurrent use; the runtime owns it.
 type AgentController struct {
+	// modes: agent -> in Manual mode (Claude agents only); manualSaid: Pixie told the user once (#97).
+	modes      map[string]bool
+	manualSaid bool
+
 	settings    Settings
 	jobs        *JobTable
 	inbox       *Inbox
@@ -375,6 +385,7 @@ func NewAgentController(settings Settings) *AgentController {
 		memories: NewMemoryLog(),
 		workers:  NewWorkers(),
 		opener:   newOpener(settings.NotifyPerMinute),
+		modes:    map[string]bool{},
 	}
 }
 
@@ -480,6 +491,8 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 		default:
 			c.workerGone(ev.Agent, now, &fx)
 		}
+	case InMode:
+		c.onMode(in.Agent, in.Mode, now, &fx)
 	case InStop:
 		if in.Agent == Coordinator {
 			c.onStop(in.Message, now, &fx)
@@ -1182,6 +1195,38 @@ func (c *AgentController) onPermission(id RequestID, agent, toolName string, too
 		q.Worker = agent
 	}
 	c.deliverOpening(q, now, fx)
+}
+
+// ManualNotice is what Pixie says, once per app run, when a Claude agent fell back to Manual.
+const ManualNotice = "Heads up: the coordinator is asking before everything because it's running in Claude Code's Manual mode. I've put the reason in the menu."
+
+// onMode: a Claude agent launched with --permission-mode auto that reports "default" fell back
+// to Manual (#97). Codex agents never report it, and anything else is ignored.
+func (c *AgentController) onMode(agent, mode string, now Millis, fx *[]Effect) {
+	if mode != "auto" && mode != "default" {
+		return
+	}
+	kind := c.settings.CoordinatorKind
+	if agent != Coordinator {
+		w := c.workers.Get(agent)
+		if w == nil {
+			return
+		}
+		kind = w.Plan.Kind
+	}
+	if kind == Codex {
+		return
+	}
+	manual := mode == "default"
+	if c.modes[agent] == manual {
+		return
+	}
+	c.modes[agent] = manual
+	*fx = append(*fx, Effect{Kind: EfManual, Agent: agent, Manual: manual})
+	if manual && !c.manualSaid {
+		c.manualSaid = true
+		c.deliver(NewLine(LineInfo, ManualNotice), now, fx)
+	}
 }
 
 func (c *AgentController) onUserSaid(text string, now Millis, fx *[]Effect) {
