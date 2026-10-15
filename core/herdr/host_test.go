@@ -1261,6 +1261,25 @@ func TestAgentStartIsRetriedWhileThePaneIsBusy(t *testing.T) {
 	}
 }
 
+// Herdr 0.9 refuses a command line over 1024 bytes while the new tab's terminal is still in
+// canonical mode (before its shell's prompt): StartAgent retries (#87: a Codex coordinator).
+func TestAgentStartIsRetriedWhileALongCommandLineDoesNotFitYet(t *testing.T) {
+	t.Parallel()
+	server := herdrtest.Start(t)
+	server.CanonicalAgentStarts(2)
+	h := newTestHost(t, server)
+	if info := mustStart(t, h, "coordinator"); info.Status != agent.PaneIdle {
+		t.Fatal(info)
+	}
+	if n := len(server.Requests("agent.start")); n != 3 {
+		t.Fatal(n)
+	}
+	other := agent.HostError{Kind: agent.HostOther, Detail: "agent_start_input_failed: something else"}
+	if IsInputNotReady(other) || !IsInputNotReady(agent.HostError{Kind: agent.HostOther, Detail: "agent_start_input_failed: input contains a 1782-byte line but the terminal is in canonical mode with a 1024-byte limit; wait for the shell prompt and retry"}) {
+		t.Fatal("IsInputNotReady")
+	}
+}
+
 // A pane busy past the limit: StartAgent fails with the busy error and leaves no tab.
 func TestAPaneBusyPastTheLimitFailsWithoutLeakingItsTab(t *testing.T) {
 	t.Parallel()

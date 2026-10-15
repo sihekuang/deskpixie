@@ -98,6 +98,9 @@ type FakeHerdr struct {
 	failAgentStart bool
 	// busyStarts: this many more agent.start calls answer agent_pane_busy.
 	busyStarts int
+	// canonicalStarts: this many more agent.start calls answer agent_start_input_failed (a long
+	// command line before the shell's prompt).
+	canonicalStarts int
 	// holdPending: launch_pending is cleared only by FinishLaunch.
 	holdPending bool
 	// failCloses: this many more pane.close calls fail.
@@ -499,6 +502,14 @@ func (f *FakeHerdr) BusyAgentStarts(n int) {
 	f.mu.Unlock()
 }
 
+// CanonicalAgentStarts: the next n agent.start calls answer agent_start_input_failed, like
+// Herdr 0.9 when a long command line meets a terminal still in canonical mode.
+func (f *FakeHerdr) CanonicalAgentStarts(n int) {
+	f.mu.Lock()
+	f.canonicalStarts = n
+	f.mu.Unlock()
+}
+
 // FailPaneCloses: the next n pane.close calls fail (the pane stays).
 func (f *FakeHerdr) FailPaneCloses(n int) {
 	f.mu.Lock()
@@ -809,6 +820,10 @@ func (f *FakeHerdr) handle(method string, p map[string]any) (result any, code, m
 		if f.busyStarts > 0 {
 			f.busyStarts--
 			return nil, "agent_pane_busy", fmt.Sprintf("agent target pane %s is not an available shell", paneID)
+		}
+		if f.canonicalStarts > 0 {
+			f.canonicalStarts--
+			return nil, "agent_start_input_failed", "input contains a 1782-byte line but the terminal is in canonical mode with a 1024-byte limit; wait for the shell prompt and retry"
 		}
 		for id, q := range f.panes {
 			if id != paneID && q.named && q.name == name {
