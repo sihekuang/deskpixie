@@ -75,6 +75,16 @@ final class EngineEventTests: XCTestCase {
         XCTAssertNil(d(#"{"kind":"updates"}"#), "lines is required")
     }
 
+    func testDecodesAgents() {
+        let json = #"{"kind":"agents","roster":{"agents":[{"name":"coordinator","label":"Coordinator","status":"idle","kind":"coordinator","reachable":true}],"yours":[{"name":"api-claude","label":"login bug","detail":"WebStorm","status":"working","kind":"session","reachable":true,"app":"com.jetbrains.WebStorm"}],"agent_count":0,"your_count":1}}"#
+        guard case .agents(let v)? = EngineEvent.decode(Data(json.utf8)) else { return XCTFail() }
+        XCTAssertEqual(v.agentCount, 0)
+        XCTAssertEqual(v.yourCount, 1)
+        XCTAssertEqual(v.yours.first?.app, "com.jetbrains.WebStorm")
+        XCTAssertNil(v.agents.first?.detail)
+        XCTAssertNil(EngineEvent.decode(Data(#"{"kind":"agents"}"#.utf8)), "roster is required")
+    }
+
     func testMouthDefaultsToZeroWhenLevelOmitted() {
         XCTAssertEqual(d(#"{"kind":"mouth"}"#), .mouth(0))
     }

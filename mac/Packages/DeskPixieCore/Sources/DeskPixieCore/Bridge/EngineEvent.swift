@@ -80,6 +80,8 @@ public enum EngineEvent: Sendable, Equatable {
     case restart
     /// The unheard agent updates, oldest first (the whole current list; empty = none left).
     case updates([UpdateLine])
+    /// The roster beside Pixie (#91): Pixie's agents and your pix sessions, with counts.
+    case agents(RosterView)
 
     private struct Kind: Decodable { var kind: String }
 
@@ -96,6 +98,7 @@ public enum EngineEvent: Sendable, Equatable {
     private struct Notify: Decodable { var title: String, body: String, sound: String? }
     private struct CanvasOpen: Decodable { var url: String, title: String }
     private struct Updates: Decodable { var lines: [UpdateLine] }
+    private struct Agents: Decodable { var roster: RosterView }
 
     /// Decodes one event JSON object; unknown kinds, malformed JSON and events missing a
     /// required field yield nil.
@@ -125,6 +128,7 @@ public enum EngineEvent: Sendable, Equatable {
         case "notify": return get(Notify.self).map { .notify(title: $0.title, body: $0.body, sound: $0.sound) }
         case "canvas.open": return get(CanvasOpen.self).map { .canvasOpen(url: $0.url, title: $0.title) }
         case "updates": return get(Updates.self).map { .updates($0.lines) }
+        case "agents": return get(Agents.self).map { .agents($0.roster) }
         default: return nil
         }
     }
