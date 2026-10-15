@@ -34,7 +34,9 @@ type session struct {
 	sessionID string
 	status    agent.PaneStatus
 	desc      Descriptions
-	conn      net.Conn // nil while unreachable
+	started   time.Time
+	active    time.Time // its last message
+	conn      net.Conn  // nil while unreachable
 	wmu       sync.Mutex
 	pending   map[string]chan wire.Msg
 	dropTimer *time.Timer
@@ -176,7 +178,7 @@ func (h *Host) register(hello wire.Msg, c net.Conn) (*session, string) {
 				s.dropTimer.Stop()
 				s.dropTimer = nil
 			}
-			s.conn, s.hello = c, hello
+			s.conn, s.hello, s.active = c, hello, time.Now()
 			return s, ""
 		}
 	}
@@ -191,7 +193,9 @@ func (h *Host) register(hello wire.Msg, c net.Conn) (*session, string) {
 	if !ok {
 		return nil, "no free name for this session"
 	}
-	s := &session{addr: addr, hello: hello, sessionID: hello.SessionID, conn: c, pending: map[string]chan wire.Msg{}}
+	now := time.Now()
+	s := &session{addr: addr, hello: hello, sessionID: hello.SessionID, conn: c, pending: map[string]chan wire.Msg{},
+		started: now, active: now}
 	if hello.Description != "" {
 		s.desc.Set(SourceUser, hello.Description, time.Now())
 	}
@@ -201,6 +205,9 @@ func (h *Host) register(hello wire.Msg, c net.Conn) (*session, string) {
 
 // onMsg handles one message from pix; true when the session ended.
 func (h *Host) onMsg(s *session, m wire.Msg) bool {
+	h.mu.Lock()
+	s.active = time.Now()
+	h.mu.Unlock()
 	switch m.Kind {
 	case wire.KindResult:
 		h.mu.Lock()
@@ -225,7 +232,7 @@ func (h *Host) onMsg(s *session, m wire.Msg) bool {
 			h.mu.Lock()
 			switch m.Source {
 			case "auto":
-				s.desc.Set(SourceAuto, AutoDescription(m.Description), time.Now())
+				s.desc.Set(SourceAuto, m.Description, time.Now()) // pix picked it from a prompt you typed
 			case "agent":
 				s.desc.Set(SourceAgent, m.Description, time.Now())
 			}
@@ -417,13 +424,34 @@ func (h *Host) List(context.Context) ([]agent.AgentInfo, error) {
 		if s.hello.GitRoot != "" {
 			repo = filepath.Base(s.hello.GitRoot)
 		}
+		desc := s.desc.Current()
+		if desc == "" {
+			desc = noTaskYet(s.hello.Tool, repo, s.hello.Cwd)
+		}
 		out = append(out, agent.AgentInfo{
 			Name: s.addr, Pane: "pix:" + s.addr, Cwd: s.hello.Cwd, Status: s.status, Origin: agent.OriginUser,
 			User: &agent.UserSession{Tool: s.hello.Tool, Repo: repo, Where: s.hello.Where, App: s.hello.App,
-				Description: s.desc.Current(), PastDescriptions: s.desc.Past(), Reachable: s.conn != nil},
+				Description: desc, PastDescriptions: s.desc.Past(), Reachable: s.conn != nil,
+				Started: s.started, LastActive: s.active},
 		})
 	}
 	return out, nil
+}
+
+// noTaskYet describes a session before it has a description: what it is and where, so it is
+// never blank ("Claude Code in focus, no task yet").
+func noTaskYet(tool, repo, cwd string) string {
+	name := map[string]string{"claude": "Claude Code", "codex": "Codex"}[tool]
+	if name == "" {
+		name = tool
+	}
+	if repo == "" && cwd != "" {
+		repo = filepath.Base(cwd)
+	}
+	if repo == "" {
+		return name + ", no task yet"
+	}
+	return name + " in " + repo + ", no task yet"
 }
 
 func (h *Host) Subscribe() <-chan agent.PaneEvent {
