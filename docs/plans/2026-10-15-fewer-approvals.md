@@ -25,6 +25,8 @@
 
 ## Rulings (where the plan narrows the spec)
 
+- From Task 1's live checks (docs/parity/fewer-approvals-live-checks.md): Codex trust is accepted with Enter (not `1`); allow lists carry Edit rules only (an Edit rule also allows Write; the spec's Write lines would do nothing); the early mode report comes from a UserPromptSubmit hook (SessionStart has no `permission_mode`). The hung approved `git init` (spec §4) could not be reproduced in 8 replays and Codex's own record shows the command never ran; no DeskPixie defect found, so no extra task.
+
 - Spec §1 says the trust answer is "recorded in the job's progress". The start path has no job-progress hook at the point the screen is answered, so the plan logs it (`agent: answered <worker>'s start screen with [1]`) instead. Cost if wrong: the user doesn't see "Trusted <repo>" in the job; add it to the worker's first progress line later.
 - Spec §5 has Pixie say the short reason once. The cause is computed in the app layer (it needs `claude --help` and the managed-settings file), after the controller has already chosen to speak, so Pixie's one-time line is the fixed `ManualNotice` and the reason is in the tray line beside it. Cost if wrong: one extra glance at the menu.
 - Spec §5's Setup row waits for #80 (the spec says "when #80 lands"); the tray line and Pixie's notice carry it until then.
@@ -462,7 +464,7 @@ git commit -m "agent: create_project makes a new repo a worker can start in (#97
 - Test: `core/agent/runtime_worker_test.go`, `core/agent/fs/recipes_test.go`
 
 **Interfaces:**
-- Consumes: Task 1 Step 3's finding (keys that accept: `["1"]` and, if needed, `["Enter"]`).
+- Consumes: Task 1 Step 3's finding: **Enter** accepts Codex's trust screen ("1. Trust and continue" is preselected; `1` alone does not accept). Codex records the trust under the main repo root's real path, also when started in a worktree.
 - Produces: `StartRefusal{Screens [][]string; Reason string; Answer []string}` — `Answer` nil = never answer (today's behaviour).
 
 - [ ] **Step 1: Write the failing runtime tests** (append to `core/agent/runtime_worker_test.go`, using the same fakes as `TestATrustPromptFailsTheStartAndNothingIsTyped` at :339 and its `codexLike` helper at :374)
@@ -470,19 +472,19 @@ git commit -m "agent: create_project makes a new repo a worker can start in (#97
 ```go
 // #97: inside the projects root the trust screen is answered once, then the start goes on.
 func TestATrustPromptInsideTheRootIsAnsweredOnceAndTheStartGoesOn(t *testing.T) {
-	refusal := StartRefusal{Screens: CodexTrustScreensOwned(), Reason: "refused", Answer: []string{"1"}}
+	refusal := StartRefusal{Screens: CodexTrustScreensOwned(), Reason: "refused", Answer: []string{"Enter"}}
 	host := newScreenHost(t, CodexTrustScreenForTest, CodexTrustScreenForTest, codexIdleScreen) // screens returned in order, last repeats
 	err := checkStartScreen(context.Background(), host, "w", []StartRefusal{refusal}, codexReady(), PaneIdle, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := host.keys(); len(got) != 1 || got[0] != "1" {
+	if got := host.keys(); len(got) != 1 || got[0] != "Enter" {
 		t.Fatalf("keys %v", got)
 	}
 }
 
 func TestATrustPromptThatStaysAfterTheAnswerFailsTheStart(t *testing.T) {
-	refusal := StartRefusal{Screens: CodexTrustScreensOwned(), Reason: "refused", Answer: []string{"1"}}
+	refusal := StartRefusal{Screens: CodexTrustScreensOwned(), Reason: "refused", Answer: []string{"Enter"}}
 	host := newScreenHost(t, CodexTrustScreenForTest) // never goes away
 	err := checkStartScreen(context.Background(), host, "w", []StartRefusal{refusal}, codexReady(), PaneIdle, time.Now())
 	if err == nil || err.Error() != "refused" || len(host.keys()) != 1 {
@@ -542,7 +544,7 @@ type StartRefusal struct {
 		}
 ```
 
-with `answeredAt := make([]time.Time, len(refusals))` declared before the poll loop. (Keep the rest of the loop — the ready-marker wait — unchanged. If Task 1 found Enter is also needed, set `Answer: []string{"1", "Enter"}` in Step 5 rather than adding a second round.)
+with `answeredAt := make([]time.Time, len(refusals))` declared before the poll loop. (Keep the rest of the loop — the ready-marker wait — unchanged.)
 
 - [ ] **Step 4: Run the runtime tests**
 
@@ -582,7 +584,7 @@ In `core/agent/fs/recipes.go`: add a `trustRoots []string` field to `FileWorkerR
 ```go
 	refusal := &agent.StartRefusal{Screens: agent.CodexTrustScreensOwned(), Reason: agent.CodexTrustRefusal(l.Repo)}
 	if r.insideTrustRoots(l.Repo) {
-		refusal.Answer = []string{"1"} // Codex records the trust itself (#97); keys per docs/parity/fewer-approvals-live-checks.md
+		refusal.Answer = []string{"Enter"} // Codex records the trust itself (#97); keys per docs/parity/fewer-approvals-live-checks.md
 	}
 ```
 
@@ -644,7 +646,6 @@ func TestWorkerAllowRulesAreExactlyTheReviewedList(t *testing.T) {
 	got := WorkerAllowRules("/Users/u/Documents/Projects")
 	want := []string{
 		"Edit(//Users/u/Documents/Projects/*/.worktrees/**)",
-		"Write(//Users/u/Documents/Projects/*/.worktrees/**)",
 		"Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)",
 		"Bash(git add:*)", "Bash(git commit:*)", "Bash(git branch:*)", "Bash(git rev-parse:*)",
 		"Bash(ls:*)", "Bash(pwd)", "Bash(which:*)",
@@ -660,7 +661,7 @@ func TestWorkerAllowRulesAreExactlyTheReviewedList(t *testing.T) {
 func TestCoordinatorAllowRulesHaveNoBuildsOrTests(t *testing.T) {
 	got := CoordinatorAllowRules("/a/workspace", "/a/canvas")
 	want := []string{
-		"Edit(//a/workspace/**)", "Write(//a/workspace/**)", "Edit(//a/canvas/**)", "Write(//a/canvas/**)",
+		"Edit(//a/workspace/**)", "Edit(//a/canvas/**)",
 		"Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)",
 		"Bash(git rev-parse:*)", "Bash(git branch:*)",
 		"Bash(ls:*)", "Bash(pwd)", "Bash(which:*)",
@@ -723,7 +724,7 @@ var readCommands = []string{
 // WorkerAllowRules: edits inside any worker's worktree, git read/stage/commit, and builds/tests.
 func WorkerAllowRules(projectsRoot string) []string {
 	wt := abs(projectsRoot) + "/*/.worktrees/**"
-	out := []string{"Edit(" + wt + ")", "Write(" + wt + ")"}
+	out := []string{"Edit(" + wt + ")"} // an Edit rule also allows Write (Task 1); a Write rule alone does not
 	out = append(out, readCommands...)
 	return append(out,
 		"Bash(git add:*)", "Bash(git commit:*)", "Bash(git branch:*)", "Bash(git rev-parse:*)",
@@ -738,8 +739,8 @@ func WorkerAllowRules(projectsRoot string) []string {
 // coordinator delegates those to workers.
 func CoordinatorAllowRules(workspace, canvas string) []string {
 	out := []string{
-		"Edit(" + abs(workspace) + "/**)", "Write(" + abs(workspace) + "/**)",
-		"Edit(" + abs(canvas) + "/**)", "Write(" + abs(canvas) + "/**)",
+		"Edit(" + abs(workspace) + "/**)",
+		"Edit(" + abs(canvas) + "/**)",
 	}
 	out = append(out, readCommands...)
 	return append(out, "Bash(git rev-parse:*)", "Bash(git branch:*)", "Bash(ls:*)", "Bash(pwd)", "Bash(which:*)")
@@ -827,7 +828,7 @@ func TestHookBodiesCarryThePermissionMode(t *testing.T) {
 
 Run: `cd core && go test ./agent/httpserver -run TestHookBodiesCarryThePermissionMode` → FAIL.
 
-Add `PermissionMode string` to `HookEvent`; in `hook()` read `mode, _ := obj["permission_mode"].(string)` once after decoding and set `PermissionMode: clean(mode)` on the stop, permission and post-tool events. If Task 1 found only `SessionStart` carries it, add a `mode` event: `case "mode": s.rt.Deliver(agent.HookEvent{Kind: agent.HookMode, Agent: name, PermissionMode: clean(mode)})` and reply 200 `{}`, plus a `SessionStart` http hook to both settings assets (`/hooks/mode`, timeout 5) and to `HookTimeouts`/`WorkerHookTimeouts`.
+Add `PermissionMode string` to `HookEvent`; in `hook()` read `mode, _ := obj["permission_mode"].(string)` once after decoding and set `PermissionMode: clean(mode)` on the stop, permission, post-tool and state events. Task 1 found `permission_mode` in UserPromptSubmit, PreToolUse, PostToolUse, PermissionRequest and Stop — **not** SessionStart — so to learn the mode as soon as an agent gets its first prompt, add a `mode` event: `case "mode": s.rt.Deliver(agent.HookEvent{Kind: agent.HookMode, Agent: name, PermissionMode: clean(mode)})` replying 200 `{}`, and a `UserPromptSubmit` http hook posting to `/hooks/mode` (timeout 5, same header/env shape as the others) in both `coordinator-settings.json` and `worker-settings.json`, added to `HookTimeouts`/`WorkerHookTimeouts`. (On tmux, `WithStateHooks` also posts UserPromptSubmit to `/hooks/state`; two hooks on one event are fine.) In `runtime.go`'s `hook()`, `HookMode` only feeds the mode (no other input). Add a hook-server test that `/hooks/mode` with `{"permission_mode":"default"}` delivers a `HookMode` event.
 
 - [ ] **Step 3: Write the failing controller tests** (append to `core/agent/controller_test.go`, using its existing controller/step helpers)
 
