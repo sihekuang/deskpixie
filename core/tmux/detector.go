@@ -2,11 +2,11 @@ package tmux
 
 // Agent status for a host that detects none itself. tmux knows only whether a pane's process
 // is alive, so status comes from three sources, merged per pane:
-//   - Claude agents' own hooks (UserPromptSubmit working, Stop idle, Notification blocked),
-//     which the runtime hands over through Host.ReportStatus. Exact, so once a Claude agent has
-//     reported, its screen is no longer read.
-//   - The screen (capture-pane every ScreenPoll) for Codex, which has no hooks, and for a
-//     Claude agent that has not reported yet (e.g. one adopted after an app restart), read with
+//   - The agents' own hooks (Claude: UserPromptSubmit working, Stop idle, Notification blocked;
+//     a Codex coordinator, #87: UserPromptSubmit and Stop), which the runtime hands over through
+//     Host.ReportStatus. Exact, so once an agent has reported, its screen is no longer read.
+//   - The screen (capture-pane every ScreenPoll) for Codex workers, which have no hooks, and for
+//     an agent that has not reported yet (e.g. one adopted after an app restart), read with
 //     the markers the controller already uses (agent.BusyMarkers, the ready prompts). A hooked
 //     Claude agent's screen still ends a turn its hooks left open, since a turn can end
 //     without a Stop hook: one interrupted with Escape (seen on the Herdr smokes with Claude
@@ -267,14 +267,14 @@ func (t *tracked) openTurn() bool {
 	return t.status == agent.PaneWorking || t.status == agent.PaneBlocked
 }
 
-// ScreenPanes is every started pane whose screen is read: Codex agents, Claude agents that
-// haven't reported through hooks yet, and hooked ones in a turn.
+// ScreenPanes is every started pane whose screen is read: agents that haven't reported through
+// hooks (Codex workers never do), and hooked ones in a turn.
 func (d *Detector) ScreenPanes() []string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	var out []string
 	for p, t := range d.panes {
-		if t.started && (t.kind == agent.Codex || !t.hooked || t.openTurn()) {
+		if t.started && (!t.hooked || t.openTurn()) {
 			out = append(out, p)
 		}
 	}
@@ -291,7 +291,7 @@ func (d *Detector) Screen(pane, screen string) {
 	t, ok := d.panes[pane]
 	switch {
 	case !ok:
-	case t.kind == agent.Codex || !t.hooked:
+	case !t.hooked:
 		evs = t.update(Classify(t.kind, screen))
 	case !t.openTurn() || Classify(t.kind, screen) != agent.PaneIdle:
 		t.idleSince = time.Time{}

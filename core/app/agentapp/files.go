@@ -17,6 +17,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/sihekuang/deskpixie/core/agent"
 )
 
 var (
@@ -165,15 +167,32 @@ func RenderWorkerSettings(port uint16) string {
 	return strings.ReplaceAll(WorkerSettingsTemplate, "{{PORT}}", strconv.Itoa(int(port)))
 }
 
+// The one rule of coordinator.md that differs per agent ({{ASK_RULE}}): its tool for asking the
+// user a question, which the unattended pane must never use.
+const (
+	ClaudeAskRule = "Do not use the AskUserQuestion tool; ask with `status=\"question\"` instead."
+	CodexAskRule  = "Do not use the request_user_input tool; ask with `status=\"question\"` instead."
+)
+
 // RenderClaudeMd is the coordinator's CLAUDE.md. projectsRoot is set when workers are on: the
 // repository section then says to start workers there; otherwise that it can't edit
 // repositories.
 func RenderClaudeMd(canvas, projectsRoot string) string {
+	return renderCoordinatorMd(canvas, projectsRoot, ClaudeAskRule)
+}
+
+// RenderAgentsMd is the same prompt as AGENTS.md, which a Codex coordinator reads (#87).
+func RenderAgentsMd(canvas, projectsRoot string) string {
+	return renderCoordinatorMd(canvas, projectsRoot, CodexAskRule)
+}
+
+func renderCoordinatorMd(canvas, projectsRoot, askRule string) string {
 	repoWork := RepoWorkSolo
 	if projectsRoot != "" {
 		repoWork = strings.ReplaceAll(RepoWorkWorkers, "{{PROJECTS_ROOT}}", projectsRoot)
 	}
 	md := strings.ReplaceAll(CoordinatorMd, "{{REPO_WORK}}", strings.TrimRightFunc(repoWork, isSpace))
+	md = strings.ReplaceAll(md, "{{ASK_RULE}}", askRule)
 	return strings.ReplaceAll(md, "{{CANVAS_DIR}}", canvas)
 }
 
@@ -292,6 +311,10 @@ func InstallFor(paths Paths, port uint16, projectsRoot string, stateHooks bool) 
 	if err := writeIfChanged(filepath.Join(paths.Workspace, "CLAUDE.md"), RenderClaudeMd(paths.Canvas, projectsRoot)); err != nil {
 		return err
 	}
+	// Both, whatever the coordinator is now: each agent reads only its own (#87).
+	if err := writeIfChanged(filepath.Join(paths.Workspace, "AGENTS.md"), RenderAgentsMd(paths.Canvas, projectsRoot)); err != nil {
+		return err
+	}
 	for _, f := range []struct {
 		path  string
 		text  string
@@ -319,6 +342,40 @@ func InstallFor(paths Paths, port uint16, projectsRoot string, stateHooks bool) 
 		}
 	}
 	return nil
+}
+
+// CoordinatorKind is agent.coordinatorKind as an agent kind (Claude for anything else: the
+// settings window refuses other values).
+func CoordinatorKind(setting string) agent.AgentKind {
+	if k, ok := agent.ParseAgentKind(setting); ok {
+		return k
+	}
+	return agent.Claude
+}
+
+// CoordinatorRecipeFor is the coordinator's launch for kind, without its env: Claude Code with
+// CoordinatorArgs (claudeModel), or Codex with agent.CodexCoordinatorArgs (codexModel; the
+// hooks on the command line, stateHooks for tmux) and its start checks. A blank model is none.
+func CoordinatorRecipeFor(kind agent.AgentKind, paths Paths, claudeModel, codexModel string, port uint16, stateHooks bool) agent.CoordinatorRecipe {
+	if kind != agent.Codex {
+		return agent.CoordinatorRecipe{Kind: agent.Claude, Cwd: paths.Workspace, Args: CoordinatorArgs(paths, claudeModel, true)}
+	}
+	return agent.CoordinatorRecipe{
+		Kind:     agent.Codex,
+		Cwd:      paths.Workspace,
+		Args:     agent.CodexCoordinatorArgs(paths.Canvas, port, codexModel, stateHooks),
+		Refusals: agent.CodexCoordinatorRefusals(paths.Workspace),
+		Ready:    agent.CodexCoordinatorReady(),
+	}
+}
+
+// KeptFor is what the last quit left running that this run adopts: a kept coordinator of
+// another kind than kind is not (its pane is replaced by a start of kind); workers are.
+func KeptFor(kept agent.KeptAgents, kind agent.AgentKind) agent.KeptAgents {
+	if kept.CoordinatorKind != kind {
+		kept.CoordinatorToken, kept.CoordinatorKind = "", 0
+	}
+	return kept
 }
 
 // CoordinatorArgs are Claude Code's arguments for the coordinator (AgentHost adds --continue

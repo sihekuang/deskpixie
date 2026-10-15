@@ -1,6 +1,6 @@
 # DeskPixie
 
-A desktop voice pixie: you talk with **Pixie**, and Pixie hands real work to **the coordinator**, a Claude Code agent working in the background. A Go core (`core/`, built as the C-ABI dylib `libdeskpixie`) hosted by a Swift macOS app (`mac/`).
+A desktop voice pixie: you talk with **Pixie**, and Pixie hands real work to **the coordinator**, a Claude Code agent (or OpenAI Codex: Settings ▸ Coordinator ▸ Coordinator agent) working in the background. A Go core (`core/`, built as the C-ABI dylib `libdeskpixie`) hosted by a Swift macOS app (`mac/`).
 
 This repo is the port of [ai-mascot](https://github.com/sihekuang/ai-mascot) (Rust/Tauri). See `docs/specs/2026-10-13-deskpixie-port-design.md`.
 

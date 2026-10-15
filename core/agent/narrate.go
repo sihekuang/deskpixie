@@ -30,6 +30,12 @@ func Phrase(toolName string, toolInput any) (string, bool) {
 			return "", false
 		}
 		text = "editing " + name
+	case "apply_patch": // Codex's edits (#87): the patch's first file
+		name, ok := pathFileName(patchFile(stringField(toolInput, "command")))
+		if !ok {
+			return "", false
+		}
+		text = "editing " + name
 	case "mcp__pixie__start_worker", "mcp__mascot__start_worker": // the old name: an agent kept over the #68 rename
 		// Only the final path component: never speak a full path.
 		if name, ok := pathFileName(Clean(stringField(toolInput, "repo"))); ok {
@@ -42,6 +48,18 @@ func Phrase(toolName string, toolInput any) (string, bool) {
 	}
 	words := strings.Fields(text)
 	return strings.Join(words[:min(len(words), narrateMaxWords)], " "), true
+}
+
+// patchFile is the first file an apply_patch patch adds, updates or deletes ("" if none).
+func patchFile(patch string) string {
+	for _, l := range strings.Split(patch, "\n") {
+		for _, p := range []string{"*** Update File: ", "*** Add File: ", "*** Delete File: "} {
+			if rest, ok := strings.CutPrefix(strings.TrimSpace(l), p); ok {
+				return Clean(strings.TrimSpace(rest))
+			}
+		}
+	}
+	return ""
 }
 
 func lowercaseFirst(s string) string {

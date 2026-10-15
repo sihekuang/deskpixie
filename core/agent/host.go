@@ -26,7 +26,9 @@ const (
 type CoordinatorRecipe struct {
 	// Cwd is the app-owned workspace (`<app_data>/agent/workspace`).
 	Cwd string
-	// Args are Claude Code arguments, e.g. `--permission-mode auto --settings … --add-dir …`.
+	// Kind is the coordinator's agent (Claude, the zero value, or Codex: #87).
+	Kind AgentKind
+	// Args are the agent's arguments, e.g. Claude Code's `--permission-mode auto --settings …`.
 	Args []string
 	// Env is [PIXIE_AGENT_TOKEN=<token>].
 	Env []EnvVar
@@ -36,6 +38,11 @@ type CoordinatorRecipe struct {
 	// ResumeLast: with no coordinator running, the first start resumes the workspace's last
 	// conversation (--continue) instead of starting a blank one.
 	ResumeLast bool
+	// Refusals and Ready are the start's screen checks (as a worker's, see StartRefusal and
+	// StartReady): a refusal screen, or a ready marker that never settles, fails the start with
+	// HostRefused and closes the pane. None for Claude.
+	Refusals []StartRefusal
+	Ready    *StartReady
 }
 
 // Ensured is EnsureCoordinator's result: Started false is Rust's Running(Status) (it was
@@ -80,6 +87,9 @@ func (h *AgentHost) Token() string {
 	}
 	return ""
 }
+
+// Kind is the coordinator's agent kind.
+func (h *AgentHost) Kind() AgentKind { return h.recipe.Kind }
 
 // Session is the session host the coordinator runs in.
 func (h *AgentHost) Session() SessionHost { return h.host }
@@ -160,17 +170,39 @@ func (h *AgentHost) EnsureCoordinator(ctx context.Context) (Ensured, error) {
 	return Ensured{Started: true, Status: info.Status, Resumed: resumed}, nil
 }
 
-// launch is one coordinator start (replacing an adopted one), with --continue if resume.
+// launch is one coordinator start (replacing an adopted one), resuming its last conversation
+// if resume: Claude Code's --continue, or Codex's `resume --last` (the newest session in the
+// workspace; with none, Codex starts a new one).
 func (h *AgentHost) launch(ctx context.Context, replace, resume bool) (AgentInfo, error) {
 	args := slices.Clone(h.recipe.Args)
 	if resume {
-		args = append(args, "--continue")
+		if h.recipe.Kind == Codex {
+			args = append([]string{"resume", "--last"}, args...)
+		} else {
+			args = append(args, "--continue")
+		}
 	}
-	spec := AgentSpec{Name: Coordinator, Kind: Claude, Cwd: h.recipe.Cwd, Args: args, Env: slices.Clone(h.recipe.Env)}
+	spec := AgentSpec{Name: Coordinator, Kind: h.recipe.Kind, Cwd: h.recipe.Cwd, Args: args, Env: slices.Clone(h.recipe.Env)}
+	began := time.Now()
+	var info AgentInfo
+	var err error
 	if replace {
-		return h.host.ReplaceAgent(ctx, spec)
+		info, err = h.host.ReplaceAgent(ctx, spec)
+	} else {
+		info, err = h.host.StartAgent(ctx, spec)
 	}
-	return h.host.StartAgent(ctx, spec)
+	if err != nil {
+		return info, err
+	}
+	if err := checkStartScreen(ctx, h.host, Coordinator, h.recipe.Refusals, h.recipe.Ready, info.Status, began); err != nil {
+		if ctx.Err() != nil {
+			return AgentInfo{}, ctx.Err()
+		}
+		// Nothing was typed into it; don't leave it to be adopted later.
+		closeBounded(ctx, Coordinator, func(c context.Context) error { return h.host.Close(c, Coordinator) })
+		return AgentInfo{}, HostError{Kind: HostRefused, Detail: err.Error()}
+	}
+	return info, nil
 }
 
 // Reset is tray ▸ Restart coordinator: forget the crash history and stop giving up.

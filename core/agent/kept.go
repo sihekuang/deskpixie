@@ -7,8 +7,11 @@ package agent
 // KeptAgents is the kept-agents file (kept.json). Zero = nothing kept.
 type KeptAgents struct {
 	// CoordinatorToken is set when the coordinator was running at the quit.
-	CoordinatorToken string       `json:"coordinatorToken,omitempty"`
-	Workers          []KeptWorker `json:"workers,omitempty"`
+	CoordinatorToken string `json:"coordinatorToken,omitempty"`
+	// CoordinatorKind is that coordinator's agent (#87; omitted for Claude, as in every file
+	// from before it). A coordinator of another kind than the one configured is not adopted.
+	CoordinatorKind AgentKind    `json:"coordinatorKind,omitempty"`
+	Workers         []KeptWorker `json:"workers,omitempty"`
 }
 
 // KeptWorker is one worker left running.

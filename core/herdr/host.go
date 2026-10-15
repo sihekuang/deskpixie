@@ -414,14 +414,15 @@ func (h *Host) start(ctx context.Context, spec agent.AgentSpec, replaceLive bool
 			return agent.AgentInfo{}, err
 		}
 	}
-	// The new tab's shell may not be at its prompt yet (agent_pane_busy): retry for a while.
+	// The new tab's shell may not be at its prompt yet (agent_pane_busy, or a command line too
+	// long for the terminal before the prompt): retry for a while.
 	busyUntil := tabMade.Add(h.paneBusyLimit)
 	for {
 		_, err := client.StartAgent(ctx, spec.Name, spec.Kind.String(), pane, spec.Args, agentStartTimeoutMs())
 		if err == nil {
 			break
 		}
-		if IsPaneBusy(err) && time.Now().Before(busyUntil) {
+		if (IsPaneBusy(err) || IsInputNotReady(err)) && time.Now().Before(busyUntil) {
 			if sleepCtx(ctx, StartPoll) {
 				continue
 			}
