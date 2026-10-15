@@ -293,7 +293,7 @@ func benchRegistry(b *benchTools) *voice.ToolRegistry {
 		go func() {
 			time.Sleep(fakeReplyDelay)
 			if rt != nil {
-				rt.Inject(voice.Notice{Text: "Agent reply: " + reply})
+				rt.Inject(voice.Notice{Text: "Coordinator reply: " + reply})
 			}
 		}()
 		o := ok(map[string]any{"job_id": id, "status": "delegated"})

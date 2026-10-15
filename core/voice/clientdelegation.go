@@ -4,8 +4,8 @@ package voice
 // typed tool call (GPT-Live's `delegation: {type: client}`) reports it as an EvToolCall for
 // ClientDelegationTool. The conversation fills in the task from the transcript (the user's last
 // words, with the earlier turns as context, as the #71 hand-off does), and the runtime's
-// clientDelegation tool sends it to the agent: answer_job when the user is answering an
-// "Agent question:", otherwise delegate.
+// clientDelegation tool sends it to the coordinator: answer_job when the user is answering a
+// "Coordinator question:", otherwise delegate.
 
 import (
 	"context"
@@ -17,7 +17,7 @@ const (
 	// ClientDelegationTool is the pseudo tool an adapter names in EvToolCall for a client
 	// delegation. Its CallID is the provider's delegation id; the conversation sets Args.
 	ClientDelegationTool = "client_delegation"
-	// AnswerJobTool is the agent's answer_job tool.
+	// AnswerJobTool is the coordinator's answer_job tool.
 	AnswerJobTool = "answer_job"
 	// CheckPrefix marks a delegated fact check (the delegation persona's "Check: ").
 	CheckPrefix = "Check: "
@@ -35,31 +35,31 @@ func isCoordinatorQuestion(text string) bool {
 type ClientDelegationArgs struct {
 	Task    string `json:"task"`
 	Context string `json:"context,omitempty"`
-	// Answer: the user is answering an "Agent question:" relayed just before this turn.
+	// Answer: the user is answering a "Coordinator question:" relayed just before this turn.
 	Answer bool `json:"answer,omitempty"`
 }
 
 // ClientDelegationResult is ClientDelegationTool's output, which the adapter turns into what
 // the voice model is told.
 type ClientDelegationResult struct {
-	// Routed: "delegate", "answer_job" or "none" (nothing was sent to the agent).
+	// Routed: "delegate", "answer_job" or "none" (nothing was sent to the coordinator).
 	Routed string `json:"routed,omitempty"`
 	JobID  string `json:"job_id,omitempty"`
-	// Check: a fact check; its answer comes back as an "Agent reply:" in this conversation.
+	// Check: a fact check; its answer comes back as a "Coordinator reply:" in this conversation.
 	Check bool   `json:"check,omitempty"`
 	Note  string `json:"note,omitempty"`
 	Error string `json:"error,omitempty"`
 }
 
-// DelegationOffNoAgent is the error when no agent is built (Settings ▸ Agent ▸ Delegation off).
-const DelegationOffNoAgent = "Delegation is off (the agent is turned off in Settings)."
+// DelegationOffNoAgent is the error when no coordinator is built (Settings ▸ Agent ▸ Delegation off).
+const DelegationOffNoAgent = "Delegation is off (the coordinator is turned off in Settings)."
 
 // clientDelegation is the runtime's ClientDelegationTool: it routes the task to the registry's
 // answer_job or delegate tool.
 type clientDelegation struct{ reg *ToolRegistry }
 
 func (clientDelegation) Name() string        { return ClientDelegationTool }
-func (clientDelegation) Description() string { return "Routes a client delegation to the agent." }
+func (clientDelegation) Description() string { return "Routes a client delegation to the coordinator." }
 func (clientDelegation) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{}}`)
 }
@@ -98,7 +98,7 @@ func (t clientDelegation) Invoke(ctx context.Context, raw json.RawMessage) ToolO
 			case id != "":
 				return resultOutcome(ClientDelegationResult{Routed: "answer_job", JobID: id})
 			case strings.Contains(e, "confirm word"):
-				return resultOutcome(ClientDelegationResult{Routed: "none", Note: "the agent is waiting for a confirm word: the app handles it"})
+				return resultOutcome(ClientDelegationResult{Routed: "none", Note: "the coordinator is waiting for a confirm word: the app handles it"})
 			}
 			// No job waiting after all: it's a new request.
 		}
@@ -112,7 +112,7 @@ func (t clientDelegation) Invoke(ctx context.Context, raw json.RawMessage) ToolO
 	id, e := jobResult(out.Output)
 	if id == "" {
 		if e == "" {
-			e = "the agent did not take it"
+			e = "the coordinator did not take it"
 		}
 		return resultOutcome(ClientDelegationResult{Error: e})
 	}
@@ -187,7 +187,7 @@ func IsQuestion(said string) bool {
 	return strings.HasSuffix(strings.TrimSpace(said), "?") || hasPrefixPhrase(text, questionStarts)
 }
 
-// confirmVerbs open a confirm-word answer ("confirm hawk"); the agent hears those itself.
+// confirmVerbs open a confirm-word answer ("confirm hawk"); the coordinator hears those itself.
 var confirmVerbs = map[string]bool{"confirm": true, "allow": true, "approve": true}
 
 // IsConfirmWords reports whether the words are a confirm-word answer: a confirm verb and a

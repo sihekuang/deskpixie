@@ -153,7 +153,7 @@ type Effect struct {
 	// Claim (EfHandOff): Pixie already said it handed it off, so a successful hand-off says
 	// nothing more (#72).
 	Claim bool
-	// Answer (EfHandOff, client delegation): the user is answering a relayed "Agent question:".
+	// Answer (EfHandOff, client delegation): the user is answering a relayed "Coordinator question:".
 	Answer bool
 	Signal VoiceSignal // EfSignal
 }
@@ -234,7 +234,7 @@ type Conversation struct {
 
 	// Client delegation (#70).
 	clientDelegation bool
-	// questionAsked: an "Agent question:" (not a confirm prompt) was relayed since the user's
+	// questionAsked: a "Coordinator question:" (not a confirm prompt) was relayed since the user's
 	// last turn began; answerTurn: this turn is the user's first since one was relayed.
 	questionAsked, answerTurn bool
 	// endNotBefore: an ending conversation waits until then for GPT-Live's hand-off line.
@@ -553,7 +553,7 @@ func (c *Conversation) onModel(ev Event, now time.Time, fx []Effect) []Effect {
 			if t := strings.TrimSpace(ev.Text); t != "" {
 				if c.clientDelegation && c.hoUser != "" && len(c.hoBot) == 0 {
 					// GPT-Live's transcript of one utterance can come in pieces (a pause, or
-					// words said while Bit talked): keep them all for the task (#70).
+					// words said while Pixie talked): keep them all for the task (#70).
 					t = c.hoUser + " " + t
 				}
 				c.hoUser = t
@@ -814,10 +814,10 @@ func (c *Conversation) handOffContext() string {
 
 // clientDelegationArgs builds a client delegation's task from the transcript (#70): the user's
 // words this turn (a question becomes a "Check: " fact), the earlier turns as context, and
-// whether they answer a relayed "Agent question:". Without words this turn it falls back to
+// whether they answer a relayed "Coordinator question:". Without words this turn it falls back to
 // the user's last earlier line.
 func (c *Conversation) clientDelegationArgs() json.RawMessage {
-	// The user's words since Bit last spoke: a pause can split one request into turns.
+	// The user's words since Pixie last spoke: a pause can split one request into turns.
 	said := c.hoUser
 	history := c.hoHistory
 	for len(history) > 0 {

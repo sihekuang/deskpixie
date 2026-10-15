@@ -112,7 +112,7 @@ func (c *codec) closeUser(out []voice.Event) []voice.Event {
 	out = append(out, voice.Event{Kind: voice.EvSpeechStopped})
 	if c.client && voice.IsGoodbye(t) {
 		// No typed end_conversation with client delegation: a goodbye ends the conversation
-		// once Bit's reply to it has played (#70).
+		// once Pixie's reply to it has played (#70).
 		c.byeSeq++
 		id := fmt.Sprintf("bye_%d", c.byeSeq)
 		c.byeCalls[id] = true
@@ -128,7 +128,7 @@ func (c *codec) onClientDelegation(id string) []voice.Event {
 	var out []voice.Event
 	if c.uOpen {
 		if c.uDeferred {
-			// Said over Bit: the words count, but no turn starts.
+			// Said over Pixie: the words count, but no turn starts.
 			c.uOpen, c.uDeferred = false, false
 			if t := strings.TrimSpace(c.uText.String()); t != "" {
 				out = append(out, voice.Event{Kind: voice.EvTranscript, Role: "user", Text: t})
@@ -398,7 +398,7 @@ func splitContent(text string, n int) (head, rest string) {
 }
 
 // clientReply answers a client delegation with what became of it (voice.ClientDelegationResult):
-// commentary when Bit should say something now, thinking when it is only context.
+// commentary when Pixie should say something now, thinking when it is only context.
 func (c *codec) clientReply(id string, output []byte) []obj {
 	var r voice.ClientDelegationResult
 	_ = json.Unmarshal(output, &r)
@@ -406,14 +406,14 @@ func (c *codec) clientReply(id string, output []byte) []obj {
 	switch {
 	case r.Routed == "delegate" && r.Check:
 		speak = false
-		text = "The app gave this question to the agent (" + r.JobID + "). Its answer arrives later as an \"Agent reply:\" line; until then don't answer it yourself. If you haven't yet, say only that you're checking."
+		text = "The app gave this question to the coordinator (" + r.JobID + "). Its answer arrives later as a \"Coordinator reply:\" line; until then don't answer it yourself. If you haven't yet, say only that you're checking."
 	case r.Routed == "delegate":
-		text = "The app handed this to the agent as " + r.JobID + ". Tell the user in a few words that you've passed it on and will let them know; don't answer it yourself."
+		text = "The app handed this to the coordinator as " + r.JobID + ". Tell the user in a few words that you've passed it on and will let them know; don't answer it yourself."
 	case r.Routed == "answer_job":
-		text = "The app passed the user's answer to the agent (" + r.JobID + "). Say in a few words that you've passed it on."
+		text = "The app passed the user's answer to the coordinator (" + r.JobID + "). Say in a few words that you've passed it on."
 	case r.Routed == "none":
 		speak = false
-		text = "Nothing was sent to the agent: " + r.Note + ". Say nothing about it."
+		text = "Nothing was sent to the coordinator: " + r.Note + ". Say nothing about it."
 	case strings.HasPrefix(r.Error, "Delegation is off ("):
 		text = "This can't be handed off: " + strings.TrimSuffix(r.Error, ".") + ". Tell the user in one short sentence that you can't hand it off and why."
 	case r.Error != "":

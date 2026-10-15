@@ -93,11 +93,11 @@ func TestClientDelegationReplies(t *testing.T) {
 		kind string
 		has  string
 	}{
-		{"work", voice.ClientDelegationResult{Routed: "delegate", JobID: "job_1"}, "session.commentary.append", "handed this to the agent as job_1"},
-		{"check", voice.ClientDelegationResult{Routed: "delegate", JobID: "job_2", Check: true}, "session.thinking.append", "Agent reply:"},
+		{"work", voice.ClientDelegationResult{Routed: "delegate", JobID: "job_1"}, "session.commentary.append", "handed this to the coordinator as job_1"},
+		{"check", voice.ClientDelegationResult{Routed: "delegate", JobID: "job_2", Check: true}, "session.thinking.append", "Coordinator reply:"},
 		{"answer", voice.ClientDelegationResult{Routed: "answer_job", JobID: "job_3"}, "session.commentary.append", "passed the user's answer"},
 		{"confirm", voice.ClientDelegationResult{Routed: "none", Note: "a confirm word"}, "session.thinking.append", "Say nothing"},
-		{"off", voice.ClientDelegationResult{Error: "Delegation is off (Agent: herdr not found)."}, "session.commentary.append", "can't be handed off: Delegation is off (Agent: herdr not found)"},
+		{"off", voice.ClientDelegationResult{Error: "Delegation is off (Coordinator: herdr not found)."}, "session.commentary.append", "can't be handed off: Delegation is off (Coordinator: herdr not found)"},
 		{"failed", voice.ClientDelegationResult{Error: "task is required"}, "session.commentary.append", "failed: task is required"},
 	}
 	for _, tc := range cases {

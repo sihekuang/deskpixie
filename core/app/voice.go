@@ -65,7 +65,7 @@ func SessionConfig(s settings.VoiceSettings, instructions string) voice.SessionC
 		Voice:        s.Voice,
 		Instructions: instructions,
 		BackendModel: s.LiveBackendModel,
-		// Client delegation straight to the agent (GPT-Live only; #70).
+		// Client delegation straight to the coordinator (GPT-Live only; #70).
 		ClientDelegation: s.LiveDelegation == settings.LiveDelegationAgent,
 		TurnDetection:    voice.TurnSemantic,
 		NoisyRoom:        s.NoisyRoom,

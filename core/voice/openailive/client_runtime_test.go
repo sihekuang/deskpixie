@@ -141,7 +141,7 @@ func TestClientDelegationQuestionThenAgentReply(t *testing.T) {
 		t.Fatalf("task %q", task)
 	}
 	r.wait("the quiet acknowledgement", func() bool { return len(fs.withDelegation("session.thinking.append", "item_1")) == 1 })
-	r.rt.Inject(voice.Notice{Text: "Agent reply: 17 degrees and light rain in Paris."})
+	r.rt.Inject(voice.Notice{Text: "Coordinator reply: 17 degrees and light rain in Paris."})
 	r.wait("the reply as commentary", func() bool {
 		for _, m := range fs.sent("session.commentary.append") {
 			if m["delegation_id"] == nil && strings.Contains(m["content"].(string), "17 degrees") {
@@ -155,14 +155,14 @@ func TestClientDelegationQuestionThenAgentReply(t *testing.T) {
 	}
 }
 
-// After an "Agent question:", the user's answer goes to answer_job, not a new job (#75).
+// After a "Coordinator question:", the user's answer goes to answer_job, not a new job (#75).
 func TestClientDelegationAnswersAWaitingQuestion(t *testing.T) {
 	del := &fakeAgentTool{name: voice.DelegateTool, out: `{"job_id":"job_9","status":"delegated"}`}
 	ans := &fakeAgentTool{name: voice.AnswerJobTool, out: `{"job_id":"job_3","status":"answered"}`}
 	fs := &fakeLive{client: true, script: []confReply{{frames: 3, tool: voice.ClientDelegationTool}},
 		said: []string{"make it blue"}}
 	r := newClientRig(t, fs, del, ans)
-	r.rt.Inject(voice.Notice{Text: "Agent question: what colour should the chart be?"})
+	r.rt.Inject(voice.Notice{Text: "Coordinator question: what colour should the chart be?"})
 	r.wait("the question as commentary", func() bool { return len(fs.sent("session.commentary.append")) == 1 })
 	time.Sleep(600 * time.Millisecond) // Bit asks it
 	r.mic.Say(300)

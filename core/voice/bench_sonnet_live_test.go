@@ -200,7 +200,7 @@ func TestLiveBenchGPTLiveSonnet(t *testing.T) {
 			t.Logf("warm-up: %s", tool.Invoke(context.Background(), json.RawMessage(`{"task":"Reply with the word ready and nothing else."}`)).Output)
 		}
 	}
-	for !slices.ContainsFunc(av.snapshot(), func(l agentLine) bool { return strings.HasPrefix(l.Text, "Agent reply") || l.Bounced }) {
+	for !slices.ContainsFunc(av.snapshot(), func(l agentLine) bool { return hasLine(l.Text, "reply") || l.Bounced }) {
 		if time.Since(warm) > 4*time.Minute {
 			t.Fatalf("the coordinator never answered the warm-up: %+v tray %+v", av.snapshot(), a.Tray())
 		}
@@ -247,6 +247,11 @@ func TestLiveBenchGPTLiveSonnet(t *testing.T) {
 	}
 	t.Logf("GPT-Live billed %.0f s", billed)
 	fmt.Println(sonnetSummary(all))
+}
+
+// hasLine: text is a coordinator line of kind ("reply", "question", …), new or old lead-in.
+func hasLine(text, kind string) bool {
+	return strings.HasPrefix(text, "Coordinator "+kind+":") || strings.HasPrefix(text, "Agent "+kind+":")
 }
 
 func trunc(s string, n int) string {
@@ -299,8 +304,8 @@ func runSonnetScenario(t *testing.T, r *benchRig, tap *wireTap, bt *benchTools, 
 		}
 	}
 	isReply := func(l agentLine) bool {
-		return l.At.After(taskAt) && (strings.HasPrefix(l.Text, "Agent reply:") || strings.HasPrefix(l.Text, "Agent question:") ||
-			strings.HasPrefix(l.Text, "Agent says:") || (l.Bounced && !strings.Contains(l.Text, "progress")))
+		return l.At.After(taskAt) && (hasLine(l.Text, "reply") || hasLine(l.Text, "question") ||
+			hasLine(l.Text, "says") || (l.Bounced && !strings.Contains(l.Text, "progress")))
 	}
 	timedOut := false
 	if !taskAt.IsZero() {
@@ -445,15 +450,15 @@ func runSonnetScenario(t *testing.T, r *benchRig, tap *wireTap, bt *benchTools, 
 				}
 				st.Lines = append(st.Lines, trunc(l.Text, 300))
 				switch {
-				case strings.HasPrefix(l.Text, "Agent progress:"):
+				case hasLine(l.Text, "progress"):
 					if st.ProgressMs < 0 {
 						st.ProgressMs = after(l.At)
 					}
-				case st.ReplyMs < 0 && (strings.HasPrefix(l.Text, "Agent reply:") || strings.HasPrefix(l.Text, "Agent question:") ||
-					strings.HasPrefix(l.Text, "Agent says:") || l.Bounced):
+				case st.ReplyMs < 0 && (hasLine(l.Text, "reply") || hasLine(l.Text, "question") ||
+					hasLine(l.Text, "says") || l.Bounced):
 					st.ReplyMs, st.Reply, st.ReplyBounced = after(l.At), l.Text, l.Bounced
 					st.ReplyKind = "reply"
-					if strings.HasPrefix(l.Text, "Agent question:") {
+					if hasLine(l.Text, "question") {
 						st.ReplyKind, st.Clarifying = "question", !strings.Contains(l.Text, "Say confirm")
 						st.Permission = strings.Contains(l.Text, "Say confirm")
 					}

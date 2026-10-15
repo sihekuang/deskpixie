@@ -42,7 +42,7 @@ func TestClientDelegationTaskIsTheUsersWordsWithEarlierTurnsAsContext(t *testing
 	if a.Task != "can you look into it?" || a.Answer {
 		t.Fatalf("args %+v", a)
 	}
-	want := "Earlier in this voice conversation:\nUser: the tmux tests were flaky yesterday\nBit: Oh no, that's annoying."
+	want := "Earlier in this voice conversation:\nUser: the tmux tests were flaky yesterday\nPixie: Oh no, that's annoying."
 	if a.Context != want {
 		t.Fatalf("context %q", a.Context)
 	}
@@ -64,6 +64,7 @@ func TestClientDelegationOfAQuestionIsACheck(t *testing.T) {
 
 func TestClientDelegationAfterAnAgentQuestionIsAnAnswer(t *testing.T) {
 	c := newClientConv()
+	// The older "Agent question:" lead-in still counts.
 	fx := c.Step(InjectInput(Notice{Text: "Agent question: which branch?"}), ms(t0(), 100))
 	if len(injects(fx)) != 1 {
 		t.Fatalf("%v", fx)
@@ -79,7 +80,7 @@ func TestClientDelegationAfterAnAgentQuestionIsAnAnswer(t *testing.T) {
 		t.Fatalf("%+v", a)
 	}
 	// A confirm prompt is never answered through answer_job.
-	c.Step(InjectInput(Notice{Text: "Agent question: may I delete it? Say confirm hawk."}), ms(t0(), 9000))
+	c.Step(InjectInput(Notice{Text: "Coordinator question: may I delete it? Say confirm hawk."}), ms(t0(), 9000))
 	userTurn(c, "yes do it", ms(t0(), 12000))
 	if _, a := clientCall(c, "item_3", ms(t0(), 12100)); a.Answer {
 		t.Fatalf("%+v", a)
@@ -186,8 +187,8 @@ func TestClientDelegationRouting(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 	off := NewToolRegistry()
-	off.Register(&recTool{name: DelegateTool, out: `{"error":"Delegation is off (Agent: herdr not found)."}`})
-	if r, _ := route(t, off, ClientDelegationArgs{Task: "fix it"}); !strings.HasPrefix(r.Error, "Delegation is off (Agent: herdr") {
+	off.Register(&recTool{name: DelegateTool, out: `{"error":"Delegation is off (Coordinator: herdr not found)."}`})
+	if r, _ := route(t, off, ClientDelegationArgs{Task: "fix it"}); !strings.HasPrefix(r.Error, "Delegation is off (Coordinator: herdr") {
 		t.Fatalf("%+v", r)
 	}
 }
@@ -256,7 +257,7 @@ func TestTranscriptMatchers(t *testing.T) {
 // app's hand-off carries Answer, so the router gives it to answer_job, not a new job.
 func TestClientModeClaimedAnswerIsHandedOffAsAnAnswer(t *testing.T) {
 	c := newClientConv()
-	c.Step(InjectInput(Notice{Text: "Agent question: what colour should the chart be?"}), ms(t0(), 100))
+	c.Step(InjectInput(Notice{Text: "Coordinator question: what colour should the chart be?"}), ms(t0(), 100))
 	reply(c, "What colour should the chart be?", ms(t0(), 400))
 	userTurn(c, "make it blue", ms(t0(), 2000))
 	reply(c, "Got it, I've passed that on to the agent.", ms(t0(), 2500))
@@ -289,7 +290,7 @@ func TestClientDelegationJoinsASplitUtterance(t *testing.T) {
 	userTurn(c, "The login tests were flaky", ms(t0(), 100))
 	userTurn(c, "yesterday", ms(t0(), 1200))
 	if _, a := clientCall(c, "item_1", ms(t0(), 1300)); a.Task != "The login tests were flaky yesterday" ||
-		a.Context != "Earlier in this voice conversation:\nBit: Hi!" {
+		a.Context != "Earlier in this voice conversation:\nPixie: Hi!" {
 		t.Fatalf("%+v", a)
 	}
 	c2 := newClientConv()

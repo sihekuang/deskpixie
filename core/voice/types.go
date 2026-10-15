@@ -42,7 +42,7 @@ type SessionConfig struct {
 	// backend model (GPT-Live's Responses delegation); the others ignore them.
 	BackendModel, BackendInstructions string
 	// ClientDelegation: the provider hands turns that need work to the app instead of running
-	// tools itself (GPT-Live's client delegation, voice.liveDelegation "agent"; #70). The others
+	// tools itself (GPT-Live's client delegation, voice.liveDelegation "agent": straight to the coordinator; #70). The others
 	// ignore it.
 	ClientDelegation bool
 }

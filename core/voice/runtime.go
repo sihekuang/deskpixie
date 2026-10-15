@@ -816,7 +816,7 @@ func (r *Runtime) handOff(task, context string, claim, answer bool) {
 	invoke := tool.Invoke
 	if router, ok := r.tools.Get(ClientDelegationTool); ok {
 		// Client delegation (#70): the same routing as GPT-Live's own delegations, so an answer
-		// to an "Agent question:" goes to answer_job rather than a new job (#75).
+		// to a "Coordinator question:" goes to answer_job rather than a new job (#75).
 		invoke = routedHandOff{router}.Invoke
 		raw, _ = json.Marshal(ClientDelegationArgs{Task: task, Context: context, Answer: answer})
 	}
