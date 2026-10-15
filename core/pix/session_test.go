@@ -297,3 +297,71 @@ func TestScreenMarkerFoundWhenCursorMovesReplaceSpaces(t *testing.T) {
 		t.Fatal("marker with cursor moves for spaces")
 	}
 }
+
+// A session whose first message is Pixie's ("Task from the coordinator, …", seen 2026-10-15
+// as the description "Task from coordinator,") must not be described by its opening words;
+// pix asks the agent for a description instead, and the agent's is what shows.
+func TestPixieMessageAsksForADescriptionInsteadOfBeingOne(t *testing.T) {
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}})
+	task := "Task from the coordinator, on the user's request: fix how Pixie's pix sessions get described."
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "p", Command: "prompt", Text: task})
+	waitEvent(t, h.d.events, "prompt result", func(m wire.Msg) bool { return m.ID == "p" })
+	reply := h.s.Hook("UserPromptSubmit", map[string]any{"prompt": task + "\n"})
+	if !strings.Contains(reply, "set_description") || !strings.Contains(reply, "UserPromptSubmit") {
+		t.Fatalf("the agent is asked to describe its task: %q", reply)
+	}
+	if err := h.s.SetDescription("deskpixie: fix pix session descriptions"); err != nil {
+		t.Fatal(err)
+	}
+	waitEvent(t, h.d.events, "agent description", func(m wire.Msg) bool {
+		if m.Event == "description" && m.Source == "auto" {
+			t.Fatalf("Pixie's message became the description: %q", m.Description)
+		}
+		return m.Event == "description" && m.Source == "agent" && m.Description == "deskpixie: fix pix session descriptions"
+	})
+	if d := h.s.description(); d != "deskpixie: fix pix session descriptions" {
+		t.Fatalf("%q", d)
+	}
+	h.s.runner.Hangup()
+	h.s.finish()
+}
+
+func TestMessagesYouDidNotTypeAreNotDescriptions(t *testing.T) {
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}})
+	h.s.Hook("UserPromptSubmit", map[string]any{"prompt": "Another Claude session sent a message:\n<agent-message from=\"a91706fc445c4c179\">\n[Subagent hand-back] report"})
+	h.s.Hook("Stop", map[string]any{})
+	h.s.Hook("UserPromptSubmit", map[string]any{"prompt": "<task-notification>\n<task-id>a5</task-id>"})
+	h.s.Hook("Stop", map[string]any{})
+	h.s.Hook("UserPromptSubmit", map[string]any{"prompt": "Please fix the flaky upload test\nit fails on CI"})
+	waitEvent(t, h.d.events, "auto description", func(m wire.Msg) bool {
+		if m.Event == "description" && m.Description != "fix the flaky upload test" {
+			t.Fatalf("got %q", m.Description)
+		}
+		return m.Event == "description"
+	})
+	h.s.runner.Hangup()
+	h.s.finish()
+}
+
+func TestAgentDescriptionMustBeWords(t *testing.T) {
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}})
+	if err := h.s.SetDescription(`<agent-message from="a9"> [Subagent`); err == nil {
+		t.Fatal("a message fragment is refused")
+	}
+	if err := h.s.SetDescription("  "); err == nil {
+		t.Fatal("an empty description is refused")
+	}
+	h.s.runner.Hangup()
+	h.s.finish()
+}
+
+// Codex has no prompt hook; its turn-end notify carries what you typed.
+func TestCodexDescriptionFromItsTurn(t *testing.T) {
+	h := newHarness(t, "codex", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}})
+	h.s.Hook("Stop", map[string]any{"type": "agent-turn-complete", "input-messages": []any{"add retries to the uploader", "and log them"}})
+	waitEvent(t, h.d.events, "codex auto description", func(m wire.Msg) bool {
+		return m.Event == "description" && m.Source == "auto" && m.Description == "add retries to the uploader"
+	})
+	h.s.runner.Hangup()
+	h.s.finish()
+}

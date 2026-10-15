@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -129,6 +130,9 @@ func TestLivePixWrapsClaude(t *testing.T) {
 	}
 	t.Logf("✓ registered as %s", addr)
 	time.Sleep(5 * time.Second) // Claude's TUI and session record come up
+	if l, _ := host.List(context.Background()); l[0].User.Description != "Claude Code in work, no task yet" {
+		t.Fatalf("before any task: %q", l[0].User.Description)
+	}
 
 	// 2. A prompt through Claude's inbox socket starts a turn; hooks report working then idle.
 	ctx := context.Background()
@@ -140,6 +144,8 @@ func TestLivePixWrapsClaude(t *testing.T) {
 	// The agent's set_description (via pix mcp) beats the automatic one.
 	if l, _ := host.List(ctx); len(l) != 1 || l[0].User.Description != "live smoke test" {
 		t.Fatalf("description: %+v", l[0].User)
+	} else if slices.ContainsFunc(l[0].User.PastDescriptions, func(d string) bool { return strings.Contains(d, "set_description") }) {
+		t.Fatalf("Pixie's message became a description: %v", l[0].User.PastDescriptions)
 	} else {
 		t.Logf("✓ set_description → %q (past %v)", l[0].User.Description, l[0].User.PastDescriptions)
 	}

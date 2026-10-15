@@ -60,12 +60,20 @@ from three places, and the higher one wins:
 
 1. **You:** `pix --description "login bug" claude`, or tell Pixie "call the WebStorm one
    login bug". Yours stays until you clear it.
-2. **The agent:** pix gives it a `set_description` tool and asks it to use it when its task
-   changes ("fixing login redirect loop").
-3. **Automatic:** the first few words of your first prompt for a new piece of work.
+2. **The agent:** pix gives it a `set_description` tool and asks it to name the project and
+   the task in a few words ("deskpixie: fix login redirect loop") when it starts a task and
+   when the task changes. Each turn that starts new work reminds it.
+3. **Automatic:** the first line of the prompt you typed to start a piece of work. Only what
+   you typed counts: Pixie's messages, other sessions' messages, subagent reports, task
+   notices, slash commands and short replies ("yes", "got it") never become a description.
+   A resumed conversation (`pix claude --resume …`) starts with your last prompt in it, or
+   the title Claude gave it. Codex sessions take it from the turn's prompt.
 
-Pixie remembers a session's last few descriptions, so "the login-bug one" still finds it after
-it moves on. Pixie only ever says descriptions, never internal names.
+Before any of these, a session is listed as what and where it is ("Claude Code in focus, no
+task yet"), never blank. Pixie remembers a session's last few descriptions, so "the
+login-bug one" still finds it after it moves on. Pixie only ever says descriptions, never
+internal names. When two sessions fit what you said (say, two in the same project), Pixie asks
+you which, by description, where it runs and when it started.
 
 ## What Pixie can do to your sessions
 

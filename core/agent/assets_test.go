@@ -149,3 +149,13 @@ func TestAFailedLocalToolIsCheckedWithTheCoordinator(t *testing.T) {
 		t.Fatal("delegation rules lack the failed-tool fallback")
 	}
 }
+
+// #103: after a check's answer Pixie decides whether to ask for more; the app keeps the
+// conversation open only when it does.
+func TestPixieDecidesWhetherToAskForMoreAfterACheck(t *testing.T) {
+	for _, phrase := range []string{`End with "Anything else?" only if they probably will`, "the app ends the conversation after it"} {
+		if !strings.Contains(DelegationPersona, phrase) {
+			t.Fatal(phrase)
+		}
+	}
+}

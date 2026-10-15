@@ -10,7 +10,7 @@ import (
 )
 
 // Instruction is the one line pix adds to the agent's instructions.
-const Instruction = "When your task changes, call set_description with a few words describing it."
+const Instruction = "This session runs under pix, so the user and their Pixie assistant can tell it apart from their other sessions by its description. When you start a task, and whenever your task changes, call set_description with 3 to 8 words naming the project and the task, e.g. \"deskpixie: fix login redirect loop\"."
 
 // Launch is how pix starts the agent.
 type Launch struct {
@@ -21,7 +21,7 @@ type Launch struct {
 }
 
 // hookEvents are the Claude hook events pix listens to.
-var hookEvents = []string{"UserPromptSubmit", "PostToolUse", "Stop", "Notification"}
+var hookEvents = []string{"SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "Notification"}
 
 // PlanLaunch builds the per-run additions for tool (nothing global is edited); userArgs
 // follow them unchanged. self is this pix's path, sock its local socket, dir a private

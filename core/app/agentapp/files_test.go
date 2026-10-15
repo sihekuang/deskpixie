@@ -443,3 +443,17 @@ func shippedCoordinatorSettings(t *testing.T, paths Paths, port uint16) string {
 	}
 	return out
 }
+
+func TestCoordinatorAsksWhichSessionAndOnlyClaimsSentMessages(t *testing.T) {
+	md := RenderClaudeMd("/canvas", "")
+	for _, want := range []string{
+		"If more than one session fits",
+		"ask the person which one, naming each by its description",
+		"Never by its name",
+		"only after it returns\n    `\"status\": \"sent\"`",
+	} {
+		if !strings.Contains(md, want) {
+			t.Errorf("prompt lacks %q", want)
+		}
+	}
+}

@@ -5,17 +5,17 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
-	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/sihekuang/deskpixie/core/agent"
+	"github.com/sihekuang/deskpixie/core/pix/describe"
 )
 
 // MaxDescription is a description's length in runes.
-const MaxDescription = 60
+const MaxDescription = describe.Max
 
-// AgentInterval is the least time between two accepted agent descriptions.
+// AgentInterval is the least time between two agent descriptions that both go into the
+// history; a quicker one replaces the last (an agent refining its first words).
 const AgentInterval = time.Minute
 
 const keepPast = 5
@@ -54,21 +54,21 @@ type Descriptions struct {
 	past      []string
 }
 
-// Set records text from src; false when it was ignored (empty, or an agent update too soon).
+// Set records text from src; false when it was ignored (empty, or not a description).
 func (d *Descriptions) Set(src Source, text string, now time.Time) bool {
 	text = CleanDescription(text)
 	if text == "" {
 		return false
 	}
-	if src == SourceAgent && !d.lastAgent.IsZero() && now.Sub(d.lastAgent) < AgentInterval {
-		return false
-	}
 	before := d.Current()
+	quick := src == SourceAgent && !d.lastAgent.IsZero() && now.Sub(d.lastAgent) < AgentInterval && before == d.by[SourceAgent]
 	d.by[src] = text
 	if src == SourceAgent {
 		d.lastAgent = now
 	}
-	d.remember(before)
+	if !quick {
+		d.remember(before)
+	}
 	return true
 }
 
@@ -104,14 +104,6 @@ func (d *Descriptions) Current() string {
 // Past is the earlier descriptions, newest first.
 func (d *Descriptions) Past() []string { return slices.Clone(d.past) }
 
-// CleanDescription is s on one line, spaces collapsed, at most MaxDescription runes.
-func CleanDescription(s string) string {
-	s = strings.Join(strings.Fields(s), " ")
-	if utf8.RuneCountInString(s) > MaxDescription {
-		s = strings.TrimSpace(string([]rune(s)[:MaxDescription]))
-	}
-	return s
-}
-
-// AutoDescription is the prompt's first three content words (as worker names use).
-func AutoDescription(prompt string) string { return CleanDescription(agent.TaskWords(prompt)) }
+// CleanDescription is s on one line, spaces collapsed, at most MaxDescription runes, or ""
+// when it is a fragment of a message (describe.Clean).
+func CleanDescription(s string) string { return describe.Clean(s) }

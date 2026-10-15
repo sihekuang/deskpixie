@@ -2,6 +2,7 @@ package pix
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,6 +15,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/sihekuang/deskpixie/core/pix/describe"
 	"github.com/sihekuang/deskpixie/core/pix/wire"
 	"golang.org/x/term"
 )
@@ -77,6 +79,42 @@ type Session struct {
 	agentDesc string // set_description
 	autoDesc  string // first prompt of the current work
 	flushing  bool
+	posted    []string // Pixie's messages not yet seen as prompts (normalized)
+}
+
+// askDescription is added to a turn that starts new work, so the agent describes it: its
+// prompt may be Pixie's message or a few words of yours that say little on their own.
+const askDescription = "pix: if this starts a new task, call set_description with 3 to 8 words naming the project and the task (for example \"deskpixie: fix login redirect loop\"), so the user and Pixie can tell this session apart."
+
+// norm is s with its spaces collapsed, for matching a prompt to a message Pixie sent.
+func norm(s string) string { return strings.Join(strings.Fields(s), " ") }
+
+// fromPixie reports (and forgets) whether prompt is a message Pixie sent: Claude Code shows it
+// as plain text, so only pix, which posted it, can tell it from one you typed.
+func (s *Session) fromPixie(prompt string) bool {
+	p := norm(prompt)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, m := range s.posted {
+		if m != "" && strings.Contains(p, m) {
+			s.posted = append(s.posted[:i], s.posted[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+// newWork records the description a new piece of work's prompt gives ("" for none).
+func (s *Session) newWork(prompt string) {
+	d := describe.FromPrompt(prompt)
+	if d == "" {
+		return
+	}
+	s.mu.Lock()
+	s.autoDesc = d
+	s.mu.Unlock()
+	s.client.Send(wire.Msg{Kind: wire.KindEvent, Event: "description", Source: "auto", Description: d})
+	s.title()
 }
 
 func newSession(o sessionOpts) *Session {
@@ -114,24 +152,41 @@ func (s *Session) Hook(event string, p map[string]any) string {
 	case "UserPromptSubmit":
 		s.setStatus("working")
 		prompt, _ := p["prompt"].(string)
+		pixie := s.fromPixie(prompt)
 		s.mu.Lock()
 		first := s.afterStop && prompt != ""
 		if first {
 			s.afterStop = false
-			s.autoDesc = prompt
 		}
 		s.mu.Unlock()
-		if first {
-			s.client.Send(wire.Msg{Kind: wire.KindEvent, Event: "description", Source: "auto", Description: prompt})
-			s.title()
+		if !first {
+			return ""
 		}
+		if !pixie {
+			s.newWork(prompt)
+		}
+		return fmt.Sprintf(`{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":%q}}`, askDescription)
 	case "Stop":
+		if s.o.tool == "codex" { // its notify carries the turn's prompts; there is no prompt hook
+			if in, _ := p["input-messages"].([]any); len(in) > 0 {
+				if first, _ := in[0].(string); first != "" && !s.fromPixie(first) {
+					s.newWork(first)
+				}
+			}
+		}
 		s.gate.Started() // a turn ran, so your line was sent (a fast Codex turn shows no busy marker)
 		s.mu.Lock()
 		s.afterStop = true
 		s.mu.Unlock()
 		s.setStatus("idle")
 		s.flushSoon()
+	case "SessionStart":
+		// A resumed conversation has no prompt until you type one: describe it from its transcript.
+		if src, _ := p["source"].(string); src == "resume" && s.currentDesc() == "" {
+			if path, _ := p["transcript_path"].(string); path != "" {
+				s.newWork(ResumedDescription(path))
+			}
+		}
 	case "Notification":
 		s.setStatus("blocked")
 	case "PostToolUse":
@@ -146,6 +201,9 @@ func (s *Session) Hook(event string, p map[string]any) string {
 
 // SetDescription is the agent's set_description (LocalHandler).
 func (s *Session) SetDescription(text string) error {
+	if text = describe.Clean(text); text == "" {
+		return errors.New("say in a few plain words what you are working on")
+	}
 	s.mu.Lock()
 	s.agentDesc = text
 	s.mu.Unlock()
@@ -158,6 +216,12 @@ func (s *Session) command(m wire.Msg) wire.Msg {
 	switch m.Command {
 	case "prompt":
 		text := Sanitize(m.Text)
+		s.mu.Lock()
+		s.posted = append(s.posted, norm(text))
+		if len(s.posted) > 8 {
+			s.posted = s.posted[len(s.posted)-8:]
+		}
+		s.mu.Unlock()
 		if s.o.tool == "claude" {
 			if rec, err := FindClaudeRecord(s.o.home, s.runner.Pid()); err == nil {
 				if err := PostClaude(rec, text); err == nil {
@@ -248,15 +312,19 @@ func (s *Session) setSessionID(id string) {
 	}
 }
 
+// currentDesc is the agent's or the automatic description, "" when there is neither.
+func (s *Session) currentDesc() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.agentDesc + s.autoDesc
+}
+
 // description is what the tab shows: yours, else the agent's, else the first prompt.
 func (s *Session) description() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, d := range []string{s.userDesc, s.agentDesc, s.autoDesc} {
-		if d = strings.Join(strings.Fields(d), " "); d != "" {
-			if r := []rune(d); len(r) > 60 {
-				d = string(r[:60])
-			}
+		if d = describe.Clean(d); d != "" {
 			return d
 		}
 	}
