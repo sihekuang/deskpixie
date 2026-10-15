@@ -140,8 +140,11 @@ final class AgentRosterController {
         let area = DesktopSpace.desktopRect(screen?.visibleFrame ?? bit, primaryMaxY: top)
         let openHeight = CGFloat(min(model.view.agents.count, AgentRosterModel.maxRows + 1)
                                  + min(model.view.yours.count, AgentRosterModel.maxRows + 1) + 3) * 22 + chipHeight
+        // While open the side stays put: only a closed chip decides it (the real list can be
+        // taller than the estimate, and flipping would move it from under the pointer).
         let (rect0, b) = ChipPlacement.frame(pixie: DesktopSpace.desktopRect(bit, primaryMaxY: top),
-                                            panel: size, screen: area, openHeight: openHeight)
+                                            panel: size, screen: area, openHeight: openHeight,
+                                            keeping: model.open ? below : nil)
         var rect = rect0
         if b != below {
             // Redraw with the list on the other side and place once more with the new size. Not
@@ -150,7 +153,7 @@ final class AgentRosterController {
             setRoot()
             let s = hosting.fittingSize
             rect = ChipPlacement.frame(pixie: DesktopSpace.desktopRect(bit, primaryMaxY: top),
-                                       panel: s, screen: area, openHeight: openHeight).0
+                                       panel: s, screen: area, openHeight: openHeight, keeping: b).0
             if !(s.width > 0 && s.height > 0) { hide(); return }
         }
         panel.setFrame(ScreenDisplays.appKitFrame(topLeft: rect.origin, size: rect.size), display: true)

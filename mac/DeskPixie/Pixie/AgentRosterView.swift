@@ -48,9 +48,15 @@ struct AgentRosterView: View {
                     .padding(.horizontal, 8)
                     .padding(.top, 4)
                 ForEach(section.rows) { r in
+                    let clickable = AgentRosterModel.clickable(r)
                     Button { onRow(r) } label: { row(r) }
                         .buttonStyle(.plain)
-                        .disabled(!AgentRosterModel.clickable(r))
+                        .disabled(!clickable)
+                        .onHover { inside in
+                            // A pointing hand on clickable rows only (spec §4).
+                            guard clickable else { return }
+                            if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                        }
                 }
                 if section.more > 0 {
                     Text("+\(section.more) more")
