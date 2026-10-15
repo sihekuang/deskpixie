@@ -760,6 +760,11 @@ func (h *AgentHandle) mcp(agent string, call McpCall) McpReply {
 		if agent != Coordinator {
 			return McpReply{Err: errors.New("This tool is not available to you.")}
 		}
+		if call.Kind == CallCloseSession {
+			if d := h.confirmClose(call.Name); !d.Allow {
+				return McpReply{Err: errors.New(d.Message)}
+			}
+		}
 		ctx, cancel := context.WithTimeout(h.ctx, OpLimit)
 		defer cancel()
 		return sessionTool(ctx, h.deps.Host.Session(), call)
@@ -772,6 +777,34 @@ func (h *AgentHandle) mcp(agent string, call McpCall) McpReply {
 		return McpReply{Err: errors.New(r.Err)}
 	}
 	return McpReply{Value: r.Value}
+}
+
+// confirmClose asks you before close_session ends a session you started, as a permission
+// request answered by a spoken confirm word. A name that is not yours is not asked about:
+// sessionTool refuses it.
+func (h *AgentHandle) confirmClose(name string) Decision {
+	c, ok := h.deps.Host.Session().(*CompositeHost)
+	if !ok || !c.Secondary().Owns(name) {
+		return Allow()
+	}
+	input := map[string]any{"name": name}
+	ctx, cancel := context.WithTimeout(h.ctx, OpLimit)
+	if list, err := c.Secondary().List(ctx); err == nil {
+		for _, a := range list {
+			if a.Name == name && a.User != nil {
+				input["description"] = a.User.Description
+			}
+		}
+	}
+	cancel()
+	rx := make(chan Decision, 1)
+	h.hook(HookEvent{Kind: HookPermission, Agent: Coordinator, ToolName: CloseSessionTool, ToolInput: input, Reply: rx})
+	select {
+	case d := <-rx:
+		return d
+	case <-h.ctx.Done():
+		return Deny("The app quit.")
+	}
 }
 
 // startWorker is start_worker (spec §5.5): resolve the repo, admit, make the worktree and

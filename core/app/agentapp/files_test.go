@@ -392,7 +392,9 @@ func TestInstallForTmuxWritesTheStateHooksAndHerdrDoesNot(t *testing.T) {
 	}
 }
 
-func TestCloseSessionAsksTheUserFirst(t *testing.T) {
+// The app itself asks before close_session (agent.CloseSessionTool), for Claude and Codex
+// coordinators alike; Claude asking as well would ask twice.
+func TestCloseSessionIsAskedByTheAppNotClaude(t *testing.T) {
 	var v struct {
 		Permissions struct {
 			Ask []string `json:"ask"`
@@ -401,8 +403,8 @@ func TestCloseSessionAsksTheUserFirst(t *testing.T) {
 	if err := json.Unmarshal([]byte(RenderSettings(48217)), &v); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains(v.Permissions.Ask, "mcp__pixie__close_session") {
-		t.Fatalf("close_session must be in permissions.ask: %v", v.Permissions.Ask)
+	if slices.Contains(v.Permissions.Ask, "mcp__pixie__close_session") {
+		t.Fatalf("close_session must not be in permissions.ask: %v", v.Permissions.Ask)
 	}
 }
 
