@@ -51,10 +51,13 @@ public enum SettingsLayout {
         platforms?.contains(platform) ?? true
     }
 
-    /// The fields of `section` that show on `platform`, in schema order.
+    /// The fields of `section` that show on `platform`, in schema order. With `values`, a
+    /// field whose `visibleWhen` doesn't hold for them is left out too.
     public static func fields(in section: SettingsSection, _ fields: [SettingsField],
-                              platform: SettingsPlatform) -> [SettingsField] {
-        fields.filter { $0.section == section && availableOn($0.platforms, platform) }
+                              platform: SettingsPlatform, values: JSONValue? = nil) -> [SettingsField] {
+        fields.filter {
+            $0.section == section && availableOn($0.platforms, platform) && (values.map($0.isVisible) ?? true)
+        }
     }
 
     // MARK: Controls

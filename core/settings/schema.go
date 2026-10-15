@@ -142,7 +142,26 @@ type FieldSpec struct {
 	Kind      Kind
 	Apply     Apply
 	Platforms []Platform
+	// VisibleWhen: the field shows only while every condition holds (nil: always shown).
+	// A hidden field keeps its stored value.
+	VisibleWhen []Condition
 }
+
+// Condition holds while the field at Key has one of the values In. Values compare as the
+// window shows them: a string as itself, a bool as "true"/"false", a number in decimal.
+type Condition struct {
+	Key string   `json:"key"`
+	In  []string `json:"in"`
+}
+
+// visibleWhen adds conditions to f; all of them must hold.
+func visibleWhen(f FieldSpec, conds ...Condition) FieldSpec {
+	f.VisibleWhen = append(append([]Condition{}, f.VisibleWhen...), conds...)
+	return f
+}
+
+// gptLiveOnly is the condition that the voice service is OpenAI GPT-Live.
+var gptLiveOnly = Condition{Key: "voice.provider", In: []string{ProviderOpenAILive}}
 
 func spec(path string, section Section, label, help string, kind Kind, apply Apply) FieldSpec {
 	return FieldSpec{Path: path, Section: section, Label: label, Help: help, Kind: kind, Apply: apply, Platforms: AllPlatforms}
@@ -298,6 +317,11 @@ var Fields = []FieldSpec{
 	spec("proximityFade.radius", SectionPixie, "Fade distance", "How far from Pixie, in points, the fading starts.", intKind(0, 1000, false), ApplyLive),
 	spec("position", SectionPixie, "Position", "Where Pixie was last dragged; written by the app.", managedKind, ApplyLive),
 	spec("voice.provider", SectionVoice, "Voice service", "The realtime voice service Pixie talks through.", choiceKind(SourceVoiceProviders), ApplyRestart),
+	// The GPT-Live fields sit right under the voice service and show only for GPT-Live.
+	visibleWhen(spec("voice.liveDelegation", SectionVoice, "GPT-Live delegation", "OpenAI backend model: a backend model runs Pixie's tools (time, weather, timers, music) and hands other work to the coordinator. Straight to the coordinator: GPT-Live hands everything it can't answer to the coordinator, with no backend model.", staticChoice(LiveDelegations), ApplyRestart), gptLiveOnly),
+	// The backend model is unused when GPT-Live delegates straight to the coordinator.
+	visibleWhen(spec("voice.liveBackendModel", SectionVoice, "Backend model (GPT-Live)", "The model that runs Pixie's tools while GPT-Live talks.", openChoice(Choices{Source: SourceStatic, Static: LiveBackendModels}), ApplyRestart),
+		gptLiveOnly, Condition{Key: "voice.liveDelegation", In: []string{LiveDelegationBackend}}),
 	spec("voice.audio", SectionVoice, "Audio", "The microphone and speaker backend.", choiceKind(SourceAudioBackends), ApplyRestart),
 	// voice.model, voice.voice and agent.model are free Text in Rust; here they are open
 	// choices (suggestions; any text still validates) — a deliberate deviation (#45).
@@ -309,8 +333,6 @@ var Fields = []FieldSpec{
 	macOnly(spec("voice.inputDevice", SectionVoice, "Microphone", "The mic Pixie listens with. If it isn't connected, Pixie uses the system default until it is. Bluetooth mics are slow to start and can cut off your first words.", choiceKind(SourceInputDevices), ApplyLive)),
 	macOnly(spec("voice.outputDevice", SectionVoice, "Speaker", "Where Pixie's voice plays. If it isn't connected, Pixie uses the system default until it is.", choiceKind(SourceOutputDevices), ApplyLive)),
 	spec("voice.noisyRoom", SectionVoice, "Noisy room", "Pixie ignores quieter voices in the background, like a TV or people nearby. Speak up a little to interrupt Pixie. With OpenAI GPT-Live this only changes Pixie's instructions.", boolKind, ApplyRestart),
-	spec("voice.liveBackendModel", SectionVoice, "Backend model (GPT-Live)", "Only for OpenAI GPT-Live: the model that runs Pixie's tools while GPT-Live talks.", openChoice(Choices{Source: SourceStatic, Static: LiveBackendModels}), ApplyRestart),
-	spec("voice.liveDelegation", SectionVoice, "GPT-Live delegation", "Only for OpenAI GPT-Live. OpenAI backend model: a backend model runs Pixie's tools (the time, weather, timers, music) and hands other work to the coordinator. Straight to the coordinator: GPT-Live hands everything it can't answer itself to the coordinator, with no backend model; Pixie knows the time from the clock, and the weather, timers and music go through the coordinator too, so they take longer.", staticChoice(LiveDelegations), ApplyRestart),
 	spec("voice.handOffWhenUnsure", SectionVoice, "Hand off when Pixie doesn't know", "When Pixie can't answer a question or request itself, it hands it to the coordinator instead of saying it doesn't know.", boolKind, ApplyRestart),
 	spec("voice.checkClaims", SectionVoice, "Check Pixie's claims", "When Pixie says it did something, like setting a timer or handing a task off, the app checks it really did and corrects it if not.", boolKind, ApplyRestart),
 	spec("voice.idleTimeoutSecs", SectionVoice, "Silence timeout (seconds)", "A conversation ends after this much silence.", intKind(1, 600, false), ApplyRestart),
@@ -559,6 +581,8 @@ type FieldView struct {
 	Kind      KindView   `json:"kind"`
 	Apply     Apply      `json:"apply"`
 	Platforms []Platform `json:"platforms"`
+	// VisibleWhen is left out when the field always shows.
+	VisibleWhen []Condition `json:"visibleWhen,omitempty"`
 }
 
 // Views is the schema for the window: every field with a control, options resolved from src.
@@ -574,8 +598,21 @@ func Views(src OptionSources) []FieldView {
 		}
 		out = append(out, FieldView{
 			Path: f.Path, Section: f.Section, Label: f.Label, Help: f.Help, Kind: k, Apply: f.Apply,
-			Platforms: append([]Platform{}, f.Platforms...),
+			Platforms:   append([]Platform{}, f.Platforms...),
+			VisibleWhen: conditionsView(f.VisibleWhen),
 		})
+	}
+	return out
+}
+
+// conditionsView copies conds for a view; nil stays nil so the JSON leaves it out.
+func conditionsView(conds []Condition) []Condition {
+	if len(conds) == 0 {
+		return nil
+	}
+	out := make([]Condition, len(conds))
+	for i, c := range conds {
+		out[i] = Condition{Key: c.Key, In: append([]string{}, c.In...)}
 	}
 	return out
 }

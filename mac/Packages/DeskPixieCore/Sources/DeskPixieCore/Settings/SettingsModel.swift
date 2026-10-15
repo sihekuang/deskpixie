@@ -96,7 +96,10 @@ public final class SettingsModel {
 
     public func fields(in section: SettingsSection) -> [SettingsField] {
         guard let snapshot else { return [] }
-        return SettingsLayout.fields(in: section, snapshot.fields, platform: snapshot.platform)
+        // The values shown: a picker saves as it changes, so switching the voice service or
+        // GPT-Live delegation shows or hides the fields that depend on it at once.
+        return SettingsLayout.fields(in: section, snapshot.fields, platform: snapshot.platform,
+                                     values: snapshot.values)
     }
 
     public func spec(_ field: SettingsField) -> SettingsLayout.ControlSpec {
