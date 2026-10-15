@@ -104,13 +104,16 @@ func isFile(p string) bool {
 	return err == nil && info.Mode().IsRegular()
 }
 
-// Terminals is the terminal registry (an unknown name falls back to warp).
+// Terminals is the terminal registry (an unknown name falls back to warp). Each reuses a
+// terminal already attached to the session instead of opening another (#98).
 func Terminals() map[string]TerminalFactory {
 	return map[string]TerminalFactory{
 		"warp": func(r agent.CommandRunner, home string) agent.TerminalLauncher {
-			return terminal.NewWarpLauncher(r, filepath.Join(home, ".warp/tab_configs"))
+			return terminal.Reuse(terminal.NewWarpLauncher(r, filepath.Join(home, ".warp/tab_configs")), r)
 		},
-		"iterm": func(r agent.CommandRunner, _ string) agent.TerminalLauncher { return terminal.NewItermLauncher(r) },
+		"iterm": func(r agent.CommandRunner, _ string) agent.TerminalLauncher {
+			return terminal.Reuse(terminal.NewItermLauncher(r), r)
+		},
 	}
 }
 
