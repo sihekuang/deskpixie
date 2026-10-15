@@ -32,6 +32,16 @@ func TestFindClaim(t *testing.T) {
 		{"I passed it to Claude.", nil, DelegateTool, false},
 		{"I've delegated that.", nil, DelegateTool, false},
 		{"I HAVE HANDED THAT OFF.", nil, DelegateTool, false},
+		// #95: the acknowledgement Pixie says after delegating claims a hand-off too
+		{"Sure, I'm on it. I'll let you know when it's done.", nil, DelegateTool, false},
+		{"On it, I'll let you know when it's done.", nil, DelegateTool, false},
+		{"I'll get right on that.", nil, DelegateTool, false},
+		{"Okay, I'll let you know once it's ready.", nil, DelegateTool, false},
+		{"I'll get back to you.", nil, DelegateTool, false},
+		{"On it, I'll let you know when it's done.", []string{DelegateTool}, "", false},
+		{"Ten minute timer set, I'll let you know when it's done.", []string{TimerToolName}, "", false},
+		{"I'll let you know when time's up.", []string{TimerToolName}, "", false},
+		{"Their prices are on its website.", nil, "", false},
 		// "let me check" promises the agent's check (any tool backs it)
 		{"Let me check that.", nil, DelegateTool, true},
 		{"Let me look that up.", nil, DelegateTool, true},

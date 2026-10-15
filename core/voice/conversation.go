@@ -111,6 +111,12 @@ func OpenInput() Input                  { return Input{Kind: InOpen} }
 // HandOffDoneInput: the hand-off (EfHandOff) finished; Pixie says n (if any) once it's quiet.
 func HandOffDoneInput(n Notice) Input { return Input{Kind: InHandOffDone, Notice: n} }
 
+// HandOffDoneAfterReplyInput: the hand-off started background work, so like a delegate call
+// it ends the conversation once Pixie's acknowledgement (or its notice's reply) has played.
+func HandOffDoneAfterReplyInput(n Notice) Input {
+	return Input{Kind: InHandOffDone, Notice: n, EndAfter: true}
+}
+
 // EffectKind mirrors the Rust `Effect` enum.
 type EffectKind int
 
@@ -204,13 +210,18 @@ type Conversation struct {
 	thinkingSince        time.Time
 	stalledSince         time.Time // Speaking looks stalled: quiet playback, no reply open/pending/expected
 	playbackIdle         bool
-	pendingTools         int  // until they finish, ResponseDone doesn't end the turn
-	ending               bool // end_conversation was called: end once the reply finished playing
-	micLive              bool
-	micAskedAt           time.Time
-	turn                 uint64            // counts the user's turns (each SpeechStarted)
-	toolTurns            map[string]uint64 // running tool calls and the turn each was called in
-	injects              []Notice          // waiting for a quiet moment, oldest first
+	pendingTools         int    // until they finish, ResponseDone doesn't end the turn
+	ending               bool   // end_conversation was called: end once the reply finished playing
+	endWhy               string // why ending was set ("goodbye", "after a hand-off")
+	endReason            string // why the last conversation ended (#71's voice log)
+	// checksOpen: "Check: " facts delegated in this conversation whose answer hasn't been
+	// read yet; reading the last one ends the conversation.
+	checksOpen int
+	micLive    bool
+	micAskedAt time.Time
+	turn       uint64            // counts the user's turns (each SpeechStarted)
+	toolTurns  map[string]uint64 // running tool calls and the turn each was called in
+	injects    []Notice          // waiting for a quiet moment, oldest first
 
 	// The hand-off safety net (#71), per user turn.
 	handOff     bool            // ConversationConfig.HandOff
@@ -222,7 +233,10 @@ type Conversation struct {
 	hoSettled   bool            // decided for this turn (handed off, or ruled out)
 	hoRepliedAt time.Time       // Pixie's reply to this turn finished
 	hoPending   int             // hand-offs running (counted in pendingTools too)
-	hoHistory   []string        // earlier turns, "User: …" / "Pixie: …", for the delegate's context
+	hoTurn      uint64          // the user turn the last hand-off was for
+	// endAfterNotice: a hand-off asked to end the conversation once Pixie has said its notice.
+	endAfterNotice bool
+	hoHistory      []string // earlier turns, "User: …" / "Pixie: …", for the delegate's context
 
 	// The claim check (#72) shares the per-turn state and the once-per-turn guard above.
 	checkClaims bool
@@ -319,9 +333,10 @@ func (c *Conversation) Step(in Input, now time.Time) []Effect {
 			fx = append(fx, Effect{Kind: EfConnect}, pixieFx(StateThinking))
 		case PhaseConnecting:
 			c.phase = PhaseIdle
+			c.endReason = "hotkey while connecting"
 			fx = append(fx, Effect{Kind: EfClose}, pixieFx(c.restState()), c.closedSignal())
 		default:
-			fx = c.end(fx, true)
+			fx = c.end(fx, true, "hotkey")
 		}
 	case InOpen:
 		// Only from rest: a conversation starting, open, closing or showing an error is left alone.
@@ -368,7 +383,7 @@ func (c *Conversation) Step(in Input, now time.Time) []Effect {
 			c.phase = PhaseIdle
 			fx = append(fx, pixieFx(c.restState()))
 		case c.listeningArmed() && c.micLive && c.pendingTools == 0 && elapsed(c.silenceSince, now, c.timeout()):
-			fx = c.end(fx, false)
+			fx = c.end(fx, false, "silence timeout")
 		case c.phase == PhaseThinking && c.openResponses == 0 && c.pendingTools == 0 &&
 			elapsed(c.thinkingSince, now, ReplyWatchdog):
 			c.thinkingSince = time.Time{}
@@ -377,7 +392,7 @@ func (c *Conversation) Step(in Input, now time.Time) []Effect {
 		case c.phase == PhaseSpeaking && elapsed(c.stalledSince, now, ReplyWatchdog):
 			c.stalledSince = time.Time{}
 			if c.ending {
-				fx = c.end(fx, false)
+				fx = c.end(fx, false, c.endingWhy()+" (the reply stalled)")
 			} else {
 				c.listen(now)
 				fx = append(fx, pixieFx(StateListening))
@@ -395,6 +410,14 @@ func (c *Conversation) Step(in Input, now time.Time) []Effect {
 			}
 			if in.Notice.Text != "" {
 				c.injects = append(c.injects, in.Notice)
+			}
+			// Ends like a delegate call, unless the user has started a new turn or is talking.
+			if in.EndAfter && c.turn == c.hoTurn && !(c.phase == PhaseListening && c.silenceSince.IsZero()) {
+				if in.Notice.Text != "" {
+					c.endAfterNotice = true
+				} else {
+					c.ending, c.endWhy = true, "after the app's hand-off"
+				}
 			}
 			if c.listeningArmed() {
 				c.silenceSince = now
@@ -417,12 +440,12 @@ func (c *Conversation) Step(in Input, now time.Time) []Effect {
 				// talking, or who has already asked something new, interrupted it.
 				talking := c.phase == PhaseListening && c.silenceSince.IsZero()
 				if thisTurn && !talking {
-					c.ending = true
+					c.ending, c.endWhy = true, "goodbye"
 				}
 			} else {
 				if in.EndAfter && thisTurn && !(c.phase == PhaseListening && c.silenceSince.IsZero()) {
 					// Ends once the reply below has played; the user talking cancels it.
-					c.ending = true
+					c.ending, c.endWhy = true, "after a hand-off"
 				}
 				// The adapter asks the model for a reply that uses the result. A provider that
 				// owns turn-taking may not reply; its next reply opens a response anyway.
@@ -546,6 +569,9 @@ func (c *Conversation) onModel(ev Event, now time.Time, fx []Effect) []Effect {
 			// (GPT-Live's backend) would start the same job twice.
 			inv.Canned = alreadyHandedOff
 		}
+		if inv.Canned == nil && (ev.ToolName == ClientDelegationTool || ev.ToolName == DelegateTool) && isCheckTask(inv.Args) {
+			c.checksOpen++
+		}
 		fx = append(fx, inv)
 	case EvTranscript:
 		if ev.Role == "user" {
@@ -594,7 +620,7 @@ func (c *Conversation) checkTurnEnd(now time.Time, fx []Effect) []Effect {
 		return fx
 	}
 	if c.ending {
-		return c.end(fx, false)
+		return c.end(fx, false, c.endingWhy())
 	}
 	if c.phase != PhaseListening {
 		c.thinkingSince = time.Time{}
@@ -616,6 +642,17 @@ func (c *Conversation) tryInject(now time.Time, fx []Effect) []Effect {
 	if isCoordinatorQuestion(n.Text) && !strings.Contains(n.Text, "Say confirm") {
 		c.questionAsked = true
 	}
+	if c.endAfterNotice {
+		c.endAfterNotice = false
+		c.ending, c.endWhy = true, "after the app's hand-off" // once Pixie has said it
+	}
+	if strings.HasPrefix(n.Text, coordinatorReplyPrefix) && c.checksOpen > 0 {
+		c.checksOpen--
+		if c.checksOpen == 0 {
+			// The answer the user was waiting for: end once Pixie has read it.
+			c.ending, c.endWhy = true, "after answering a check"
+		}
+	}
 	// What Pixie says next answers the notice, not the user's words.
 	c.hoSettled = true
 	c.phase = PhaseThinking
@@ -634,7 +671,19 @@ func (c *Conversation) closedSignal() Effect {
 	return Effect{Kind: EfSignal, Signal: VoiceSignal{Kind: SigClosed, Undelivered: undelivered}}
 }
 
-func (c *Conversation) end(fx []Effect, flush bool) []Effect {
+// EndReason is why the last conversation ended ("" before any has): "silence timeout",
+// "hotkey", "goodbye", "after a hand-off", "error: …". For the voice log (#71).
+func (c *Conversation) EndReason() string { return c.endReason }
+
+func (c *Conversation) endingWhy() string {
+	if c.endWhy == "" {
+		return "ending"
+	}
+	return c.endWhy
+}
+
+func (c *Conversation) end(fx []Effect, flush bool, reason string) []Effect {
+	c.endReason = reason
 	if flush {
 		fx = append(fx, Effect{Kind: EfFlushPlayback})
 	}
@@ -654,6 +703,7 @@ func (c *Conversation) fail(f Failure, now time.Time, fx []Effect) []Effect {
 	if !c.IsActive() {
 		return fx
 	}
+	c.endReason = "error: " + f.Status()
 	fx = append(fx,
 		Effect{Kind: EfFlushPlayback},
 		Effect{Kind: EfStopMic},
@@ -677,7 +727,8 @@ func (c *Conversation) resetTurn() {
 	c.playbackIdle = true
 	c.pendingTools = 0
 	clear(c.toolTurns)
-	c.ending = false
+	c.ending, c.endWhy = false, ""
+	c.checksOpen = 0
 	c.micLive = false
 	c.micAskedAt = time.Time{}
 	c.newHandOffTurn()
@@ -697,6 +748,7 @@ const (
 
 // newHandOffTurn starts a user turn: the last turn's words become history.
 func (c *Conversation) newHandOffTurn() {
+	c.endAfterNotice = false
 	if c.hoUser != "" {
 		c.hoHistory = append(c.hoHistory, "User: "+clip(c.hoUser))
 	}
@@ -797,6 +849,10 @@ func (c *Conversation) handOffTask(task string, claim bool, fx []Effect) []Effec
 	c.hoPending++
 	c.pendingTools++
 	c.hoHandedOff = true
+	c.hoTurn = c.turn
+	if strings.HasPrefix(task, CheckPrefix) {
+		c.checksOpen++
+	}
 	answer := c.clientDelegation && c.answerTurn
 	if answer {
 		c.answerTurn = false
@@ -855,3 +911,15 @@ func (c *Conversation) clientDelegationArgs() json.RawMessage {
 var alreadyHandedOff = json.RawMessage(`{"status":"already handed off","note":"The app already gave this request to the coordinator. Don't hand it off again; just say you'll let the user know."}`)
 
 func pixieFx(s PixieState) Effect { return Effect{Kind: EfPixie, State: s} }
+
+// coordinatorReplyPrefix leads a job's result (agent routing's "Coordinator reply: ").
+const coordinatorReplyPrefix = "Coordinator reply: "
+
+// isCheckTask: a delegate call's arguments ask for a "Check: " fact.
+func isCheckTask(args json.RawMessage) bool {
+	var a struct {
+		Task string `json:"task"`
+	}
+	_ = json.Unmarshal(args, &a)
+	return strings.HasPrefix(a.Task, CheckPrefix)
+}

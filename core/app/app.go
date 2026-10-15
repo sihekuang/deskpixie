@@ -281,6 +281,7 @@ func (a *App) buildVoice(cfg settings.Config) {
 		MouthLevels:  MouthLevels(levels, ok),
 		Conversation: voice.ConversationConfig{IdleTimeout: idle, HoldTimeout: hold, HandOff: cfg.Voice.HandOffWhenUnsure, CheckClaims: cfg.Voice.CheckClaims},
 		OnMicSent:    a.deps.OnMicSent,
+		Log:          voice.NewVoiceLog(voice.VoiceLogPath(a.paths.AppSupport)),
 	}, a.onVoiceEvent)
 	a.mu.Lock()
 	a.meter = a.rt
