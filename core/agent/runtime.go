@@ -8,6 +8,7 @@ import (
 	"log"
 	"maps"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -80,6 +81,8 @@ type Deps struct {
 	Kept KeptStore
 	// Updates gets the updates bubble's list (nil: ignored).
 	Updates UpdatesSink
+	// Roster gets the roster beside Pixie on every change (nil: no roster is kept).
+	Roster RosterSink
 }
 
 // WorkerDeps are the worker adapters (spec §5.5), injected only when agent.workers.enabled.
@@ -183,6 +186,11 @@ type AgentHandle struct {
 	// shuttingDown is set first thing in Shutdown: from then on inputs are ignored and host
 	// calls other than the final stops are skipped.
 	shuttingDown atomic.Bool
+	// The roster beside Pixie (#91): rosterPoke asks for a rebuild; the last view sent.
+	rosterPoke chan struct{}
+	rosterMu   sync.Mutex
+	rosterLast RosterView
+	rosterSent bool
 }
 
 // NewRuntime builds the runtime without workers (start_worker is refused).
@@ -196,7 +204,7 @@ func NewRuntimeWithWorkers(deps Deps, cfg RuntimeConfig, workers *WorkerDeps) *A
 	ctx, cancel := context.WithCancel(context.Background())
 	h := &AgentHandle{
 		deps: deps, workers: workers, keepPanes: cfg.Settings.KeepPanesOnQuit,
-		ctx: ctx, cancel: cancel,
+		ctx: ctx, cancel: cancel, rosterPoke: make(chan struct{}, 1),
 		ctl:  NewAgentController(cfg.Settings),
 		main: newQueue[mainItem](), ops: newQueue[hostOp](),
 		panes:     deps.Host.Session().Subscribe(),
@@ -240,6 +248,8 @@ func NewRuntimeWithWorkers(deps Deps, cfg RuntimeConfig, workers *WorkerDeps) *A
 func (h *AgentHandle) Run(ctx context.Context) {
 	defer h.cancel()
 	go h.recheck()
+	go h.runRoster()
+	h.pokeRoster()
 	// One goroutine runs the coordinator's host calls one at a time, in the order queued.
 	go func() {
 		for {
@@ -277,6 +287,7 @@ func (h *AgentHandle) Run(ctx context.Context) {
 				continue
 			}
 			h.Input(PaneInput(ev))
+			h.pokeRoster()
 		case <-tick.C:
 			h.Input(TickInput())
 		}
@@ -504,6 +515,99 @@ func (h *AgentHandle) FocusJob(ctx context.Context, job JobID, worker string) er
 	return h.deps.Launcher.Open(Attach{Argv: h.deps.Host.AttachCommand(), Dir: h.deps.TerminalDir})
 }
 
+// RosterDebounce coalesces a burst of changes into one rebuild; RosterBackstop rebuilds anyway,
+// for a change no event reported.
+const (
+	RosterDebounce = 250 * time.Millisecond
+	RosterBackstop = 30 * time.Second
+)
+
+// Roster is the last roster sent (empty before the first), for the shell's first read.
+func (h *AgentHandle) Roster() RosterView {
+	h.rosterMu.Lock()
+	defer h.rosterMu.Unlock()
+	if !h.rosterSent {
+		return EmptyRoster()
+	}
+	return h.rosterLast
+}
+
+// FocusAgent is a click on one of Pixie's agents in the roster: bring its pane forward, then
+// attach a terminal. Your own sessions are not focused here (the app activates their terminal).
+func (h *AgentHandle) FocusAgent(ctx context.Context, name string) error {
+	if err := h.deps.Host.Session().EnsureSession(ctx); err != nil {
+		return err
+	}
+	h.Input(EnsureCoordinatorInput())
+	focusQuietly(ctx, h.deps.Host.Session(), name)
+	return h.deps.Launcher.Open(Attach{Argv: h.deps.Host.AttachCommand(), Dir: h.deps.TerminalDir})
+}
+
+func (h *AgentHandle) pokeRoster() {
+	select {
+	case h.rosterPoke <- struct{}{}:
+	default:
+	}
+}
+
+// runRoster rebuilds the roster after a poke or a host change (debounced), and on the backstop.
+func (h *AgentHandle) runRoster() {
+	if h.deps.Roster == nil {
+		return
+	}
+	var changes <-chan struct{}
+	if n, ok := h.deps.Host.Session().(ChangeNotifier); ok {
+		changes = n.Changes()
+	}
+	back := time.NewTicker(RosterBackstop)
+	defer back.Stop()
+	for {
+		select {
+		case <-h.ctx.Done():
+			return
+		case <-h.rosterPoke:
+		case <-changes:
+		case <-back.C:
+		}
+		select {
+		case <-h.ctx.Done():
+			return
+		case <-time.After(RosterDebounce):
+		}
+		select { // a poke during the wait is covered by this rebuild
+		case <-h.rosterPoke:
+		default:
+		}
+		h.rebuildRoster()
+	}
+}
+
+func (h *AgentHandle) rebuildRoster() {
+	if h.quitting() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(h.ctx, 5*time.Second)
+	defer cancel()
+	session := h.deps.Host.Session()
+	list, err := session.List(ctx)
+	if err != nil {
+		log.Printf("agent: roster: %v", err)
+		return
+	}
+	h.ctlMu.Lock()
+	workers := h.ctl.WorkerRows()
+	h.ctlMu.Unlock()
+	v := BuildRoster(list, workers, session.Name())
+	h.rosterMu.Lock()
+	if h.rosterSent && reflect.DeepEqual(v, h.rosterLast) {
+		h.rosterMu.Unlock()
+		return
+	}
+	h.rosterLast, h.rosterSent = v, true
+	h.rosterMu.Unlock()
+	h.deps.Roster.Roster(v)
+}
+
 // Voice forwards the voice loop's signals.
 func (h *AgentHandle) Voice(sig VoiceSignal) { h.Input(VoiceInput(sig)) }
 
@@ -614,6 +718,7 @@ func sendDecision(tx chan<- Decision, d Decision) {
 // runOp carries out one coordinator host call, giving up on it after OpLimit (StartOpLimit
 // for a start). Once the app is quitting nothing runs; Shutdown stops the pane itself.
 func (h *AgentHandle) runOp(op hostOp) {
+	defer h.pokeRoster()
 	if h.quitting() {
 		return
 	}
@@ -1161,6 +1266,7 @@ func (h *AgentHandle) newLane(name string) *queue[Effect] {
 }
 
 func (h *AgentHandle) runWorkerOp(e Effect) {
+	defer h.pokeRoster()
 	if e.Kind == EfForgetWorker {
 		// Queued after the worker's last ops (its close), so its git links are re-checked only
 		// once its pane is gone.
