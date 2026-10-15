@@ -353,6 +353,9 @@ const (
 	// with no conversation to continue). Detail carries the agent kind.
 	HostExitedAtStart
 	HostOther
+	// HostRefused: the agent started but its start screen failed the start (a refusal screen,
+	// or no ready screen). Detail is the app's own fixed reason (never screen text).
+	HostRefused
 )
 
 // HostError is a SessionHost failure; its messages match Rust's thiserror strings.

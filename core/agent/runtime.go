@@ -340,6 +340,7 @@ func (h *AgentHandle) saveKept() {
 	var kept KeptAgents
 	if running {
 		kept.CoordinatorToken = h.deps.Host.Token()
+		kept.CoordinatorKind = h.deps.Host.Kind()
 	}
 	if h.workers != nil {
 		for _, w := range live {
@@ -1027,7 +1028,11 @@ func (h *AgentHandle) launchWorker(ctx context.Context, w WorkerDeps, plan Worke
 		return "", 0, err
 	}
 	setPane(info.Pane)
-	if err := checkStartScreen(ctx, session, plan, prepared.Refusal, prepared.Ready, info.Status, began); err != nil {
+	var refusals []StartRefusal
+	if prepared.Refusal != nil {
+		refusals = []StartRefusal{*prepared.Refusal}
+	}
+	if err := checkStartScreen(ctx, session, plan.Name, refusals, prepared.Ready, info.Status, began); err != nil {
 		return "", 0, err
 	}
 	return worktree, info.Status, nil
@@ -1315,8 +1320,8 @@ func closeBounded(ctx context.Context, agent string, close func(context.Context)
 // began (at least DialogWait, and on past it while a settle that began before it runs); if it
 // never is, the start fails with its reason naming the last screen line. Without it, the
 // screen is read once, and again for up to DialogWait only while the pane is blocked.
-func checkStartScreen(ctx context.Context, session SessionHost, plan WorkerPlan, refusal *StartRefusal, ready *StartReady, status PaneStatus, began time.Time) error {
-	if refusal == nil && ready == nil {
+func checkStartScreen(ctx context.Context, session SessionHost, name string, refusals []StartRefusal, ready *StartReady, status PaneStatus, began time.Time) error {
+	if len(refusals) == 0 && ready == nil {
 		return nil
 	}
 	deadline := time.Now().Add(DialogWait)
@@ -1329,11 +1334,13 @@ func checkStartScreen(ctx context.Context, session SessionHost, plan WorkerPlan,
 	var since time.Time // when the marker began to show on every read; zero: it doesn't
 	for {
 		text, err := within(ctx, max(time.Until(deadline), 0), func(c context.Context) (string, error) {
-			return session.Read(c, plan.Name, 40)
+			return session.Read(c, name, 40)
 		})
 		if err == nil {
-			if refusal != nil && ShowsAnyScreen(text, refusal.Screens) {
-				return errors.New(refusal.Reason)
+			for _, refusal := range refusals {
+				if ShowsAnyScreen(text, refusal.Screens) {
+					return errors.New(refusal.Reason)
+				}
 			}
 			last = lastLine(text)
 			if ready != nil {
@@ -1421,6 +1428,8 @@ func tag(err error) string {
 		return "gave_up"
 	case HostExitedAtStart:
 		return "exited_at_start"
+	case HostRefused:
+		return "refused"
 	}
 	return "other"
 }

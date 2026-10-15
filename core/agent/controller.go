@@ -70,6 +70,9 @@ type Settings struct {
 	// or failed line, an agent question or a spoken worker report that comes while no
 	// conversation is open makes Pixie open one and say it (opener.go).
 	OpenConversation bool
+	// CoordinatorKind (`agent.coordinatorKind`, #87): the coordinator's agent, named in the
+	// tray when it can't start.
+	CoordinatorKind AgentKind
 }
 
 // DefaultSettings: 4 notifications a minute, 2-minute permission timeout, narration on.
@@ -791,7 +794,12 @@ func (c *AgentController) coordinatorFailed(err HostError, now Millis, fx *[]Eff
 	case HostGaveUp:
 		c.disable("Coordinator: stopped after repeated crashes", now, fx)
 	default:
-		c.setStatus("Coordinator: claude did not start", fx)
+		if err.Kind == HostRefused {
+			// The start screen's fixed reason (e.g. Codex wants its hooks reviewed).
+			c.setStatus("Coordinator: "+err.Detail, fx)
+		} else {
+			c.setStatus("Coordinator: "+c.settings.CoordinatorKind.String()+" did not start", fx)
+		}
 		c.inbox = NewInbox()
 		for _, id := range c.OpenJobs() {
 			c.failJob(id, "the coordinator could not start", now, fx)
@@ -1586,6 +1594,8 @@ func errorTag(e HostError) string {
 		return "gave_up"
 	case HostExitedAtStart:
 		return "exited_at_start"
+	case HostRefused:
+		return "refused"
 	}
 	return "other"
 }
