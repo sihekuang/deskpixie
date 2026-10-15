@@ -1,6 +1,8 @@
 package httpserver
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -119,7 +121,7 @@ func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {
 	case "ping":
 		result = map[string]any{}
 	case "tools/list":
-		result = map[string]any{"tools": agent.Catalog(role)}
+		result = map[string]any{"tools": s.catalog(role)}
 	case "tools/call":
 		result, fail = s.call(r, agentName, role, params)
 	default:
@@ -158,6 +160,14 @@ func (s *Server) call(r *http.Request, agentName string, role agent.Role, params
 	if !ok {
 		args = map[string]any{}
 	}
+	if role == agent.RoleCoordinator {
+		if t := s.localTool(name); t != nil {
+			return s.callLocal(r, t, args), nil
+		}
+		if s.opts.NoWorkerTools {
+			return nil, &rpcFailure{codeInvalidParams, "Unknown tool: " + agent.Quote(name, 4)}
+		}
+	}
 	call, err := agent.ParseToolCall(role, name, args)
 	if err != nil {
 		var pe agent.ToolParseError
@@ -189,4 +199,62 @@ func (s *Server) call(r *http.Request, agentName string, role agent.Role, params
 	case <-r.Context().Done():
 	}
 	return toolResult("The app did not answer.", true), nil
+}
+
+// catalog is role's tools/list: a worker's report tools; the coordinator's worker tools (unless
+// workers are off), then Pixie's local tools.
+func (s *Server) catalog(role agent.Role) []map[string]any {
+	if role != agent.RoleCoordinator {
+		return agent.Catalog(role)
+	}
+	var out []map[string]any
+	if !s.opts.NoWorkerTools {
+		out = agent.Catalog(role)
+	}
+	for _, t := range s.opts.CoordinatorTools {
+		schema, err := decodeJSON(t.Parameters())
+		if err != nil {
+			schema = map[string]any{"type": "object"}
+		}
+		out = append(out, map[string]any{"name": t.Name(), "description": t.Description(), "inputSchema": schema})
+	}
+	if out == nil {
+		out = []map[string]any{}
+	}
+	return out
+}
+
+func (s *Server) localTool(name string) LocalTool {
+	for _, t := range s.opts.CoordinatorTools {
+		if t.Name() == name {
+			return t
+		}
+	}
+	return nil
+}
+
+// callLocal runs a local tool for the coordinator (bounded by the call limit and the request).
+// Its output is the tool result's text; an in-band {"error": ...} is a tool error.
+func (s *Server) callLocal(r *http.Request, t LocalTool, args any) map[string]any {
+	raw, err := encodeJSON(args)
+	if err != nil {
+		return toolResult("The arguments are not JSON.", true)
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), s.mcpCallLimit)
+	defer cancel()
+	out, _, err := t.Invoke(ctx, json.RawMessage(raw))
+	if err != nil {
+		return toolResult(err.Error(), true)
+	}
+	v, err := decodeJSON(out)
+	if err != nil {
+		return toolResult("The tool gave an answer that is not JSON.", true)
+	}
+	obj, _ := v.(map[string]any)
+	_, failed := obj["error"]
+	text, err := encodeJSON(v)
+	if err != nil {
+		return toolResult("The tool gave an answer that is not JSON.", true)
+	}
+	return toolResult(text, failed)
 }

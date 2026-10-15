@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sihekuang/deskpixie/core/settings"
+	"github.com/sihekuang/deskpixie/core/tools/toolstest"
 	"github.com/sihekuang/deskpixie/core/voice"
 )
 
@@ -293,5 +294,57 @@ func TestTheUpdatesBubbleCallsAreNoOpsWithoutAnAgent(t *testing.T) {
 		if out := h.call(method, args); string(out) != "{}" {
 			t.Fatal(method, string(out))
 		}
+	}
+}
+
+// #78: the local tools are built once, before the agent, and the agent gets the very instances
+// the voice loop holds (a timer set through one is a timer of the other).
+func TestTheAgentGetsTheSameLocalToolsAsTheVoiceLoop(t *testing.T) {
+	f := &fakeAgent{}
+	h := newHarness(t, withAgent(f))
+	var got []string
+	for _, lt := range f.hooks.LocalTools {
+		got = append(got, lt.Name())
+	}
+	if !slices.Equal(got, []string{"timer", "get_weather", "media", "get_time", "calculate"}) {
+		t.Fatal(got)
+	}
+	timer := f.hooks.LocalTools[0]
+	if _, _, err := timer.Invoke(context.Background(), json.RawMessage(`{"action":"start","duration_seconds":600,"label":"tea"}`)); err != nil {
+		t.Fatal(err)
+	}
+	vt, ok := h.app.voiceTools.Get("timer")
+	if !ok {
+		t.Fatal("the voice loop has no timer")
+	}
+	out := vt.Invoke(context.Background(), json.RawMessage(`{"action":"list"}`))
+	if !strings.Contains(string(out.Output), `"label":"tea"`) {
+		t.Fatalf("the voice loop's timer is another one: %s", out.Output)
+	}
+	_ = vt.Invoke(context.Background(), json.RawMessage(`{"action":"cancel"}`))
+}
+
+// #78: a timer the coordinator sets rings through the app's own alarm (here: no voice loop at
+// all, so a chime and a notification), like one Pixie sets.
+func TestACoordinatorTimerRingsThroughTheAppEvenWithoutAVoiceLoop(t *testing.T) {
+	f := &fakeAgent{}
+	clock := toolstest.NewTimerClock()
+	h := newHarness(t, withAgent(f), func(d *Deps, _ *harness) {
+		d.Providers = map[string]ModelFactory{} // the voice provider is unknown: no voice loop
+		d.LocalTools = LocalToolDeps{TimerClock: clock}
+	})
+	if h.app.Runtime() != nil {
+		t.Fatal("expected no voice loop")
+	}
+	if len(f.hooks.LocalTools) != 5 {
+		t.Fatal("the agent gets the local tools even without a voice loop:", len(f.hooks.LocalTools))
+	}
+	if _, _, err := f.hooks.LocalTools[0].Invoke(context.Background(), json.RawMessage(`{"action":"start","duration_seconds":120,"label":"pasta"}`)); err != nil {
+		t.Fatal(err)
+	}
+	clock.Advance(2 * time.Minute)
+	ev := h.waitFor("notify", func(e event) bool { return e["title"] == "Timer done" }, 2*time.Second)
+	if ev["body"] != "pasta (2 minutes)" || ev["sound"] != "glass" {
+		t.Fatal(ev)
 	}
 }

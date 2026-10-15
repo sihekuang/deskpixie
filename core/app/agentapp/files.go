@@ -322,11 +322,12 @@ func InstallFor(paths Paths, port uint16, projectsRoot string, stateHooks bool) 
 }
 
 // CoordinatorArgs are Claude Code's arguments for the coordinator (AgentHost adds --continue
-// on re-creation). With workers on it also gets the pixie MCP server (--mcp-config). A blank
+// on re-creation). With mcp it also gets the pixie MCP server (--mcp-config; the app always
+// passes it: worker tools when workers are on, Pixie's local tools always). A blank
 // model is none.
-func CoordinatorArgs(paths Paths, model string, workers bool) []string {
+func CoordinatorArgs(paths Paths, model string, mcp bool) []string {
 	args := []string{"--permission-mode", "auto", "--settings", paths.Settings, "--add-dir", paths.Canvas}
-	if workers {
+	if mcp {
 		args = append(args, "--mcp-config", paths.CoordinatorMcp())
 	}
 	if m := strings.TrimSpace(model); m != "" {

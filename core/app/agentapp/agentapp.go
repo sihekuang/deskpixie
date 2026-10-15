@@ -242,11 +242,11 @@ func Build(c Config) *Agent {
 	} else {
 		coordinatorToken = tokens.Issue(agent.Coordinator)
 	}
-	if workersOn {
-		if err := WriteCoordinatorMcp(paths, s.Port, coordinatorToken); err != nil {
-			log.Printf("agent: cannot write the coordinator's MCP config: %v", err)
-			setProblem("Coordinator: invalid settings (see log)")
-		}
+	// Always: besides the worker tools (workers on), the pixie MCP server serves the coordinator
+	// Pixie's local tools (timer, weather, music, time, math).
+	if err := WriteCoordinatorMcp(paths, s.Port, coordinatorToken); err != nil {
+		log.Printf("agent: cannot write the coordinator's MCP config: %v", err)
+		setProblem("Coordinator: invalid settings (see log)")
 	}
 	model := ""
 	if s.Model != nil {
@@ -254,7 +254,7 @@ func Build(c Config) *Agent {
 	}
 	recipe := agent.CoordinatorRecipe{
 		Cwd:  paths.Workspace,
-		Args: CoordinatorArgs(paths, model, workersOn),
+		Args: CoordinatorArgs(paths, model, true),
 		Env:  []agent.EnvVar{{Key: agent.TokenEnv, Value: coordinatorToken}},
 		// A coordinator found running is the kept one: adopted as it is.
 		AdoptEarlier: kept.CoordinatorToken != "",
@@ -310,7 +310,8 @@ func Build(c Config) *Agent {
 	if ln != nil {
 		a.addr = ln.Addr().String()
 		a.wg.Go(func() {
-			if err := httpserver.Serve(a.ctx, ln, tokens, a.handle); err != nil && !errors.Is(err, context.Canceled) {
+			opts := httpserver.Options{CoordinatorTools: CoordinatorLocalTools(c.Hooks.LocalTools), NoWorkerTools: !workersOn}
+			if err := httpserver.ServeWith(a.ctx, ln, tokens, a.handle, opts); err != nil && !errors.Is(err, context.Canceled) {
 				log.Printf("agent: hook server stopped: %v", err)
 			}
 		})

@@ -84,6 +84,8 @@ type Deps struct {
 	// ExtraTools and ExtraPersona are added to the voice loop's tools and persona.
 	ExtraTools   []voice.Tool
 	ExtraPersona string
+	// LocalTools are the local tools' boundaries (zero = the real ones; tests inject fakes).
+	LocalTools LocalToolDeps
 	// Agent builds the delegation agent (nil = no agent; the factory returns nil when
 	// agent.enabled is false). Its tools and persona join the voice loop's.
 	Agent AgentFactory
@@ -114,6 +116,10 @@ type App struct {
 	recordDir string
 
 	agent Agent // nil when delegation is off
+
+	// localTools are built once and shared by the voice loop (voiceTools) and the agent.
+	localTools []tools.Tool
+	voiceTools *voice.ToolRegistry
 
 	canvas   *canvas.CanvasController // nil when the canvas is unavailable
 	resolver *canvas.Resolver
@@ -207,8 +213,12 @@ func New(d Deps) (*App, error) {
 		log.Printf("canvas: unavailable: %v", err)
 		a.canvas = nil
 	}
+	// Before the agent and the voice loop, which both hold these instances. The alarm reaches
+	// the voice loop lazily (a.voiceLink), so it works with no voice loop at all.
+	a.localTools = NewLocalTools(homeCity(cfg), &TimerAlarm{Voice: a.voiceLink, Notify: a.notify}, d.LocalTools)
 	if d.Agent != nil {
 		a.agent = d.Agent(cfg, p.AppSupport, AgentHooks{
+			LocalTools:  a.localTools,
 			Celebrate:   a.Celebrate,
 			FlashError:  a.FlashError,
 			RefreshTray: a.pushTray,
@@ -246,11 +256,9 @@ func (a *App) buildVoice(cfg settings.Config) {
 		a.setupFail = fail
 		return
 	}
-	home := ""
-	if cfg.Voice.HomeCity != nil {
-		home = *cfg.Voice.HomeCity
-	}
-	reg := LocalTools(home, &TimerAlarm{Voice: a.voiceLink, Notify: a.notify})
+	home := homeCity(cfg)
+	reg := VoiceTools(a.localTools)
+	a.voiceTools = reg
 	extra, extraPersona := a.voiceExtras()
 	for _, t := range extra {
 		reg.Register(t)
@@ -292,6 +300,14 @@ func (a *App) buildVoice(cfg settings.Config) {
 			}
 		}
 	}()
+}
+
+// homeCity is voice.homeCity ("" when unset).
+func homeCity(cfg settings.Config) string {
+	if cfg.Voice.HomeCity != nil {
+		return *cfg.Voice.HomeCity
+	}
+	return ""
 }
 
 // voiceExtras are the tools and persona section added to the voice loop's: Deps.ExtraTools /
