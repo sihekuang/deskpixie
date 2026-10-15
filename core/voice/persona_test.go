@@ -71,3 +71,36 @@ func TestMissingOrEmptyPersonaFallsBack(t *testing.T) {
 		t.Fatal("empty")
 	}
 }
+
+// #72: the knowledge boundary. Facts about the user's world and anything current come from a
+// tool or the agent, never from memory; general knowledge and chat stay with Bit.
+func TestDefaultPersonaDrawsTheKnowledgeBoundary(t *testing.T) {
+	p := DefaultPersona()
+	for _, phrase := range []string{
+		"come only from a tool or the agent, never from memory",
+		"files, repositories, builds, jobs and workers",
+		"news, prices, scores, software versions and today's events",
+		"If you aren't certain, delegate rather than guess",
+		"General knowledge, small talk",
+	} {
+		if !strings.Contains(p, phrase) {
+			t.Errorf("the persona doesn't say %q", phrase)
+		}
+	}
+	// The old rule only said "say so" when unsure; with a delegate tool that now conflicts.
+	if strings.Contains(p, "If you aren't certain and have no delegate tool to check with, say so") {
+		t.Error("the old unsure rule is still there")
+	}
+}
+
+// #72: Bit never claims an action it didn't take, and knows what a correction means.
+func TestDefaultPersonaExplainsClaimCorrections(t *testing.T) {
+	p := DefaultPersona()
+	prefix := strings.TrimSuffix(CorrectionPrefix, " ")
+	if !strings.Contains(p, `Lines starting "`+prefix+`"`) {
+		t.Errorf("the persona doesn't explain %q lines", prefix)
+	}
+	if !strings.Contains(p, "Never say you did something") {
+		t.Error("the persona doesn't forbid claiming undone actions")
+	}
+}
