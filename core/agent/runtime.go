@@ -495,10 +495,10 @@ func (h *AgentHandle) OpenTerminal(ctx context.Context) error {
 // UpdatesSeen: the bubble showed these lines long enough to count as heard.
 func (h *AgentHandle) UpdatesSeen(ids []uint64) { h.Input(UpdatesSeenInput(ids)) }
 
-// SetAway: the shell's presence (screen locked, displays asleep or idle).
 // Decide is a tap on Allow or Deny in the bubble for the question with this confirm word.
 func (h *AgentHandle) Decide(token string, allow bool) { h.Input(DecideInput(token, allow)) }
 
+// SetAway: the shell's presence (screen locked, displays asleep or idle).
 func (h *AgentHandle) SetAway(away bool) { h.Input(PresenceInput(away)) }
 
 // Updates is the bubble's current list (the `updates` event's lines), for the shell's first read.

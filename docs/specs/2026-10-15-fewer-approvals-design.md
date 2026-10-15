@@ -148,7 +148,7 @@ Where the user sees it:
   the fix as a menu item when there is one ("Use a supported model", "Copy update command").
 - **Setup (#80):** a `claude.autoMode` row (group Coordinator) with the same state, reason and
   fix; `skipped` until an agent has reported its mode.
-- **Pixie,** once per app run: "Heads up: the coordinator is asking before everything because
+- **Pixie,** once per app run: "Heads up: one of my agents is asking before everything because
   <short reason>. I've put a fix in the menu." (A notice through the usual inject path, so it
   waits for a quiet moment and is spoken next time if the user is away.)
 

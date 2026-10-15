@@ -1215,10 +1215,8 @@ func (c *AgentController) onPermission(id RequestID, agent, toolName string, too
 }
 
 // ManualNotice is what Pixie says, once per app run, when a Claude agent fell back to Manual.
-const ManualNotice = "Heads up: the coordinator is asking before everything because it's running in Claude Code's Manual mode. I've put the reason in the menu."
+const ManualNotice = "Heads up: one of my agents is asking before everything because it's running in Claude Code's Manual mode. I've put the reason in the menu."
 
-// onMode: a Claude agent launched with --permission-mode auto that reports "default" fell back
-// to Manual (#97). Codex agents never report it, and anything else is ignored.
 // clearMode forgets an agent's mode when it ends (a worker closes, the coordinator stops or
 // restarts) and clears its tray flag if it was on, so a later "default" flags it again.
 func (c *AgentController) clearMode(agent string, fx *[]Effect) {
@@ -1229,6 +1227,8 @@ func (c *AgentController) clearMode(agent string, fx *[]Effect) {
 	}
 }
 
+// onMode: a Claude agent launched with --permission-mode auto that reports "default" fell back
+// to Manual (#97). Codex agents never report it, and anything else is ignored.
 func (c *AgentController) onMode(agent, mode string, now Millis, fx *[]Effect) {
 	if mode != "auto" && mode != "default" {
 		return

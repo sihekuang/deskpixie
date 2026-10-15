@@ -1200,3 +1200,10 @@ func TestOnlyAPendingQuestionCarriesAToken(t *testing.T) {
 		}
 	}
 }
+
+// #97: the Manual-mode line names no agent, since a worker can fall back on its own.
+func TestManualNoticeIsAgentNeutral(t *testing.T) {
+	if ManualNotice != "Heads up: one of my agents is asking before everything because it's running in Claude Code's Manual mode. I've put the reason in the menu." {
+		t.Fatal(ManualNotice)
+	}
+}
