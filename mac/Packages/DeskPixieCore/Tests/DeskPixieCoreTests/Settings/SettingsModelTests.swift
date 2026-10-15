@@ -5,6 +5,7 @@ import XCTest
 /// refuses what `refuse` says.
 final class FakeSettingsClient: SettingsClient {
     var values: JSONValue = SettingsFixture.defaults
+    var fields: [SettingsField] = SettingsFixture.fields
     var seq: UInt64 = 0
     var fileError: String?
     var warning: String?
@@ -20,7 +21,7 @@ final class FakeSettingsClient: SettingsClient {
 
     func next() -> SettingsSnapshot {
         seq += 1
-        return SettingsSnapshot(platform: .macos, values: values, fields: SettingsFixture.fields,
+        return SettingsSnapshot(platform: .macos, values: values, fields: fields,
                                 restartPending: restartPending, fileError: fileError, warning: warning, seq: seq)
     }
 

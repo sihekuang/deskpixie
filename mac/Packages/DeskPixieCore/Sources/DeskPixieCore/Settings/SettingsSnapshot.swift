@@ -106,6 +106,23 @@ public enum SettingsKind: Equatable, Sendable, Codable {
     }
 }
 
+/// Holds while the field at `key` has one of the values `in` (Go `Condition`). Values compare
+/// as the window shows them: a string as itself, a bool as "true"/"false", a number in decimal.
+public struct SettingsCondition: Codable, Equatable, Sendable {
+    public var key: String
+    public var `in`: [String]
+
+    public init(key: String, in values: [String]) {
+        self.key = key
+        self.in = values
+    }
+
+    /// Whether the condition holds for `values` (a missing value reads as "").
+    public func holds(_ values: JSONValue) -> Bool {
+        `in`.contains(SettingsLayout.textOf(values.at(key)))
+    }
+}
+
 /// One field for the window (Go `FieldView`).
 public struct SettingsField: Codable, Equatable, Sendable {
     public var path: String
@@ -116,9 +133,12 @@ public struct SettingsField: Codable, Equatable, Sendable {
     /// "live" or "restart".
     public var apply: String
     public var platforms: [SettingsPlatform]?
+    /// The field shows only while every condition holds; nil (absent) means always.
+    public var visibleWhen: [SettingsCondition]?
 
     public init(path: String, section: SettingsSection, label: String, help: String = "", kind: SettingsKind,
-                apply: String = "live", platforms: [SettingsPlatform]? = SettingsPlatform.all) {
+                apply: String = "live", platforms: [SettingsPlatform]? = SettingsPlatform.all,
+                visibleWhen: [SettingsCondition]? = nil) {
         self.path = path
         self.section = section
         self.label = label
@@ -126,6 +146,13 @@ public struct SettingsField: Codable, Equatable, Sendable {
         self.kind = kind
         self.apply = apply
         self.platforms = platforms
+        self.visibleWhen = visibleWhen
+    }
+
+    /// Whether the field shows for `values`: every `visibleWhen` condition holds. A hidden
+    /// field keeps its stored value.
+    public func isVisible(_ values: JSONValue) -> Bool {
+        (visibleWhen ?? []).allSatisfy { $0.holds(values) }
     }
 }
 
