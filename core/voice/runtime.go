@@ -103,6 +103,8 @@ type connectResult struct {
 type handOffResult struct {
 	gen    uint64
 	notice Notice
+	// endAfter: the hand-off started background work (the delegate tool's EndAfterReply).
+	endAfter bool
 }
 
 // toolResult is a finished tool call, tagged with the conversation generation that invoked it.
@@ -543,7 +545,11 @@ func (r *Runtime) run() {
 			r.onToolDone(t)
 		case h := <-r.handOffs:
 			if h.gen == r.gen {
-				r.input(HandOffDoneInput(h.notice))
+				if h.endAfter {
+					r.input(HandOffDoneAfterReplyInput(h.notice))
+				} else {
+					r.input(HandOffDoneInput(h.notice))
+				}
 			}
 		case ev, ok := <-r.events:
 			if !ok {
@@ -813,15 +819,15 @@ func (r *Runtime) apply(fx Effect) {
 // back the notice Pixie then says (#71).
 func (r *Runtime) handOff(task, context string, claim, answer bool) {
 	gen := r.gen
-	deliver := func(n Notice) {
+	deliver := func(n Notice, endAfter bool) {
 		select {
-		case r.handOffs <- handOffResult{gen: gen, notice: n}:
+		case r.handOffs <- handOffResult{gen: gen, notice: n, endAfter: endAfter}:
 		case <-r.done:
 		}
 	}
 	tool, ok := r.tools.Get(DelegateTool)
 	if !ok {
-		go deliver(Notice{})
+		go deliver(Notice{}, false)
 		return
 	}
 	args := map[string]string{"task": task}
@@ -849,7 +855,7 @@ func (r *Runtime) handOff(task, context string, claim, answer bool) {
 		} else {
 			log.Printf("voice: Pixie had no answer to a request: %s", why)
 		}
-		deliver(n)
+		deliver(n, out.EndAfterReply)
 	}()
 }
 

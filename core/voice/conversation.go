@@ -111,6 +111,12 @@ func OpenInput() Input                  { return Input{Kind: InOpen} }
 // HandOffDoneInput: the hand-off (EfHandOff) finished; Pixie says n (if any) once it's quiet.
 func HandOffDoneInput(n Notice) Input { return Input{Kind: InHandOffDone, Notice: n} }
 
+// HandOffDoneAfterReplyInput: the hand-off started background work, so like a delegate call
+// it ends the conversation once Pixie's acknowledgement (or its notice's reply) has played.
+func HandOffDoneAfterReplyInput(n Notice) Input {
+	return Input{Kind: InHandOffDone, Notice: n, EndAfter: true}
+}
+
 // EffectKind mirrors the Rust `Effect` enum.
 type EffectKind int
 
@@ -224,7 +230,10 @@ type Conversation struct {
 	hoSettled   bool            // decided for this turn (handed off, or ruled out)
 	hoRepliedAt time.Time       // Pixie's reply to this turn finished
 	hoPending   int             // hand-offs running (counted in pendingTools too)
-	hoHistory   []string        // earlier turns, "User: …" / "Pixie: …", for the delegate's context
+	hoTurn      uint64          // the user turn the last hand-off was for
+	// endAfterNotice: a hand-off asked to end the conversation once Pixie has said its notice.
+	endAfterNotice bool
+	hoHistory      []string // earlier turns, "User: …" / "Pixie: …", for the delegate's context
 
 	// The claim check (#72) shares the per-turn state and the once-per-turn guard above.
 	checkClaims bool
@@ -398,6 +407,14 @@ func (c *Conversation) Step(in Input, now time.Time) []Effect {
 			}
 			if in.Notice.Text != "" {
 				c.injects = append(c.injects, in.Notice)
+			}
+			// Ends like a delegate call, unless the user has started a new turn or is talking.
+			if in.EndAfter && c.turn == c.hoTurn && !(c.phase == PhaseListening && c.silenceSince.IsZero()) {
+				if in.Notice.Text != "" {
+					c.endAfterNotice = true
+				} else {
+					c.ending = true
+				}
 			}
 			if c.listeningArmed() {
 				c.silenceSince = now
@@ -619,6 +636,10 @@ func (c *Conversation) tryInject(now time.Time, fx []Effect) []Effect {
 	if isCoordinatorQuestion(n.Text) && !strings.Contains(n.Text, "Say confirm") {
 		c.questionAsked = true
 	}
+	if c.endAfterNotice {
+		c.endAfterNotice = false
+		c.ending = true // once Pixie has said it
+	}
 	// What Pixie says next answers the notice, not the user's words.
 	c.hoSettled = true
 	c.phase = PhaseThinking
@@ -713,6 +734,7 @@ const (
 
 // newHandOffTurn starts a user turn: the last turn's words become history.
 func (c *Conversation) newHandOffTurn() {
+	c.endAfterNotice = false
 	if c.hoUser != "" {
 		c.hoHistory = append(c.hoHistory, "User: "+clip(c.hoUser))
 	}
@@ -813,6 +835,7 @@ func (c *Conversation) handOffTask(task string, claim bool, fx []Effect) []Effec
 	c.hoPending++
 	c.pendingTools++
 	c.hoHandedOff = true
+	c.hoTurn = c.turn
 	answer := c.clientDelegation && c.answerTurn
 	if answer {
 		c.answerTurn = false

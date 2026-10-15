@@ -139,6 +139,33 @@ func TestGoodbyeEndsTheConversationInClientMode(t *testing.T) {
 	wantKinds(t, b.poll(at(1000)), voice.EvTranscript, voice.EvSpeechStopped)
 }
 
+// #93: a goodbye said while Pixie is still talking starts no turn, but still ends the
+// conversation (once Pixie's reply has played).
+func TestGoodbyeSaidOverPixieEndsTheConversation(t *testing.T) {
+	for _, viaDelegation := range []bool{false, true} {
+		c := clientCodec()
+		c.decode(outDelta(tone(2400, 8000), 0), at(0))
+		c.decode(inText("thanks, bye"), at(100))
+		var evs []voice.Event
+		if viaDelegation {
+			evs = c.decode(delegationCreated(""), at(200))
+		} else {
+			c.decode(outDelta(tone(2400, 8000), 100), at(800))
+			evs = c.poll(at(1000))
+		}
+		wantKinds(t, evs, voice.EvTranscript, voice.EvToolCall)
+		if evs[1].ToolName != voice.EndConversationTool {
+			t.Fatalf("delegation=%v: %+v", viaDelegation, evs[1])
+		}
+	}
+	// Not a goodbye: the words are kept, nothing ends.
+	c := clientCodec()
+	c.decode(outDelta(tone(2400, 8000), 0), at(0))
+	c.decode(inText("mm-hm"), at(100))
+	c.decode(outDelta(tone(2400, 8000), 100), at(800))
+	wantKinds(t, c.poll(at(1000)), voice.EvTranscript)
+}
+
 func TestTimeContextOncePerMinuteInClientMode(t *testing.T) {
 	loc := time.FixedZone("PDT", -7*3600)
 	now := time.Date(2026, 10, 14, 21, 16, 5, 0, loc)

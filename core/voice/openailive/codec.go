@@ -110,15 +110,31 @@ func (c *codec) closeUser(out []voice.Event) []voice.Event {
 	}
 	c.uText.Reset()
 	out = append(out, voice.Event{Kind: voice.EvSpeechStopped})
-	if c.client && voice.IsGoodbye(t) {
-		// No typed end_conversation with client delegation: a goodbye ends the conversation
-		// once Pixie's reply to it has played (#70).
-		c.byeSeq++
-		id := fmt.Sprintf("bye_%d", c.byeSeq)
-		c.byeCalls[id] = true
-		out = append(out, voice.Event{Kind: voice.EvToolCall, CallID: id, ToolName: voice.EndConversationTool, Args: json.RawMessage(`{}`)})
+	return c.goodbye(t, out)
+}
+
+// goodbye: no typed end_conversation with client delegation, so the user's goodbye ends the
+// conversation once Pixie's reply has played (#70), even one said over Pixie (#93).
+func (c *codec) goodbye(said string, out []voice.Event) []voice.Event {
+	if !c.client || !voice.IsGoodbye(said) {
+		return out
 	}
-	return out
+	c.byeSeq++
+	id := fmt.Sprintf("bye_%d", c.byeSeq)
+	c.byeCalls[id] = true
+	return append(out, voice.Event{Kind: voice.EvToolCall, CallID: id, ToolName: voice.EndConversationTool, Args: json.RawMessage(`{}`)})
+}
+
+// closeDeferred ends a user span said over Pixie: the words count, but no turn starts.
+func (c *codec) closeDeferred(out []voice.Event) []voice.Event {
+	c.uOpen, c.uDeferred = false, false
+	t := strings.TrimSpace(c.uText.String())
+	c.uText.Reset()
+	if t == "" {
+		return out
+	}
+	out = append(out, voice.Event{Kind: voice.EvTranscript, Role: "user", Text: t})
+	return c.goodbye(t, out)
 }
 
 // onClientDelegation: GPT-Live handed this turn to the app (no task text). Its decision means
@@ -128,12 +144,7 @@ func (c *codec) onClientDelegation(id string) []voice.Event {
 	var out []voice.Event
 	if c.uOpen {
 		if c.uDeferred {
-			// Said over Pixie: the words count, but no turn starts.
-			c.uOpen, c.uDeferred = false, false
-			if t := strings.TrimSpace(c.uText.String()); t != "" {
-				out = append(out, voice.Event{Kind: voice.EvTranscript, Role: "user", Text: t})
-			}
-			c.uText.Reset()
+			out = c.closeDeferred(out)
 		} else {
 			out = c.closeUser(out)
 		}
@@ -306,11 +317,7 @@ func (c *codec) poll(now time.Time) []voice.Event {
 	if c.uOpen && now.Sub(c.uLast) >= userQuiet {
 		if c.uDeferred {
 			// Pixie talked through it (a backchannel or noise): no turn, but keep the words.
-			c.uOpen, c.uDeferred = false, false
-			if t := strings.TrimSpace(c.uText.String()); t != "" {
-				out = append(out, voice.Event{Kind: voice.EvTranscript, Role: "user", Text: t})
-			}
-			c.uText.Reset()
+			out = c.closeDeferred(out)
 		} else {
 			out = c.closeUser(out)
 		}
