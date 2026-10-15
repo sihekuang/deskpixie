@@ -336,3 +336,20 @@ func TestClientModeOnItWithoutAHandOffIsHandedOff(t *testing.T) {
 		t.Fatalf("%+v", h)
 	}
 }
+
+// A question in the "while you were away" replay (how a conversation opened for an update
+// starts) asks too: the next turn answers it, unless the question is a confirm prompt.
+func TestClientDelegationAfterAReplayedQuestionIsAnAnswer(t *testing.T) {
+	c := newClientConv()
+	c.Step(InjectInput(Notice{Text: "Coordinator replies while you were away:\n- Coordinator reply: Found it.\n- Coordinator question: Which repo should I push?"}), ms(t0(), 100))
+	reply(c, "Which repo should I push?", ms(t0(), 400))
+	userTurn(c, "the spacex one", ms(t0(), 2000))
+	if _, a := clientCall(c, "item_1", ms(t0(), 2100)); !a.Answer {
+		t.Fatalf("%+v", a)
+	}
+	c.Step(InjectInput(Notice{Text: "Coordinator replies while you were away:\n- Coordinator question: Run git push? Say confirm hawk."}), ms(t0(), 9000))
+	userTurn(c, "yes do it", ms(t0(), 12000))
+	if _, a := clientCall(c, "item_2", ms(t0(), 12100)); a.Answer {
+		t.Fatalf("%+v", a)
+	}
+}
