@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -794,4 +795,43 @@ func (g *GitWorktrees) ForeignSlugs(repo string) []string {
 	}
 	slices.Sort(slugs)
 	return slugs
+}
+
+// projectName: 1–64 of A–Z a–z 0–9 - _ ., not starting with '.' or '-' (#97).
+var projectName = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9._-]{0,63}$`)
+
+// CreateProject makes <root>/<name> a new git repository with one empty commit, so a worker's
+// worktree can be made from it at once. It refuses a bad name or any existing path, and removes
+// only a folder it made itself when a later step fails.
+func (g *GitWorktrees) CreateProject(name string) (string, error) {
+	if !projectName.MatchString(name) {
+		return "", werr("%q is not a usable project name: use letters, digits, '-', '_' or '.'.", name)
+	}
+	root, err := canonicalize(g.root)
+	if err != nil {
+		return "", werr("The projects root %s does not exist.", g.root)
+	}
+	dir := filepath.Join(root, name)
+	if _, err := os.Lstat(dir); err == nil {
+		return "", werr("%s already exists under the projects root.", name)
+	}
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		return "", werr("Could not create %s: %v", name, err)
+	}
+	by := g.deadline()
+	fail := func(step string, err error) (string, error) {
+		_ = os.RemoveAll(dir)
+		return "", werr("Could not %s for %s: %v", step, name, err)
+	}
+	if _, err := g.git(by, dir, "init", "-q", "-b", "main"); err != nil {
+		return fail("initialise git", err)
+	}
+	args := []string{"commit", "-q", "--allow-empty", "-m", "Start " + name}
+	if out, _ := g.run(by, dir, "config", "user.email"); strings.TrimSpace(out.Stdout) == "" {
+		args = append([]string{"-c", "user.name=DeskPixie", "-c", "user.email=deskpixie@localhost"}, args...)
+	}
+	if _, err := g.git(by, dir, args...); err != nil {
+		return fail("make the first commit", err)
+	}
+	return canonicalize(dir)
 }

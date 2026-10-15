@@ -746,6 +746,8 @@ type FakeWorktrees struct {
 	gate       chan struct{}
 	entered    atomic.Bool
 	auditGate  chan struct{}
+	created    []string
+	createErr  error
 }
 
 // FakeWorktreesWithRepo knows one repo, name, at /projects/<name>.
@@ -803,6 +805,33 @@ func (w *FakeWorktrees) AddForeign(slug string) {
 	w.mu.Lock()
 	w.foreign = append(w.foreign, slug)
 	w.mu.Unlock()
+}
+
+// Created is every CreateProject name, in order.
+func (w *FakeWorktrees) Created() []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return slices.Clone(w.created)
+}
+
+// SetCreateErr makes CreateProject fail with a WorktreeError saying why ("" clears it).
+func (w *FakeWorktrees) SetCreateErr(why string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.createErr = nil
+	if why != "" {
+		w.createErr = agent.WorktreeError(why)
+	}
+}
+
+func (w *FakeWorktrees) CreateProject(name string) (string, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.created = append(w.created, name)
+	if w.createErr != nil {
+		return "", w.createErr
+	}
+	return "/projects/" + name, nil
 }
 
 func (w *FakeWorktrees) Ensured() []RepoSlug {

@@ -588,10 +588,11 @@ const (
 	CallInterruptSession
 	CallCloseSession
 	CallDescribeSession
+	CallCreateProject
 )
 
 // McpCall is one pixie MCP tool call, arguments checked and cleaned. Only the fields of its
-// Kind are set: StartWorker → Worker; MessageWorker → Name, Text; StopWorker → Name;
+// Kind are set: StartWorker → Worker; MessageWorker → Name, Text; StopWorker → Name; CreateProject → Name;
 // ReportProgress → Summary; ReportResult → Outcome, Summary, Evidence; AskCoordinator →
 // Question, Options; ReportBlocked → Reason.
 type McpCall struct {

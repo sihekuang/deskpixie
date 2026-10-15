@@ -112,7 +112,7 @@ var localNames = []string{"calculate", "get_time", "get_weather", "media", "time
 func TestTheCoordinatorAlsoListsPixiesLocalToolsWithTheirOwnSchemas(t *testing.T) {
 	r := lrig(false)
 	got := listed(t, r, r.coordinator)
-	want := sortStrings(append(append(append([]string{}, localNames...), "list_workers", "message_worker", "start_worker", "stop_worker"), agent.SessionTools[:]...))
+	want := sortStrings(append(append(append([]string{}, localNames...), "create_project", "list_workers", "message_worker", "start_worker", "stop_worker"), agent.SessionTools[:]...))
 	if !reflect.DeepEqual(names(got), want) {
 		t.Fatal(names(got))
 	}

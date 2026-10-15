@@ -895,6 +895,9 @@ func (h *AgentHandle) mcp(agent string, call McpCall) McpReply {
 	if call.Kind == CallStartWorker {
 		return h.startWorker(agent, call.Worker)
 	}
+	if call.Kind == CallCreateProject {
+		return h.createProject(agent, call.Name)
+	}
 	if isSessionCall(call.Kind) {
 		// Sessions you started with pix (#89): the host answers, not the controller; they
 		// are not workers and have no job.
@@ -946,6 +949,26 @@ func (h *AgentHandle) confirmClose(name string) Decision {
 	case <-h.ctx.Done():
 		return Deny("The app quit.")
 	}
+}
+
+// createProject is create_project (#97): a new repository under the projects root.
+func (h *AgentHandle) createProject(agent, name string) McpReply {
+	if agent != Coordinator {
+		return McpReply{Err: errors.New("This tool is not available to you.")}
+	}
+	if h.workers == nil {
+		return McpReply{Err: errors.New("Workers are turned off (agent.workers.enabled).")}
+	}
+	path, err := within(h.ctx, RepoLimit, func(context.Context) (string, error) {
+		return h.workers.Worktrees.CreateProject(name)
+	})
+	if errors.Is(err, errTimedOut) {
+		return McpReply{Err: errors.New("Couldn't create the project in time; try again.")}
+	}
+	if err != nil {
+		return McpReply{Err: err}
+	}
+	return McpReply{Value: map[string]any{"name": name, "path": path}}
 }
 
 // startWorker is start_worker (spec §5.5): resolve the repo, admit, make the worktree and

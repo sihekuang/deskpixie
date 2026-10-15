@@ -1064,3 +1064,40 @@ func TestEnsureBudgetIsTheRustValue(t *testing.T) {
 		t.Fatal(EnsureBudget)
 	}
 }
+
+func TestCreateProjectMakesARepoAWorkerCanUse(t *testing.T) {
+	f := newFixture(t)
+	g := f.fs()
+	path, err := g.CreateProject("spacex-dashboard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want, _ := filepath.EvalSymlinks(filepath.Join(f.root, "spacex-dashboard")); path != want {
+		t.Fatalf("%s != %s", path, want)
+	}
+	if got := f.git(path, "log", "--format=%s"); got != "Start spacex-dashboard" {
+		t.Fatalf("%q", got)
+	}
+	if _, err := g.Ensure(path, "first"); err != nil {
+		t.Fatal("a worktree must be creatable at once: ", err)
+	}
+	if _, err := g.CreateProject("spacex-dashboard"); err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatal(err)
+	}
+}
+
+func TestCreateProjectRefusesBadNamesWithoutTouchingDisk(t *testing.T) {
+	f := newFixture(t)
+	g := f.fs()
+	mustWrite(t, filepath.Join(f.root, "afile"), "x")
+	before, _ := os.ReadDir(f.root)
+	for _, name := range []string{"", ".", "..", ".hidden", "-x", "a/b", "naïve", "has space", strings.Repeat("a", 65), "afile"} {
+		if _, err := g.CreateProject(name); err == nil {
+			t.Errorf("%q was accepted", name)
+		}
+	}
+	after, _ := os.ReadDir(f.root)
+	if len(after) != len(before) {
+		t.Fatalf("disk changed: %v -> %v", before, after)
+	}
+}

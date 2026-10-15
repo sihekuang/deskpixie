@@ -418,3 +418,17 @@ func TestCoordinatorPromptExplainsSessionsYouStart(t *testing.T) {
 		}
 	}
 }
+
+func TestTheCoordinatorCreatesNewProjectsWithCreateProject(t *testing.T) {
+	with := RenderClaudeMd("/data/canvas", "/Users/x/Documents/Projects")
+	solo := RenderClaudeMd("/data/canvas", "")
+	if !strings.Contains(with, "`create_project`") || strings.Contains(solo, "create_project") {
+		t.Fatal("create_project is explained exactly when workers are on")
+	}
+	if !strings.Contains(RenderAgentsMd("/data/canvas", "/Users/x/Documents/Projects"), "`create_project`") {
+		t.Fatal("AGENTS.md")
+	}
+	if strings.Contains(RenderAgentsMd("/data/canvas", ""), "create_project") {
+		t.Fatal("AGENTS.md with workers off")
+	}
+}

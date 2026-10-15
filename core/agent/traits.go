@@ -143,6 +143,9 @@ type WorktreeFs interface {
 	Audit(repo, slug string) error
 	// ForeignSlugs: names in `<repo>/.worktrees/` that are not a worktree on `pixie/<name>`.
 	ForeignSlugs(repo string) []string
+	// CreateProject makes `<projects root>/<name>` a new git repository with one empty commit
+	// and returns its canonical path. It refuses a bad name or any existing path.
+	CreateProject(name string) (string, error) // WorktreeError
 }
 
 // TokenIssuer is per-agent bearer tokens for the hook/MCP server (in memory, never logged).

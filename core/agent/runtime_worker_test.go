@@ -937,3 +937,23 @@ func TestFocusJobFocusesTheJobsLiveWorker(t *testing.T) {
 		}
 	})
 }
+
+func TestCreateProjectGoesToTheWorktreesAndOnlyForTheCoordinator(t *testing.T) {
+	r := wRigWith(t, true)
+	got := okValue(t, call(r, Coordinator, McpCall{Kind: CallCreateProject, Name: "spacex-dashboard"}))
+	if got["name"] != "spacex-dashboard" || got["path"] != "/projects/spacex-dashboard" {
+		t.Fatalf("%v", got)
+	}
+	if rep := call(r, wName, McpCall{Kind: CallCreateProject, Name: "x"}); rep.Err == nil {
+		t.Fatal("a worker created a project")
+	}
+	if c := r.worktrees.Created(); len(c) != 1 || c[0] != "spacex-dashboard" {
+		t.Fatal(c)
+	}
+	r.worktrees.SetCreateErr("spacex-dashboard already exists under the projects root.")
+	wantErr(t, call(r, Coordinator, McpCall{Kind: CallCreateProject, Name: "spacex-dashboard"}), "spacex-dashboard already exists under the projects root.")
+	off := wRigWith(t, false)
+	if rep := call(off, Coordinator, McpCall{Kind: CallCreateProject, Name: "x"}); rep.Err == nil {
+		t.Fatal("workers are off")
+	}
+}
