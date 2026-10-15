@@ -715,12 +715,12 @@ func (ws *Workers) DueRetries(now Millis) []string {
 	return out
 }
 
-// Waiting is the worker hinted as waiting at a prompt in its terminal that has waited the
-// shortest (the latest to block), "" if none is.
-func (ws *Workers) Waiting() string {
+// Waiting is the worker blocked at a prompt in its terminal with no permission waiting in Pixie
+// (hasPending), the latest to block; "" if none is.
+func (ws *Workers) Waiting(hasPending func(string) bool) string {
 	name, since := "", Millis(0)
 	for _, w := range ws.sorted() {
-		if w.hinted && w.blockedSince.set && (name == "" || w.blockedSince.v >= since) {
+		if w.blockedSince.set && !w.StopRequested && !hasPending(w.Plan.Name) && (name == "" || w.blockedSince.v >= since) {
 			name, since = w.Plan.Name, w.blockedSince.v
 		}
 	}

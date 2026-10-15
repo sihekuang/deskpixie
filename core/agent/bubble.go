@@ -101,7 +101,7 @@ func (c *AgentController) WorkerRows() []WorkerRow { return c.jobs.WorkerRows() 
 // OpenTarget is the pane a click on Pixie focuses (#110): the worker waiting at a prompt in its
 // terminal if its pane is up, else the coordinator.
 func (c *AgentController) OpenTarget() string {
-	if w := c.workers.Get(c.workers.Waiting()); w != nil && w.IsUp() {
+	if w := c.workers.Get(c.workers.Waiting(c.confirms.HasPendingFor)); w != nil && w.IsUp() {
 		return w.Plan.Name
 	}
 	return Coordinator

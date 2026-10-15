@@ -715,7 +715,8 @@ func TestAResultAfterTheJobEndedIsNotSpoken(t *testing.T) {
 	}
 }
 
-// #110: a click on Pixie opens the agent waiting at a prompt in its terminal, else the coordinator.
+// #110: a click on Pixie opens the worker blocked at a prompt in its terminal (before its hint
+// too), else the coordinator.
 func TestAClickOnPixieOpensTheWorkerWaitingInItsTerminal(t *testing.T) {
 	c := wctl()
 	p := admitOK(t, c, Codex)
@@ -724,7 +725,6 @@ func TestAClickOnPixieOpensTheWorkerWaitingInItsTerminal(t *testing.T) {
 		t.Fatalf("nothing waiting: %q", got)
 	}
 	c.Step(paneStatus(p.Name, PaneBlocked), T0)
-	c.Step(TickInput(), T0+WorkerBlockedGraceMs)
 	if got := c.OpenTarget(); got != p.Name {
 		t.Fatalf("waiting worker: %q", got)
 	}
