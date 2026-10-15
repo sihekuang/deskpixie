@@ -413,7 +413,7 @@ func (c *Conversation) Step(in Input, now time.Time) []Effect {
 				if in.Notice.Text != "" {
 					c.endAfterNotice = true
 				} else {
-					c.ending = true
+					c.ending, c.endWhy = true, "after the app's hand-off"
 				}
 			}
 			if c.listeningArmed() {
@@ -638,7 +638,7 @@ func (c *Conversation) tryInject(now time.Time, fx []Effect) []Effect {
 	}
 	if c.endAfterNotice {
 		c.endAfterNotice = false
-		c.ending = true // once Pixie has said it
+		c.ending, c.endWhy = true, "after the app's hand-off" // once Pixie has said it
 	}
 	// What Pixie says next answers the notice, not the user's words.
 	c.hoSettled = true

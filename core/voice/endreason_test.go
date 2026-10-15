@@ -1,6 +1,9 @@
 package voice
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 // #71: every way a conversation ends leaves its reason, for the voice log.
 func TestEachEndHasAReason(t *testing.T) {
@@ -45,5 +48,17 @@ func TestEachEndHasAReason(t *testing.T) {
 	c.Step(FailedInput(Failure{Kind: FailConnectionLost}), ms(now, 100))
 	if got := c.EndReason(); got == "" || got[:6] != "error:" {
 		t.Errorf("error: %q", got)
+	}
+}
+
+func TestTheAppsHandOffEndHasAReason(t *testing.T) {
+	c := newClaimConv(true, true)
+	userTurn(c, "build me a small dashboard app", ms(t0(), 100))
+	reply(c, "I've handed that off to the coordinator.", ms(t0(), 500))
+	ticks(c, ms(t0(), 500), 3*time.Second)
+	c.Step(HandOffDoneAfterReplyInput(Notice{}), ms(t0(), 3600))
+	ticks(c, ms(t0(), 3600), time.Second)
+	if c.IsActive() || c.EndReason() != "after the app's hand-off" {
+		t.Fatalf("active %v reason %q", c.IsActive(), c.EndReason())
 	}
 }
