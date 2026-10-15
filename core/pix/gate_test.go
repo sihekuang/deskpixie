@@ -164,3 +164,16 @@ func TestGateSlashCommandAndEmptyEnterNeedNoTurn(t *testing.T) {
 		t.Fatal("Enter on an empty line: clear")
 	}
 }
+
+func TestSessionStopOpensTheGate(t *testing.T) {
+	// A Codex turn can end before its busy marker shows; its Stop still means the line was sent.
+	h := newHarness(t, "codex", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}})
+	h.s.gate.Keys([]byte("fix it"), time.Now())
+	h.s.gate.Keys([]byte("\r"), time.Now())
+	h.s.Hook("Stop", map[string]any{})
+	if !h.s.gate.Clear(time.Now().Add(TypingQuiet)) {
+		t.Fatal("after Stop the gate must be clear")
+	}
+	h.s.runner.Hangup()
+	h.s.finish()
+}

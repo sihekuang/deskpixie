@@ -114,6 +114,7 @@ func (s *Session) Hook(event string, p map[string]any) string {
 			s.title()
 		}
 	case "Stop":
+		s.gate.Started() // a turn ran, so your line was sent (a fast Codex turn shows no busy marker)
 		s.mu.Lock()
 		s.afterStop = true
 		s.mu.Unlock()
