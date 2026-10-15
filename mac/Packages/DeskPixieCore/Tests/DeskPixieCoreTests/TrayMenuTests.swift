@@ -146,4 +146,28 @@ final class TrayMenuTests: XCTestCase {
     func test_it_is_a_class_method_not_an_instance_method() {
         XCTAssertTrue(MicModes.isInstanceMethod == false)
     }
+
+    // MARK: Manual-mode fix
+
+    private func fixRow(_ items: [TrayItem], _ title: String) -> TrayMenu.Row? {
+        for case .action(let row) in items where row.title == title { return row }
+        return nil
+    }
+
+    func test_a_mode_fix_with_an_id_is_an_action() throws {
+        let s = try state(#"{"statusLines":["Coordinator is in Manual mode: its model is too old for auto mode"],"agentModeFix":{"id":"agent:fix-model","title":"Use a supported model"}}"#)
+        let fix = try XCTUnwrap(fixRow(TrayMenu.build(s, localStatusLines: [], micModeAvailable: false), "Use a supported model"))
+        XCTAssertTrue(fix.enabled)
+        XCTAssertEqual(TrayMenu.route(fix.id), .core("agent:fix-model"))
+    }
+
+    func test_a_mode_fix_with_copy_copies_and_calls_nothing() throws {
+        let s = try state(#"{"statusLines":["A worker is in Manual mode: Claude Code is too old for auto mode"],"agentModeFix":{"title":"Copy update command","copy":"claude update"}}"#)
+        let items = TrayMenu.build(s, localStatusLines: [], micModeAvailable: false)
+        let fix = try XCTUnwrap(fixRow(items, "Copy update command"))
+        XCTAssertEqual(TrayMenu.route(fix.id), .copy("claude update"))
+        XCTAssertTrue(TrayMenu.isLocal(fix.id))
+        // sits right under the status line
+        XCTAssertEqual(titles(items).prefix(3).map { $0 }, ["label:A worker is in Manual mode: Claude Code is too old for auto mode", fix.id, "--"])
+    }
 }

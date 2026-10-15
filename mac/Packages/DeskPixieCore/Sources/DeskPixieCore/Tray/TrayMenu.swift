@@ -22,6 +22,14 @@ public struct TrayAppState: Decodable, Sendable, Equatable {
         public var label: String
     }
 
+    /// The fix offered under the Manual-mode status line: `id` runs through `app.action`;
+    /// `copy` is put on the clipboard and nothing is run.
+    public struct ModeFix: Decodable, Sendable, Equatable {
+        public var id: String?
+        public var title: String
+        public var copy: String?
+    }
+
     public struct Agent: Decodable, Sendable, Equatable {
         public var enabled: Bool
         public var jobs: [Job]
@@ -44,9 +52,10 @@ public struct TrayAppState: Decodable, Sendable, Equatable {
     public var agent: Agent?
     public var statusLines: [String]
     public var hotkey: String
+    public var agentModeFix: ModeFix?
 
     private enum CodingKeys: String, CodingKey {
-        case state, packs, pack, scale, fade, talking, canvasRecent, agent, statusLines, hotkey
+        case state, packs, pack, scale, fade, talking, canvasRecent, agent, statusLines, hotkey, agentModeFix
     }
 
     public init(from decoder: Decoder) throws {
@@ -61,6 +70,7 @@ public struct TrayAppState: Decodable, Sendable, Equatable {
         agent = try c.decodeIfPresent(Agent.self, forKey: .agent)
         statusLines = try c.decodeIfPresent([String].self, forKey: .statusLines) ?? []
         hotkey = try c.decodeIfPresent(String.self, forKey: .hotkey) ?? ""
+        agentModeFix = try c.decodeIfPresent(ModeFix.self, forKey: .agentModeFix)
     }
 }
 
@@ -115,15 +125,21 @@ public enum TrayMenu {
         case micMode
         /// `app.action {id}`; `focusCanvas` when the user asked for a canvas page, so the
         /// canvas window comes forward (core-initiated opens never take focus).
+        /// Put this text on the pasteboard; nothing is sent to the core.
+        case copy(String)
         case core(String, focusCanvas: Bool = false)
     }
 
+    /// Prefix of a copy-only row's id; the rest is the text to copy.
+    public static let copyPrefix = "copy:"
+
     public static func route(_ id: String) -> Route {
+        if id.hasPrefix(copyPrefix) { return .copy(String(id.dropFirst(copyPrefix.count))) }
         switch id {
-        case quitID: .quit
-        case settingsID: .settings
-        case micModeID: .micMode
-        default: .core(id, focusCanvas: id == "canvas:open" || id.hasPrefix("canvas:page:"))
+        case quitID: return .quit
+        case settingsID: return .settings
+        case micModeID: return .micMode
+        default: return .core(id, focusCanvas: id == "canvas:open" || id.hasPrefix("canvas:page:"))
         }
     }
 
@@ -135,7 +151,7 @@ public enum TrayMenu {
     }
 
     /// Ids Swift handles itself (never sent to `app.action`).
-    public static func isLocal(_ id: String) -> Bool { [quitID, settingsID, micModeID].contains(id) }
+    public static func isLocal(_ id: String) -> Bool { [quitID, settingsID, micModeID].contains(id) || id.hasPrefix(copyPrefix) }
 
     /// Size rows; a non-preset scale gets its own checked "Custom (×N)" row.
     public static func sizeItems(scale: Int) -> [Row] {
@@ -165,6 +181,14 @@ public enum TrayMenu {
         var seen = Set<String>()
         for line in localStatusLines + (s?.statusLines ?? []) where !line.isEmpty && seen.insert(line).inserted {
             items += [.label(line), .separator]
+        }
+        if let fix = s?.agentModeFix, !fix.title.isEmpty {
+            // Right under the status lines; a copy-only fix never reaches app.action.
+            let id = fix.id.flatMap { $0.isEmpty ? nil : $0 } ?? fix.copy.map { copyPrefix + $0 }
+            if let id {
+                let row = TrayItem.action(Row(id: id, title: fix.title))
+                if items.isEmpty { items += [row, .separator] } else { items.insert(row, at: items.count - 1) }
+            }
         }
 
         if let s {

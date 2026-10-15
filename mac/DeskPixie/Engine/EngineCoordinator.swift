@@ -208,6 +208,10 @@ final class EngineCoordinator {
             NSApp.terminate(nil)
         case .micMode:
             MicModes.show(using: appState.micModes)
+        case .copy(let text):
+            // Terminal commands are only ever copied, never run.
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
         case .settings:
             break // MenuBarMenu opens the Settings scene
         case .core(let id, let focusCanvas):
