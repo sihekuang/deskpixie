@@ -98,12 +98,12 @@ func TestUpdatesOverTheCapAreHeldAndMergedWithTheConversationOpen(t *testing.T) 
 	}
 	r.RouteUpdate(true, NewLine(LineInfo, "B done."), 2)
 	// The coordinator's own lines are still said at once in a conversation.
-	wantRoute(t, r.Route(true, reply("Checked."), 3), InjectDelivery(voice.Notice{Text: "Agent reply: Checked."}))
+	wantRoute(t, r.Route(true, reply("Checked."), 3), InjectDelivery(voice.Notice{Text: "Coordinator reply: Checked."}))
 	if len(r.Tick(true, 59_999)) != 0 {
 		t.Fatal("no slot yet")
 	}
 	got := r.Tick(true, 60_000)
-	if len(got) != 1 || got[0].Kind != DeliverInject || got[0].Notice.Text != "Agent: 2 more updates. A done. B done." || len(got[0].Lines) != 2 {
+	if len(got) != 1 || got[0].Kind != DeliverInject || got[0].Notice.Text != "Coordinator: 2 more updates. A done. B done." || len(got[0].Lines) != 2 {
 		t.Fatalf("%+v", got)
 	}
 	if len(r.Tick(true, 60_001)) != 0 {
@@ -136,7 +136,7 @@ func TestQuestionsBypassTheCapInBothConversationStates(t *testing.T) {
 	r := NewRouter(4)
 	fillCap(r, true, 0)
 	q := NewLine(LineQuestion, "Which branch?")
-	wantRoute(t, r.RouteUpdate(true, q, 1), InjectDelivery(voice.Notice{Text: "Agent question: Which branch?"}))
+	wantRoute(t, r.RouteUpdate(true, q, 1), InjectDelivery(voice.Notice{Text: "Coordinator question: Which branch?"}))
 	wantRoute(t, r.RouteUpdate(false, q, 1), ChimeDelivery(), NotifyDelivery("Which branch?"), OutboxDelivery(q))
 }
 
@@ -216,7 +216,7 @@ func TestTheCoordinatorsReplySupersedesAHeldWorkerReport(t *testing.T) {
 	mcp(t, c, workerName, done("Fixed the flaky test"), T0)
 	fx := stop(c, fmt.Sprintf(`<spoken ref="%s" status="working">The fix is in; I'm checking it.</spoken>`, job(1)), T0+5_000)
 	fx = append(fx, c.Step(TickInput(), T0+5_000+UpdateQuietMs)...)
-	if got := injects(fx); !reflect.DeepEqual(got, []string{"Agent reply: The fix is in; I'm checking it."}) {
+	if got := injects(fx); !reflect.DeepEqual(got, []string{"Coordinator reply: The fix is in; I'm checking it."}) {
 		t.Fatal(got)
 	}
 }
@@ -228,7 +228,7 @@ func TestTheCoordinatorsReplyStillGoesAfterTheWorkerLineWasSaid(t *testing.T) {
 	mcp(t, c, workerName, done("Fixed the flaky test"), T0)
 	fx := c.Step(TickInput(), T0+UpdateQuietMs)
 	fx = append(fx, stop(c, fmt.Sprintf(`<spoken ref="%s" status="done">Fixed and checked.</spoken>`, job(1)), T0+UpdateQuietMs+1)...)
-	want := []string{"The upload worker in focus says it's done: Fixed the flaky test.", "Agent reply: Fixed and checked."}
+	want := []string{"The upload worker in focus says it's done: Fixed the flaky test.", "Coordinator reply: Fixed and checked."}
 	if got := injects(fx); !reflect.DeepEqual(got, want) {
 		t.Fatal(got)
 	}
@@ -322,13 +322,13 @@ func TestQuestionsAreNeverHeldByTheDebounceOrTheCap(t *testing.T) {
 		mcp(t, c, workerName, done("Fixed the flaky test"), T0+1_000)
 		fx := askPush(c, 7, T0+2_000)
 		if open {
-			wantContains(t, fx, eInject("Agent question: Run git push in coordinator? Say confirm hawk."))
+			wantContains(t, fx, eInject("Coordinator question: Run git push in coordinator? Say confirm hawk."))
 		} else {
 			wantContains(t, fx, eNotify("Run git push in coordinator? Say confirm hawk."))
 		}
 		fx = stop(c, fmt.Sprintf(`<spoken ref="%s" status="question">Which branch?</spoken>`, job(1)), T0+3_000)
 		if open {
-			wantContains(t, fx, eInject("Agent question: Which branch?"))
+			wantContains(t, fx, eInject("Coordinator question: Which branch?"))
 		} else {
 			wantContains(t, fx, eNotify("Which branch?"))
 		}

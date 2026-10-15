@@ -9,7 +9,7 @@ import (
 //go:embed assets/persona.md
 var defaultPersona string
 
-// DefaultPersona is Bit's built-in persona, trimmed (Rust: DEFAULT_PERSONA.trim()).
+// DefaultPersona is Pixie's built-in persona, trimmed (Rust: DEFAULT_PERSONA.trim()).
 func DefaultPersona() string { return strings.TrimSpace(defaultPersona) }
 
 // Instructions returns the persona file's trimmed contents, or DefaultPersona when the

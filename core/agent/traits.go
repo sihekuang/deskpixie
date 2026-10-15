@@ -95,7 +95,7 @@ type VoiceLink interface {
 	IsOpen() bool
 	Inject(notice Notice)
 	HoldOpen(on bool)
-	// Open starts a conversation as the hotkey does, only if Bit is at rest; false if it did
+	// Open starts a conversation as the hotkey does, only if Pixie is at rest; false if it did
 	// nothing (a conversation starting, open or closing, an error showing, the mic unusable).
 	Open() bool
 }
@@ -115,7 +115,7 @@ type UpdatesSink interface {
 	Updates(items []UpdateItem)
 }
 
-// StatusSink is the tray's one-line agent status, e.g. "Agent: herdr not found"; "" clears it.
+// StatusSink is the tray's one-line agent status, e.g. "Coordinator: herdr not found"; "" clears it.
 type StatusSink interface {
 	SetStatus(line string)
 }

@@ -3,7 +3,7 @@ package agent
 import "slices"
 
 // The updates bubble (spec docs/specs/2026-10-14-updates-bubble-design.md): the outbox's
-// undelivered lines, shown beside Bit while Bit isn't opening conversations for them.
+// undelivered lines, shown beside Pixie while Pixie isn't opening conversations for them.
 
 // UpdateItem is one line in the bubble (the `updates` event's lines; kind lowercase, at in ms).
 type UpdateItem struct {
@@ -29,7 +29,7 @@ func (c *AgentController) bubbleItems() []UpdateItem {
 }
 
 // Updates is the bubble's current list, for a shell that missed the last `updates` event (it
-// subscribes after the first Step). Empty while Bit opens conversations for updates. Never nil.
+// subscribes after the first Step). Empty while Pixie opens conversations for updates. Never nil.
 func (c *AgentController) Updates() []UpdateItem {
 	if c.settings.OpenConversation || c.shutDown {
 		return []UpdateItem{}

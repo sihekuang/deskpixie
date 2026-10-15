@@ -66,7 +66,9 @@ func TestIsRequest(t *testing.T) {
 		{"What's the price of bitcoin right now?", true},
 		{"what is on my calendar tomorrow", true},
 		{"Who won the game last night?", true},
+		{"Hey Pixie, can you check on the deskpixie repo?", true},
 		{"Hey Bit, can you check on the deskpixie repo?", true},
+		{"Pixie, hand this to the coordinator: why is the build red?", true},
 		{"Could you find me a good ramen place nearby", true},
 		{"Tell me the latest news about the election.", true},
 		{"Look up the weather in Lisbon next week", true},
@@ -84,8 +86,8 @@ func TestIsRequest(t *testing.T) {
 		{"Goodbye, talk to you later.", false},
 		{"That's all for now, thanks.", false},
 		{"No, never mind.", false},
-		{"Good night Bit.", false},
-		// chit-chat questions about Bit
+		{"Good night Pixie.", false},
+		// chit-chat questions about Pixie
 		{"How are you doing today?", false},
 		{"What's your favorite food?", false},
 		{"What should we have for dinner?", false},

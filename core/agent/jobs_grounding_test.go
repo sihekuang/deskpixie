@@ -10,8 +10,8 @@ import (
 	"github.com/sihekuang/deskpixie/core/voice"
 )
 
-// #72: what Bit says about job status comes from the job table, through the jobs tool and the
-// agent's own lines, never from Bit's memory.
+// #72: what Pixie says about job status comes from the job table, through the jobs tool and the
+// agent's own lines, never from Pixie's memory.
 
 func TestBitsJobStatusComesFromTheJobTable(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
@@ -36,7 +36,7 @@ func TestBitsJobStatusComesFromTheJobTable(t *testing.T) {
 		for _, v := range r.h.JobStatus() {
 			table[v.JobID] = v.Status.String()
 		}
-		// What the jobs tool tells Bit.
+		// What the jobs tool tells Pixie.
 		out := invoke(t, Jobs{H: r.h}, `{"action":"status"}`).(map[string]any)
 		told := map[string]string{}
 		for _, j := range out["jobs"].([]any) {
@@ -52,7 +52,7 @@ func TestBitsJobStatusComesFromTheJobTable(t *testing.T) {
 			t.Errorf("jobs tool %v, table %v", told, table)
 		}
 
-		// The lines Bit hears say exactly what the table says: a reply for the done and the
+		// The lines Pixie hears say exactly what the table says: a reply for the done and the
 		// failed job, nothing for the one still working.
 		var replies []string
 		for _, c := range r.voice.Calls() {
@@ -60,13 +60,13 @@ func TestBitsJobStatusComesFromTheJobTable(t *testing.T) {
 				replies = append(replies, c.Text)
 			}
 		}
-		for _, line := range []string{"Agent reply: There are 12.", "Agent reply: The deploy key is missing."} {
+		for _, line := range []string{"Coordinator reply: There are 12.", "Coordinator reply: The deploy key is missing."} {
 			if !hasCall(r.voice.Calls(), agenttest.InjectCall(line)) {
-				t.Errorf("Bit wasn't told %q: %q", line, replies)
+				t.Errorf("Pixie wasn't told %q: %q", line, replies)
 			}
 		}
 		if len(replies) != 2 {
-			t.Errorf("Bit was told more than the table says: %q", replies)
+			t.Errorf("Pixie was told more than the table says: %q", replies)
 		}
 	})
 }
@@ -75,9 +75,9 @@ func TestBitsJobStatusComesFromTheJobTable(t *testing.T) {
 func TestThePersonaTakesJobStatusOnlyFromTheJobsTool(t *testing.T) {
 	for _, phrase := range []string{
 		`call jobs with action "status" and answer from it`,
-		"Job status comes only from the jobs tool and Agent lines",
-		`never from memory or "Recent work with the agent"`,
-		"Never say a job finished unless an Agent reply said so.",
+		"Job status comes only from the jobs tool and Coordinator lines",
+		`never from memory or "Recent work with the coordinator"`,
+		"Never say a job finished unless a Coordinator reply said so.",
 	} {
 		if !strings.Contains(DelegationPersona, phrase) {
 			t.Errorf("the delegation persona doesn't say %q", phrase)

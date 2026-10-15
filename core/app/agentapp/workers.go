@@ -53,7 +53,7 @@ func Policy(w settings.WorkerSettings) agent.WorkerPolicy {
 // with no usable kind is a setup problem: the error is its sticky status line.
 func WorkersOn(w settings.WorkerSettings, policy agent.WorkerPolicy) (bool, error) {
 	if w.Enabled && !policy.Enabled {
-		return false, errors.New("Agent: workers off: no usable worker kind")
+		return false, errors.New("Coordinator: workers off: no usable worker kind")
 	}
 	return w.Enabled, nil
 }
@@ -87,7 +87,7 @@ func SetupWorkers(w settings.WorkerSettings, projectsRootRaw, home string) Worke
 	root, err := ProjectsRoot(projectsRootRaw, home)
 	if err != nil {
 		log.Printf("agent: workers off: projectsRoot not usable: %v", err)
-		return off("Agent: workers off: projectsRoot not usable")
+		return off("Coordinator: workers off: projectsRoot not usable")
 	}
 	return WorkersSetup{Policy: policy, Root: root}
 }

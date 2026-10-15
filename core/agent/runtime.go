@@ -97,7 +97,7 @@ type RuntimeConfig struct {
 	// SetupProblem: a setup problem found by the composition root (the tray status line);
 	// delegation starts off. "" = none.
 	SetupProblem string
-	// Notice: a setup note that disables nothing (e.g. "Agent: workers off: …"), shown while
+	// Notice: a setup note that disables nothing (e.g. "Coordinator: workers off: …"), shown while
 	// nothing else is. "" = none.
 	Notice string
 	// Kept is what the last run left running (keepPanesOnQuit): its coordinator token (already
@@ -463,7 +463,7 @@ func (h *AgentHandle) Answer(jobID, text string) (JobID, error) {
 	return r.Job, nil
 }
 
-// OpenTerminal is a single click on Bit / Tray ▸ Open agent terminal: the session is running,
+// OpenTerminal is a single click on Pixie / Tray ▸ Open coordinator terminal: the session is running,
 // the coordinator is (being) started unless delegation is off, then a terminal attaches.
 func (h *AgentHandle) OpenTerminal(ctx context.Context) error {
 	if err := h.deps.Host.Session().EnsureSession(ctx); err != nil {
@@ -506,7 +506,7 @@ func (h *AgentHandle) FocusJob(ctx context.Context, job JobID, worker string) er
 // Voice forwards the voice loop's signals.
 func (h *AgentHandle) Voice(sig VoiceSignal) { h.Input(VoiceInput(sig)) }
 
-// Restart is tray ▸ Restart agent.
+// Restart is tray ▸ Restart coordinator.
 func (h *AgentHandle) Restart() { h.Input(RestartInput()) }
 
 // Shutdown is the app's quit: deny pending permissions and stop the panes, in parallel,
@@ -1199,7 +1199,7 @@ func (h *AgentHandle) apply(e Effect) {
 	case EfChime:
 		d.Notifier.Chime()
 	case EfNotify:
-		d.Notifier.Notify("Bit", e.Text)
+		d.Notifier.Notify("Pixie", e.Text)
 	case EfCue:
 		d.Pixie.Cue(e.Cue)
 	case EfDecide:

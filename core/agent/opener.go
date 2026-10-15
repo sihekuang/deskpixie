@@ -5,8 +5,8 @@ import "github.com/sihekuang/deskpixie/core/voice"
 // Opening a conversation for an update (`agent.openConversationForUpdates`, a feature flag, off by
 // default). With it on, a job's done or failed line, an agent question or a spoken worker
 // report that arrives while no conversation is open still gets today's chime, notification
-// and outbox line, and Bit also opens a conversation the way the hotkey does. Its Opened
-// replays the outbox (each line once, marked delivered), so Bit says the update and then
+// and outbox line, and Pixie also opens a conversation the way the hotkey does. Its Opened
+// replays the outbox (each line once, marked delivered), so Pixie says the update and then
 // listens; the conversation ends on the usual silence timeout.
 //
 // Worker reports are debounced first (debounce.go): held per job until quiet, deduped and
@@ -86,7 +86,7 @@ func (c *AgentController) tryOpen(now Millis, fx *[]Effect) {
 	*fx = append(*fx, Effect{Kind: EfOpenConversation})
 }
 
-// setAway (InPresence): while you're away Bit doesn't open a conversation or chime (the
+// setAway (InPresence): while you're away Pixie doesn't open a conversation or chime (the
 // notification and the outbox line still happen); on return it tries again.
 func (c *AgentController) setAway(away bool, now Millis, fx *[]Effect) {
 	c.away = away
@@ -111,7 +111,7 @@ func (c *AgentController) openRefused(now Millis, fx *[]Effect) {
 
 // openerSaw is told of the voice loop's Opened and Closed: whichever comes ends the wait.
 // Opened replays the outbox; a Closed while waiting is a failed connect, not retried until the
-// next update. A Closed with no open asked for (the conversation that made Bit busy ended)
+// next update. A Closed with no open asked for (the conversation that made Pixie busy ended)
 // leaves a refused open to the next tick.
 func (c *AgentController) openerSaw(kind voice.SignalKind) {
 	o := c.opener

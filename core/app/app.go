@@ -312,7 +312,7 @@ func (a *App) voiceExtras() ([]voice.Tool, string) {
 }
 
 // sessionFacts are the facts each voice session starts with: the local ones, then, when the
-// agent has them, its recent jobs (Bit's memory comes from the coordinator side).
+// agent has them, its recent jobs (Pixie's memory comes from the coordinator side).
 func (a *App) sessionFacts(home string) voice.SessionFacts {
 	var facts voice.SessionFacts = tools.LocalFacts{Clock: tools.SystemClock{}, Home: home}
 	if f, ok := a.agent.(AgentFacts); ok {
@@ -424,7 +424,7 @@ func (a *App) onVoiceEvent(ev voice.UIEvent) {
 		}
 		return
 	case "mouth":
-		// Non-zero only while Bit's reply is audibly playing: feeds the agent's echo gate.
+		// Non-zero only while Pixie's reply is audibly playing: feeds the agent's echo gate.
 		if a.agent != nil {
 			a.agent.OnMouth(ev.Level)
 		}
@@ -494,7 +494,7 @@ func (a *App) announce(name string) {
 	})
 }
 
-// Celebrate: Bit plays happy (a new canvas page), only from idle. Safe from any goroutine.
+// Celebrate: Pixie plays happy (a new canvas page), only from idle. Safe from any goroutine.
 func (a *App) Celebrate() {
 	a.mu.Lock()
 	p, _ := a.currentPackLocked()
@@ -503,7 +503,7 @@ func (a *App) Celebrate() {
 	a.showHeld("happy", h, ok)
 }
 
-// FlashError: Bit shows error (a delegated job failed), then returns to where it was.
+// FlashError: Pixie shows error (a delegated job failed), then returns to where it was.
 func (a *App) FlashError() {
 	a.mu.Lock()
 	p, _ := a.currentPackLocked()
@@ -1166,7 +1166,7 @@ func startAndReap(program string, args ...string) error {
 	return nil
 }
 
-// OpenAgentTerminal is a single click on Bit (Rust agent::open_terminal): attach a terminal to
+// OpenAgentTerminal is a single click on Pixie (Rust agent::open_terminal): attach a terminal to
 // the agent session. With delegation off, nothing opens.
 func (a *App) OpenAgentTerminal() {
 	if a.agent == nil {

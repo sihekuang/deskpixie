@@ -187,7 +187,7 @@ func confClips() vt.Clips {
 
 func confCfg() voice.SessionConfig {
 	return voice.SessionConfig{
-		Model: DefaultModel, Voice: "marin", Instructions: "be Bit",
+		Model: DefaultModel, Voice: "marin", Instructions: "be Pixie",
 		Tools: []voice.ToolSpec{{Name: voice.EndConversationTool, Description: "end"}},
 	}
 }

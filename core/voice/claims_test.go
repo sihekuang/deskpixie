@@ -2,7 +2,7 @@ package voice
 
 import "testing"
 
-// The claim check (#72): what Bit's words claim it did, against the tools it called.
+// The claim check (#72): what Pixie's words claim it did, against the tools it called.
 
 var allClaimTools = []string{DelegateTool, TimerToolName, MediaToolName}
 
@@ -27,6 +27,9 @@ func TestFindClaim(t *testing.T) {
 		{"OK, I started a job for that.", nil, DelegateTool, false},
 		{"I've kicked off a job.", nil, DelegateTool, false},
 		{"I passed it to your bigger brain.", nil, DelegateTool, false},
+		{"I've handed that to the coordinator.", nil, DelegateTool, false},
+		{"I'll ask the coordinator.", nil, DelegateTool, false},
+		{"I passed it to Claude.", nil, DelegateTool, false},
 		{"I've delegated that.", nil, DelegateTool, false},
 		{"I HAVE HANDED THAT OFF.", nil, DelegateTool, false},
 		// "let me check" promises the agent's check (any tool backs it)
@@ -114,10 +117,10 @@ func TestFindClaimOnlyForAvailableTools(t *testing.T) {
 }
 
 func TestClaimNotices(t *testing.T) {
-	if n := ClaimNotice(Claim{Tool: TimerToolName}); n.Text != "Agent: correction: no timer was set or changed. Call timer now, or ask the user how long." {
+	if n := ClaimNotice(Claim{Tool: TimerToolName}); n.Text != "Coordinator: correction: no timer was set or changed. Call timer now, or ask the user how long." {
 		t.Fatalf("%q", n.Text)
 	}
-	if n := ClaimNotice(Claim{Tool: MediaToolName}); n.Text != "Agent: correction: the music wasn't changed. Call media now, or tell the user it didn't happen." {
+	if n := ClaimNotice(Claim{Tool: MediaToolName}); n.Text != "Coordinator: correction: the music wasn't changed. Call media now, or tell the user it didn't happen." {
 		t.Fatalf("%q", n.Text)
 	}
 	if n := ClaimNotice(Claim{Tool: DelegateTool}); n.Text != "" {

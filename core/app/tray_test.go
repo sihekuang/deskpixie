@@ -31,10 +31,10 @@ func TestTheAgentStatusLinePrefersTheRuntimeOverTheIntegrationHint(t *testing.T)
 	if got := AgentStatusLine("", ""); got != "" {
 		t.Fatal(got)
 	}
-	if got := AgentStatusLine("", IntegrationHint); got != "Agent: run `herdr integration install claude`" {
+	if got := AgentStatusLine("", IntegrationHint); got != "Coordinator: run `herdr integration install claude`" {
 		t.Fatal(got)
 	}
-	if got := AgentStatusLine("Agent: herdr not found", IntegrationHint); got != "Agent: herdr not found" {
+	if got := AgentStatusLine("Coordinator: herdr not found", IntegrationHint); got != "Coordinator: herdr not found" {
 		t.Fatal(got)
 	}
 }

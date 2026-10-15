@@ -1,6 +1,6 @@
 package voice
 
-// The hand-off safety net (#71): when Bit answers a request with "I don't know" and calls no
+// The hand-off safety net (#71): when Pixie answers a request with "I don't know" and calls no
 // tool, the conversation hands the user's words to the delegate tool itself. These matchers
 // decide when; they are English only and deliberately conservative: a missed hand-off leaves
 // today's behaviour, a wrong one starts a job nobody asked for.
@@ -54,7 +54,7 @@ func hasPrefixPhrase(text string, phrases []string) bool {
 	return false
 }
 
-// nonAnswerPhrases are Bit admitting it can't answer (normalized: no apostrophes).
+// nonAnswerPhrases are Pixie admitting it can't answer (normalized: no apostrophes).
 var nonAnswerPhrases = []string{
 	"i dont know", "i do not know", "i dunno", "i have no idea", "ive no idea",
 	"im not sure", "i am not sure", "im not certain", "i am not certain",
@@ -89,7 +89,7 @@ var notNonAnswer = []string{
 // nonAnswerMaxWords: a longer reply is doing more than not answering.
 const nonAnswerMaxWords = 40
 
-// IsNonAnswer reports whether Bit's reply is an "I don't know": its first sentence says Bit
+// IsNonAnswer reports whether Pixie's reply is an "I don't know": its first sentence says Pixie
 // can't answer, the reply is short, and it neither asks the user to clarify nor guesses.
 func IsNonAnswer(reply string) bool {
 	all := normalize(reply)
@@ -118,7 +118,7 @@ var smallTalk = []string{
 	"wow", "haha", "lol", "hmm", "oh", "uh", "um",
 }
 
-// chitChat are questions about Bit itself (its feelings, tastes, opinions): Bit answers those,
+// chitChat are questions about Pixie itself (its feelings, tastes, opinions): Pixie answers those,
 // and an "I don't know" to one is a fine answer.
 var chitChat = []string{
 	"how are you", "how are things", "how is it going", "hows it going",
@@ -143,10 +143,10 @@ var requestStarts = []string{
 	"give me", "get me", "i need", "i want", "id like", "i would like", "help me", "let me know",
 	"remind me", "make", "write", "draft", "open", "send", "explain", "summarize", "summarise",
 	"research", "figure out", "work out", "compare", "list", "read", "fix", "update", "create",
-	"build", "add", "set up", "book", "order", "plan", "ask", "find out",
+	"build", "add", "set up", "book", "order", "plan", "ask", "find out", "hand", "pass", "delegate",
 }
 
-// requestAnywhere are request markers anywhere in the words ("hey Bit, can you …").
+// requestAnywhere are request markers anywhere in the words ("hey Pixie, can you …").
 var requestAnywhere = []string{
 	"can you", "could you", "would you", "will you", "can u", "do you know", "i wonder",
 	"i was wondering", "any idea", "tell me", "let me know", "find out", "look up",
@@ -155,14 +155,14 @@ var requestAnywhere = []string{
 // requestMinWords: "why?" alone is too little to hand off.
 const requestMinWords = 3
 
-// leadIns are words before the request that don't change it: "hey Bit, thanks, so what's …".
+// leadIns are words before the request that don't change it: "hey Pixie, thanks, so what's …".
 var leadIns = map[string]bool{
-	"hey": true, "hi": true, "hello": true, "ok": true, "okay": true, "so": true, "bit": true,
+	"hey": true, "hi": true, "hello": true, "ok": true, "okay": true, "so": true, "bit": true, "pixie": true,
 	"um": true, "uh": true, "and": true, "also": true, "thanks": true, "well": true, "oh": true,
 }
 
 // IsRequest reports whether the user's words ask a question or for something to be done, not
-// small talk, an acknowledgement, a goodbye or a question about Bit itself.
+// small talk, an acknowledgement, a goodbye or a question about Pixie itself.
 func IsRequest(said string) bool {
 	words := strings.Fields(normalize(said))
 	for len(words) > 0 && leadIns[words[0]] {
@@ -183,24 +183,24 @@ func IsRequest(said string) bool {
 		hasAnyPhrase(text, requestAnywhere)
 }
 
-// ShouldHandOff: the user asked for something and Bit's whole reply was a non-answer.
+// ShouldHandOff: the user asked for something and Pixie's whole reply was a non-answer.
 func ShouldHandOff(userSaid, botSaid string) bool {
 	return IsRequest(userSaid) && IsNonAnswer(botSaid)
 }
 
-// Notice lead-ins for the hand-off; the delegation persona tells Bit what to say for each.
+// Notice lead-ins for the hand-off; the delegation persona tells Pixie what to say for each.
 const (
-	HandedOffPrefix   = "Agent: handed off: "
-	CantHandOffPrefix = "Agent: can't hand off: "
+	HandedOffPrefix   = "Coordinator: handed off: "
+	CantHandOffPrefix = "Coordinator: can't hand off: "
 )
 
 // delegationOff is how the delegate tool reports that delegation is off:
 // "Delegation is off (<the agent's status line>)." (agent.AgentHandle.Delegate).
 const delegationOff = "Delegation is off ("
 
-// HandOffNotice is what Bit is told after the hand-off's delegate call returned output: the
+// HandOffNotice is what Pixie is told after the hand-off's delegate call returned output: the
 // task was handed off, or delegation is off and why (the agent's status line, e.g. "herdr not
-// found"). Any other failure says nothing (Bit's "I don't know" stands). why is for the log;
+// found"). Any other failure says nothing (Pixie's "I don't know" stands). why is for the log;
 // it never includes the user's words.
 func HandOffNotice(task string, output json.RawMessage) (n Notice, why string) {
 	var out struct {
@@ -210,11 +210,11 @@ func HandOffNotice(task string, output json.RawMessage) (n Notice, why string) {
 	_ = json.Unmarshal(output, &out)
 	switch {
 	case out.JobID != "":
-		return Notice{Text: HandedOffPrefix + task}, "handed it to the agent as " + out.JobID
+		return Notice{Text: HandedOffPrefix + task}, "handed it to the coordinator as " + out.JobID
 	case strings.HasPrefix(out.Error, delegationOff):
 		reason := strings.TrimSuffix(strings.TrimPrefix(out.Error, delegationOff), ".")
 		reason = strings.TrimSuffix(reason, ")")
-		reason = strings.TrimPrefix(strings.TrimSpace(reason), "Agent: ")
+		reason = strings.TrimPrefix(strings.TrimSpace(reason), "Coordinator: ")
 		text := "delegation is off"
 		if reason != "" {
 			text += " (" + reason + ")"

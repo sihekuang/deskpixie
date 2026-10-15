@@ -163,7 +163,7 @@ func TestADoneReplyWithTheConversationClosedChimesAndNotifies(t *testing.T) {
 		settle()
 		stopHook(r, `<spoken ref="job_000000000001" status="done">There are 12.</spoken>`)
 		settle()
-		want := []agenttest.Alert{agenttest.ChimeAlert(), agenttest.NotifyAlert("Bit", "There are 12."), agenttest.CueAlert(CueHappy)}
+		want := []agenttest.Alert{agenttest.ChimeAlert(), agenttest.NotifyAlert("Pixie", "There are 12."), agenttest.CueAlert(CueHappy)}
 		if !slices.Equal(r.alerts.Alerts(), want) {
 			t.Fatal(r.alerts.Alerts())
 		}
@@ -183,7 +183,7 @@ func TestAReplyWhileOpenIsInjected(t *testing.T) {
 		settle()
 		stopHook(r, `<spoken ref="job_000000000001">There are 12.</spoken>`)
 		settle()
-		if !hasCall(r.voice.Calls(), agenttest.InjectCall("Agent reply: There are 12.")) {
+		if !hasCall(r.voice.Calls(), agenttest.InjectCall("Coordinator reply: There are 12.")) {
 			t.Fatal(r.voice.Calls())
 		}
 	})
@@ -197,7 +197,7 @@ func TestAnInjectThatFindsTheConversationClosedFallsBackToANotification(t *testi
 		settle()
 		stopHook(r, `<spoken ref="job_000000000001">There are 12.</spoken>`)
 		settle()
-		if !hasAlert(r.alerts.Alerts(), agenttest.NotifyAlert("Bit", "There are 12.")) {
+		if !hasAlert(r.alerts.Alerts(), agenttest.NotifyAlert("Pixie", "There are 12.")) {
 			t.Fatal(r.alerts.Alerts())
 		}
 	})
@@ -248,7 +248,7 @@ func TestAPermissionHookIsAnsweredByASpokenConfirm(t *testing.T) {
 		ev, rx := permissionEvent("git push")
 		r.h.Deliver(ev)
 		settle()
-		if !hasCall(r.voice.Calls(), agenttest.InjectCall("Agent question: Run git push in coordinator? Say confirm hawk.")) {
+		if !hasCall(r.voice.Calls(), agenttest.InjectCall("Coordinator question: Run git push in coordinator? Say confirm hawk.")) {
 			t.Fatal(r.voice.Calls())
 		}
 		r.h.Voice(VoiceSignal{Kind: voice.SigUserSaid, Text: "confirm hawk"})
@@ -331,10 +331,10 @@ func TestHerdrMissingTurnsDelegationOffAndDelegateSaysSo(t *testing.T) {
 		r.host.FailEnsure(HostError{Kind: HostNotFound})
 		delegate(t, r, "a")
 		settle()
-		if !slices.Equal(r.status.Lines(), []string{"Agent: herdr not found"}) {
+		if !slices.Equal(r.status.Lines(), []string{"Coordinator: herdr not found"}) {
 			t.Fatal(r.status.Lines())
 		}
-		wantJSON(t, delegate(t, r, "b"), `{"error":"Delegation is off (Agent: herdr not found)."}`)
+		wantJSON(t, delegate(t, r, "b"), `{"error":"Delegation is off (Coordinator: herdr not found)."}`)
 	})
 }
 
@@ -381,7 +381,7 @@ func TestDelegateRequiresATaskAndThePersonaNamesEveryTool(t *testing.T) {
 		r := newRig(t)
 		wantJSON(t, invoke(t, Delegate{H: r.h}, `{"task":"  "}`), `{"error":"task is required"}`)
 	})
-	for _, name := range []string{"delegate", "jobs", "answer_job", "Agent reply:", "Agent question:", "confirm"} {
+	for _, name := range []string{"delegate", "jobs", "answer_job", "Coordinator reply:", "Coordinator question:", "confirm"} {
 		if !strings.Contains(DelegationPersona, name) {
 			t.Fatal(name)
 		}
@@ -414,10 +414,10 @@ func TestTheTimeWeatherAndMathGoToTheLocalToolsNotTheAgent(t *testing.T) {
 
 func TestThePersonaOffloadsWorkToTheAgentByDefault(t *testing.T) {
 	for _, phrase := range []string{
-		"You are the voice; it does the work.",
+		"You are the voice; the coordinator does the work.",
 		"If you are unsure whether something is work, delegate it.",
 		"Keep for yourself only:",
-		"The agent does not hear this conversation.",
+		"The coordinator does not hear this conversation.",
 		"One delegate call per independent task.",
 		"If you think you can't do it yourself, that is the signal to delegate",
 		"The app goes idle once that sentence has played",
@@ -439,7 +439,7 @@ func TestDelegateEndsTheConversationAfterTheAcknowledgementButNotForAFactCheck(t
 			t.Fatal("work: the conversation should end after the acknowledgement")
 		}
 		if out := (Delegate{H: r.h}).Invoke(context.Background(), json.RawMessage(`{"task":"Check: who won the game?"}`)); out.EndAfterReply {
-			t.Fatal("a fact check stays open so Bit can answer aloud")
+			t.Fatal("a fact check stays open so Pixie can answer aloud")
 		}
 		if out := (Delegate{H: r.h}).Invoke(context.Background(), json.RawMessage(`{"task":"  "}`)); out.EndAfterReply {
 			t.Fatal("a refused delegate does not end the conversation")
@@ -518,7 +518,7 @@ func TestOpeningTheConversationReachesTheController(t *testing.T) {
 		settle()
 		stopHook(r, `<spoken ref="job_000000000001">Done.</spoken>`)
 		settle()
-		if !hasCall(r.voice.Calls(), agenttest.InjectCall("Agent reply: Done.")) {
+		if !hasCall(r.voice.Calls(), agenttest.InjectCall("Coordinator reply: Done.")) {
 			t.Fatal(r.voice.Calls())
 		}
 		if slices.ContainsFunc(r.alerts.Alerts(), agenttest.Alert.IsNotify) {
@@ -751,7 +751,7 @@ func TestAStartThatOutlastsItsLimitFailsTheJobOutLoud(t *testing.T) {
 		if r.h.JobStatus()[0].Status != JobFailed {
 			t.Fatal("the controller left Starting", r.h.JobStatus())
 		}
-		if !hasAlert(r.alerts.Alerts(), agenttest.NotifyAlert("Bit", "The agent stopped before finishing: a")) {
+		if !hasAlert(r.alerts.Alerts(), agenttest.NotifyAlert("Pixie", "The coordinator stopped before finishing: a")) {
 			t.Fatal(r.alerts.Alerts())
 		}
 		if !hasAlert(r.alerts.Alerts(), agenttest.CueAlert(CueError)) {
@@ -811,16 +811,16 @@ func TestAFailedPromptIsSentAgainOnTheNextIdle(t *testing.T) {
 
 func TestAWarmStartWithASetupProblemStartsNothing(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		cfg := RuntimeConfig{Settings: DefaultSettings(), Warm: true, SetupProblem: "Agent: hook port busy"}
+		cfg := RuntimeConfig{Settings: DefaultSettings(), Warm: true, SetupProblem: "Coordinator: hook port busy"}
 		r := build(t, &agenttest.MemStore{}, cfg, nil, nil)
 		settle()
 		if len(r.host.Starts()) != 0 || r.host.Ensures() != 0 {
 			t.Fatal(r.host.Starts(), r.host.Ensures())
 		}
-		if !slices.Equal(r.status.Lines(), []string{"Agent: hook port busy"}) {
+		if !slices.Equal(r.status.Lines(), []string{"Coordinator: hook port busy"}) {
 			t.Fatal(r.status.Lines())
 		}
-		if _, err := r.h.Delegate("a", ""); err == nil || err.Error() != "Delegation is off (Agent: hook port busy)." {
+		if _, err := r.h.Delegate("a", ""); err == nil || err.Error() != "Delegation is off (Coordinator: hook port busy)." {
 			t.Fatal(err)
 		}
 	})
@@ -893,7 +893,7 @@ func TestATimedOutPromptWithNoSignOfLifeFailsTheJobOutLoud(t *testing.T) {
 		if r.h.JobStatus()[0].Status != JobFailed {
 			t.Fatal(r.h.JobStatus())
 		}
-		if !hasAlert(r.alerts.Alerts(), agenttest.NotifyAlert("Bit", "I couldn't reach the agent: a")) {
+		if !hasAlert(r.alerts.Alerts(), agenttest.NotifyAlert("Pixie", "I couldn't reach the coordinator: a")) {
 			t.Fatal(r.alerts.Alerts())
 		}
 	})
@@ -955,7 +955,7 @@ func TestAwayHoldsTheChime(t *testing.T) {
 		settle()
 		stopHook(r, `<spoken ref="job_000000000001" status="done">There are 12.</spoken>`)
 		settle()
-		want := []agenttest.Alert{agenttest.NotifyAlert("Bit", "There are 12."), agenttest.CueAlert(CueHappy)}
+		want := []agenttest.Alert{agenttest.NotifyAlert("Pixie", "There are 12."), agenttest.CueAlert(CueHappy)}
 		if !slices.Equal(r.alerts.Alerts(), want) {
 			t.Fatal(r.alerts.Alerts())
 		}

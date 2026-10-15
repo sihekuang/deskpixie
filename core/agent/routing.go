@@ -22,7 +22,7 @@ const (
 	LineQuestion
 	// LineUnsolicited is a reply that names no open job (e.g. the user typed into the pane).
 	LineUnsolicited
-	// LineInfo is the app's own line, already complete (e.g. "Agent: allowed").
+	// LineInfo is the app's own line, already complete (e.g. "Coordinator: allowed").
 	LineInfo
 )
 
@@ -49,11 +49,11 @@ var _ json.Marshaler = LineReply
 func (k LineKind) Prefix() string {
 	switch k {
 	case LineReply:
-		return "Agent reply: "
+		return "Coordinator reply: "
 	case LineQuestion:
-		return "Agent question: "
+		return "Coordinator question: "
 	case LineUnsolicited:
-		return "Agent says: "
+		return "Coordinator says: "
 	}
 	return ""
 }
@@ -204,7 +204,7 @@ func moreUpdates(n int) string {
 	return fmt.Sprintf("%d more updates", n)
 }
 
-// mergedUpdates: one held line as is; several as "Agent: 5 more updates. <the latest three>".
+// mergedUpdates: one held line as is; several as "Coordinator: 5 more updates. <the latest three>".
 func mergedUpdates(lines []Line) string {
 	if len(lines) == 1 {
 		return lines[0].Spoken()
@@ -213,7 +213,7 @@ func mergedUpdates(lines []Line) string {
 	for _, l := range lines[max(0, len(lines)-MaxMergedUpdates):] {
 		texts = append(texts, l.Text)
 	}
-	return fmt.Sprintf("Agent: %s. %s", moreUpdates(len(lines)), strings.Join(texts, " "))
+	return fmt.Sprintf("Coordinator: %s. %s", moreUpdates(len(lines)), strings.Join(texts, " "))
 }
 
 // ConversationOpened is called on VoiceSignal Opened: the outbox replay already covers the

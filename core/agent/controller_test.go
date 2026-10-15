@@ -108,7 +108,7 @@ func TestAWorkingBlockDeliversProgressAndStaysWorking(t *testing.T) {
 	c := workingOnJob1()
 	openVoice(c)
 	fx := visible(stop(c, `<spoken ref="job_000000000001" status="working">Halfway through.</spoken>`, T0))
-	wantEffects(t, fx, eInject("Agent reply: Halfway through."))
+	wantEffects(t, fx, eInject("Coordinator reply: Halfway through."))
 	wantJobStatus(t, c, 1, JobWorking)
 	if got := lastProgress(t, c); got != "Halfway through." {
 		t.Fatalf("last_progress %q", got)
@@ -170,13 +170,13 @@ func TestCancelOfAJobNeverSentJustDropsIt(t *testing.T) {
 func TestDelegationOffFailsOpenJobsWithTheAgentStopped(t *testing.T) {
 	c := workingOnJob1()
 	fx := visible(c.Step(CoordinatorFailedInput(HostError{Kind: HostGaveUp}), T0))
-	if !effectsEqual(fx[:1], []Effect{eStatus("Agent: stopped after repeated crashes")}) {
+	if !effectsEqual(fx[:1], []Effect{eStatus("Coordinator: stopped after repeated crashes")}) {
 		t.Fatalf("%s", fmtEffects(fx))
 	}
-	wantContains(t, fx, eNotify("The agent stopped before finishing: summarise the issues"))
+	wantContains(t, fx, eNotify("The coordinator stopped before finishing: summarise the issues"))
 	wantContains(t, fx, eHold(false))
 	wantJobStatus(t, c, 1, JobFailed)
-	wantDisabled(t, c, "Agent: stopped after repeated crashes")
+	wantDisabled(t, c, "Coordinator: stopped after repeated crashes")
 	wantNone(t, visible(delegate(c, 2, "b")), "delegate is refused while off")
 }
 
@@ -196,7 +196,7 @@ func TestAnUnknownRefIsUnsolicitedNeverTheNewestJob(t *testing.T) {
 	c := workingOnJob1()
 	openVoice(c)
 	fx := visible(stop(c, `<spoken ref="job_ffffffffffff" status="done">Something else.</spoken>`, T0))
-	wantEffects(t, fx, eInject("Agent says: Something else."))
+	wantEffects(t, fx, eInject("Coordinator says: Something else."))
 	wantJobStatus(t, c, 1, JobWorking, "job 1 untouched (#89)")
 }
 
@@ -224,7 +224,7 @@ func TestAReplyWithoutBlocksFallsBackToItsFirstSentences(t *testing.T) {
 	fx := stop(c, "I looked. Nothing is broken. More detail here.", T0)
 	wantContains(t, fx, eLog("spoken_fallback"))
 	// The only job in the prompt just answered: the fallback is its reply, and it closes.
-	wantContains(t, fx, eInject("Agent reply: I looked. Nothing is broken."))
+	wantContains(t, fx, eInject("Coordinator reply: I looked. Nothing is broken."))
 	wantJobStatus(t, c, 1, JobDone)
 	wantContains(t, fx, eHold(false))
 }
@@ -233,7 +233,7 @@ func TestARefLessBlockAnswersTheOnlyJobInFlight(t *testing.T) {
 	c := workingOnJob1()
 	openVoice(c)
 	fx := visible(stop(c, "<spoken>Twelve issues, none urgent.</spoken>", T0))
-	wantContains(t, fx, eInject("Agent reply: Twelve issues, none urgent."))
+	wantContains(t, fx, eInject("Coordinator reply: Twelve issues, none urgent."))
 	wantJobStatus(t, c, 1, JobDone)
 }
 
@@ -244,10 +244,10 @@ func TestAReplyWithoutRefsForTwoJobsInFlightIsUnsolicitedAndClosesBoth(t *testin
 	c.Step(CoordinatorUpInput(PaneIdle), T0)
 	openVoice(c)
 	fx := visible(stop(c, "<spoken>Both handled.</spoken>", T0))
-	wantContains(t, fx, eInject("Agent says: Both handled."))
+	wantContains(t, fx, eInject("Coordinator says: Both handled."))
 	wantJobStatus(t, c, 1, JobDone)
 	wantJobStatus(t, c, 2, JobDone)
-	wantContains(t, fx, eInject("Agent reply: The agent finished: a; details are in the terminal."))
+	wantContains(t, fx, eInject("Coordinator reply: The coordinator finished: a; details are in the terminal."))
 	wantContains(t, fx, eHold(false))
 }
 
@@ -256,7 +256,7 @@ func TestAReplyWithoutBlocksAndNothingInFlightStaysUnsolicited(t *testing.T) {
 	stop(c, `<spoken ref="job_000000000001" status="working">Halfway.</spoken>`, T0)
 	openVoice(c)
 	fx := visible(stop(c, "Still going. More here.", T0))
-	wantContains(t, fx, eInject("Agent says: Still going. More here."))
+	wantContains(t, fx, eInject("Coordinator says: Still going. More here."))
 	wantJobStatus(t, c, 1, JobWorking)
 }
 
@@ -266,7 +266,7 @@ func TestClosedLinesReplayOnTheNextConversation(t *testing.T) {
 	c := workingOnJob1()
 	stop(c, `<spoken ref="job_000000000001">Twelve issues.</spoken>`, T0)
 	fx := visible(c.Step(voiceOpened(), T0+5))
-	wantEffects(t, fx, eInject("Agent replies while you were away:\n- Agent reply: Twelve issues."))
+	wantEffects(t, fx, eInject("Coordinator replies while you were away:\n- Coordinator reply: Twelve issues."))
 	wantNone(t, visible(c.Step(voiceOpened(), T0+6)), "replayed once")
 }
 
@@ -280,9 +280,9 @@ func TestAnotherPartsUndeliveredNoticeIsNotTheAgentsToDeliver(t *testing.T) {
 func TestUndeliveredNoticesFromAClosedConversationAreNotified(t *testing.T) {
 	c := ctl()
 	openVoice(c)
-	fx := visible(c.Step(voiceClosed(Notice{Text: "Agent reply: x"}), T0))
+	fx := visible(c.Step(voiceClosed(Notice{Text: "Coordinator reply: x"}), T0))
 	wantEffects(t, fx, eChime, eNotify("x"))
-	fx = visible(c.Step(InjectBouncedInput(Notice{Text: "Agent reply: y"}), T0))
+	fx = visible(c.Step(InjectBouncedInput(Notice{Text: "Coordinator reply: y"}), T0))
 	wantEffects(t, fx, eChime, eNotify("y"))
 }
 
@@ -296,7 +296,7 @@ func TestAPermissionIsSpokenAsAQuestionWithAConfirmWord(t *testing.T) {
 	c := workingOnJob1()
 	openVoice(c)
 	fx := visible(askPush(c, 7, T0))
-	wantEffects(t, fx, eInject("Agent question: Run git push in coordinator? Say confirm hawk."))
+	wantEffects(t, fx, eInject("Coordinator question: Run git push in coordinator? Say confirm hawk."))
 	wantJobStatus(t, c, 1, JobQuestion)
 }
 
@@ -305,7 +305,7 @@ func TestACleanConfirmAllowsAndResumesTheJob(t *testing.T) {
 	openVoice(c)
 	askPush(c, 7, T0)
 	fx := visible(c.Step(userSaid("Confirm hawk."), T0))
-	wantEffects(t, fx, eDecide(7, Allow()), eInject("Agent: allowed"))
+	wantEffects(t, fx, eDecide(7, Allow()), eInject("Coordinator: allowed"))
 	wantJobStatus(t, c, 1, JobWorking)
 }
 
@@ -326,7 +326,7 @@ func TestAnUnansweredPermissionIsDeniedAfterTheTimeout(t *testing.T) {
 	}
 	fx := visible(c.Step(TickInput(), T0+120_000))
 	wantEffects(t, fx[:1], eDecide(7, Deny("No answer from the user.")))
-	wantContains(t, fx, eNotify("Agent: denied after two minutes with no answer."))
+	wantContains(t, fx, eNotify("Coordinator: denied after two minutes with no answer."))
 }
 
 func TestQuittingDeniesEveryPendingPermissionAndStopsTheCoordinator(t *testing.T) {
@@ -356,7 +356,7 @@ func TestABlockedCoordinatorWithoutAPendingPermissionGetsTheTerminalHint(t *test
 	c.Step(coordStatus(PaneBlocked), T0)
 	wantNone(t, visible(c.Step(TickInput(), T0+2_999)))
 	fx := visible(c.Step(TickInput(), T0+3_000))
-	wantEffects(t, fx, eStatus("Agent: waiting in terminal"), eChime, eNotify(BlockedHint))
+	wantEffects(t, fx, eStatus("Coordinator: waiting in terminal"), eChime, eNotify(BlockedHint))
 	wantNone(t, visible(c.Step(TickInput(), T0+9_000)), "hinted once")
 	fx = visible(c.Step(coordStatus(PaneWorking), T0+9_500))
 	wantEffects(t, fx, eStatus(""))
@@ -381,7 +381,7 @@ func TestAStartFailureFailsTheWaitingJobsButKeepsDelegationOn(t *testing.T) {
 	c := ctl()
 	delegate(c, 1, "a")
 	fx := visible(c.Step(CoordinatorFailedInput(HostError{Kind: HostTimeout, Detail: "claude"}), T0))
-	wantEffects(t, fx[:1], eStatus("Agent: claude did not start"))
+	wantEffects(t, fx[:1], eStatus("Coordinator: claude did not start"))
 	wantJobStatus(t, c, 1, JobFailed)
 	wantDisabled(t, c, "")
 	wantEffects(t, visible(delegate(c, 2, "b")), eHold(true), eStart)
@@ -390,38 +390,38 @@ func TestAStartFailureFailsTheWaitingJobsButKeepsDelegationOn(t *testing.T) {
 func TestHerdrMissingOrMismatchedTurnsDelegationOff(t *testing.T) {
 	c := ctl()
 	c.Step(CoordinatorFailedInput(HostError{Kind: HostNotFound}), T0)
-	wantDisabled(t, c, "Agent: herdr not found")
+	wantDisabled(t, c, "Coordinator: herdr not found")
 	c = ctl()
 	c.Step(CoordinatorFailedInput(HostError{Kind: HostVersionMismatch, Client: 17, Server: 18}), T0)
-	wantDisabled(t, c, "Agent: herdr version mismatch (update herdr)")
+	wantDisabled(t, c, "Coordinator: herdr version mismatch (update herdr)")
 	// The host says what the user has and which versions are supported: the status line shows it.
 	c = ctl()
 	c.Step(CoordinatorFailedInput(HostError{Kind: HostVersionMismatch, Client: 20, Server: 20,
 		Detail: "you have herdr 0.8.0 (protocol 20); DeskPixie supports Herdr 0.7.5 (protocol 17) or 0.9.x (protocol 22)"}), T0)
-	wantDisabled(t, c, "Agent: herdr version mismatch: you have herdr 0.8.0 (protocol 20); DeskPixie supports Herdr 0.7.5 (protocol 17) or 0.9.x (protocol 22)")
+	wantDisabled(t, c, "Coordinator: herdr version mismatch: you have herdr 0.8.0 (protocol 20); DeskPixie supports Herdr 0.7.5 (protocol 17) or 0.9.x (protocol 22)")
 }
 
 // Another session host's name is the one the status line names (Herdr's lines are unchanged).
 func TestTheStatusLineNamesTheActiveHost(t *testing.T) {
 	c := ctl()
 	c.Step(CoordinatorFailedInput(HostError{Kind: HostNotFound, Host: "tmux"}), T0)
-	wantDisabled(t, c, "Agent: tmux not found")
+	wantDisabled(t, c, "Coordinator: tmux not found")
 	c = ctl()
 	c.Step(CoordinatorFailedInput(HostError{Kind: HostVersionMismatch, Host: "tmux"}), T0)
-	wantDisabled(t, c, "Agent: tmux version mismatch (update tmux)")
+	wantDisabled(t, c, "Coordinator: tmux version mismatch (update tmux)")
 	c = ctl()
 	c.Step(CoordinatorFailedInput(HostError{Kind: HostVersionMismatch, Host: "tmux", Detail: "you have tmux 3.1; DeskPixie supports tmux 3.2 or newer"}), T0)
-	wantDisabled(t, c, "Agent: tmux version mismatch: you have tmux 3.1; DeskPixie supports tmux 3.2 or newer")
+	wantDisabled(t, c, "Coordinator: tmux version mismatch: you have tmux 3.1; DeskPixie supports tmux 3.2 or newer")
 	c = ctl()
 	c.Step(CoordinatorFailedInput(HostError{Kind: HostNotFound, Host: "herdr"}), T0)
-	wantDisabled(t, c, "Agent: herdr not found")
+	wantDisabled(t, c, "Coordinator: herdr not found")
 }
 
 func TestRestartTurnsDelegationBackOn(t *testing.T) {
 	// A runtime disable (repeated crashes) is what Restart undoes.
 	c := workingOnJob1()
 	c.Step(CoordinatorFailedInput(HostError{Kind: HostGaveUp}), T0)
-	wantDisabled(t, c, "Agent: stopped after repeated crashes")
+	wantDisabled(t, c, "Coordinator: stopped after repeated crashes")
 	fx := visible(c.Step(RestartInput(), T0))
 	wantEffects(t, fx, eStatus(""), eResetHost)
 	wantDisabled(t, c, "")
@@ -447,12 +447,12 @@ func TestNarrationIsSpokenOnceTheJobIsQuietAtMostEvery30Seconds(t *testing.T) {
 	wantNone(t, edit("notes.md", T0), "held until quiet")
 	wantNone(t, edit("plan.md", T0+5_000), "held until quiet")
 	wantNone(t, visible(c.Step(TickInput(), T0+5_000+UpdateQuietMs-1)))
-	wantEffects(t, visible(c.Step(TickInput(), T0+5_000+UpdateQuietMs)), eInject("Agent progress: editing plan.md"))
+	wantEffects(t, visible(c.Step(TickInput(), T0+5_000+UpdateQuietMs)), eInject("Coordinator progress: editing plan.md"))
 	// Quiet again 20 s later, but within 30 s of the last narration: it waits for the interval.
 	at := T0 + 5_000 + UpdateQuietMs
 	wantNone(t, edit("main.go", at+1))
 	wantNone(t, visible(c.Step(TickInput(), at+UpdateQuietMs+1)))
-	wantEffects(t, visible(c.Step(TickInput(), at+NarrateIntervalMs)), eInject("Agent progress: editing main.go"))
+	wantEffects(t, visible(c.Step(TickInput(), at+NarrateIntervalMs)), eInject("Coordinator progress: editing main.go"))
 	if got := lastProgress(t, c); got != "editing main.go" {
 		t.Fatalf("last_progress %q", got)
 	}
@@ -466,7 +466,7 @@ func TestBusyNarrationIsStillSpokenAfterTheMaxHold(t *testing.T) {
 		c.Step(PostToolInput(Coordinator, "Bash", map[string]any{"description": fmt.Sprintf("step %d", now)}), now)
 		fx = append(fx, visible(c.Step(TickInput(), now))...)
 	}
-	wantEffects(t, fx, eInject(fmt.Sprintf("Agent progress: step %d", T0+UpdateMaxHoldMs)))
+	wantEffects(t, fx, eInject(fmt.Sprintf("Coordinator progress: step %d", T0+UpdateMaxHoldMs)))
 }
 
 func TestNarrationIsSilentWhenClosedButStillRecorded(t *testing.T) {
@@ -519,7 +519,7 @@ func TestRestoreFailsOpenJobsAndOutboxesALine(t *testing.T) {
 	}
 	wantJobStatus(t, c, 1, JobFailed)
 	fx = visible(c.Step(voiceOpened(), T0+20))
-	wantEffects(t, fx, eInject("Agent replies while you were away:\n- Agent: a job stopped when the app restarted: summarise the issues"))
+	wantEffects(t, fx, eInject("Coordinator replies while you were away:\n- Coordinator: a job stopped when the app restarted: summarise the issues"))
 }
 
 // ---------- hardening rulings ----------
@@ -530,12 +530,12 @@ func TestAnUnreadableCommandIsDeniedWithoutATokenOrAStatusChange(t *testing.T) {
 	fx := visible(c.Step(PermissionInput(9, Coordinator, "Bash", map[string]any{"command": "git push origin :main"}), T0))
 	wantEffects(t, fx,
 		eDecide(9, Deny("This can't be approved by voice. Ask the user to run it themselves, or to change it so it can be read aloud plainly.")),
-		eInject("The agent asked to run something I can't read out safely, so I said no. Open the terminal to see it."),
+		eInject("The coordinator asked to run something I can't read out safely, so I said no. Open the terminal to see it."),
 	)
 	wantJobStatus(t, c, 1, JobWorking)
 	// No token was allocated: a readable request still gets the first word.
 	fx = visible(askPush(c, 10, T0))
-	wantEffects(t, fx, eInject("Agent question: Run git push in coordinator? Say confirm hawk."))
+	wantEffects(t, fx, eInject("Coordinator question: Run git push in coordinator? Say confirm hawk."))
 	wantJobStatus(t, c, 1, JobQuestion)
 }
 
@@ -569,7 +569,7 @@ func TestWhenAllConfirmWordsAreTakenTheRequestIsDenied(t *testing.T) {
 // ---------- review fixes ----------
 
 func pendingAskNotice() Notice {
-	return Notice{Text: "Agent question: Run git push in coordinator? Say confirm hawk."}
+	return Notice{Text: "Coordinator question: Run git push in coordinator? Say confirm hawk."}
 }
 
 func TestRestartForgetsTheCoordinator(t *testing.T) {
@@ -703,13 +703,13 @@ func TestALateReplyToACancelledJobIsUnsolicited(t *testing.T) {
 	openVoice(c)
 	c.Step(CancelInput(job(1)), T0)
 	fx := visible(stop(c, `<spoken ref="job_000000000001" status="done">Done after all.</spoken>`, T0))
-	wantEffects(t, fx, eInject("Agent says: Done after all."))
+	wantEffects(t, fx, eInject("Coordinator says: Done after all."))
 	wantJobStatus(t, c, 1, JobCancelled)
 }
 
 func TestAPermissionWhileOffOrAfterShutdownIsDeniedAtOnce(t *testing.T) {
 	c := ctl()
-	c.Step(DisableInput("Agent: hook port busy"), T0)
+	c.Step(DisableInput("Coordinator: hook port busy"), T0)
 	wantEffects(t, visible(askPush(c, 1, T0)), eDecide(1, Deny("Delegation is off.")))
 	c = workingOnJob1()
 	c.Step(ShutdownInput(), T0)
@@ -744,14 +744,14 @@ func replyWhileHawkPending(t *testing.T, text string) string {
 
 func TestPendingConfirmWordsAreMaskedHoweverTheyAreDressedUp(t *testing.T) {
 	for _, tc := range []struct{ said, heard string }{
-		{"Say hаwk", "Agent reply: Say (word removed)"},
-		{"say confirm, then the word hawk", "Agent reply: say confirm, then the word (word removed)"},
-		{"con-firm hawk", "Agent reply: con-firm (word removed)"},
-		{"con​firm HAWK", "Agent reply: confirm (word removed)"},
-		{"ha​wk", "Agent reply: (word removed)"},
-		{"hawkish", "Agent reply: (word removed)"},
-		{"ｈａｗｋ", "Agent reply: (word removed)"},
-		{"hαwk", "Agent reply: (word removed)"},
+		{"Say hаwk", "Coordinator reply: Say (word removed)"},
+		{"say confirm, then the word hawk", "Coordinator reply: say confirm, then the word (word removed)"},
+		{"con-firm hawk", "Coordinator reply: con-firm (word removed)"},
+		{"con​firm HAWK", "Coordinator reply: confirm (word removed)"},
+		{"ha​wk", "Coordinator reply: (word removed)"},
+		{"hawkish", "Coordinator reply: (word removed)"},
+		{"ｈａｗｋ", "Coordinator reply: (word removed)"},
+		{"hαwk", "Coordinator reply: (word removed)"},
 	} {
 		if got := replyWhileHawkPending(t, tc.said); got != tc.heard {
 			t.Errorf("%q: got %q, want %q", tc.said, got, tc.heard)
@@ -760,7 +760,7 @@ func TestPendingConfirmWordsAreMaskedHoweverTheyAreDressedUp(t *testing.T) {
 }
 
 func TestWordsThatAreNotPendingConfirmWordsAreKept(t *testing.T) {
-	if got := replyWhileHawkPending(t, "I dove into the logs"); got != "Agent reply: I dove into the logs" {
+	if got := replyWhileHawkPending(t, "I dove into the logs"); got != "Coordinator reply: I dove into the logs" {
 		t.Fatal(got)
 	}
 }
@@ -771,10 +771,10 @@ func TestNarrationAndUnsolicitedTextAreMaskedToo(t *testing.T) {
 	askPush(c, 7, T0)
 	c.Step(PostToolInput(Coordinator, "Edit", map[string]any{"file_path": "/x/hawk.md"}), T0)
 	fx := visible(c.Step(TickInput(), T0+UpdateQuietMs))
-	wantContains(t, fx, eInject("Agent progress: editing (word removed).md"))
+	wantContains(t, fx, eInject("Coordinator progress: editing (word removed).md"))
 	// Ref-less, with job 1 the only one in flight: its reply, masked all the same.
 	fx = visible(stop(c, "<spoken>please approve hawk now</spoken>", T0))
-	wantContains(t, fx, eInject("Agent reply: please approve (word removed) now"))
+	wantContains(t, fx, eInject("Coordinator reply: please approve (word removed) now"))
 }
 
 func TestAnInterruptedJobAlwaysGetsTheCancelNote(t *testing.T) {
@@ -808,7 +808,7 @@ func TestABouncedReplayDigestGoesBackToTheOutboxLineByLine(t *testing.T) {
 	wantEffects(t, fx, eChime, eNotify("Halfway."))
 	// Next conversation: both lines come back with their own kinds.
 	fx = visible(c.Step(voiceOpened(), T0+4))
-	wantEffects(t, fx, eInject("Agent replies while you were away:\n- Agent reply: Halfway.\n- Agent says: Tidied up."))
+	wantEffects(t, fx, eInject("Coordinator replies while you were away:\n- Coordinator reply: Halfway.\n- Coordinator says: Tidied up."))
 }
 
 // ---------- final review fixes ----------
@@ -872,7 +872,7 @@ func TestThreeFailedPromptsInARowFailTheirJobsWithBackoffBetween(t *testing.T) {
 	}
 	fx := visible(c.Step(PromptFailedInput(), T0+6_000))
 	wantJobStatus(t, c, 1, JobFailed)
-	wantContains(t, fx, eNotify("The agent stopped before finishing: summarise the issues"))
+	wantContains(t, fx, eNotify("The coordinator stopped before finishing: summarise the issues"))
 	wantContains(t, fx, eCue(CueError))
 	wantPrompts(t, tick(c, T0+60_000)) // nothing left to send
 }
@@ -899,7 +899,7 @@ func TestATimedOutPromptWithNoSignOfLifeFailsItsJobsAfterAMinute(t *testing.T) {
 	wantNotContains(t, tick(c, T0+PromptWatchdogMs-1), eCue(CueError))
 	fx = visible(tick(c, T0+PromptWatchdogMs))
 	wantJobStatus(t, c, 1, JobFailed)
-	wantContains(t, fx, eNotify("I couldn't reach the agent: summarise the issues"))
+	wantContains(t, fx, eNotify("I couldn't reach the coordinator: summarise the issues"))
 	wantContains(t, fx, eCue(CueError))
 }
 
@@ -936,7 +936,7 @@ func TestARefLessQuestionOrProgressForTwoJobsLeavesThemOpen(t *testing.T) {
 		c.Step(CoordinatorUpInput(PaneIdle), T0)
 		openVoice(c)
 		fx := visible(stop(c, fmt.Sprintf(`<spoken status="%s">Which one first?</spoken>`, status), T0))
-		wantContains(t, fx, eInject("Agent says: Which one first?"), status)
+		wantContains(t, fx, eInject("Coordinator says: Which one first?"), status)
 		wantJobStatus(t, c, 1, JobWorking, status)
 		wantJobStatus(t, c, 2, JobWorking, status)
 	}
@@ -944,9 +944,9 @@ func TestARefLessQuestionOrProgressForTwoJobsLeavesThemOpen(t *testing.T) {
 
 func TestASetupDisableSurvivesRestart(t *testing.T) {
 	c := ctl()
-	c.Step(DisableInput("Agent: hook port busy"), T0)
+	c.Step(DisableInput("Coordinator: hook port busy"), T0)
 	c.Step(RestartInput(), T0)
-	wantDisabled(t, c, "Agent: hook port busy")
+	wantDisabled(t, c, "Coordinator: hook port busy")
 	wantNone(t, visible(delegate(c, 1, "a")), "delegate still refused")
 	wantNone(t, visible(c.Step(EnsureCoordinatorInput(), T0)))
 }
@@ -990,10 +990,10 @@ func TestARefLessFailedBlockForTwoJobsFailsBoth(t *testing.T) {
 	c.Step(CoordinatorUpInput(PaneIdle), T0)
 	openVoice(c)
 	fx := visible(stop(c, `<spoken status="failed">That broke.</spoken>`, T0))
-	wantContains(t, fx, eInject("Agent says: That broke."))
+	wantContains(t, fx, eInject("Coordinator says: That broke."))
 	wantJobStatus(t, c, 1, JobFailed)
 	wantJobStatus(t, c, 2, JobFailed)
-	wantContains(t, fx, eHold(false), "Bit stops holding")
+	wantContains(t, fx, eHold(false), "Pixie stops holding")
 }
 
 func TestABusyStatusCancelsAPendingPromptRetry(t *testing.T) {
@@ -1045,13 +1045,13 @@ func TestAnIdleDuringTheWatchdogIsLeftToTheWatchdog(t *testing.T) {
 
 func TestANoticeShowsWhenTheStatusIsOtherwiseEmptyAndDisablesNothing(t *testing.T) {
 	c := workingOnJob1()
-	fx := visible(c.Step(NoticeInput("Agent: workers off: projectsRoot not usable"), T0))
-	wantEffects(t, fx, eStatus("Agent: workers off: projectsRoot not usable"))
+	fx := visible(c.Step(NoticeInput("Coordinator: workers off: projectsRoot not usable"), T0))
+	wantEffects(t, fx, eStatus("Coordinator: workers off: projectsRoot not usable"))
 	c.Step(coordStatus(PaneBlocked), T0)
 	fx = visible(c.Step(TickInput(), T0+3_000))
-	wantContains(t, fx, eStatus("Agent: waiting in terminal"), "a live status wins")
+	wantContains(t, fx, eStatus("Coordinator: waiting in terminal"), "a live status wins")
 	fx = visible(c.Step(coordStatus(PaneWorking), T0+4_000))
-	wantEffects(t, fx, eStatus("Agent: workers off: projectsRoot not usable")) // then the notice is back
+	wantEffects(t, fx, eStatus("Coordinator: workers off: projectsRoot not usable")) // then the notice is back
 	fx = visible(askPush(c, 1, T0+5_000))
 	if anyKind(fx, EfDecide) {
 		t.Fatalf("delegation still works: %s", fmtEffects(fx))

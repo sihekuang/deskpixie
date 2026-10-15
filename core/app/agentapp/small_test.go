@@ -24,7 +24,7 @@ func TestChimeAndNotificationCommands(t *testing.T) {
 	var got [][2]string
 	n := NewNotifier(r, func(title, body string) { got = append(got, [2]string{title, body}) })
 	n.Chime()
-	n.Notify("Bit", `Run "git push" in focus? Say confirm hawk.`)
+	n.Notify("Pixie", `Run "git push" in focus? Say confirm hawk.`)
 	spawned := r.Spawned()
 	if len(spawned) != 1 || !reflect.DeepEqual(spawned[0].Argv, []string{"/usr/bin/afplay", Chime}) {
 		t.Fatalf("%+v", spawned)
@@ -35,7 +35,7 @@ func TestChimeAndNotificationCommands(t *testing.T) {
 	if Chime != "/System/Library/Sounds/Glass.aiff" {
 		t.Fatal(Chime)
 	}
-	if !reflect.DeepEqual(got, [][2]string{{"Bit", `Run "git push" in focus? Say confirm hawk.`}}) {
+	if !reflect.DeepEqual(got, [][2]string{{"Pixie", `Run "git push" in focus? Say confirm hawk.`}}) {
 		t.Fatal(got)
 	}
 }

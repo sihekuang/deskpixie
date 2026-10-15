@@ -131,7 +131,7 @@ type Job struct {
 	LastProgress *string `json:"last_progress"`
 	// Reason says why it failed (e.g. "app restarted").
 	Reason *string `json:"reason"`
-	// Reply is the coordinator's last spoken reply or question for it (Bit's memory of the job).
+	// Reply is the coordinator's last spoken reply or question for it (Pixie's memory of the job).
 	Reply *string `json:"reply,omitempty"`
 	// Workers started for this job, oldest first.
 	Workers []WorkerRow `json:"workers"`

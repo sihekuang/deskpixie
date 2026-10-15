@@ -41,22 +41,22 @@ type Delegate struct{ H *AgentHandle }
 func (Delegate) Name() string { return voice.DelegateTool }
 
 func (Delegate) Description() string {
-	return "Hand a task to the capable agent working in the background. This is the default for every " +
+	return "Hand a task to the coordinator, the capable agent working in the background. This is the default for every " +
 		"request: use it for anything beyond small talk, simple stable facts you are certain of, what the " +
 		"user just told you, and your own tools. That includes research, facts to check, live information " +
 		"(news, prices, scores), the user's projects, files, code, repositories, apps and settings, writing, " +
 		"explanations, advice, summaries, charts, diagrams or pages. When unsure, call it; don't try it " +
 		"yourself first or ask whether to. Not for the time, the weather, arithmetic, timers or music " +
-		"controls: get_time, get_weather, calculate, timer and media answer those at once. The agent does " +
+		"controls: get_time, get_weather, calculate, timer and media answer those at once. The coordinator does " +
 		"not hear the conversation, so the task and context must stand on their own. Call this BEFORE " +
 		"saying you will hand something off. Returns at once with a job id; then say one short " +
-		"acknowledgement; the result arrives later as an \"Agent reply:\" line."
+		"acknowledgement; the result arrives later as an \"Coordinator reply:\" line."
 }
 
 func (Delegate) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{` +
 		`"task":{"type":"string","description":"What the user wants done, in their words."},` +
-		`"context":{"type":"string","description":"Everything from the conversation the agent needs, since it cannot hear it: what pronouns refer to, names, numbers, choices, earlier Agent replies."}},` +
+		`"context":{"type":"string","description":"Everything from the conversation the coordinator needs, since it cannot hear it: what pronouns refer to, names, numbers, choices, earlier Coordinator replies."}},` +
 		`"required":["task"],"additionalProperties":false}`)
 }
 
@@ -71,8 +71,8 @@ func (d Delegate) Invoke(_ context.Context, raw json.RawMessage) voice.ToolOutco
 		return toolError(err)
 	}
 	out := toolReply(map[string]any{"job_id": id.String(), "status": "delegated"})
-	// Work: Bit says it handed it off, then goes idle; the result comes back on its own. A fact
-	// check stays open so Bit can answer it aloud.
+	// Work: Pixie says it handed it off, then goes idle; the result comes back on its own. A fact
+	// check stays open so Pixie can answer it aloud.
 	out.EndAfterReply = !strings.HasPrefix(task, "Check:")
 	return out
 }
@@ -84,8 +84,8 @@ type Jobs struct{ H *AgentHandle }
 func (Jobs) Name() string { return "jobs" }
 
 func (Jobs) Description() string {
-	return "The agent's jobs. action \"status\": what each job is doing (status, age in seconds, latest " +
-		"progress), to answer \"what's the agent doing?\". action \"cancel\": stop a job; without job_id it " +
+	return "The coordinator's jobs. action \"status\": what each job is doing (status, age in seconds, latest " +
+		"progress), to answer \"what's the coordinator doing?\". action \"cancel\": stop a job; without job_id it " +
 		"cancels the only open job, and if several are open it returns an error asking which."
 }
 
@@ -122,7 +122,7 @@ type AnswerJob struct{ H *AgentHandle }
 func (AnswerJob) Name() string { return "answer_job" }
 
 func (AnswerJob) Description() string {
-	return "Give the agent the user's spoken answer to an \"Agent question:\" you relayed. Never use it for a " +
+	return "Give the coordinator the user's spoken answer to an \"Coordinator question:\" you relayed. Never use it for a " +
 		"confirm word: the app handles those itself. Without job_id it answers the only job waiting for an " +
 		"answer; if several are waiting it returns an error asking which."
 }

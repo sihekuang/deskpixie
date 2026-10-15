@@ -493,7 +493,7 @@ func TestProgressIsRecordedAndNarratedOnlyWhileOpen(t *testing.T) {
 	}
 	c.Step(voiceOpened(), T0)
 	mcp(t, c, workerName, McpCall{Kind: CallReportProgress, Summary: "writing the fix"}, T0+1)
-	wantContains(t, c.Step(TickInput(), T0+1+UpdateQuietMs), eInject("Agent progress: writing the fix"))
+	wantContains(t, c.Step(TickInput(), T0+1+UpdateQuietMs), eInject("Coordinator progress: writing the fix"))
 }
 
 func TestAReportAfterTheJobEndedIsRefused(t *testing.T) {

@@ -53,7 +53,7 @@ func (n *Notifier) Notify(title, body string) {
 	}
 }
 
-// pixieCue: Happy → Bit celebrates, Error → Bit flashes the error state.
+// pixieCue: Happy → Pixie celebrates, Error → Pixie flashes the error state.
 type pixieCue struct{ hooks app.AgentHooks }
 
 func (m pixieCue) Cue(cue agent.Cue) {
@@ -82,12 +82,12 @@ func call(f func()) {
 
 // ---------- echo.rs ----------
 
-// EchoTail: user words this soon after Bit stopped speaking are still treated as possible echo.
+// EchoTail: user words this soon after Pixie stopped speaking are still treated as possible echo.
 const EchoTail = 1500 * time.Millisecond
 
-// EchoGate (defence in depth): Bit's own speech, picked up by the mic and transcribed as the
+// EchoGate (defence in depth): Pixie's own speech, picked up by the mic and transcribed as the
 // user's words, must never reach the delegation controller (where it could say a confirm
-// word). Driven by the mouth level the voice runtime reports: it is non-zero only while Bit's
+// word). Driven by the mouth level the voice runtime reports: it is non-zero only while Pixie's
 // reply is audibly playing. The zero value is quiet. Not safe for concurrent use on its own.
 type EchoGate struct {
 	speaking bool
@@ -108,7 +108,7 @@ func (g *EchoGate) blocking(now time.Time) bool {
 	return g.speaking || (!g.ended.IsZero() && now.Sub(g.ended) < EchoTail)
 }
 
-// Admits is false for UserSaid while Bit is speaking or within EchoTail after; true otherwise.
+// Admits is false for UserSaid while Pixie is speaking or within EchoTail after; true otherwise.
 func (g *EchoGate) Admits(s voice.VoiceSignal, now time.Time) bool {
 	return !(s.Kind == voice.SigUserSaid && g.blocking(now))
 }

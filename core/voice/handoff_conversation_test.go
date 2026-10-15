@@ -30,7 +30,7 @@ func userTurn(c *Conversation, words string, at time.Time) {
 	model(c, said("user", words), at)
 }
 
-// reply: one spoken response from Bit with its transcript, finished at `at`.
+// reply: one spoken response from Pixie with its transcript, finished at `at`.
 func reply(c *Conversation, words string, at time.Time) []Effect {
 	var fx []Effect
 	fx = append(fx, model(c, evResponseCreated, at)...)
@@ -134,7 +134,7 @@ func TestHandOffAtMostOncePerTurn(t *testing.T) {
 	fx := reply(c, "I don't know.", ms(t0(), 500))
 	fx = append(fx, ticks(c, ms(t0(), 500), 3*time.Second)...)
 	c.Step(HandOffDoneInput(Notice{}), ms(t0(), 3600))
-	// Bit says another non-answer in the same turn (unprompted).
+	// Pixie says another non-answer in the same turn (unprompted).
 	fx = append(fx, reply(c, "Sorry, I can't check that.", ms(t0(), 3700))...)
 	fx = append(fx, ticks(c, ms(t0(), 3700), 5*time.Second)...)
 	if n := len(handOffs(fx)); n != 1 {
@@ -149,7 +149,7 @@ func TestHandOffAtMostOncePerTurn(t *testing.T) {
 		t.Fatalf("second turn: %+v", h)
 	}
 	if !strings.Contains(h[0].Context, "User: Who won the game last night?") ||
-		!strings.Contains(h[0].Context, "Bit: I don't know. Sorry, I can't check that.") {
+		!strings.Contains(h[0].Context, "Pixie: I don't know. Sorry, I can't check that.") {
 		t.Fatalf("context: %q", h[0].Context)
 	}
 }
@@ -223,17 +223,17 @@ func TestHandOffNotForBitsReplyToANotice(t *testing.T) {
 	fx = reply(c, "I'm not sure what the timer was for.", ms(t0(), 500))
 	fx = append(fx, ticks(c, ms(t0(), 500), 5*time.Second)...)
 	if len(handOffs(fx)) != 0 {
-		t.Fatal("handed off Bit's reply to a notice")
+		t.Fatal("handed off Pixie's reply to a notice")
 	}
 }
 
 func TestHandOffNoticeFromTheDelegateResult(t *testing.T) {
 	n, _ := HandOffNotice("what's on my calendar", json.RawMessage(`{"job_id":"job_0123456789ab","status":"delegated"}`))
-	if n.Text != "Agent: handed off: what's on my calendar" {
+	if n.Text != "Coordinator: handed off: what's on my calendar" {
 		t.Fatalf("%q", n.Text)
 	}
-	n, why := HandOffNotice("x", json.RawMessage(`{"error":"Delegation is off (Agent: herdr not found)."}`))
-	if n.Text != "Agent: can't hand off: delegation is off (herdr not found)." || why != "delegation is off (herdr not found)" {
+	n, why := HandOffNotice("x", json.RawMessage(`{"error":"Delegation is off (Coordinator: herdr not found)."}`))
+	if n.Text != "Coordinator: can't hand off: delegation is off (herdr not found)." || why != "delegation is off (herdr not found)" {
 		t.Fatalf("%q / %q", n.Text, why)
 	}
 	if n, _ := HandOffNotice("x", json.RawMessage(`{"error":"The app is quitting."}`)); n.Text != "" {
@@ -312,7 +312,7 @@ func TestRuntimeHandOffDelegatesAndInjects(t *testing.T) {
 	d := &fakeDelegate{}
 	_, s := runHandOff(t, d, true)
 	waitLong(t, "the hand-off notice", func() bool { return len(s.commands(CmdInject)) == 1 })
-	if got := s.commands(CmdInject)[0]; got.Text != "Agent: handed off: What's the price of bitcoin right now?" || !got.Respond {
+	if got := s.commands(CmdInject)[0]; got.Text != "Coordinator: handed off: What's the price of bitcoin right now?" || !got.Respond {
 		t.Fatalf("%+v", got)
 	}
 	jobs := d.jobs()
@@ -325,10 +325,10 @@ func TestRuntimeHandOffDelegatesAndInjects(t *testing.T) {
 }
 
 func TestRuntimeHandOffWithDelegationOffSaysWhy(t *testing.T) {
-	d := &fakeDelegate{off: "Agent: herdr not found"}
+	d := &fakeDelegate{off: "Coordinator: herdr not found"}
 	_, s := runHandOff(t, d, true)
 	waitLong(t, "the reason notice", func() bool { return len(s.commands(CmdInject)) == 1 })
-	if got := s.commands(CmdInject)[0].Text; got != "Agent: can't hand off: delegation is off (herdr not found)." {
+	if got := s.commands(CmdInject)[0].Text; got != "Coordinator: can't hand off: delegation is off (herdr not found)." {
 		t.Fatalf("%q", got)
 	}
 	if len(d.jobs()) != 0 {

@@ -210,7 +210,7 @@ func TestAProjectsRootSymlinkThatLeavesHomeIsRefused(t *testing.T) {
 func TestPersonaAndHerdrPathsMustBeFilesWhenSet(t *testing.T) {
 	env := testEnv(t)
 	file := filepath.Join(env.Home, "persona.md")
-	os.WriteFile(file, []byte("You are Bit."), 0o644)
+	os.WriteFile(file, []byte("You are Pixie."), 0o644)
 	c := Default()
 	c.Voice.PersonaPath = ptr(file)
 	c.Agent.HerdrPath = ptr(file)

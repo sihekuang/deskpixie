@@ -66,15 +66,15 @@ type VoiceSettings struct {
 	NoiseFilter     bool    `json:"noiseFilter"`
 	NoiseModel      string  `json:"noiseModel"`
 	NoisyRoom       bool    `json:"noisyRoom"`
-	// LiveBackendModel is the Responses model that runs Bit's tools on OpenAI GPT-Live.
+	// LiveBackendModel is the Responses model that runs Pixie's tools on OpenAI GPT-Live.
 	LiveBackendModel string  `json:"liveBackendModel"`
 	InputDevice      *string `json:"inputDevice"`
 	OutputDevice     *string `json:"outputDevice"`
 	HomeCity         *string `json:"homeCity"`
-	// HandOffWhenUnsure: when Bit answers a request with "I don't know" and calls no tool, the
+	// HandOffWhenUnsure: when Pixie answers a request with "I don't know" and calls no tool, the
 	// app hands the request to the agent itself (#71).
 	HandOffWhenUnsure bool `json:"handOffWhenUnsure"`
-	// CheckClaims: when Bit says it did something (set a timer, handed a task off) without
+	// CheckClaims: when Pixie says it did something (set a timer, handed a task off) without
 	// calling the tool, the app corrects it (#72).
 	CheckClaims bool `json:"checkClaims"`
 }
@@ -89,7 +89,7 @@ type NotificationSettings struct {
 	AwayAfterMins uint64 `json:"awayAfterMins"`
 }
 
-// BubbleSettings is notifications.bubble: the updates bubble beside Bit.
+// BubbleSettings is notifications.bubble: the updates bubble beside Pixie.
 type BubbleSettings struct {
 	Enabled bool   `json:"enabled"`
 	PopSecs uint64 `json:"popSecs"`
@@ -130,7 +130,7 @@ type AgentSettings struct {
 	NotifyPerMinute       uint64  `json:"notifyPerMinute"`
 	Narration             bool    `json:"narration"`
 	// OpenConversationForUpdates: a job finishing or failing, an agent question or a spoken
-	// worker report that comes while no conversation is open makes Bit open one and say it
+	// worker report that comes while no conversation is open makes Pixie open one and say it
 	// (off by default: a feature flag).
 	OpenConversationForUpdates bool           `json:"openConversationForUpdates"`
 	ProjectsRoot               string         `json:"projectsRoot"`
@@ -142,7 +142,7 @@ type WorkerSettings struct {
 	Enabled bool     `json:"enabled"`
 	Max     uint64   `json:"max"`
 	Kinds   []string `json:"kinds"`
-	// SpeakResults: Bit says a worker's own done/failed/blocked report as soon as it comes
+	// SpeakResults: Pixie says a worker's own done/failed/blocked report as soon as it comes
 	// (off by default: a feature flag).
 	SpeakResults bool `json:"speakResults"`
 }

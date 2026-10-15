@@ -196,7 +196,7 @@ func TestMemoryFactsFitTheBudgetWithJobsAndNotes(t *testing.T) {
 	if utf8.RuneCountInString(got) > MemoryBudgetChars || !strings.Contains(got, "note 30 ") || !strings.Contains(got, "task 30 ") {
 		t.Fatal(utf8.RuneCountInString(got), got)
 	}
-	if only := MemoryFacts(nil, notes[:1], memNow, time.UTC); !strings.HasPrefix(only, "Recent work with the agent") {
+	if only := MemoryFacts(nil, notes[:1], memNow, time.UTC); !strings.HasPrefix(only, "Recent work with the coordinator") {
 		t.Fatal(only)
 	}
 }

@@ -19,13 +19,13 @@ import (
 // terminal hint.
 const BlockedGraceMs Millis = 3_000
 
-const BlockedHint = "The agent is waiting at a prompt in its terminal; click me to open it."
+const BlockedHint = "The coordinator is waiting at a prompt in its terminal; click me to open it."
 
 // unreadableDenial is what the agent is told when a request cannot be read aloud plainly
 // enough to approve by voice.
 const unreadableDenial = "This can't be approved by voice. Ask the user to run it themselves, or to change it so it can be read aloud plainly."
 
-const unreadableNotice = "The agent asked to run something I can't read out safely, so I said no. Open the terminal to see it."
+const unreadableNotice = "The coordinator asked to run something I can't read out safely, so I said no. Open the terminal to see it."
 
 const (
 	// MaxPromptFailures: this many prompts failing in a row (no finished turn between) fail the
@@ -44,7 +44,7 @@ const (
 	IdleWithoutStopMs Millis = 10_000
 )
 
-const unreachable = "I couldn't reach the agent"
+const unreachable = "I couldn't reach the coordinator"
 
 // timerNotice is how the voice loop's timer notices start (the timer handles its own
 // undelivered ones).
@@ -68,7 +68,7 @@ type Settings struct {
 	SpeakWorkerReports bool
 	// OpenConversation (`agent.openConversationForUpdates`, a feature flag, off by default): a job's done
 	// or failed line, an agent question or a spoken worker report that comes while no
-	// conversation is open makes Bit open one and say it (opener.go).
+	// conversation is open makes Pixie open one and say it (opener.go).
 	OpenConversation bool
 }
 
@@ -112,7 +112,7 @@ const (
 	InPromptFailed                        // EfPrompt could not be delivered
 	InPromptTimedOut                      // the EfPrompt host call timed out: it may or may not have been typed
 	InTick                                // about once a second
-	InRestart                             // tray ▸ Restart agent
+	InRestart                             // tray ▸ Restart coordinator
 	InShutdown                            // app quit
 	InMcp                                 // Agent, Call: a pixie MCP tool call other than start_worker; answered with EfToolResult
 	InAdmitWorker                         // Worker, Repo (canonical), Taken: start_worker; answered with EfAdmitted
@@ -353,7 +353,7 @@ type AgentController struct {
 	// bubbleSent, bubbleLast: the updates bubble's list as last sent (bubble.go).
 	bubbleSent bool
 	bubbleLast []UpdateItem
-	// away: the user is away (InPresence): Bit opens no conversation and plays no chime.
+	// away: the user is away (InPresence): Pixie opens no conversation and plays no chime.
 	away bool
 }
 
@@ -385,7 +385,7 @@ func (c *AgentController) isDisabled() bool { _, off := c.Disabled(); return off
 
 func (c *AgentController) Snapshot(now Millis) []JobView { return c.jobs.Snapshot(now) }
 
-// RecentJobs are the open jobs and those updated since `since`, oldest first (Bit's memory).
+// RecentJobs are the open jobs and those updated since `since`, oldest first (Pixie's memory).
 func (c *AgentController) RecentJobs(since Millis) []Job { return c.jobs.Recent(since) }
 
 // RecentMemories are the newest n memories, oldest first.
@@ -448,7 +448,7 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 	case InCoordinatorUp:
 		c.coordinator = coordUp
 		c.onCoordinatorStatus(in.Status, now, &fx)
-		if c.status == "Agent: claude did not start" {
+		if c.status == "Coordinator: claude did not start" {
 			c.setStatus(c.notice, &fx)
 		}
 		c.flush(now, &fx)
@@ -652,7 +652,7 @@ func (c *AgentController) restore(jobs, outbox []string, keep bool, now Millis, 
 		if j, ok := c.jobs.Get(id); ok {
 			task = short(j.Task)
 		}
-		c.outbox.Push(NewLine(LineInfo, "Agent: a job stopped when the app restarted: "+task), now)
+		c.outbox.Push(NewLine(LineInfo, "Coordinator: a job stopped when the app restarted: "+task), now)
 	}
 	*fx = append(*fx,
 		Effect{Kind: EfRewrite, File: JobsFile, Lines: c.jobs.Lines()},
@@ -768,7 +768,7 @@ func (c *AgentController) onCoordinatorStatus(status PaneStatus, now Millis, fx 
 	} else {
 		c.blocked = optMs{}
 		c.hinted = false
-		if c.status == "Agent: waiting in terminal" {
+		if c.status == "Coordinator: waiting in terminal" {
 			c.setStatus(c.notice, fx)
 		}
 	}
@@ -779,22 +779,22 @@ func (c *AgentController) coordinatorFailed(err HostError, now Millis, fx *[]Eff
 	*fx = append(*fx, logEffect("coordinator start failed: "+errorTag(err)))
 	switch err.Kind {
 	case HostNotFound:
-		c.disable("Agent: "+err.HostName()+" not found", now, fx)
+		c.disable("Coordinator: "+err.HostName()+" not found", now, fx)
 	case HostVersionMismatch:
 		host := err.HostName()
 		if err.Detail == "" {
-			c.disable("Agent: "+host+" version mismatch (update "+host+")", now, fx)
+			c.disable("Coordinator: "+host+" version mismatch (update "+host+")", now, fx)
 		} else {
 			// What the user has and which versions are supported (e.g. herdr.SupportedVersions).
-			c.disable("Agent: "+host+" version mismatch: "+err.Detail, now, fx)
+			c.disable("Coordinator: "+host+" version mismatch: "+err.Detail, now, fx)
 		}
 	case HostGaveUp:
-		c.disable("Agent: stopped after repeated crashes", now, fx)
+		c.disable("Coordinator: stopped after repeated crashes", now, fx)
 	default:
-		c.setStatus("Agent: claude did not start", fx)
+		c.setStatus("Coordinator: claude did not start", fx)
 		c.inbox = NewInbox()
 		for _, id := range c.OpenJobs() {
-			c.failJob(id, "the agent could not start", now, fx)
+			c.failJob(id, "the coordinator could not start", now, fx)
 		}
 		c.syncHold(fx)
 	}
@@ -817,7 +817,7 @@ func (c *AgentController) promptFailed(now Millis, fx *[]Effect) {
 		c.retryAt = optMs{}
 		for _, id := range carried {
 			c.inbox.DropQueued(id)
-			c.failJob(id, "the agent could not be reached", now, fx)
+			c.failJob(id, "the coordinator could not be reached", now, fx)
 		}
 		c.syncHold(fx)
 	} else if c.coordinator == coordUp {
@@ -832,7 +832,7 @@ func (c *AgentController) watchdogFired(jobs []JobID, now Millis, fx *[]Effect) 
 		c.inbox.DropInFlight(id)
 		c.inbox.DropQueued(id)
 		if j, ok := c.jobs.Get(id); ok {
-			c.failJobSaying(id, "the agent could not be reached", unreachable+": "+short(j.Task), now, fx)
+			c.failJobSaying(id, "the coordinator could not be reached", unreachable+": "+short(j.Task), now, fx)
 		}
 	}
 	c.syncHold(fx)
@@ -876,13 +876,13 @@ func (c *AgentController) clearTimers() {
 	c.awaitingStop = false
 }
 
-// disable turns delegation off (spec §9): every open job fails with "the agent stopped".
+// disable turns delegation off (spec §9): every open job fails with "the coordinator stopped".
 func (c *AgentController) disable(status string, now Millis, fx *[]Effect) {
 	c.disabled = status
 	c.setStatus(status, fx)
 	c.inbox = NewInbox()
 	for _, id := range c.OpenJobs() {
-		c.failJob(id, "the agent stopped", now, fx)
+		c.failJob(id, "the coordinator stopped", now, fx)
 	}
 	c.syncHold(fx)
 }
@@ -892,7 +892,7 @@ func (c *AgentController) failJob(id JobID, reason string, now Millis, fx *[]Eff
 	if j, ok := c.jobs.Get(id); ok {
 		task = short(j.Task)
 	}
-	c.failJobSaying(id, reason, "The agent stopped before finishing: "+task, now, fx)
+	c.failJobSaying(id, reason, "The coordinator stopped before finishing: "+task, now, fx)
 }
 
 // failJobSaying fails an open job and says line (with the error cue).
@@ -1035,13 +1035,13 @@ func (c *AgentController) onUnreferencedStop(message string, blocks []Spoken, an
 		c.deliver(NewLine(LineUnsolicited, text), now, fx)
 	}
 	// A question or progress can't say which job: they stay open. Failed is terminal: they fail
-	// (leaving them open would keep Bit holding).
+	// (leaving them open would keep Pixie holding).
 	switch status {
 	case SpokenQuestion, SpokenWorking:
 		return
 	case SpokenFailed:
 		for _, id := range answered {
-			c.failJob(id, "the agent reported a failure", now, fx)
+			c.failJob(id, "the coordinator reported a failure", now, fx)
 		}
 		c.syncHold(fx)
 		return
@@ -1061,7 +1061,7 @@ func (c *AgentController) finishedLine(id JobID) string {
 	if j, ok := c.jobs.Get(id); ok {
 		task = short(j.Task)
 	}
-	return fmt.Sprintf("The agent finished: %s; details are in the terminal.", task)
+	return fmt.Sprintf("The coordinator finished: %s; details are in the terminal.", task)
 }
 
 func (c *AgentController) onReferencedStop(blocks []Spoken, now Millis, fx *[]Effect) {
@@ -1177,9 +1177,9 @@ func (c *AgentController) onPermission(id RequestID, agent, toolName string, too
 func (c *AgentController) onUserSaid(text string, now Millis, fx *[]Effect) {
 	for _, d := range c.confirms.OnTranscript(text) {
 		decision := Deny("The user said no.")
-		said := "Agent: denied"
+		said := "Coordinator: denied"
 		if d.Allow {
-			decision, said = Allow(), "Agent: allowed"
+			decision, said = Allow(), "Coordinator: allowed"
 		}
 		*fx = append(*fx, decideEffect(d.Pending.ID, decision))
 		c.resumeJob(d.Pending.Job, now, fx)
@@ -1279,7 +1279,7 @@ func (c *AgentController) conversationClosed(now Millis, fx *[]Effect) {
 
 // narrate injects a progress line (remembered with no lines: dropped if it bounces).
 func (c *AgentController) narrate(phrase string, fx *[]Effect) {
-	n := Notice{Text: "Agent progress: " + phrase}
+	n := Notice{Text: "Coordinator progress: " + phrase}
 	c.remember(n, nil)
 	*fx = append(*fx, Effect{Kind: EfInject, Notice: n})
 }
@@ -1291,7 +1291,7 @@ func (c *AgentController) tick(now Millis, fx *[]Effect) {
 	for _, p := range c.confirms.Expire(now) {
 		*fx = append(*fx, decideEffect(p.ID, Deny("No answer from the user.")))
 		c.resumeJob(p.Job, now, fx)
-		c.deliver(NewLine(LineInfo, "Agent: denied after two minutes with no answer."), now, fx)
+		c.deliver(NewLine(LineInfo, "Coordinator: denied after two minutes with no answer."), now, fx)
 	}
 	c.flushUpdates(now, fx)
 	for _, d := range c.router.Tick(c.voiceOpen, now) {
@@ -1304,7 +1304,7 @@ func (c *AgentController) tick(now Millis, fx *[]Effect) {
 	blockedLong := c.blocked.set && satSub(now, c.blocked.v) >= BlockedGraceMs
 	if blockedLong && !c.hinted && !c.confirms.HasPendingFor(Coordinator) {
 		c.hinted = true
-		c.setStatus("Agent: waiting in terminal", fx)
+		c.setStatus("Coordinator: waiting in terminal", fx)
 		c.deliver(NewLine(LineInfo, BlockedHint), now, fx)
 	}
 }
@@ -1563,7 +1563,7 @@ func foldConfusable(r rune) rune {
 
 // stripPrefix is a notice without the voice model's lead-in, for a notification.
 func stripPrefix(text string) string {
-	for _, p := range []string{"Agent reply: ", "Agent question: ", "Agent says: ", "Agent progress: "} {
+	for _, p := range []string{"Coordinator reply: ", "Coordinator question: ", "Coordinator says: ", "Coordinator progress: "} {
 		if rest, ok := strings.CutPrefix(text, p); ok {
 			return rest
 		}

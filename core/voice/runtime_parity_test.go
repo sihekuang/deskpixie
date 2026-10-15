@@ -485,7 +485,7 @@ func TestInjectIsSentOnceQuietAndBitAnswers(t *testing.T) {
 		r := newRig(t, vt.NewScriptedModel(vt.Audio(3)), rigOpts{})
 		r.r.Hotkey()
 		wait(100)
-		r.r.Inject(voice.Notice{Text: "Agent reply: the tests pass."})
+		r.r.Inject(voice.Notice{Text: "Coordinator reply: the tests pass."})
 		wait(1000)
 		var injected []voice.Command
 		for _, c := range r.model.NonAudio() {
@@ -493,7 +493,7 @@ func TestInjectIsSentOnceQuietAndBitAnswers(t *testing.T) {
 				injected = append(injected, c)
 			}
 		}
-		if len(injected) != 1 || injected[0].Text != "Agent reply: the tests pass." || !injected[0].Respond {
+		if len(injected) != 1 || injected[0].Text != "Coordinator reply: the tests pass." || !injected[0].Respond {
 			t.Fatalf("injected %+v", injected)
 		}
 		plays := 0
@@ -503,7 +503,7 @@ func TestInjectIsSentOnceQuietAndBitAnswers(t *testing.T) {
 			}
 		}
 		if plays <= 1 {
-			t.Fatal("Bit did not speak the reply")
+			t.Fatal("Pixie did not speak the reply")
 		}
 		if lastState(r) != listening {
 			t.Fatalf("states %v", r.sink.States())

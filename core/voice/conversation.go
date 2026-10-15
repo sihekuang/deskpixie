@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	// ErrorCooldown is how long the error state shows before Bit returns to idle.
+	// ErrorCooldown is how long the error state shows before Pixie returns to idle.
 	ErrorCooldown = 2 * time.Second
 	// ReplyWatchdog is how long Thinking may last with no response open and no tool running
 	// before giving up (also bounds a stalled Speaking phase).
@@ -19,7 +19,7 @@ const (
 	// MicPermissionWait is how long a conversation waits for the user to answer macOS's
 	// microphone prompt.
 	MicPermissionWait = 60 * time.Second
-	// HandOffGrace is how long after Bit's reply to a request the hand-off waits before it
+	// HandOffGrace is how long after Pixie's reply to a request the hand-off waits before it
 	// decides: a late transcript of the user's words, or a provider's late tool call, still
 	// counts (#71).
 	HandOffGrace = 1500 * time.Millisecond
@@ -68,7 +68,7 @@ const (
 	InTick                  // PlaybackIdle; sent about 30 times a second by the runtime
 	InFailed                // Failure
 	InInject                // Notice: say something about it once nobody is talking
-	InHoldOpen              // Hold: while on, the silence timeout is the hold timeout and Bit rests in delegating
+	InHoldOpen              // Hold: while on, the silence timeout is the hold timeout and Pixie rests in delegating
 	InMicLive               // the mic is actually on (the permission prompt may have shown first)
 	InOpen                  // start a conversation if none is under way (unlike InHotkey, never ends one)
 	InHandOffDone           // the hand-off's delegate call finished; Notice (Text "" = nothing to say)
@@ -105,7 +105,7 @@ func HoldOpenInput(on bool) Input       { return Input{Kind: InHoldOpen, Hold: o
 func MicLiveInput() Input               { return Input{Kind: InMicLive} }
 func OpenInput() Input                  { return Input{Kind: InOpen} }
 
-// HandOffDoneInput: the hand-off (EfHandOff) finished; Bit says n (if any) once it's quiet.
+// HandOffDoneInput: the hand-off (EfHandOff) finished; Pixie says n (if any) once it's quiet.
 func HandOffDoneInput(n Notice) Input { return Input{Kind: InHandOffDone, Notice: n} }
 
 // EffectKind mirrors the Rust `Effect` enum.
@@ -118,7 +118,7 @@ const (
 	EfClose
 	EfPlay            // Audio
 	EfResponseStarted // a new reply started playing: remember the playback position to compute "heard"
-	EfInterrupt       // the user talked over Bit: flush playback and send CmdCancelResponse{HeardMs}
+	EfInterrupt       // the user talked over Pixie: flush playback and send CmdCancelResponse{HeardMs}
 	EfFlushPlayback
 	EfPlayChime  // Chime (played only when RuntimeConfig.Chimes)
 	EfInvokeTool // CallID, ToolName, Args
@@ -126,7 +126,7 @@ const (
 	EfStatus     // Status; "" clears the status line (Rust's Status(None))
 	EfInject     // Text: send CmdInject{Text, Respond: true}
 	EfSignal     // Signal: tell subscribers
-	// EfHandOff: Bit gave a request a non-answer (#71), or claimed it handed it off without
+	// EfHandOff: Pixie gave a request a non-answer (#71), or claimed it handed it off without
 	// calling delegate (Claim, #72); delegate Text (the user's words) with Context, then feed
 	// HandOffDoneInput.
 	EfHandOff
@@ -147,7 +147,7 @@ type Effect struct {
 	Status  string     // EfStatus
 	Text    string     // EfInject; EfHandOff: the task
 	Context string     // EfHandOff
-	// Claim (EfHandOff): Bit already said it handed it off, so a successful hand-off says
+	// Claim (EfHandOff): Pixie already said it handed it off, so a successful hand-off says
 	// nothing more (#72).
 	Claim  bool
 	Signal VoiceSignal // EfSignal
@@ -160,10 +160,10 @@ type ConversationConfig struct {
 	// ProviderTurns: the provider decides whether to speak after a tool result
 	// (Capabilities.OwnsTurnTaking), so a finished tool doesn't make the turn wait for a reply.
 	ProviderTurns bool
-	// HandOff: when Bit answers a request with a non-answer and calls no tool, hand the request
+	// HandOff: when Pixie answers a request with a non-answer and calls no tool, hand the request
 	// to the delegate tool (voice.handOffWhenUnsure, and only with a delegate tool; #71).
 	HandOff bool
-	// CheckClaims: when Bit's words claim an action whose tool wasn't called in the turn, correct
+	// CheckClaims: when Pixie's words claim an action whose tool wasn't called in the turn, correct
 	// it (voice.checkClaims; #72). ClaimTools are the covered tools that exist (the runtime sets
 	// them from its registry).
 	CheckClaims bool
@@ -207,14 +207,14 @@ type Conversation struct {
 	// The hand-off safety net (#71), per user turn.
 	handOff     bool            // ConversationConfig.HandOff
 	hoUser      string          // the user's words this turn (the last transcript)
-	hoBot       []string        // Bit's words this turn
+	hoBot       []string        // Pixie's words this turn
 	hoTool      bool            // a tool was called this turn
 	hoTools     map[string]bool // the tools called this turn, for the claim check
 	hoHandedOff bool            // the app handed this turn off (a late delegate call is answered, not run)
 	hoSettled   bool            // decided for this turn (handed off, or ruled out)
-	hoRepliedAt time.Time       // Bit's reply to this turn finished
+	hoRepliedAt time.Time       // Pixie's reply to this turn finished
 	hoPending   int             // hand-offs running (counted in pendingTools too)
-	hoHistory   []string        // earlier turns, "User: …" / "Bit: …", for the delegate's context
+	hoHistory   []string        // earlier turns, "User: …" / "Pixie: …", for the delegate's context
 
 	// The claim check (#72) shares the per-turn state and the once-per-turn guard above.
 	checkClaims bool
@@ -268,7 +268,7 @@ func (c *Conversation) timeout() time.Duration {
 	return c.idleTimeout
 }
 
-// restState is the state Bit rests in outside a conversation.
+// restState is the state Pixie rests in outside a conversation.
 func (c *Conversation) restState() PixieState {
 	if c.held {
 		return StateDelegating
@@ -571,7 +571,7 @@ func (c *Conversation) tryInject(now time.Time, fx []Effect) []Effect {
 	}
 	n := c.injects[0]
 	c.injects = c.injects[1:]
-	// What Bit says next answers the notice, not the user's words.
+	// What Pixie says next answers the notice, not the user's words.
 	c.hoSettled = true
 	c.phase = PhaseThinking
 	c.thinkingSince = now
@@ -654,7 +654,7 @@ func (c *Conversation) newHandOffTurn() {
 		c.hoHistory = append(c.hoHistory, "User: "+clip(c.hoUser))
 	}
 	if len(c.hoBot) > 0 {
-		c.hoHistory = append(c.hoHistory, "Bit: "+clip(strings.Join(c.hoBot, " ")))
+		c.hoHistory = append(c.hoHistory, "Pixie: "+clip(strings.Join(c.hoBot, " ")))
 	}
 	if n := len(c.hoHistory); n > handOffHistoryLines {
 		c.hoHistory = append([]string(nil), c.hoHistory[n-handOffHistoryLines:]...)
@@ -674,13 +674,13 @@ func clip(s string) string {
 	return string(r[:handOffLineRunes]) + "…"
 }
 
-// maybeHandOff decides, once per turn and HandOffGrace after Bit's reply (and its tools)
+// maybeHandOff decides, once per turn and HandOffGrace after Pixie's reply (and its tools)
 // finished, never while the conversation is ending:
-//   - the hand-off (#71): Bit's reply to a request was a non-answer and no tool was called, so
+//   - the hand-off (#71): Pixie's reply to a request was a non-answer and no tool was called, so
 //     the request goes to the delegate tool;
-//   - else the claim check (#72): Bit's words claim an action whose tool wasn't called. A
+//   - else the claim check (#72): Pixie's words claim an action whose tool wasn't called. A
 //     delegate claim ("let me hand that off") to a request is made true by handing the request
-//     off; any other claim gets a correction notice, so Bit doesn't guess the tool's arguments.
+//     off; any other claim gets a correction notice, so Pixie doesn't guess the tool's arguments.
 func (c *Conversation) maybeHandOff(now time.Time, fx []Effect) []Effect {
 	if !(c.handOff || c.checkClaims) || c.hoSettled || !c.IsActive() || c.phase == PhaseConnecting {
 		return fx
@@ -757,6 +757,6 @@ func (c *Conversation) handOffTask(task string, claim bool, fx []Effect) []Effec
 }
 
 // alreadyHandedOff answers a delegate call in a turn the app already handed off.
-var alreadyHandedOff = json.RawMessage(`{"status":"already handed off","note":"The app already gave this request to the agent. Don't hand it off again; just say you'll let the user know."}`)
+var alreadyHandedOff = json.RawMessage(`{"status":"already handed off","note":"The app already gave this request to the coordinator. Don't hand it off again; just say you'll let the user know."}`)
 
 func pixieFx(s PixieState) Effect { return Effect{Kind: EfPixie, State: s} }

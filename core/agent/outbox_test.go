@@ -15,7 +15,7 @@ func TestReplayJoinsUndeliveredLinesInOrderAndMarksThem(t *testing.T) {
 	o.Push(reply("First done."), 1)
 	o.Push(NewLine(LineUnsolicited, "Notes tidied."), 2)
 	notice, records := o.Replay(all)
-	if notice == nil || notice.Text != "Agent replies while you were away:\n- Agent reply: First done.\n- Agent says: Notes tidied." {
+	if notice == nil || notice.Text != "Coordinator replies while you were away:\n- Coordinator reply: First done.\n- Coordinator says: Notes tidied." {
 		t.Fatalf("%+v", notice)
 	}
 	if len(records) != 2 || len(o.Undelivered()) != 0 {
@@ -47,7 +47,7 @@ func TestLiveQuestionsAreReplayed(t *testing.T) {
 	o := NewOutbox()
 	o.Push(hawkQuestion(), 1)
 	n, _ := o.Replay(all)
-	if n == nil || !strings.Contains(n.Text, "Agent question: Run git push") {
+	if n == nil || !strings.Contains(n.Text, "Coordinator question: Run git push") {
 		t.Fatal(n)
 	}
 }

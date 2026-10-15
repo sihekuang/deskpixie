@@ -59,7 +59,7 @@ func TestNoUsableKindTurnsWorkersOff(t *testing.T) {
 	if Policy(w).Enabled {
 		t.Fatal("enabled")
 	}
-	if _, err := WorkersOn(w, Policy(w)); err == nil || err.Error() != "Agent: workers off: no usable worker kind" {
+	if _, err := WorkersOn(w, Policy(w)); err == nil || err.Error() != "Coordinator: workers off: no usable worker kind" {
 		t.Fatal(err)
 	}
 	ok := settings.WorkerSettings{Enabled: true, Max: 4, Kinds: []string{"codex"}}
@@ -79,13 +79,13 @@ func TestAWorkersProblemTurnsOnlyWorkersOff(t *testing.T) {
 	}
 	on := settings.WorkerSettings{Enabled: true, Max: 4, Kinds: []string{"claude"}}
 	bad := SetupWorkers(on, "~/missing", home)
-	if bad.Policy.Enabled || bad.Root != "" || bad.Notice != "Agent: workers off: projectsRoot not usable" {
+	if bad.Policy.Enabled || bad.Root != "" || bad.Notice != "Coordinator: workers off: projectsRoot not usable" {
 		t.Fatalf("%+v", bad)
 	}
 	noKind := on
 	noKind.Kinds = []string{"gpt"}
 	nk := SetupWorkers(noKind, "~/code", home)
-	if nk.Policy.Enabled || nk.Root != "" || nk.Notice != "Agent: workers off: no usable worker kind" {
+	if nk.Policy.Enabled || nk.Root != "" || nk.Notice != "Coordinator: workers off: no usable worker kind" {
 		t.Fatalf("%+v", nk)
 	}
 	good := SetupWorkers(on, "~/code", home)

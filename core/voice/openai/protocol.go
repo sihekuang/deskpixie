@@ -20,7 +20,7 @@ func sessionUpdate(cfg voice.SessionConfig) obj {
 	case cfg.TurnDetection == voice.TurnManual:
 		td = nil
 	case cfg.NoisyRoom:
-		// A higher threshold than the default 0.5: a TV or people nearby no longer cut Bit off.
+		// A higher threshold than the default 0.5: a TV or people nearby no longer cut Pixie off.
 		td = obj{"type": "server_vad", "threshold": 0.85, "prefix_padding_ms": 300, "silence_duration_ms": 500,
 			"create_response": true, "interrupt_response": true}
 	case cfg.TurnDetection == voice.TurnSemantic:

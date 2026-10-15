@@ -367,7 +367,7 @@ func WorkerWho(plan WorkerPlan) string {
 	return fmt.Sprintf("The %s worker in %s", work, plan.RepoName)
 }
 
-// WorkerResultSpoken is a worker's report_result as Bit says it to the user at once, clearly
+// WorkerResultSpoken is a worker's report_result as Pixie says it to the user at once, clearly
 // the worker's own word, not a checked result: "<who> says it's done: <summary>." /
 // "<who> couldn't finish: <summary>."
 func WorkerResultSpoken(who string, outcome Outcome, summary string) string {
@@ -377,7 +377,7 @@ func WorkerResultSpoken(who string, outcome Outcome, summary string) string {
 	return workerSpoken(who+" says it's done", summary)
 }
 
-// WorkerBlockedSpoken is a worker's report_blocked as Bit says it: "<who> is stuck: <reason>."
+// WorkerBlockedSpoken is a worker's report_blocked as Pixie says it: "<who> is stuck: <reason>."
 func WorkerBlockedSpoken(who, reason string) string {
 	return workerSpoken(who+" is stuck", reason)
 }

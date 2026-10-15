@@ -37,7 +37,7 @@ func DefaultControllerSettings() ControllerSettings {
 type OutcomeKind int
 
 const (
-	// OutcomeShown: shown automatically; Bit plays happy.
+	// OutcomeShown: shown automatically; Pixie plays happy.
 	OutcomeShown OutcomeKind = iota
 	// OutcomeUpdated: changed while AutoOpen is off; only the recent list moved.
 	OutcomeUpdated

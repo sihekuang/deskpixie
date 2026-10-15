@@ -3,7 +3,7 @@ package agent
 // The coordinator's memories: every finished coordinator turn leaves exactly one short memory,
 // written by the coordinator as a `<memory ref="job_…">…</memory>` block next to its <spoken>
 // blocks, or, when the turn has none, made by the app from the turn's spoken text and the job's
-// task. They are kept in memories.jsonl (bounded, oldest trimmed) and feed Bit's session block
+// task. They are kept in memories.jsonl (bounded, oldest trimmed) and feed Pixie's session block
 // and recall. Like <spoken>, the input is untrusted text: size-bounded, linear scans, cleaned
 // and capped on write.
 

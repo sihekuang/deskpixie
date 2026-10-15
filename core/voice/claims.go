@@ -1,6 +1,6 @@
 package voice
 
-// The claim check (#72): when Bit's words in a turn claim an action ("I've handed that off",
+// The claim check (#72): when Pixie's words in a turn claim an action ("I've handed that off",
 // "I've set a timer", "I've paused the music") and the tool that does it wasn't called in that
 // turn, the conversation corrects it. Like the hand-off (#71) these matchers are English only
 // and deliberately conservative: only first-person statements count, never questions, offers,
@@ -17,18 +17,18 @@ const (
 // ClaimTools are the tools whose claims are checked; the runtime keeps those it has.
 var ClaimTools = []string{DelegateTool, TimerToolName, MediaToolName}
 
-// Claim is an action Bit said it did that no tool call backs.
+// Claim is an action Pixie said it did that no tool call backs.
 type Claim struct {
 	Tool string // the tool that would do it
-	// Check: Bit promised to check a fact ("Let me check that."): the delegated task gets the
+	// Check: Pixie promised to check a fact ("Let me check that."): the delegated task gets the
 	// "Check: " prefix the persona uses for facts.
 	Check bool
 }
 
-// CorrectionPrefix leads the notice Bit gets when a claim wasn't backed.
-const CorrectionPrefix = "Agent: correction: "
+// CorrectionPrefix leads the notice Pixie gets when a claim wasn't backed.
+const CorrectionPrefix = "Coordinator: correction: "
 
-// ClaimNotice is what Bit is told about a claim it can't back: what didn't happen and what to
+// ClaimNotice is what Pixie is told about a claim it can't back: what didn't happen and what to
 // do. A delegate claim gets none: the app delegates instead.
 func ClaimNotice(c Claim) Notice {
 	switch c.Tool {
@@ -58,7 +58,7 @@ const claimWindow = 5
 var claimSpecs = []claimSpec{
 	{tool: DelegateTool, backed: []string{DelegateTool, "recall", "answer_job", "jobs"}, groups: []claimGroup{
 		{verbs: words("hand handed handing pass passed passing ask asked asking"),
-			objects: words("agent agents brain")},
+			objects: words("coordinator agent agents claude brain")},
 		{verbs: words("hand handed handing"), objects: words("off")},
 		{verbs: words("start started starting kick kicked kicking open opened opening create created creating queue queued queuing"),
 			objects: words("job")},
@@ -79,8 +79,8 @@ var claimSpecs = []claimSpec{
 	}},
 }
 
-// The "let me check" words never cover these: Bit checking its own tools or the agent's jobs.
-var checkNotAbout = words("timer timers music song agent agents job jobs weather time clock")
+// The "let me check" words never cover these: Pixie checking its own tools or the agent's jobs.
+var checkNotAbout = words("timer timers music song coordinator agent agents job jobs weather time clock")
 
 func words(s string) []string { return strings.Fields(s) }
 
@@ -114,7 +114,7 @@ var (
 	}
 )
 
-// FindClaim returns the first action Bit's words claim that no call in called backs, among the
+// FindClaim returns the first action Pixie's words claim that no call in called backs, among the
 // covered tools in available.
 func FindClaim(said string, called map[string]bool, available []string) (Claim, bool) {
 	anyCall := len(called) > 0

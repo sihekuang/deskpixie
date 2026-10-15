@@ -293,7 +293,7 @@ func NewRuntime(m Model, c audio.Cleaner, cfg RuntimeConfig, emit func(UIEvent))
 	return r
 }
 
-// Open starts a conversation, as the hotkey does, but only when Bit is at rest and the mic is
+// Open starts a conversation, as the hotkey does, but only when Pixie is at rest and the mic is
 // usable: false (nothing done) while a conversation is starting, open, closing or showing an
 // error, when the mic could not start, or after Close.
 func (r *Runtime) Open() bool {
@@ -382,11 +382,11 @@ func (r *Runtime) AudioFailed(e AudioError) {
 	}
 }
 
-// Inject asks Bit to say something about n once nobody is talking. If no conversation is
+// Inject asks Pixie to say something about n once nobody is talking. If no conversation is
 // open it comes straight back as a SigClosed signal with n undelivered.
 func (r *Runtime) Inject(n Notice) { r.control(control{kind: ctlInject, notice: n}) }
 
-// HoldOpen: while on, the silence timeout is the hold timeout and Bit rests in delegating.
+// HoldOpen: while on, the silence timeout is the hold timeout and Pixie rests in delegating.
 func (r *Runtime) HoldOpen(on bool) { r.control(control{kind: ctlHoldOpen, on: on}) }
 
 // SetMouthLevels: the active pack changed; its mouth level count.
@@ -775,7 +775,7 @@ func (r *Runtime) apply(fx Effect) {
 }
 
 // handOff delegates task through the delegate tool, as if the model had called it, and feeds
-// back the notice Bit then says (#71).
+// back the notice Pixie then says (#71).
 func (r *Runtime) handOff(task, context string, claim bool) {
 	gen := r.gen
 	deliver := func(n Notice) {
@@ -799,12 +799,12 @@ func (r *Runtime) handOff(task, context string, claim bool) {
 		out := tool.Invoke(ctx, raw)
 		n, why := HandOffNotice(task, out.Output)
 		if claim {
-			log.Printf("voice: Bit said it handed a request off without calling delegate: %s", why)
+			log.Printf("voice: Pixie said it handed a request off without calling delegate: %s", why)
 			if strings.HasPrefix(n.Text, HandedOffPrefix) {
-				n = Notice{} // Bit already said so; now it's true
+				n = Notice{} // Pixie already said so; now it's true
 			}
 		} else {
-			log.Printf("voice: Bit had no answer to a request: %s", why)
+			log.Printf("voice: Pixie had no answer to a request: %s", why)
 		}
 		deliver(n)
 	}()

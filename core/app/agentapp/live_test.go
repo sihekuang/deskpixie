@@ -10,7 +10,7 @@ package agentapp_test
 // never the app's "deskpixie"), the hook server on a free loopback port (never 48217: the
 // running app holds it), temp app data and projects root. A trivial task is delegated through
 // the voice tool; the coordinator's Stop-hook reply must reach the voice loop as an injected
-// "Agent reply: Pong." (any case or punctuation); any other Agent reply (such as the failure
+// "Coordinator reply: Pong." (any case or punctuation); any other Coordinator reply (such as the failure
 // notice, which echoes the task) fails. Shutdown then denies anything pending, closes the panes
 // and deletes the MCP configs. The smoke session is stopped and deleted at the end.
 
@@ -142,20 +142,20 @@ func TestLiveDelegationEndToEnd(t *testing.T) {
 		t.Fatalf("delegate failed: %s", out.Output)
 	}
 
-	// Only the coordinator's own answer counts: an "Agent reply:" whose text is just "pong". Any
-	// other Agent reply (e.g. "The agent stopped before finishing: Reply with the word pong…"
+	// Only the coordinator's own answer counts: an "Coordinator reply:" whose text is just "pong". Any
+	// other Coordinator reply (e.g. "The agent stopped before finishing: Reply with the word pong…"
 	// when the coordinator never started) fails at once; progress lines are ignored.
 	deadline := time.Now().Add(4 * time.Minute)
 	reply := ""
 	for reply == "" {
 		for _, text := range v.all() {
-			body, ok := strings.CutPrefix(text, "Agent reply:")
+			body, ok := strings.CutPrefix(text, "Coordinator reply:")
 			if !ok {
 				continue
 			}
 			if !isPong(body) {
 				notesMu.Lock()
-				t.Fatalf("the voice loop got %q, not an Agent reply of pong; injected %q; notifications %q; tray %+v", text, v.all(), notes, a.Tray())
+				t.Fatalf("the voice loop got %q, not a Coordinator reply of pong; injected %q; notifications %q; tray %+v", text, v.all(), notes, a.Tray())
 			}
 			reply = text
 		}
@@ -164,7 +164,7 @@ func TestLiveDelegationEndToEnd(t *testing.T) {
 		}
 		if time.Now().After(deadline) {
 			notesMu.Lock()
-			t.Fatalf("no Agent reply with pong within 4 minutes; injected %q; notifications %q; tray %+v", v.all(), notes, a.Tray())
+			t.Fatalf("no Coordinator reply with pong within 4 minutes; injected %q; notifications %q; tray %+v", v.all(), notes, a.Tray())
 		}
 		time.Sleep(time.Second)
 	}

@@ -427,7 +427,7 @@ func TestTopLevelKeysAreCaseSensitive(t *testing.T) {
 	}
 }
 
-// voice.shortTermMemory was removed (Bit's memory now comes from the coordinator): a settings
+// voice.shortTermMemory was removed (Pixie's memory now comes from the coordinator): a settings
 // file that still has it loads with every other setting kept, and the next save drops it.
 func TestTheRemovedShortTermMemoryKeyIsIgnored(t *testing.T) {
 	p := tmpFile(t)
