@@ -1211,7 +1211,13 @@ func (c *AgentController) onPermission(id RequestID, agent, toolName string, too
 	if agent != Coordinator {
 		q.Worker = agent
 	}
+	before := c.outbox.Len()
 	c.deliverOpening(q, now, fx)
+	// Said in a conversation, it never reached the outbox: keep it there as heard, so the bubble
+	// lists it with Allow and Deny while it waits (#97).
+	if !c.outbox.HasTokenSince(before, token) {
+		*fx = append(*fx, Effect{Kind: EfAppend, File: OutboxFile, Line: c.outbox.PushHeard(q, now)})
+	}
 }
 
 // ManualNotice is what Pixie says, once per app run, when a Claude agent fell back to Manual.

@@ -251,3 +251,37 @@ func TestAPermissionQuestionKeepsItsTokenRuleWhenTheJobMovesOn(t *testing.T) {
 		t.Fatal("a pending permission question left with its job's status")
 	}
 }
+
+// #97: Allow and Deny must be reachable whatever Pixie did with the question, so a permission
+// question still waiting stays listed after Pixie reads it out and when Pixie opens
+// conversations for updates.
+func TestAPendingPermissionQuestionStaysAfterPixieReadsItOut(t *testing.T) {
+	c := workingOnJob1()
+	items, _ := lastUpdates(t, askPush(c, 7, T0))
+	c.Step(voiceOpened(), T0+1000)
+	if got := c.Updates(); len(got) != 1 || got[0].ID != items[0].ID || got[0].Token == "" {
+		t.Fatalf("a read-out permission question left the bubble: %+v", got)
+	}
+}
+
+func TestAPendingPermissionQuestionIsListedWhenBitOpensConversationsForUpdates(t *testing.T) {
+	c := openingCtl()
+	askPush(c, 7, T0)
+	got := c.Updates()
+	if len(got) != 1 || got[0].Kind != LineQuestion || got[0].Token == "" {
+		t.Fatalf("%+v", got)
+	}
+	c.Step(TickInput(), T0+DefaultSettings().PermissionTimeoutMs+1000)
+	if got := c.Updates(); len(got) != 0 {
+		t.Fatalf("an expired question, or another line, is listed: %+v", got)
+	}
+}
+
+func TestAPermissionQuestionAskedDuringAConversationIsListed(t *testing.T) {
+	c := workingOnJob1()
+	c.Step(voiceOpened(), T0)
+	askPush(c, 7, T0+1000)
+	if got := c.Updates(); len(got) != 1 || got[0].Token == "" {
+		t.Fatalf("%+v", got)
+	}
+}

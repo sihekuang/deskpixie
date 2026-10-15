@@ -3,7 +3,8 @@ package agent
 import "slices"
 
 // The updates bubble (spec docs/specs/2026-10-14-updates-bubble-design.md): the outbox's
-// undelivered lines, shown beside Pixie while Pixie isn't opening conversations for them.
+// undelivered lines, shown beside Pixie while Pixie isn't opening conversations for them, and
+// permission questions still waiting, always (their Allow and Deny, #97).
 
 // UpdateItem is one line in the bubble (the `updates` event's lines; kind lowercase, at in ms).
 type UpdateItem struct {
@@ -19,11 +20,17 @@ type UpdateItem struct {
 	Token string `json:"token,omitempty"`
 }
 
-// bubbleItems: the undelivered lines, minus permission questions no longer pending. Never nil.
+// bubbleItems: the undelivered lines, minus permission questions no longer pending, while Pixie
+// isn't opening conversations for updates; and always every permission question still pending,
+// heard or not, so its Allow and Deny stay reachable (#97). Never nil.
 func (c *AgentController) bubbleItems() []UpdateItem {
 	items := []UpdateItem{}
-	for _, l := range c.outbox.Undelivered() {
-		if l.Token != nil && !c.confirms.IsPendingToken(*l.Token) {
+	if c.shutDown {
+		return items
+	}
+	for _, l := range c.outbox.lines {
+		pending := l.Token != nil && c.confirms.IsPendingToken(*l.Token)
+		if !pending && (l.Token != nil || l.Delivered || c.settings.OpenConversation) {
 			continue
 		}
 		item := UpdateItem{ID: l.ID, Text: l.Text, Kind: l.Kind, At: l.At, Job: l.Job, Worker: l.Worker}
@@ -36,18 +43,13 @@ func (c *AgentController) bubbleItems() []UpdateItem {
 }
 
 // Updates is the bubble's current list, for a shell that missed the last `updates` event (it
-// subscribes after the first Step). Empty while Pixie opens conversations for updates. Never nil.
-func (c *AgentController) Updates() []UpdateItem {
-	if c.settings.OpenConversation || c.shutDown {
-		return []UpdateItem{}
-	}
-	return c.bubbleItems()
-}
+// subscribes after the first Step). Never nil.
+func (c *AgentController) Updates() []UpdateItem { return c.bubbleItems() }
 
 // syncUpdates sends the bubble its list when it changed (every Step ends here). The first
 // Step always sends one, so the shell starts from the current list.
 func (c *AgentController) syncUpdates(fx *[]Effect) {
-	if c.settings.OpenConversation || c.shutDown {
+	if c.shutDown {
 		return
 	}
 	items := c.bubbleItems()
