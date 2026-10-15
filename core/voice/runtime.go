@@ -255,6 +255,13 @@ func NewRuntime(m Model, c audio.Cleaner, cfg RuntimeConfig, emit func(UIEvent))
 	if _, ok := tools.Get(DelegateTool); !ok {
 		cfg.Conversation.HandOff = false // nothing to hand off to
 	}
+	// The claim check covers only the tools this registry has (#72).
+	cfg.Conversation.ClaimTools = nil
+	for _, name := range ClaimTools {
+		if _, ok := tools.Get(name); ok {
+			cfg.Conversation.ClaimTools = append(cfg.Conversation.ClaimTools, name)
+		}
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	r := &Runtime{
 		model:     m,
@@ -742,6 +749,17 @@ func (r *Runtime) apply(fx Effect) {
 			r.pb.enqueue(ChimeSamples(fx.Chime))
 		}
 	case EfInvokeTool:
+		if fx.Canned != nil {
+			gen, callID, out := r.gen, fx.CallID, fx.Canned
+			log.Printf("voice: a late delegate call in a turn already handed off; not starting a second job")
+			go func() {
+				select {
+				case r.toolDone <- toolResult{gen: gen, callID: callID, outcome: ToolOutcome{Output: out}}:
+				case <-r.done:
+				}
+			}()
+			return
+		}
 		r.invokeTool(fx.CallID, fx.ToolName, fx.Args)
 	case EfPixie:
 		r.emit(UIEvent{Kind: "state", State: string(fx.State)})
@@ -752,13 +770,13 @@ func (r *Runtime) apply(fx Effect) {
 	case EfSignal:
 		r.publish(fx.Signal)
 	case EfHandOff:
-		r.handOff(fx.Text, fx.Context)
+		r.handOff(fx.Text, fx.Context, fx.Claim)
 	}
 }
 
 // handOff delegates task through the delegate tool, as if the model had called it, and feeds
 // back the notice Bit then says (#71).
-func (r *Runtime) handOff(task, context string) {
+func (r *Runtime) handOff(task, context string, claim bool) {
 	gen := r.gen
 	deliver := func(n Notice) {
 		select {
@@ -780,7 +798,14 @@ func (r *Runtime) handOff(task, context string) {
 	go func() {
 		out := tool.Invoke(ctx, raw)
 		n, why := HandOffNotice(task, out.Output)
-		log.Printf("voice: Bit had no answer to a request: %s", why)
+		if claim {
+			log.Printf("voice: Bit said it handed a request off without calling delegate: %s", why)
+			if strings.HasPrefix(n.Text, HandedOffPrefix) {
+				n = Notice{} // Bit already said so; now it's true
+			}
+		} else {
+			log.Printf("voice: Bit had no answer to a request: %s", why)
+		}
 		deliver(n)
 	}()
 }

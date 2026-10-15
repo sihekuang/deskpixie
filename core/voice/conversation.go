@@ -126,8 +126,9 @@ const (
 	EfStatus     // Status; "" clears the status line (Rust's Status(None))
 	EfInject     // Text: send CmdInject{Text, Respond: true}
 	EfSignal     // Signal: tell subscribers
-	// EfHandOff: Bit gave a request a non-answer; delegate Text (the user's words) with Context,
-	// then feed HandOffDoneInput.
+	// EfHandOff: Bit gave a request a non-answer (#71), or claimed it handed it off without
+	// calling delegate (Claim, #72); delegate Text (the user's words) with Context, then feed
+	// HandOffDoneInput.
 	EfHandOff
 )
 
@@ -139,11 +140,17 @@ type Effect struct {
 	CallID   string          // EfInvokeTool
 	ToolName string          // EfInvokeTool
 	Args     json.RawMessage // EfInvokeTool
-	State    PixieState      // EfPixie
-	Status   string          // EfStatus
-	Text     string          // EfInject; EfHandOff: the task
-	Context  string          // EfHandOff
-	Signal   VoiceSignal     // EfSignal
+	// Canned (EfInvokeTool): don't run the tool, answer the call with this output (a delegate
+	// call in a turn the app already handed off).
+	Canned  json.RawMessage
+	State   PixieState // EfPixie
+	Status  string     // EfStatus
+	Text    string     // EfInject; EfHandOff: the task
+	Context string     // EfHandOff
+	// Claim (EfHandOff): Bit already said it handed it off, so a successful hand-off says
+	// nothing more (#72).
+	Claim  bool
+	Signal VoiceSignal // EfSignal
 }
 
 // ConversationConfig sets the silence timeouts.
@@ -156,6 +163,11 @@ type ConversationConfig struct {
 	// HandOff: when Bit answers a request with a non-answer and calls no tool, hand the request
 	// to the delegate tool (voice.handOffWhenUnsure, and only with a delegate tool; #71).
 	HandOff bool
+	// CheckClaims: when Bit's words claim an action whose tool wasn't called in the turn, correct
+	// it (voice.checkClaims; #72). ClaimTools are the covered tools that exist (the runtime sets
+	// them from its registry).
+	CheckClaims bool
+	ClaimTools  []string
 }
 
 // DefaultConversationConfig: 7 s idle, 180 s hold-open.
@@ -193,14 +205,24 @@ type Conversation struct {
 	injects              []Notice          // waiting for a quiet moment, oldest first
 
 	// The hand-off safety net (#71), per user turn.
-	handOff     bool      // ConversationConfig.HandOff
-	hoUser      string    // the user's words this turn (the last transcript)
-	hoBot       []string  // Bit's words this turn
-	hoTool      bool      // a tool was called this turn
-	hoSettled   bool      // decided for this turn (handed off, or ruled out)
-	hoRepliedAt time.Time // Bit's reply to this turn finished
-	hoPending   int       // hand-offs running (counted in pendingTools too)
-	hoHistory   []string  // earlier turns, "User: …" / "Bit: …", for the delegate's context
+	handOff     bool            // ConversationConfig.HandOff
+	hoUser      string          // the user's words this turn (the last transcript)
+	hoBot       []string        // Bit's words this turn
+	hoTool      bool            // a tool was called this turn
+	hoTools     map[string]bool // the tools called this turn, for the claim check
+	hoHandedOff bool            // the app handed this turn off (a late delegate call is answered, not run)
+	hoSettled   bool            // decided for this turn (handed off, or ruled out)
+	hoRepliedAt time.Time       // Bit's reply to this turn finished
+	hoPending   int             // hand-offs running (counted in pendingTools too)
+	hoHistory   []string        // earlier turns, "User: …" / "Bit: …", for the delegate's context
+
+	// The claim check (#72) shares the per-turn state and the once-per-turn guard above.
+	checkClaims bool
+	claimTools  []string
+	// claimFix: the correction queued for this turn and the tool it is about; a late call to that
+	// tool (GPT-Live's backend can lag) withdraws it while it still waits.
+	claimFix     Notice
+	claimFixTool string
 }
 
 // NewConversation starts in PhaseIdle.
@@ -215,6 +237,8 @@ func NewConversation(cfg ConversationConfig) *Conversation {
 		holdTimeout:   hold,
 		providerTurns: cfg.ProviderTurns,
 		handOff:       cfg.HandOff,
+		checkClaims:   cfg.CheckClaims,
+		claimTools:    cfg.ClaimTools,
 		playbackIdle:  true,
 		toolTurns:     map[string]uint64{},
 	}
@@ -365,6 +389,8 @@ func (c *Conversation) Step(in Input, now time.Time) []Effect {
 			if c.pendingTools > 0 {
 				c.pendingTools--
 			}
+			// The claim check waits HandOffGrace from here for the reply that uses the result.
+			c.hoRepliedAt = now
 			turn, known := c.toolTurns[in.CallID]
 			delete(c.toolTurns, in.CallID)
 			thisTurn := known && turn == c.turn
@@ -473,9 +499,20 @@ func (c *Conversation) onModel(ev Event, now time.Time, fx []Effect) []Effect {
 		fx = c.checkTurnEnd(now, fx)
 	case EvToolCall:
 		c.hoTool = true
+		if c.hoTools == nil {
+			c.hoTools = map[string]bool{}
+		}
+		c.hoTools[ev.ToolName] = true
+		c.withdrawClaimFix(ev.ToolName)
 		c.pendingTools++
 		c.toolTurns[ev.CallID] = c.turn
-		fx = append(fx, Effect{Kind: EfInvokeTool, CallID: ev.CallID, ToolName: ev.ToolName, Args: ev.Args})
+		inv := Effect{Kind: EfInvokeTool, CallID: ev.CallID, ToolName: ev.ToolName, Args: ev.Args}
+		if ev.ToolName == DelegateTool && c.hoHandedOff {
+			// The app already handed this turn to the agent; a provider that delegates late
+			// (GPT-Live's backend) would start the same job twice.
+			inv.Canned = alreadyHandedOff
+		}
+		fx = append(fx, inv)
 	case EvTranscript:
 		if ev.Role == "user" {
 			fx = append(fx, Effect{Kind: EfSignal, Signal: VoiceSignal{Kind: SigUserSaid, Text: ev.Text}})
@@ -623,7 +660,9 @@ func (c *Conversation) newHandOffTurn() {
 		c.hoHistory = append([]string(nil), c.hoHistory[n-handOffHistoryLines:]...)
 	}
 	c.hoUser, c.hoBot = "", nil
-	c.hoTool, c.hoSettled = false, false
+	c.hoTool, c.hoSettled, c.hoHandedOff = false, false, false
+	c.hoTools = nil
+	c.claimFix, c.claimFixTool = Notice{}, ""
 	c.hoRepliedAt = time.Time{}
 }
 
@@ -635,34 +674,89 @@ func clip(s string) string {
 	return string(r[:handOffLineRunes]) + "…"
 }
 
-// maybeHandOff hands the user's request to the delegate tool when Bit's reply to it was a
-// non-answer and no tool was called: once per turn, HandOffGrace after the reply finished,
-// never while the conversation is ending.
+// maybeHandOff decides, once per turn and HandOffGrace after Bit's reply (and its tools)
+// finished, never while the conversation is ending:
+//   - the hand-off (#71): Bit's reply to a request was a non-answer and no tool was called, so
+//     the request goes to the delegate tool;
+//   - else the claim check (#72): Bit's words claim an action whose tool wasn't called. A
+//     delegate claim ("let me hand that off") to a request is made true by handing the request
+//     off; any other claim gets a correction notice, so Bit doesn't guess the tool's arguments.
 func (c *Conversation) maybeHandOff(now time.Time, fx []Effect) []Effect {
-	if !c.handOff || c.hoSettled || !c.IsActive() || c.phase == PhaseConnecting {
+	if !(c.handOff || c.checkClaims) || c.hoSettled || !c.IsActive() || c.phase == PhaseConnecting {
 		return fx
 	}
-	if c.ending || c.hoTool {
+	handOff := c.handOff && !c.hoTool
+	if c.ending || c.hoTools[EndConversationTool] || (!handOff && !c.checkClaims) {
 		c.hoSettled = true
 		return fx
 	}
-	if c.openResponses > 0 || !elapsed(c.hoRepliedAt, now, HandOffGrace) {
+	if c.openResponses > 0 || c.pendingTools > 0 || !elapsed(c.hoRepliedAt, now, HandOffGrace) {
 		return fx
 	}
-	if c.hoUser == "" || len(c.hoBot) == 0 {
+	if len(c.hoBot) == 0 {
 		return fx // a transcript may still come; the next turn resets this
 	}
+	bot := strings.Join(c.hoBot, " ")
+	var claim Claim
+	hasClaim := false
+	if c.checkClaims {
+		claim, hasClaim = FindClaim(bot, c.hoTools, c.claimTools)
+	}
+	needUser := (hasClaim && claim.Tool == DelegateTool) || (handOff && !hasClaim)
+	if needUser && c.hoUser == "" {
+		return fx // the user's transcript may still come
+	}
 	c.hoSettled = true
-	if !ShouldHandOff(c.hoUser, strings.Join(c.hoBot, " ")) {
+	if handOff && ShouldHandOff(c.hoUser, bot) {
+		return c.handOffTask(c.hoUser, false, fx)
+	}
+	if !hasClaim {
 		return fx
 	}
+	if claim.Tool == DelegateTool {
+		if !IsRequest(c.hoUser) {
+			return fx // likely about earlier work: nothing new to hand off
+		}
+		task := c.hoUser
+		if claim.Check {
+			task = "Check: " + task
+		}
+		return c.handOffTask(task, true, fx)
+	}
+	if n := ClaimNotice(claim); n.Text != "" {
+		c.injects = append(c.injects, n)
+		c.claimFix, c.claimFixTool = n, claim.Tool
+	}
+	return fx
+}
+
+// withdrawClaimFix drops this turn's queued correction when its tool is called after all.
+func (c *Conversation) withdrawClaimFix(tool string) {
+	if c.claimFixTool == "" || tool != c.claimFixTool {
+		return
+	}
+	for i, n := range c.injects {
+		if n == c.claimFix {
+			c.injects = append(c.injects[:i:i], c.injects[i+1:]...)
+			break
+		}
+	}
+	c.claimFix, c.claimFixTool = Notice{}, ""
+}
+
+// handOffTask starts the app's hand-off of task (EfHandOff), with the earlier turns as context.
+func (c *Conversation) handOffTask(task string, claim bool, fx []Effect) []Effect {
 	c.hoPending++
 	c.pendingTools++
+	c.hoHandedOff = true
 	ctx := ""
 	if len(c.hoHistory) > 0 {
 		ctx = "Earlier in this voice conversation:\n" + strings.Join(c.hoHistory, "\n")
 	}
-	return append(fx, Effect{Kind: EfHandOff, Text: c.hoUser, Context: ctx})
+	return append(fx, Effect{Kind: EfHandOff, Text: task, Context: ctx, Claim: claim})
 }
+
+// alreadyHandedOff answers a delegate call in a turn the app already handed off.
+var alreadyHandedOff = json.RawMessage(`{"status":"already handed off","note":"The app already gave this request to the agent. Don't hand it off again; just say you'll let the user know."}`)
 
 func pixieFx(s PixieState) Effect { return Effect{Kind: EfPixie, State: s} }

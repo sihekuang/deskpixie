@@ -270,7 +270,7 @@ func (a *App) buildVoice(cfg settings.Config) {
 		Chimes:       cfg.Voice.Chimes,
 		RecordDir:    a.recordDir,
 		MouthLevels:  MouthLevels(levels, ok),
-		Conversation: voice.ConversationConfig{IdleTimeout: idle, HoldTimeout: hold, HandOff: cfg.Voice.HandOffWhenUnsure},
+		Conversation: voice.ConversationConfig{IdleTimeout: idle, HoldTimeout: hold, HandOff: cfg.Voice.HandOffWhenUnsure, CheckClaims: cfg.Voice.CheckClaims},
 		OnMicSent:    a.deps.OnMicSent,
 	}, a.onVoiceEvent)
 	a.mu.Lock()
