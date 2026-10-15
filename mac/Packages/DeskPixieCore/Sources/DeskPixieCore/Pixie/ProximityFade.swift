@@ -41,7 +41,7 @@ public enum ProximityFade {
         return t * t
     }
 
-    /// actions.rs `spawn_proximity`: full opacity while the cursor is on Bit's own pixels
+    /// actions.rs `spawn_proximity`: full opacity while the cursor is on Pixie's own pixels
     /// (`overBit`, which also covers an active press/drag) or when the fade is off.
     public static func target(cursor: CGPoint, rect: CGRect, radius: CGFloat,
                               enabled: Bool, overBit: Bool) -> CGFloat {

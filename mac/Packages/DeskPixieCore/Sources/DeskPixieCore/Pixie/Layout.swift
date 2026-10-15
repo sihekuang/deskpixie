@@ -53,7 +53,7 @@ public enum Layout {
         return CGSize(width: pack.cellWidth * s, height: pack.cellHeight * s)
     }
 
-    /// New top-left so the window's bottom-centre (Bit's feet) stays put when resizing.
+    /// New top-left so the window's bottom-centre (Pixie's feet) stays put when resizing.
     public static func keepFeet(_ pos: CGPoint, old: CGSize, new: CGSize) -> CGPoint {
         CGPoint(x: pos.x + (old.width - new.width) / 2, y: pos.y + old.height - new.height)
     }
@@ -66,7 +66,7 @@ public enum Layout {
     }
 
     /// Where the pixie window opens. A saved position stays as long as the window's centre is
-    /// on a connected display's frame (over the Dock or the menu bar counts: the user put Bit
+    /// on a connected display's frame (over the Dock or the menu bar counts: the user put Pixie
     /// there). One left on an unplugged display is pulled fully into the nearest work area.
     public static func restorePosition(_ saved: CGPoint?, size: CGSize, displays: LayoutDisplays) -> CGPoint {
         let monitors = displays.monitorList()

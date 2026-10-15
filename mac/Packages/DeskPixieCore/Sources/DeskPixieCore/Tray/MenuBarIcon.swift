@@ -1,7 +1,7 @@
 import AppKit
 import CoreGraphics
 
-/// The menu bar item: Bit's face (idle frame 0 with the closed mouth) as an 18 pt template
+/// The menu bar item: Pixie's face (idle frame 0 with the closed mouth) as an 18 pt template
 /// image, so macOS tints it for light and dark menu bars. Template images use alpha only, so
 /// the face's dark pixels (eyes, mouth, outline) are cut out of the silhouette to keep it
 /// readable. Scaled nearest-neighbour; `sparkles` when the pack cannot be read.
@@ -12,7 +12,7 @@ public enum MenuBarIcon {
     /// Below this luminance (0…1, unpremultiplied) a pixel is a feature, not body.
     static let featureLuminance: CGFloat = 0.2
 
-    /// Black-on-clear mask of Bit's face, trimmed to its opaque pixels; nil when the pack has
+    /// Black-on-clear mask of Pixie's face, trimmed to its opaque pixels; nil when the pack has
     /// no idle state or the sheet cannot be cropped.
     public static func faceMask(pack: Pack, sheet: SpriteSheet) -> CGImage? {
         let w = pack.cellWidth, h = pack.cellHeight
@@ -40,7 +40,7 @@ public enum MenuBarIcon {
         for i in 0..<(w * h) {
             let a = rgba[i * 4 + 3]
             guard a > 0 else { continue }
-            // Track Bit's whole extent (features included) so the face stays centred.
+            // Track Pixie's whole extent (features included) so the face stays centred.
             let x = i % w, y = i / w
             minX = min(minX, x); maxX = max(maxX, x); minY = min(minY, y); maxY = max(maxY, y)
             let k = 255 / CGFloat(a)
@@ -100,7 +100,7 @@ public enum MenuBarIcon {
         return image(pack: pack, sheet: sheet)
     }
 
-    /// Bit's face, else the `sparkles` symbol (also a template).
+    /// Pixie's face, else the `sparkles` symbol (also a template).
     public static func imageOrFallback(packDirectory dir: URL) -> NSImage {
         if let img = load(packDirectory: dir) { return img }
         let img = NSImage(systemSymbolName: fallbackSymbol, accessibilityDescription: tooltip) ?? NSImage()

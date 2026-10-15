@@ -1,7 +1,7 @@
 import AppKit
 import QuartzCore
 
-/// Layer-backed view drawing Bit as two nearest-neighbour-scaled layers: body and mouth.
+/// Layer-backed view drawing Pixie as two nearest-neighbour-scaled layers: body and mouth.
 /// Mouse events are forwarded to the controller (window coordinates, `event.timestamp`).
 final class PixieView: NSView {
     private let bodyLayer = CALayer()

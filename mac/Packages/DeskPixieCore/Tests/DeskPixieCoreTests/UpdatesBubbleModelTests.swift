@@ -1,7 +1,7 @@
 import XCTest
 @testable import DeskPixieCore
 
-/// Spec §4 lifecycle of the updates bubble beside Bit: hidden / popped / badge / expanded, the
+/// Spec §4 lifecycle of the updates bubble beside Pixie: hidden / popped / badge / expanded, the
 /// 1 s "seen" rule, away → badge only → one pop on return. Times are seconds on one clock.
 final class UpdatesBubbleModelTests: XCTestCase {
     private func line(_ id: UInt64) -> UpdateLine {

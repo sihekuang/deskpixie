@@ -32,19 +32,19 @@ final class NotifierTests: XCTestCase {
         let sink = FakeSink()
         let n = Notifier(sink: sink)
         let events = [
-            #"{"kind":"notify","title":"Bit","body":"Timer done","sound":"glass"}"#,
-            #"{"kind":"notify","title":"Bit","body":"Agent reply: tests pass"}"#,
-            #"{"kind":"notify","title":"Bit","body":"Tea","sound":"ping"}"#,
+            #"{"kind":"notify","title":"Pixie","body":"Timer done","sound":"glass"}"#,
+            #"{"kind":"notify","title":"Pixie","body":"Coordinator reply: tests pass"}"#,
+            #"{"kind":"notify","title":"Pixie","body":"Tea","sound":"ping"}"#,
         ]
         for json in events { n.handle(try XCTUnwrap(EngineEvent.decode(Data(json.utf8)))) }
         await n.drain()
-        XCTAssertEqual(sink.posted, ["Bit|Timer done", "Bit|Agent reply: tests pass", "Bit|Tea"])
+        XCTAssertEqual(sink.posted, ["Pixie|Timer done", "Pixie|Coordinator reply: tests pass", "Pixie|Tea"])
         XCTAssertEqual(sink.played, 1, "only sound \"glass\" plays the Glass chime")
     }
 
     func testSystemNotificationContent() {
-        let c = SystemNotificationSink.content(title: "Bit", body: "Timer done")
-        XCTAssertEqual(c.title, "Bit")
+        let c = SystemNotificationSink.content(title: "Pixie", body: "Timer done")
+        XCTAssertEqual(c.title, "Pixie")
         XCTAssertEqual(c.body, "Timer done")
         XCTAssertNil(c.sound, "Glass is played separately, never the user's notification sound")
         XCTAssertEqual(SystemNotificationSink.glassPath, "/System/Library/Sounds/Glass.aiff")

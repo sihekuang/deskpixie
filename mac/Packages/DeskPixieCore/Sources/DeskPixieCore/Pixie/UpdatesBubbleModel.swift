@@ -29,7 +29,7 @@ public struct UpdateLine: Decodable, Sendable, Equatable, Identifiable {
 public enum PopPermission: Sendable {
     /// Present and nothing in the way: pop.
     case allowed
-    /// Present but a pop would intrude (fullscreen app, Bit hidden): badge only, nothing held.
+    /// Present but a pop would intrude (fullscreen app, Pixie hidden): badge only, nothing held.
     case badgeOnly
     /// Away: badge only, and pop once on return (`back`).
     case hold
@@ -56,7 +56,7 @@ public struct UpdatesBubbleModel: Sendable {
     public static let hoverMinAlpha: CGFloat = 0.1
 
     /// Whether the pointer over the panel counts as hovering the bubble: only while it can be
-    /// seen (a badge faded with Bit is not opened or marked seen by a passing pointer). Once
+    /// seen (a badge faded with Pixie is not opened or marked seen by a passing pointer). Once
     /// open under the pointer it is drawn opaque, so it stays open.
     public static func hoverCounts(pointerOnPanel: Bool, alpha: CGFloat, alreadyInside: Bool) -> Bool {
         pointerOnPanel && (alreadyInside || alpha >= hoverMinAlpha)

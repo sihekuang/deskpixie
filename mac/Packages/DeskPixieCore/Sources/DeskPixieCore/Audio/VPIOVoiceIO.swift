@@ -25,7 +25,7 @@ import os
 ///   sends `.failed(.permissionDenied)`.
 public final class VPIOVoiceIO: VoiceIO, @unchecked Sendable {
     static let tickInterval: DispatchTimeInterval = .milliseconds(20)
-    /// Keep other apps' audio as loud as possible while Bit listens (ai-mascot engine.rs value).
+    /// Keep other apps' audio as loud as possible while Pixie listens (ai-mascot engine.rs value).
     static let otherAudioDucking = AUVoiceIOOtherAudioDuckingConfiguration(
         mEnableAdvancedDucking: false, mDuckingLevel: .min)
     private static let log = Logger(subsystem: "com.sihekuang.deskpixie", category: "audio")
@@ -198,7 +198,7 @@ final class VPIOUnit: VoiceUnitHandle, AudioDeviceTarget {
             try setProp(u, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 1, &fmt)
             try setProp(u, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0, &fmt)
 
-            // Keep other apps' audio as loud as possible while Bit listens. Best effort.
+            // Keep other apps' audio as loud as possible while Pixie listens. Best effort.
             var duck = VPIOVoiceIO.otherAudioDucking
             _ = AudioUnitSetProperty(u, kAUVoiceIOProperty_OtherAudioDuckingConfiguration,
                                      kAudioUnitScope_Global, 0, &duck,

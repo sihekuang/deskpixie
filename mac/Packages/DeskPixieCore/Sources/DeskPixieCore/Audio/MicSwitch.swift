@@ -6,7 +6,7 @@ import Foundation
 /// `crates/audio-macos/src/mic.rs` + `permission.rs`.
 ///
 /// macOS hands an app that has never been asked ("not determined") silent mic buffers rather
-/// than an error, so a user who then denies access just sees Bit hear nothing. So the switch
+/// than an error, so a user who then denies access just sees Pixie hear nothing. So the switch
 /// asks up front, before the mic goes on: it stays off until the user answers (`start` returns
 /// `.awaitingPermission`); allowing sends `.live`, and a denial fails the conversation with
 /// `.permissionDenied`. The Go runtime waits up to 60 s (`voice.MicPermissionWait`) for the

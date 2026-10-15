@@ -39,7 +39,7 @@ public enum SettingsLayout {
     public static let tabs: [Tab] = [
         Tab(section: .pixie, title: "Pixie", symbol: "face.smiling", tint: .pink),
         Tab(section: .voice, title: "Voice", symbol: "waveform", tint: .purple),
-        Tab(section: .agent, title: "Agent", symbol: "sparkles", tint: .orange),
+        Tab(section: .agent, title: "Coordinator", symbol: "sparkles", tint: .orange),
         Tab(section: .workers, title: "Workers", symbol: "person.2", tint: .indigo),
         Tab(section: .notifications, title: "Notifications", symbol: "bell.badge", tint: .red),
         Tab(section: .canvas, title: "Canvas", symbol: "rectangle.on.rectangle", tint: .teal),
@@ -459,7 +459,7 @@ public enum SettingsLayout {
         switch section {
         case .pixie:
             return [.button(label: "Reset position",
-                            help: "Move Bit back to the bottom-right corner of the main screen.",
+                            help: "Move Pixie back to the bottom-right corner of the main screen.",
                             title: "Reset Position", action: .resetPosition)]
         case .voice:
             return SettingsSecretID.allCases.map { .secret(id: $0, label: $0.label, help: $0.help) }

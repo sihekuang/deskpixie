@@ -3,7 +3,7 @@ import XCTest
 @testable import DeskPixieCore
 
 /// Port of ai-mascot `src-tauri/src/proximity.rs` tests (12 of 12: opacity, distance, should_emit,
-/// cursor_cell, rescale), plus the `actions.rs` spawn_proximity rule (full opacity over Bit / while
+/// cursor_cell, rescale), plus the `actions.rs` spawn_proximity rule (full opacity over Pixie / while
 /// pressed / when disabled). Rects are desktop coordinates (top-left origin, y down), as in Rust.
 final class ProximityFadeTests: XCTestCase {
     private let r = CGRect(x: 1000, y: 500, width: 256, height: 256)
@@ -62,7 +62,7 @@ final class ProximityFadeTests: XCTestCase {
     /// calls `rescale` with equal factors (a no-op); the function and its Rust test are kept so the
     /// tao mixed-Retina rule stays documented and checked.
     func testRescaleMapsARetinaScaledCursorOntoA1xMonitor() {
-        // Bit at (679,-833) 256x256 on a 1x display above a 2x Retina primary (seen live).
+        // Pixie at (679,-833) 256x256 on a 1x display above a 2x Retina primary (seen live).
         let rect = CGRect(x: 679, y: -833, width: 256, height: 256)
         let c = ProximityFade.rescale(CGPoint(x: 1611, y: -1326), from: 2, to: 1)
         XCTAssertEqual(c, CGPoint(x: 805.5, y: -663))

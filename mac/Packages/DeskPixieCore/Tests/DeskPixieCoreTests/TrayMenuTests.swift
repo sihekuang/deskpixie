@@ -67,15 +67,15 @@ final class TrayMenuTests: XCTestCase {
         {"state":"thinking","packs":[{"id":"bit","name":"Bit"},{"id":"zed","name":"Zed"}],"pack":"bit","scale":6,
          "fade":true,"talking":false,"canvasRecent":[{"slug":"q3","title":"Q3"}],
          "agent":{"enabled":true,"jobs":[{"id":"job_1","label":"fix it — working, 4 s"}]},
-         "statusLines":["Voice: connection lost","Agent: herdr not found"],"hotkey":"Ctrl+Alt+Space"}
+         "statusLines":["Voice: connection lost","Coordinator: herdr not found"],"hotkey":"Ctrl+Alt+Space"}
         """#)
         let items = TrayMenu.build(s, localStatusLines: ["Hotkey unavailable: ⌃⌥Space"], micModeAvailable: true)
         XCTAssertEqual(titles(items), [
             "label:Hotkey unavailable: ⌃⌥Space", "--",
             "label:Voice: connection lost", "--",
-            "label:Agent: herdr not found", "--",
+            "label:Coordinator: herdr not found", "--",
             "menu:State", "talk", "menu:Size", "reset-position", "fade", "menu:Pixie", "reload", "menu:Canvas",
-            "menu:Agent", "--", "mic-mode", "settings", "--", "quit",
+            "menu:Coordinator", "--", "mic-mode", "settings", "--", "quit",
         ])
         let st = try XCTUnwrap(submenu(items, "State"))
         XCTAssertEqual(titles(st.items), TrayMenu.stateNames.map { "state:\($0)" })
@@ -93,7 +93,7 @@ final class TrayMenuTests: XCTestCase {
         let recent = try XCTUnwrap(submenu(canvas.items, "Recent"))
         XCTAssertTrue(recent.enabled)
         XCTAssertEqual(titles(recent.items), ["canvas:page:q3"])
-        let agent = try XCTUnwrap(submenu(items, "Agent"))
+        let agent = try XCTUnwrap(submenu(items, "Coordinator"))
         XCTAssertEqual(titles(agent.items), ["agent-job:job_1", "menu:Cancel job", "agent:open", "agent:restart"])
         XCTAssertEqual(agent.items.first, .action(.init(id: "agent-job:job_1", title: "fix it — working, 4 s", enabled: false)))
         let cancel = try XCTUnwrap(submenu(agent.items, "Cancel job"))
@@ -105,7 +105,7 @@ final class TrayMenuTests: XCTestCase {
         // What the temporary app.state returns before P14: no agent, no recent pages.
         let s = try state(#"{"state":"idle","packs":[],"pack":"","scale":8,"statusLines":[]}"#)
         let items = TrayMenu.build(s, localStatusLines: [], micModeAvailable: false)
-        XCTAssertNil(submenu(items, "Agent"))
+        XCTAssertNil(submenu(items, "Coordinator"))
         XCTAssertNil(submenu(items, "Pixie"), "no packs, no Pixie submenu")
         XCTAssertFalse(titles(items).contains("mic-mode"))
         let recent = try XCTUnwrap(submenu(try XCTUnwrap(submenu(items, "Canvas")).items, "Recent"))
@@ -120,7 +120,7 @@ final class TrayMenuTests: XCTestCase {
 
     func testEmptyAgentHasDisabledCancel() throws {
         let s = try state(#"{"state":"idle","agent":{"enabled":true,"jobs":[]}}"#)
-        let agent = try XCTUnwrap(submenu(TrayMenu.build(s, localStatusLines: [], micModeAvailable: true), "Agent"))
+        let agent = try XCTUnwrap(submenu(TrayMenu.build(s, localStatusLines: [], micModeAvailable: true), "Coordinator"))
         XCTAssertEqual(try XCTUnwrap(submenu(agent.items, "Cancel job")).enabled, false)
     }
 

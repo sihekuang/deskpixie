@@ -24,7 +24,7 @@ final class SettingsLayoutTests: XCTestCase {
 
     func test_tabs_follow_the_sections_with_their_symbols() {
         XCTAssertEqual(L.tabs.map(\.section), [.pixie, .voice, .agent, .workers, .notifications, .canvas, .advanced])
-        XCTAssertEqual(L.tabs.map(\.title), ["Pixie", "Voice", "Agent", "Workers", "Notifications", "Canvas", "Advanced"])
+        XCTAssertEqual(L.tabs.map(\.title), ["Pixie", "Voice", "Coordinator", "Workers", "Notifications", "Canvas", "Advanced"])
         XCTAssertEqual(L.tabs.map(\.symbol),
                        ["face.smiling", "waveform", "sparkles", "person.2", "bell.badge", "rectangle.on.rectangle", "gearshape.2"])
     }

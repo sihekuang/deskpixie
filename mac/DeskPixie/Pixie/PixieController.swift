@@ -2,7 +2,7 @@ import AppKit
 import DeskPixieCore
 import os
 
-/// Owns Bit on screen: the panel, the view, the player, the mouth level and the gestures.
+/// Owns Pixie on screen: the panel, the view, the player, the mouth level and the gestures.
 ///
 /// Usage (coordinator, main actor):
 /// ```swift
@@ -30,7 +30,7 @@ final class PixieController {
     private(set) var sheet: SpriteSheet
     private var currentSheetPath: String?
     private(set) var scale: Int
-    /// Bit's pixels in any frame (the `pack` event's mask, or built from the sheet at launch).
+    /// Pixie's pixels in any frame (the `pack` event's mask, or built from the sheet at launch).
     private(set) var hitMask: HitMask
     private(set) var settings: PixieSettings
     private(set) var player: PixiePlayer
@@ -43,7 +43,7 @@ final class PixieController {
     /// Set while the controller places the panel itself, so the move is not reported as the user's.
     private var placing = false
 
-    /// The voice hotkey action (double-click on Bit).
+    /// The voice hotkey action (double-click on Pixie).
     var onDoubleClick: (() -> Void)? {
         get { gestures.onDoubleClick }
         set { gestures.onDoubleClick = newValue }
@@ -52,11 +52,11 @@ final class PixieController {
     let panel: PixiePanel
     let view: PixieView
 
-    /// Bit's panel frame (AppKit) after every move, drag or placement (the updates bubble follows it).
+    /// Pixie's panel frame (AppKit) after every move, drag or placement (the updates bubble follows it).
     var onFrameChange: ((NSRect) -> Void)?
-    /// The opacity the proximity fade just applied to Bit (the updates bubble follows it).
+    /// The opacity the proximity fade just applied to Pixie (the updates bubble follows it).
     var onOpacityChange: ((CGFloat) -> Void)?
-    /// Whether Bit is on screen.
+    /// Whether Pixie is on screen.
     var isShown: Bool { panel.isVisible }
 
     private var animationTimer: Timer?
@@ -150,7 +150,7 @@ final class PixieController {
     }
 
     /// `EngineEvent.pack`: a new pack and/or scale. Reloads the sheet and the hit mask and
-    /// resizes the panel keeping Bit's feet where they were (actions.rs `resize_window`); the
+    /// resizes the panel keeping Pixie's feet where they were (actions.rs `resize_window`); the
     /// moved top-left is then saved like a drag. A sheet that cannot be read keeps the old pack.
     func applyPack(_ ev: PackEvent) {
         let newSheet: SpriteSheet
@@ -289,7 +289,7 @@ final class PixieController {
         // tao's mixed-Retina correction (`rescale`) is the identity here.
         let cursor = DesktopSpace.desktopPoint(NSEvent.mouseLocation, primaryMaxY: top)
         let rect = DesktopSpace.desktopRect(panel.frame, primaryMaxY: top)
-        // Click-through wherever no frame of Bit ever draws; never mid-press or mid-drag.
+        // Click-through wherever no frame of Pixie ever draws; never mid-press or mid-drag.
         let d = ClickThrough.decide(cursor: cursor, window: rect, mask: hitMask, pointerActive: gestures.pointerActive,
                                     leftButtonDown: NSEvent.pressedMouseButtons & 1 != 0,
                                     fadeEnabled: settings.fadeEnabled, fadeRadius: settings.fadeRadius)
