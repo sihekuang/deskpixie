@@ -225,15 +225,15 @@ func TestStatusAndExitEvents(t *testing.T) {
 func TestDescriptionSources(t *testing.T) {
 	h, sock := newHost(t)
 	p, r := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api"})
-	wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "description", Source: "auto", Description: "Please fix the flaky upload test"})
-	eventually(t, "auto description", func() bool { return listed(t, h)[0].User.Description == "fix flaky upload" })
+	wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "description", Source: "auto", Description: "fix the flaky upload test"})
+	eventually(t, "auto description", func() bool { return listed(t, h)[0].User.Description == "fix the flaky upload test" })
 	if err := h.SetDescription(r.Address, "uploads"); err != nil {
 		t.Fatal(err)
 	}
 	wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "description", Source: "agent", Description: "agent text"})
 	time.Sleep(50 * time.Millisecond)
 	u := listed(t, h)[0].User
-	if u.Description != "uploads" || len(u.PastDescriptions) != 1 || u.PastDescriptions[0] != "fix flaky upload" {
+	if u.Description != "uploads" || len(u.PastDescriptions) != 1 || u.PastDescriptions[0] != "fix the flaky upload test" {
 		t.Fatalf("user must win, auto kept as past: %+v", u)
 	}
 }
@@ -380,4 +380,44 @@ func TestChangesOnRegisterDescriptionDropAndExit(t *testing.T) {
 	p.c.Close()
 	changedSoon(t, h, "unreachable")
 	changedSoon(t, h, "dropped")
+}
+
+func TestNoDescriptionYetSaysWhatItIs(t *testing.T) {
+	h, sock := newHost(t)
+	dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/focus", Cwd: "/x/focus"})
+	dialPix(t, sock, wire.Msg{Tool: "codex", Cwd: "/x/scratch"})
+	got := map[string]string{}
+	for _, a := range listed(t, h) {
+		got[a.User.Tool] = a.User.Description
+	}
+	if got["claude"] != "Claude Code in focus, no task yet" || got["codex"] != "Codex in scratch, no task yet" {
+		t.Fatalf("%v", got)
+	}
+}
+
+func TestListShowsStartAndLastActivity(t *testing.T) {
+	h, sock := newHost(t)
+	before := time.Now()
+	p, _ := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/focus"})
+	u := listed(t, h)[0].User
+	if u.Started.Before(before) || u.LastActive.Before(u.Started) {
+		t.Fatalf("started %v last %v", u.Started, u.LastActive)
+	}
+	first := u.LastActive
+	time.Sleep(5 * time.Millisecond)
+	wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "status", Status: "working"})
+	eventually(t, "activity", func() bool { return listed(t, h)[0].User.LastActive.After(first) })
+}
+
+func TestJunkDescriptionsFromPixAreIgnored(t *testing.T) {
+	h, sock := newHost(t)
+	p, _ := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/focus"})
+	wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "description", Source: "auto", Description: "fix the upload test"})
+	wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "description", Source: "auto",
+		Description: "Another Claude session sent a message:\n<agent-message from=\"a9\">\n[Subagent hand-back] x"})
+	wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "status", Status: "working"})
+	eventually(t, "status", func() bool { return listed(t, h)[0].Status == agent.PaneWorking })
+	if d := listed(t, h)[0].User.Description; d != "fix the upload test" {
+		t.Fatalf("%q", d)
+	}
 }

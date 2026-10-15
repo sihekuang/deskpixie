@@ -217,11 +217,14 @@ type Conversation struct {
 	// checksOpen: "Check: " facts delegated in this conversation whose answer hasn't been
 	// read yet; reading the last one ends the conversation.
 	checksOpen int
-	micLive    bool
-	micAskedAt time.Time
-	turn       uint64            // counts the user's turns (each SpeechStarted)
-	toolTurns  map[string]uint64 // running tool calls and the turn each was called in
-	injects    []Notice          // waiting for a quiet moment, oldest first
+	// followUpUntil: Pixie asked if there's anything else; without a real reply by then the
+	// conversation ends (#103). Zero: no such window.
+	followUpUntil time.Time
+	micLive       bool
+	micAskedAt    time.Time
+	turn          uint64            // counts the user's turns (each SpeechStarted)
+	toolTurns     map[string]uint64 // running tool calls and the turn each was called in
+	injects       []Notice          // waiting for a quiet moment, oldest first
 
 	// The hand-off safety net (#71), per user turn.
 	handOff     bool            // ConversationConfig.HandOff
@@ -297,7 +300,20 @@ func (c *Conversation) timeout() time.Duration {
 	if c.held {
 		return c.holdTimeout
 	}
+	if !c.followUpUntil.IsZero() && c.idleTimeout < FollowUpWindow {
+		return FollowUpWindow // the follow-up window decides, not the shorter silence timeout
+	}
 	return c.idleTimeout
+}
+
+// FollowUpWindow: after Pixie answers a check and asks if there's anything else, the user has
+// this long to start a real reply (#103).
+const FollowUpWindow = 5 * time.Second
+
+// followUpDue: the follow-up window has passed with no real reply, and the user isn't talking.
+func (c *Conversation) followUpDue(now time.Time) bool {
+	return !c.followUpUntil.IsZero() && !now.Before(c.followUpUntil) &&
+		!(c.phase == PhaseListening && c.silenceSince.IsZero())
 }
 
 // restState is the state Pixie rests in outside a conversation.
@@ -379,6 +395,14 @@ func (c *Conversation) Step(in Input, now time.Time) []Effect {
 			return c.fail(Failure{Kind: FailMicPermissionTimeout}, now, fx)
 		}
 		switch {
+		case c.followUpDue(now):
+			c.followUpUntil = time.Time{}
+			if c.phase != PhaseSpeaking && c.openResponses == 0 && c.pendingTools == 0 {
+				fx = c.end(fx, false, "no follow-up")
+			} else {
+				// Pixie is answering a noise: end once that has played.
+				c.ending, c.endWhy = true, "no follow-up"
+			}
 		case c.phase == PhaseCooldown && !now.Before(c.cooldownUntil):
 			c.phase = PhaseIdle
 			fx = append(fx, pixieFx(c.restState()))
@@ -576,6 +600,9 @@ func (c *Conversation) onModel(ev Event, now time.Time, fx []Effect) []Effect {
 	case EvTranscript:
 		if ev.Role == "user" {
 			fx = append(fx, Effect{Kind: EfSignal, Signal: VoiceSignal{Kind: SigUserSaid, Text: ev.Text}})
+			if !c.followUpUntil.IsZero() && !IsNoise(ev.Text) {
+				c.followUpUntil = time.Time{} // a real reply: carry on as usual
+			}
 			if t := strings.TrimSpace(ev.Text); t != "" {
 				if c.clientDelegation && c.hoUser != "" && len(c.hoBot) == 0 {
 					// GPT-Live's transcript of one utterance can come in pieces (a pause, or
@@ -618,6 +645,12 @@ func (c *Conversation) checkTurnEnd(now time.Time, fx []Effect) []Effect {
 	}
 	if !finished {
 		return fx
+	}
+	if c.ending && c.endWhy == "after answering a check" && asksForMore(c.hoBot) {
+		// Pixie judged the conversation can go on and asked (#103): listen for a reply
+		// instead of closing.
+		c.ending, c.endWhy = false, ""
+		c.followUpUntil = now.Add(FollowUpWindow)
 	}
 	if c.ending {
 		return c.end(fx, false, c.endingWhy())
@@ -729,6 +762,7 @@ func (c *Conversation) resetTurn() {
 	clear(c.toolTurns)
 	c.ending, c.endWhy = false, ""
 	c.checksOpen = 0
+	c.followUpUntil = time.Time{}
 	c.micLive = false
 	c.micAskedAt = time.Time{}
 	c.newHandOffTurn()
@@ -922,4 +956,40 @@ func isCheckTask(args json.RawMessage) bool {
 	}
 	_ = json.Unmarshal(args, &a)
 	return strings.HasPrefix(a.Task, CheckPrefix)
+}
+
+// asksForMore: Pixie's last words this turn end with a question ("Anything else?").
+func asksForMore(said []string) bool {
+	return len(said) > 0 && strings.HasSuffix(strings.TrimSpace(said[len(said)-1]), "?")
+}
+
+// noiseWords are what a transcript of a sound (not a reply) is made of.
+var noiseWords = map[string]bool{"um": true, "uh": true, "hmm": true, "hm": true, "mm": true, "mhm": true,
+	"ah": true, "oh": true, "er": true, "erm": true, "huh": true}
+
+// IsNoise reports whether a user transcript is a sound rather than words for Pixie: empty,
+// punctuation, bracketed sound descriptions ("[gulp]", "(coughs)") or only filler sounds.
+func IsNoise(said string) bool {
+	var b strings.Builder
+	depth := 0
+	for _, r := range said {
+		switch r {
+		case '[', '(':
+			depth++
+		case ']', ')':
+			if depth > 0 {
+				depth--
+			}
+		default:
+			if depth == 0 {
+				b.WriteRune(r)
+			}
+		}
+	}
+	for _, w := range strings.Fields(normalize(b.String())) {
+		if !noiseWords[w] {
+			return false
+		}
+	}
+	return true
 }

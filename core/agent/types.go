@@ -342,7 +342,9 @@ type UserSession struct {
 	App              string // the terminal app's bundle id, e.g. "com.jetbrains.WebStorm" ("" = unknown)
 	Description      string
 	PastDescriptions []string
-	Reachable        bool // pix is connected (false for a few seconds after it dropped)
+	Reachable        bool      // pix is connected (false for a few seconds after it dropped)
+	Started          time.Time // when it first registered with this app
+	LastActive       time.Time // its last hook, status or description
 }
 
 // EnvVar is one environment entry (Rust's (String, String) pair).

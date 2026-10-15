@@ -11,10 +11,10 @@ import (
 
 var setDescriptionTool = map[string]any{
 	"name":        "set_description",
-	"description": "Say in a few words what you are working on, so the user and Pixie can tell this session apart. Call it when your task changes.",
+	"description": "Say in 3 to 8 words what this session is working on, naming the project and the task, so the user and Pixie can tell it apart from their other sessions. Call it when you start a task and whenever your task changes.",
 	"inputSchema": map[string]any{
 		"type":       "object",
-		"properties": map[string]any{"text": map[string]any{"type": "string", "description": "A few words, e.g. \"fixing login redirect loop\"."}},
+		"properties": map[string]any{"text": map[string]any{"type": "string", "description": "3 to 8 words, e.g. \"deskpixie: fix login redirect loop\"."}},
 		"required":   []string{"text"},
 	},
 }

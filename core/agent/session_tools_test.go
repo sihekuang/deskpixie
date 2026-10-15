@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sihekuang/deskpixie/core/agent"
 	"github.com/sihekuang/deskpixie/core/agent/agenttest"
@@ -20,8 +21,10 @@ func (u *userFake) List(ctx context.Context) ([]agent.AgentInfo, error) {
 	l, err := u.FakeSessionHost.List(ctx)
 	for i := range l {
 		l[i].Origin = agent.OriginUser
+		l[i].Cwd = "/x/focus"
 		l[i].User = &agent.UserSession{Tool: "claude", Repo: "focus", Where: "WebStorm", Description: "login bug",
-			PastDescriptions: []string{"auth"}, Reachable: true}
+			PastDescriptions: []string{"auth"}, Reachable: true,
+			Started: time.Now().Add(-90 * time.Minute), LastActive: time.Now().Add(-3 * time.Minute)}
 	}
 	return l, err
 }
@@ -42,7 +45,8 @@ func TestListSessionsShowsOnlyYours(t *testing.T) {
 	r := agent.SessionToolForTest(context.Background(), c, agent.McpCall{Kind: agent.CallListSessions})
 	rows, _ := r.Value.(map[string]any)["sessions"].([]agent.SessionRow)
 	if r.Err != nil || len(rows) != 1 || rows[0].Name != "focus-claude" || rows[0].Description != "login bug" ||
-		rows[0].Where != "WebStorm" || rows[0].PastDescriptions[0] != "auth" || rows[0].Status != "idle" {
+		rows[0].Where != "WebStorm" || rows[0].PastDescriptions[0] != "auth" || rows[0].Status != "idle" ||
+		rows[0].Cwd != "/x/focus" || rows[0].Started != "1h30m ago" || rows[0].LastActive != "3m ago" {
 		t.Fatalf("%+v %v", rows, r.Err)
 	}
 }
