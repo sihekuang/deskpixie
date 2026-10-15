@@ -259,7 +259,8 @@ Findings (2026-10-15, Claude Code 2.1.300, Codex 0.162.1):
   the work: not used.
 - **Codex** accepts pix's `-c` overrides (`mcp_servers.pixie.*`, `developer_instructions`,
   `notify`; checked with `codex mcp list`). Codex status: working from the busy marker on
-  screen, idle from `notify` at each turn's end. **Not yet run live.**
+  screen, idle from `notify` at each turn's end. Run live (`TestLivePixWrapsCodex`): registers,
+  a prompt typed through the gate starts a turn, `notify` reports idle, close ends it.
 - Not checked here: JetBrains' terminal variables (`TERMINAL_EMULATOR=JetBrains-JediTerm`,
   `__CFBundleIdentifier`), whether the JetBrains Claude Code plugin's command is configurable,
   and `permissions.ask` beating `allow: mcp__pixie` for `close_session` (Claude's documented

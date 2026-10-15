@@ -2,7 +2,7 @@
 
 package pixhost_test
 
-// Opt-in live smoke (#89): the real pix binary wrapping the installed Claude Code, driven
+// Opt-in live smokes (#89): the real pix binary wrapping the installed Claude Code and Codex, driven
 // through the real wrapper host. Run with:
 //
 //	go test -tags live -run Live -v -timeout 10m ./pixhost/
@@ -13,6 +13,7 @@ package pixhost_test
 
 import (
 	"context"
+	"fmt"
 	"github.com/creack/pty"
 	"io"
 	"os"
@@ -185,4 +186,80 @@ func TestLivePixWrapsClaude(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("pix still running after close")
 	}
+}
+
+func TestLivePixWrapsCodex(t *testing.T) {
+	if _, err := exec.LookPath("codex"); err != nil {
+		t.Skip("codex not installed")
+	}
+	root, err := os.MkdirTemp("/tmp", "pixcodex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, _ = filepath.EvalSymlinks(root)
+	t.Cleanup(func() { os.RemoveAll(root) })
+	bin, work := filepath.Join(root, "bin"), filepath.Join(root, "work")
+	os.MkdirAll(bin, 0o755)
+	os.MkdirAll(work, 0o755)
+	if out, err := exec.Command("go", "build", "-o", filepath.Join(bin, "pix"), "../cmd/pix").CombinedOutput(); err != nil {
+		t.Fatalf("build pix: %v\n%s", err, out)
+	}
+	sock := filepath.Join(root, "pix.sock")
+	host := pixhost.New(sock, func() []string { return nil })
+	if err := host.Listen(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(host.Shutdown)
+	events := host.Subscribe()
+	screen, _ := os.Create(filepath.Join(root, "screen.log"))
+	ptmx, tty, err := pty.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ptmx.Close()
+	pty.Setsize(ptmx, &pty.Winsize{Rows: 40, Cols: 120})
+	go io.Copy(screen, ptmx)
+	args := []string{"codex", "-c", fmt.Sprintf("projects.%q.trust_level=\"trusted\"", work)}
+	if m := os.Getenv("SMOKE_CODEX_MODEL"); m != "" {
+		args = append(args, "-m", m)
+	}
+	cmd := exec.Command(filepath.Join(bin, "pix"), args...)
+	cmd.Dir = work
+	cmd.Env = liveEnv("PATH="+bin+":"+os.Getenv("PATH"), "DESKPIXIE_PIX_SOCK="+sock)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = tty, tty, tty
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	tty.Close()
+	t.Cleanup(func() {
+		cmd.Process.Signal(syscall.SIGKILL)
+		if t.Failed() {
+			b, _ := os.ReadFile(screen.Name())
+			if len(b) > 3000 {
+				b = b[len(b)-3000:]
+			}
+			t.Logf("pix screen (tail):\n%q", b)
+		}
+	})
+	var addr string
+	for deadline := time.Now().Add(30 * time.Second); addr == "" && time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
+		if l, _ := host.List(context.Background()); len(l) == 1 {
+			addr = l[0].Name
+		}
+	}
+	if addr == "" {
+		t.Fatal("pix did not register")
+	}
+	t.Logf("✓ registered as %s", addr)
+	time.Sleep(8 * time.Second) // Codex's TUI comes up
+	ctx := context.Background()
+	if err := host.Prompt(ctx, addr, "Reply with the single word PONG and nothing else."); err != nil {
+		t.Fatal(err)
+	}
+	waitEvent(t, events, addr, "typed prompt → working (busy marker)", 90*time.Second, func(ev agent.PaneEvent) bool { return ev.Status == agent.PaneWorking })
+	waitEvent(t, events, addr, "turn end → idle (notify)", 180*time.Second, func(ev agent.PaneEvent) bool { return ev.Status == agent.PaneIdle })
+	if err := host.Close(ctx, addr); err != nil {
+		t.Fatal(err)
+	}
+	waitEvent(t, events, addr, "close → exited", 15*time.Second, func(ev agent.PaneEvent) bool { return ev.Kind == agent.PaneEventExited })
 }
