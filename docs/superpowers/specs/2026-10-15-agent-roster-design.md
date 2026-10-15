@@ -87,7 +87,7 @@ clickable).
 - **`agent.Roster`** (new, `core/agent/roster.go`): a pure builder.
   `BuildRoster(list []AgentInfo, workers []WorkerRow, hostName string) RosterView` turns the
   combined host list into rows and counts, using the jobs' worker rows to tell workers from
-  other panes. `RosterView{Agents []RosterRow; Yours []RosterRow; AgentCount, YourCount int}`;
+  other panes. `RosterView{Agents []RosterRow; Yours []RosterRow; AgentCount /* excludes the coordinator */, YourCount int}`;
   `RosterRow{Name, Label, Detail, Status string; Kind string /* coordinator|worker|pane|session */;
   Reachable bool; App string /* bundle id, sessions only */}`. JSON field names in snake_case.
 - **Runtime wiring** (`core/agent/runtime.go`): the runtime already consumes the merged
