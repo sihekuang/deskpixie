@@ -3,6 +3,7 @@ package agent_test
 import (
 	"context"
 	"reflect"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -80,13 +81,39 @@ func (p *pixFake) connect(t *testing.T, name string) {
 	}
 }
 
+// passivePrimary is a primary that lists passively and counts the calls that would start it
+// (a non-passive List, EnsureSession).
+type passivePrimary struct {
+	*primaryFake
+	starting atomic.Int32
+}
+
+func (p *passivePrimary) List(ctx context.Context) ([]AgentInfo, error) {
+	p.starting.Add(1)
+	return p.primaryFake.List(ctx)
+}
+
+func (p *passivePrimary) EnsureSession(ctx context.Context) error {
+	p.starting.Add(1)
+	return p.primaryFake.EnsureSession(ctx)
+}
+
+func (p *passivePrimary) ListRunning(ctx context.Context) ([]AgentInfo, error) {
+	return p.FakeSessionHost.List(ctx)
+}
+
 func newRosterRig(t *testing.T, warm bool) *rosterRig {
+	return newRosterRigWith(t, warm, func(p *primaryFake) SessionHost { return p })
+}
+
+// newRosterRigWith is the rig with the primary wrapped by wrap.
+func newRosterRigWith(t *testing.T, warm bool, wrap func(*primaryFake) SessionHost) *rosterRig {
 	host := agenttest.NewFakeSessionHost().ManualTurns()
 	user := &pixFake{agenttest.NewFakeSessionHost(), make(chan struct{}, 1), t.Context()}
 	r := &rosterRig{host: host, user: user, roster: &agenttest.RecordingRoster{}, launcher: &agenttest.FakeLauncher{}}
 	clock := agenttest.ClockAt(1_000_000)
 	deps := Deps{
-		Host:  NewAgentHost(NewCompositeHost(&primaryFake{host, t.Context()}, user), clock, CoordinatorRecipe{Cwd: "/data/agent/workspace"}),
+		Host:  NewAgentHost(NewCompositeHost(wrap(&primaryFake{host, t.Context()}), user), clock, CoordinatorRecipe{Cwd: "/data/agent/workspace"}),
 		Voice: &agenttest.RecordingVoiceLink{}, Notifier: &agenttest.RecordingNotifier{}, Pixie: &agenttest.RecordingNotifier{},
 		Status: &agenttest.RecordingStatus{}, Launcher: r.launcher, TerminalDir: "/home/me/Projects",
 		Store: &agenttest.MemStore{}, Clock: clock, IDs: &agenttest.SeqIds{}, Updates: &agenttest.RecordingUpdates{},
@@ -223,6 +250,55 @@ func TestAWorkerStartingAndStoppingShowsInTheRoster(t *testing.T) {
 		time.Sleep(WorkerStopGrace + time.Second)
 		if v := lastRoster(t, r.roster); v.AgentCount != 0 {
 			t.Fatalf("the stopped worker is gone: %+v", v)
+		}
+	})
+}
+
+func TestTheRosterNeverStartsThePrimary(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var p *passivePrimary
+		r := newRosterRigWith(t, false, func(f *primaryFake) SessionHost {
+			p = &passivePrimary{primaryFake: f}
+			return p
+		})
+		time.Sleep(time.Second)
+		r.user.connect(t, "api-claude")
+		time.Sleep(RosterBackstop + time.Second)
+		if v := lastRoster(t, r.roster); v.YourCount != 1 {
+			t.Fatalf("%+v", v)
+		}
+		if n := p.starting.Load(); n != 0 {
+			t.Fatalf("the roster rebuilds listed or ensured the primary %d times", n)
+		}
+	})
+}
+
+func TestAFailingPrimaryStillShowsYourSessions(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRosterRig(t, true)
+		time.Sleep(time.Second)
+		r.host.FailList(true)
+		r.user.connect(t, "api-claude")
+		time.Sleep(time.Second)
+		v := lastRoster(t, r.roster)
+		if v.YourCount != 1 || len(v.Yours) != 1 {
+			t.Fatalf("your session shows: %+v", v)
+		}
+		if len(v.Agents) != 1 || v.Agents[0].Kind != "coordinator" {
+			t.Fatalf("Pixie's agents are kept: %+v", v)
+		}
+	})
+}
+
+func TestAPrimaryThatNeverListedStillShowsYourSessions(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRosterRig(t, false)
+		r.host.FailList(true)
+		r.user.connect(t, "api-claude")
+		time.Sleep(time.Second)
+		v := lastRoster(t, r.roster)
+		if v.YourCount != 1 || len(v.Agents) != 0 || v.Agents == nil {
+			t.Fatalf("%+v", v)
 		}
 	})
 }

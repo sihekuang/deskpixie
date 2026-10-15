@@ -84,6 +84,48 @@ func (c *CompositeHost) List(ctx context.Context) ([]AgentInfo, error) {
 	return out, nil
 }
 
+// PassiveLister is a host that can list its agents without starting anything: ListRunning is
+// the agents if the host is already running; a host that isn't running lists none.
+type PassiveLister interface {
+	ListRunning(ctx context.Context) ([]AgentInfo, error)
+}
+
+// ListRunning lists h passively when it can (PassiveLister), else with its List.
+func ListRunning(ctx context.Context, h SessionHost) ([]AgentInfo, error) {
+	if p, ok := h.(PassiveLister); ok {
+		return p.ListRunning(ctx)
+	}
+	return h.List(ctx)
+}
+
+// ListParts is a passive list split by host, each part with its own error.
+type ListParts struct {
+	Primary, Secondary       []AgentInfo
+	PrimaryErr, SecondaryErr error
+}
+
+// ListRunningParts lists the primary passively (it is never started) and the secondary, each
+// part on its own: one failing never hides the other.
+func (c *CompositeHost) ListRunningParts(ctx context.Context) ListParts {
+	var p ListParts
+	p.Primary, p.PrimaryErr = ListRunning(ctx, c.primary)
+	p.Secondary, p.SecondaryErr = c.secondary.List(ctx)
+	return p
+}
+
+// ListRunning is List without starting the primary.
+func (c *CompositeHost) ListRunning(ctx context.Context) ([]AgentInfo, error) {
+	p := c.ListRunningParts(ctx)
+	if p.PrimaryErr != nil {
+		return nil, p.PrimaryErr
+	}
+	out := p.Primary
+	if p.SecondaryErr == nil {
+		out = append(out, p.Secondary...)
+	}
+	return out, nil
+}
+
 // Subscribe merges both hosts' events.
 func (c *CompositeHost) Subscribe() <-chan PaneEvent {
 	out := make(chan PaneEvent, 64)

@@ -987,6 +987,22 @@ func (h *Host) List(ctx context.Context) ([]agent.AgentInfo, error) {
 	if err != nil {
 		return nil, err
 	}
+	return h.listWith(ctx, client)
+}
+
+var _ agent.PassiveLister = (*Host)(nil)
+
+// ListRunning is List only if the session's server is already running: never starts one (no
+// server lists none).
+func (h *Host) ListRunning(ctx context.Context) ([]agent.AgentInfo, error) {
+	client, err := h.runningClient(ctx)
+	if err != nil || client == nil {
+		return nil, err
+	}
+	return h.listWith(ctx, client)
+}
+
+func (h *Host) listWith(ctx context.Context, client *Client) ([]agent.AgentInfo, error) {
 	list, err := client.Agents(ctx)
 	if err != nil {
 		return nil, err

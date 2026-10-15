@@ -191,6 +191,7 @@ type AgentHandle struct {
 	rosterMu   sync.Mutex
 	rosterLast RosterView
 	rosterSent bool
+	rosterErr  string // the last roster list error logged ("" = none)
 }
 
 // NewRuntime builds the runtime without workers (start_worker is refused).
@@ -582,6 +583,9 @@ func (h *AgentHandle) runRoster() {
 	}
 }
 
+// rebuildRoster lists the hosts passively (never starting Herdr or tmux): when Pixie's host
+// can't be listed, its part of the last roster is kept and your sessions still refresh (and
+// the other way round).
 func (h *AgentHandle) rebuildRoster() {
 	if h.quitting() {
 		return
@@ -589,15 +593,32 @@ func (h *AgentHandle) rebuildRoster() {
 	ctx, cancel := context.WithTimeout(h.ctx, 5*time.Second)
 	defer cancel()
 	session := h.deps.Host.Session()
-	list, err := session.List(ctx)
-	if err != nil {
-		log.Printf("agent: roster: %v", err)
+	var parts ListParts
+	if c, ok := session.(*CompositeHost); ok {
+		parts = c.ListRunningParts(ctx)
+	} else {
+		parts.Primary, parts.PrimaryErr = ListRunning(ctx, session)
+	}
+	h.logRosterErr(parts.PrimaryErr)
+	if parts.PrimaryErr != nil && parts.SecondaryErr != nil {
 		return
 	}
 	h.ctlMu.Lock()
 	workers := h.ctl.WorkerRows()
 	h.ctlMu.Unlock()
-	v := BuildRoster(list, workers, session.Name())
+	h.rosterMu.Lock()
+	last := h.rosterLast
+	if !h.rosterSent {
+		last = EmptyRoster()
+	}
+	h.rosterMu.Unlock()
+	v := BuildRoster(append(parts.Primary, parts.Secondary...), workers, session.Name())
+	if parts.PrimaryErr != nil {
+		v.Agents, v.AgentCount = last.Agents, last.AgentCount
+	}
+	if parts.SecondaryErr != nil {
+		v.Yours, v.YourCount = last.Yours, last.YourCount
+	}
 	h.rosterMu.Lock()
 	if h.rosterSent && reflect.DeepEqual(v, h.rosterLast) {
 		h.rosterMu.Unlock()
@@ -606,6 +627,21 @@ func (h *AgentHandle) rebuildRoster() {
 	h.rosterLast, h.rosterSent = v, true
 	h.rosterMu.Unlock()
 	h.deps.Roster.Roster(v)
+}
+
+// logRosterErr logs a failing roster list once per change of its text, not every backstop.
+func (h *AgentHandle) logRosterErr(err error) {
+	text := ""
+	if err != nil {
+		text = err.Error()
+	}
+	h.rosterMu.Lock()
+	changed := text != h.rosterErr
+	h.rosterErr = text
+	h.rosterMu.Unlock()
+	if changed && err != nil {
+		log.Printf("agent: roster: %v", err)
+	}
 }
 
 // Voice forwards the voice loop's signals.

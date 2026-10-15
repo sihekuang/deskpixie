@@ -30,8 +30,8 @@ import (
 	"time"
 
 	"github.com/creack/pty"
-	agentfs "github.com/sihekuang/deskpixie/core/agent/fs"
 	"github.com/sihekuang/deskpixie/core/agent"
+	agentfs "github.com/sihekuang/deskpixie/core/agent/fs"
 	"github.com/sihekuang/deskpixie/core/app"
 	"github.com/sihekuang/deskpixie/core/app/agentapp"
 	"github.com/sihekuang/deskpixie/core/herdr/smoketest"
