@@ -417,12 +417,15 @@ func TestACodexWorkerAnswersTrustOnlyInsideTheProjectsRoot(t *testing.T) {
 	inside := filepath.Join(root, "repo")
 	mustMkdir(t, inside)
 	outside := t.TempDir()
+	sibling := filepath.Join(root+"2", "x") // shares the root's name as a prefix, but is not inside it
+	mustMkdir(t, sibling)
+	t.Cleanup(func() { os.RemoveAll(root + "2") })
 	d := tempDir(t)
 	r := NewFileWorkerRecipes(filepath.Join(d, "mcp"), filepath.Join(d, "w.json"), 1, "", &recordingTrust{}, root)
 	for _, c := range []struct {
 		repo   string
 		answer bool
-	}{{inside, true}, {outside, false}, {root, false}, {root + "2", false}} {
+	}{{inside, true}, {outside, false}, {root, false}, {sibling, false}} {
 		p, err := r.Prepare(agent.WorkerLaunch{Name: "w", Kind: agent.Codex, Repo: c.repo, Worktree: c.repo})
 		if err != nil {
 			t.Fatal(err)
