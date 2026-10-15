@@ -288,3 +288,12 @@ func TestRefusedAfterRegisteringStopsReconnecting(t *testing.T) {
 		t.Fatal("still reconnecting after a refusal")
 	}
 }
+
+func TestScreenMarkerFoundWhenCursorMovesReplaceSpaces(t *testing.T) {
+	// Captured from Claude Code 2.1.300 in a real terminal.
+	var w screenWatch
+	chunk := "\x1b[38;2;153;153;153m  ⎿  Interrupted · What\x1b[25Gshould Claude\x1b[39Gdo instead?\r\x1b[3B\x1b[39m❯"
+	if !w.saw(chunk, claudeInterrupted) {
+		t.Fatal("marker with cursor moves for spaces")
+	}
+}
