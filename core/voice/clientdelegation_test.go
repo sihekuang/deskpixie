@@ -279,3 +279,24 @@ func TestClientModeClaimedAnswerIsHandedOffAsAnAnswer(t *testing.T) {
 		t.Fatalf("%+v", n)
 	}
 }
+
+// A pause splits one request into two transcribed turns, or a piece comes while Bit talks: the
+// task is all of the user's words since Bit last spoke (bench: "The login tests were flaky" |
+// "yesterday").
+func TestClientDelegationJoinsASplitUtterance(t *testing.T) {
+	c := newClientConv()
+	reply(c, "Hi!", ms(t0(), 50))
+	userTurn(c, "The login tests were flaky", ms(t0(), 100))
+	userTurn(c, "yesterday", ms(t0(), 1200))
+	if _, a := clientCall(c, "item_1", ms(t0(), 1300)); a.Task != "The login tests were flaky yesterday" ||
+		a.Context != "Earlier in this voice conversation:\nBit: Hi!" {
+		t.Fatalf("%+v", a)
+	}
+	c2 := newClientConv()
+	model(c2, evSpeechStarted, ms(t0(), 100))
+	model(c2, said("user", "I'm working on the desk pixie repo"), ms(t0(), 200))
+	model(c2, said("user", "today"), ms(t0(), 900))
+	if _, a := clientCall(c2, "item_1", ms(t0(), 1000)); a.Task != "I'm working on the desk pixie repo today" {
+		t.Fatalf("%+v", a)
+	}
+}

@@ -551,6 +551,11 @@ func (c *Conversation) onModel(ev Event, now time.Time, fx []Effect) []Effect {
 		if ev.Role == "user" {
 			fx = append(fx, Effect{Kind: EfSignal, Signal: VoiceSignal{Kind: SigUserSaid, Text: ev.Text}})
 			if t := strings.TrimSpace(ev.Text); t != "" {
+				if c.clientDelegation && c.hoUser != "" && len(c.hoBot) == 0 {
+					// GPT-Live's transcript of one utterance can come in pieces (a pause, or
+					// words said while Bit talked): keep them all for the task (#70).
+					t = c.hoUser + " " + t
+				}
 				c.hoUser = t
 			}
 		} else if t := strings.TrimSpace(ev.Text); t != "" {
@@ -812,13 +817,30 @@ func (c *Conversation) handOffContext() string {
 // whether they answer a relayed "Agent question:". Without words this turn it falls back to
 // the user's last earlier line.
 func (c *Conversation) clientDelegationArgs() json.RawMessage {
+	// The user's words since Bit last spoke: a pause can split one request into turns.
 	said := c.hoUser
-	for i := len(c.hoHistory) - 1; said == "" && i >= 0; i-- {
-		if rest, ok := strings.CutPrefix(c.hoHistory[i], "User: "); ok {
-			said = rest
+	history := c.hoHistory
+	for len(history) > 0 {
+		rest, ok := strings.CutPrefix(history[len(history)-1], "User: ")
+		if !ok {
+			break
+		}
+		said = strings.TrimSpace(rest + " " + said)
+		history = history[:len(history)-1]
+	}
+	if said == "" {
+		for i := len(history) - 1; i >= 0; i-- {
+			if rest, ok := strings.CutPrefix(history[i], "User: "); ok {
+				said = rest
+				break
+			}
 		}
 	}
-	a := ClientDelegationArgs{Task: said, Context: c.handOffContext(), Answer: c.answerTurn}
+	ctx := ""
+	if len(history) > 0 {
+		ctx = "Earlier in this voice conversation:\n" + strings.Join(history, "\n")
+	}
+	a := ClientDelegationArgs{Task: said, Context: ctx, Answer: c.answerTurn}
 	if !a.Answer && IsQuestion(said) {
 		a.Task = CheckPrefix + said
 	}
