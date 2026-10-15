@@ -334,6 +334,7 @@ func Build(c Config) *Agent {
 		IDs:         c.IDs,
 		Kept:        KeptFile(paths.Kept()),
 		Updates:     updatesSink{c.Hooks},
+		Panes:       paneSink{c.Hooks},
 		Roster:      rosterSink{c.Hooks},
 		Modes:       a,
 	}

@@ -120,6 +120,12 @@ type UpdatesSink interface {
 	Updates(items []UpdateItem)
 }
 
+// PaneSink brings up an agent's pane for the user (#110): worker "" is the coordinator. The shell
+// waits until the user stops typing, then focuses it as a click would (agent.focusJob).
+type PaneSink interface {
+	ShowPane(job JobID, worker string)
+}
+
 // StatusSink is the tray's one-line agent status, e.g. "Coordinator: herdr not found"; "" clears it.
 type StatusSink interface {
 	SetStatus(line string)

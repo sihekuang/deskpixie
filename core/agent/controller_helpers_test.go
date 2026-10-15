@@ -96,6 +96,7 @@ func fmtEffect(e Effect) string {
 // Effect builders for assertions.
 func eInject(text string) Effect              { return Effect{Kind: EfInject, Notice: Notice{Text: text}} }
 func eNotify(text string) Effect              { return Effect{Kind: EfNotify, Text: text} }
+func eShowPane(j JobID, name string) Effect   { return Effect{Kind: EfShowPane, Job: j, Name: name} }
 func ePrompt(text string) Effect              { return Effect{Kind: EfPrompt, Text: text} }
 func eHold(on bool) Effect                    { return Effect{Kind: EfHoldOpen, Hold: on} }
 func eStatus(line string) Effect              { return Effect{Kind: EfStatus, Text: line} }

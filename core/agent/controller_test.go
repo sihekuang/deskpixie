@@ -356,7 +356,7 @@ func TestABlockedCoordinatorWithoutAPendingPermissionGetsTheTerminalHint(t *test
 	c.Step(coordStatus(PaneBlocked), T0)
 	wantNone(t, visible(c.Step(TickInput(), T0+2_999)))
 	fx := visible(c.Step(TickInput(), T0+3_000))
-	wantEffects(t, fx, eStatus("Coordinator: waiting in terminal"), eChime, eNotify(BlockedHint))
+	wantEffects(t, fx, eStatus("Coordinator: waiting in terminal"), eChime, eNotify(BlockedHint), eShowPane("", ""))
 	wantNone(t, visible(c.Step(TickInput(), T0+9_000)), "hinted once")
 	fx = visible(c.Step(coordStatus(PaneWorking), T0+9_500))
 	wantEffects(t, fx, eStatus(""))

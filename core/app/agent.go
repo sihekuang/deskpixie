@@ -33,6 +33,8 @@ type AgentHooks struct {
 	Updates func(items any)
 	// Roster is the roster beside Pixie (the `agents` event's roster), on every change (#91).
 	Roster func(view any)
+	// ShowPane asks the shell to bring up an agent's pane (the `showPane` event, #110).
+	ShowPane func(job, worker string)
 	// LocalTools are Pixie's local tools (NewLocalTools), the very instances the voice loop
 	// holds: the agent serves them to the coordinator over MCP. Never to workers.
 	LocalTools []tools.Tool

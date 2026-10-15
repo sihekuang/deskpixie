@@ -87,6 +87,8 @@ type Deps struct {
 	Updates UpdatesSink
 	// Roster gets the roster beside Pixie on every change (nil: no roster is kept).
 	Roster RosterSink
+	// Panes brings up an agent's pane waiting at a prompt in its terminal (nil: ignored).
+	Panes PaneSink
 }
 
 // WorkerDeps are the worker adapters (spec §5.5), injected only when agent.workers.enabled.
@@ -1446,6 +1448,10 @@ func (h *AgentHandle) apply(e Effect) {
 		d.Store.Rewrite(e.File, e.Lines)
 	case EfStatus:
 		d.Status.SetStatus(e.Text)
+	case EfShowPane:
+		if d.Panes != nil {
+			d.Panes.ShowPane(e.Job, e.Name)
+		}
 	case EfManual:
 		if d.Modes != nil {
 			d.Modes.ManualMode(e.Agent, e.Manual)

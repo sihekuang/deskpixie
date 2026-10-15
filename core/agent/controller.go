@@ -19,7 +19,7 @@ import (
 // terminal hint.
 const BlockedGraceMs Millis = 3_000
 
-const BlockedHint = "The coordinator is waiting at a prompt in its terminal; click me to open it."
+const BlockedHint = "The coordinator is waiting at a prompt in its terminal; I'm bringing it up for you."
 
 // unreadableDenial is what the agent is told when a request cannot be read aloud plainly
 // enough to approve by voice.
@@ -275,6 +275,7 @@ const (
 	EfOpenConversation // start a conversation if the voice loop is at rest (else answered with InOpenRefused)
 	EfUpdates          // Value: []UpdateItem: the updates bubble's list (sent when it changes)
 	EfManual           // Agent, Manual: a Claude agent is (or no longer is) in Manual mode
+	EfShowPane         // Job, Name: bring up this agent's pane (Name "": the coordinator) — it waits at a prompt in its terminal (#110)
 )
 
 // Effect is one thing the caller must do, in order. Err set (non-empty) is the Err branch of
@@ -1400,6 +1401,8 @@ func (c *AgentController) tick(now Millis, fx *[]Effect) {
 		c.hinted = true
 		c.setStatus("Coordinator: waiting in terminal", fx)
 		c.deliver(NewLine(LineInfo, BlockedHint), now, fx)
+		// No job: FocusTarget would pick the job's worker; this is the coordinator's own pane.
+		*fx = append(*fx, Effect{Kind: EfShowPane})
 	}
 }
 

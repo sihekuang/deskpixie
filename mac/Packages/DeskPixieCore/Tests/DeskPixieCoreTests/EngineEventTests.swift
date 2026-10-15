@@ -58,6 +58,17 @@ final class EngineEventTests: XCTestCase {
         XCTAssertNil(d(#"{"kind":"pack","sheetPath":"/x"}"#))
     }
 
+    func testShowPaneEventDecodes() {
+        guard case .showPane(let r)? = d(#"{"kind":"showPane","job":"job_1","worker":"focus-fix"}"#) else {
+            return XCTFail("not decoded")
+        }
+        XCTAssertEqual(r, PaneRequest(job: "job_1", worker: "focus-fix"))
+        guard case .showPane(let c)? = d(#"{"kind":"showPane","job":"","worker":""}"#) else {
+            return XCTFail("coordinator not decoded")
+        }
+        XCTAssertEqual(c, PaneRequest(job: "", worker: ""))
+    }
+
     func testUpdatesEventDecodes() {
         let json = #"{"kind":"updates","lines":[{"id":3,"text":"Done.","kind":"reply","at":1700000000000,"job":"job_000000000001"},{"id":4,"text":"hi","kind":"info","at":1700000000001}]}"#
         guard case .updates(let lines)? = EngineEvent.decode(Data(json.utf8)) else { return XCTFail() }

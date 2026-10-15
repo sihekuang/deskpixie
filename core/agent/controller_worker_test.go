@@ -477,7 +477,9 @@ func TestABlockedCodexWorkerGetsTheApprovalHint(t *testing.T) {
 		t.Fatalf("%v", r)
 	}
 	fx := c.Step(TickInput(), T0+WorkerBlockedGraceMs)
-	wantContains(t, fx, eNotify("The Codex worker in focus is waiting for approval in its terminal; click me to open it."))
+	wantContains(t, fx, eNotify("The Codex worker in focus is waiting for approval in its terminal; I'm bringing it up for you."))
+	wantContains(t, fx, eShowPane(p.Job, p.Name))
+	wantNotContains(t, c.Step(TickInput(), T0+WorkerBlockedGraceMs+5_000), eShowPane(p.Job, p.Name))
 }
 
 func TestProgressIsRecordedAndNarratedOnlyWhileOpen(t *testing.T) {

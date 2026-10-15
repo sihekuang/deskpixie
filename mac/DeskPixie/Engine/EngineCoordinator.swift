@@ -418,6 +418,8 @@ final class EngineCoordinator {
             bubble?.apply(lines: lines)
         case .agents(let view):
             roster?.apply(view: view)
+        case .showPane(let r):
+            bubble?.showPane(r)
         }
     }
 

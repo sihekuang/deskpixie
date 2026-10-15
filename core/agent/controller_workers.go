@@ -460,13 +460,14 @@ func (c *AgentController) tickWorkers(now Millis, fx *[]Effect) {
 		if w == nil {
 			continue
 		}
-		text := fmt.Sprintf("A worker in %s is waiting at a prompt in its terminal; click me to open it.", w.Plan.RepoName)
+		text := fmt.Sprintf("A worker in %s is waiting at a prompt in its terminal; I'm bringing it up for you.", w.Plan.RepoName)
 		if w.Plan.Kind == Codex {
-			text = fmt.Sprintf("The Codex worker in %s is waiting for approval in its terminal; click me to open it.", w.Plan.RepoName)
+			text = fmt.Sprintf("The Codex worker in %s is waiting for approval in its terminal; I'm bringing it up for you.", w.Plan.RepoName)
 		}
 		l := NewJobLine(LineInfo, text, w.Plan.Job)
 		l.Worker = name
 		c.deliver(l, now, fx)
+		*fx = append(*fx, Effect{Kind: EfShowPane, Job: w.Plan.Job, Name: name})
 	}
 }
 

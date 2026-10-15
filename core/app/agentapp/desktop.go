@@ -74,6 +74,15 @@ func (u updatesSink) Updates(items []agent.UpdateItem) {
 	}
 }
 
+// paneSink: an agent waiting at a prompt in its terminal → the app's `showPane` event.
+type paneSink struct{ hooks app.AgentHooks }
+
+func (p paneSink) ShowPane(job agent.JobID, worker string) {
+	if p.hooks.ShowPane != nil {
+		p.hooks.ShowPane(string(job), worker)
+	}
+}
+
 type rosterSink struct{ hooks app.AgentHooks }
 
 func (r rosterSink) Roster(v agent.RosterView) {

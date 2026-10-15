@@ -231,6 +231,7 @@ func New(d Deps) (*App, error) {
 			Notify:     func(title, body string) { a.emit("notify", map[string]any{"title": title, "body": body}) },
 			Updates:    func(items any) { a.emit("updates", map[string]any{"lines": items}) },
 			Roster:     func(view any) { a.emit("agents", map[string]any{"roster": view}) },
+			ShowPane:   func(job, worker string) { a.emit("showPane", map[string]any{"job": job, "worker": worker}) },
 		})
 	}
 	a.buildVoice(cfg)

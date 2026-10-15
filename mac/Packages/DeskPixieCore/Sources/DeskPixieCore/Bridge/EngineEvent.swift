@@ -82,6 +82,8 @@ public enum EngineEvent: Sendable, Equatable {
     case updates([UpdateLine])
     /// The roster beside Pixie (#91): Pixie's agents and your pix sessions, with counts.
     case agents(RosterView)
+    /// Bring up the pane of an agent waiting at a prompt in its terminal (#110).
+    case showPane(PaneRequest)
 
     private struct Kind: Decodable { var kind: String }
 
@@ -129,6 +131,7 @@ public enum EngineEvent: Sendable, Equatable {
         case "canvas.open": return get(CanvasOpen.self).map { .canvasOpen(url: $0.url, title: $0.title) }
         case "updates": return get(Updates.self).map { .updates($0.lines) }
         case "agents": return get(Agents.self).map { .agents($0.roster) }
+        case "showPane": return get(PaneRequest.self).map { .showPane($0) }
         default: return nil
         }
     }
