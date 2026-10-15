@@ -324,3 +324,15 @@ func TestClientDelegationJoinsASplitUtterance(t *testing.T) {
 		t.Fatalf("%+v", a)
 	}
 }
+
+// #95: GPT-Live says the usual acknowledgement without delegating; the claim check hands the
+// request off.
+func TestClientModeOnItWithoutAHandOffIsHandedOff(t *testing.T) {
+	c := newClientConv()
+	userTurn(c, "I want you to build a Next.js application", ms(t0(), 1000))
+	reply(c, "Sure, I'm on it. I'll let you know when it's done.", ms(t0(), 2500))
+	h := handOffs(ticks(c, ms(t0(), 2500), 3*time.Second))
+	if len(h) != 1 || h[0].Text != "I want you to build a Next.js application" {
+		t.Fatalf("%+v", h)
+	}
+}

@@ -51,6 +51,8 @@ type claimSpec struct {
 	backed []string // a call to any of these backs the claim; nil = any tool
 	check  bool
 	groups []claimGroup
+	// phrases claim it when a sentence opens with one, after any lead-ins.
+	phrases []string
 }
 
 const claimWindow = 5
@@ -63,6 +65,14 @@ var claimSpecs = []claimSpec{
 		{verbs: words("start started starting kick kicked kicking open opened opening create created creating queue queued queuing"),
 			objects: words("job")},
 		{verbs: words("delegate delegated delegating")},
+	}},
+	// The acknowledgement Pixie says after delegating ("On it, I'll let you know when it's
+	// done", #95). A timer or any other tool called in the turn backs it.
+	{tool: DelegateTool, phrases: []string{
+		"on it", "im on it", "im on that", "ill get on it", "ill get on that", "ill get right on it",
+		"ill get right on that", "ill get back to you", "ill let you know when its done",
+		"ill let you know once its done", "ill let you know when its ready", "ill let you know once its ready",
+		"ill let you know when its finished", "ill let you know when thats done",
 	}},
 	{tool: DelegateTool, check: true, groups: []claimGroup{
 		{verbs: words("check checking look looking find"), next: words("that it this now for real quickly into up out")},
@@ -182,6 +192,13 @@ func claimSentences(said string) []string {
 }
 
 func (s claimSpec) matches(toks []string) bool {
+	if len(s.phrases) > 0 {
+		k := 0
+		for k < len(toks) && inSet(toks[k], claimLeadIns) {
+			k++
+		}
+		return hasPrefixPhrase(strings.Join(toks[k:], " "), s.phrases)
+	}
 	for i := range toks {
 		if !verbPosition(toks, i) {
 			continue
