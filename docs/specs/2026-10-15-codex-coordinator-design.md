@@ -76,6 +76,15 @@ Other
   per-pane token), so the coordinator runs with `--no-daemon`.
 - curl 8.7 (macOS) has `--variable %ENV` / `--expand-header`, so the bearer is read by curl from
   the environment and never appears on a command line (`ps`).
+- Herdr 0.9 types an agent's command line into the new tab's shell and refuses a line over
+  1024 bytes while the terminal is still in canonical mode (before the shell's prompt):
+  `agent_start_input_failed: input contains a 1782-byte line but the terminal is in canonical
+  mode …; wait for the shell prompt and retry`. The Codex coordinator's line (hooks + trust) is
+  ~1.8 KB, so the Herdr host retries that error like `agent_pane_busy` (within
+  `PaneBusyLimit`); once the shell's line editor is up it takes the line. tmux runs the
+  command directly (no limit). Found by the Herdr live smoke.
+- Codex lists MCP tools to the model as a namespace (`{"name":"mcp__pixie","tools":[…]}`); a
+  call is a `function_call` with `namespace: "mcp__pixie"`, `name: "start_worker"`.
 - Codex models offered (its model list): gpt-6.1-sol, gpt-6-astra, gpt-6-sol, gpt-6-luna,
   gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna.
 
@@ -182,11 +191,13 @@ kind's last conversation in the workspace, if any).
 - A refusal screen (§3) becomes `Coordinator: <reason>` (fixed texts, no screen text).
 - Codex not installed: herdr/tmux report the agent exiting at start → "codex did not start".
 
-## 10. Workers' turn end (bonus)
+## 10. Workers' turn end (bonus): not done
 
 Codex workers keep their current screen-based turn detection. Giving them the Stop hook means
-also adding `--no-daemon` and the hook flags to `CodexWorkerArgs`, which changes the worker
-path the smokes cover; left as a follow-up (noted in #87).
+adding `--no-daemon` and the hook flags to `CodexWorkerArgs` and reworking the worker state
+machine's Codex paths (held Idle/Done, screen reads after the no-report grace,
+`SilentReadScreen`), and a PermissionRequest hook would move their approvals from the pane to
+the voice flow. Not cheap or safe enough for this change; left as a follow-up.
 
 ## 11. Out of scope
 
