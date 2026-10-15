@@ -357,3 +357,27 @@ func TestRegisterCarriesTheAppBundleID(t *testing.T) {
 		t.Fatalf("%+v", l[0].User)
 	}
 }
+
+// changedSoon waits for a change signal.
+func changedSoon(t *testing.T, h *Host, what string) {
+	t.Helper()
+	select {
+	case <-h.Changes():
+	case <-time.After(time.Second):
+		t.Fatal("no change signal: " + what)
+	}
+}
+
+func TestChangesOnRegisterDescriptionDropAndExit(t *testing.T) {
+	h, sock := newHost(t)
+	h.unreachableFor = 100 * time.Millisecond
+	p, r := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api"})
+	changedSoon(t, h, "register")
+	if err := h.SetDescription(r.Address, "uploads"); err != nil {
+		t.Fatal(err)
+	}
+	changedSoon(t, h, "description")
+	p.c.Close()
+	changedSoon(t, h, "unreachable")
+	changedSoon(t, h, "dropped")
+}

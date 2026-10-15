@@ -9,6 +9,20 @@ type SecondaryHost interface {
 	Owns(name string) bool
 }
 
+// ChangeNotifier is a host whose list can change without a pane event (a pix session
+// connected, dropped or was described): Changes gets a signal then (coalesced, never blocks).
+type ChangeNotifier interface {
+	Changes() <-chan struct{}
+}
+
+// Changes is the secondary's change signal; nil when it has none.
+func (c *CompositeHost) Changes() <-chan struct{} {
+	if n, ok := c.secondary.(ChangeNotifier); ok {
+		return n.Changes()
+	}
+	return nil
+}
+
 // CompositeHost is the primary host (Herdr or tmux) plus a secondary one, as one SessionHost:
 // starts go to the primary, per-agent calls to whichever host owns the agent, and lists and
 // events are merged. Focus and tab labels apply to the primary's agents only.

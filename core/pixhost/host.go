@@ -52,13 +52,24 @@ type Host struct {
 	l        net.Listener
 	sessions map[string]*session // by address
 	subs     []chan agent.PaneEvent
+	changes  chan struct{}
 	seq      atomic.Uint64
 }
 
 // New is a host listening on sock once Listen is called; taken lists the names already in
 // use elsewhere (Pixie's workers), so addresses never collide with them.
 func New(sock string, taken func() []string) *Host {
-	return &Host{sock: sock, taken: taken, unreachableFor: UnreachableFor, sessions: map[string]*session{}}
+	return &Host{sock: sock, taken: taken, unreachableFor: UnreachableFor, sessions: map[string]*session{}, changes: make(chan struct{}, 1)}
+}
+
+// Changes signals that List may have changed (coalesced: one pending signal at most).
+func (h *Host) Changes() <-chan struct{} { return h.changes }
+
+func (h *Host) changed() {
+	select {
+	case h.changes <- struct{}{}:
+	default:
+	}
 }
 
 // Listen opens the socket (its folder 0700, the socket 0600: only your user can connect).
@@ -127,6 +138,7 @@ func (h *Host) serve(c net.Conn) {
 		wire.Encode(c, wire.Msg{Kind: wire.KindRefused, Reason: reason})
 		return
 	}
+	h.changed()
 	s.wmu.Lock()
 	err = wire.Encode(c, wire.Msg{Kind: wire.KindRegistered, Address: s.addr})
 	s.wmu.Unlock()
@@ -218,6 +230,7 @@ func (h *Host) onMsg(s *session, m wire.Msg) bool {
 				s.desc.Set(SourceAgent, m.Description, time.Now())
 			}
 			h.mu.Unlock()
+			h.changed()
 		case "session":
 			// The id usually arrives after registering (at the first hook), so the duplicate
 			// check runs here too: the later pix is refused and runs on without Pixie.
@@ -251,12 +264,19 @@ func (h *Host) onMsg(s *session, m wire.Msg) bool {
 // lost: c dropped without saying goodbye. The session stays listed as unreachable for a
 // while, so a pix that is reconnecting keeps its address.
 func (h *Host) lost(s *session, c net.Conn) {
+	dropped := false
+	defer func() {
+		if dropped {
+			h.changed()
+		}
+	}()
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if s.conn != c || h.sessions[s.addr] != s {
 		return // replaced by a re-registration, or already removed
 	}
 	s.conn = nil
+	dropped = true
 	for id, ch := range s.pending {
 		close(ch)
 		delete(s.pending, id)
@@ -284,6 +304,7 @@ func (h *Host) remove(s *session) {
 }
 
 func (h *Host) broadcast(ev agent.PaneEvent) {
+	h.changed()
 	h.mu.Lock()
 	subs := append([]chan agent.PaneEvent(nil), h.subs...)
 	h.mu.Unlock()
@@ -344,9 +365,9 @@ func (h *Host) Owns(name string) bool {
 // SetDescription sets your own description of a session ("" clears it).
 func (h *Host) SetDescription(name, text string) error {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	s := h.sessions[name]
 	if s == nil {
+		h.mu.Unlock()
 		return agent.ErrNoAgent(name)
 	}
 	if text == "" {
@@ -354,6 +375,8 @@ func (h *Host) SetDescription(name, text string) error {
 	} else {
 		s.desc.Set(SourceUser, text, time.Now())
 	}
+	h.mu.Unlock()
+	h.changed()
 	return nil
 }
 
