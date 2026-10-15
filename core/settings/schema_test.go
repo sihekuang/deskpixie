@@ -485,3 +485,87 @@ func TestCheckClaimsField(t *testing.T) {
 		}
 	}
 }
+
+// #85: every visibility rule names another real field with at least one value, and a value
+// a static choice can't hold is a typo.
+func TestVisibilityConditionsNameRealFields(t *testing.T) {
+	n := 0
+	for _, f := range Fields {
+		for _, c := range f.VisibleWhen {
+			n++
+			target := FieldByPath(c.Key)
+			if target == nil {
+				t.Fatalf("%s: visibleWhen names unknown field %q", f.Path, c.Key)
+			}
+			if c.Key == f.Path {
+				t.Fatalf("%s: visibleWhen names itself", f.Path)
+			}
+			if target.Kind.Type == KindManaged {
+				t.Fatalf("%s: visibleWhen names managed field %q", f.Path, c.Key)
+			}
+			if len(c.In) == 0 {
+				t.Fatalf("%s: visibleWhen %q has no values", f.Path, c.Key)
+			}
+			if target.Kind.Type == KindChoice && target.Kind.Choices.Source == SourceStatic && !target.Kind.Choices.Open {
+				for _, v := range c.In {
+					found := false
+					for _, o := range target.Kind.Choices.Static {
+						found = found || o.Value == v
+					}
+					if !found {
+						t.Fatalf("%s: %q is not a choice of %s", f.Path, v, c.Key)
+					}
+				}
+			}
+		}
+	}
+	if n == 0 {
+		t.Fatal("no visibility rules")
+	}
+}
+
+func TestTheGPTLiveFieldsShowOnlyForGPTLiveRightUnderTheVoiceService(t *testing.T) {
+	provider := Condition{Key: "voice.provider", In: []string{ProviderOpenAILive}}
+	if got := FieldByPath("voice.liveDelegation").VisibleWhen; !reflect.DeepEqual(got, []Condition{provider}) {
+		t.Fatal(got)
+	}
+	want := []Condition{provider, {Key: "voice.liveDelegation", In: []string{LiveDelegationBackend}}}
+	if got := FieldByPath("voice.liveBackendModel").VisibleWhen; !reflect.DeepEqual(got, want) {
+		t.Fatal(got)
+	}
+	var voice []string
+	for _, f := range Fields {
+		if f.Section == SectionVoice {
+			voice = append(voice, f.Path)
+		}
+	}
+	if !reflect.DeepEqual(voice[:4], []string{"voice.provider", "voice.liveDelegation", "voice.liveBackendModel", "voice.audio"}) {
+		t.Fatal(voice)
+	}
+	for _, p := range []string{"voice.liveDelegation", "voice.liveBackendModel"} {
+		if strings.Contains(FieldByPath(p).Help, "Only for") {
+			t.Fatal(p, FieldByPath(p).Help)
+		}
+	}
+}
+
+func TestVisibleWhenSerializesOnlyWhenSet(t *testing.T) {
+	views := Views(OptionSources{})
+	for i := range views {
+		got := mustJSON(t, views[i])
+		switch views[i].Path {
+		case "voice.liveBackendModel":
+			want := []any{
+				map[string]any{"key": "voice.provider", "in": []any{"openai-live"}},
+				map[string]any{"key": "voice.liveDelegation", "in": []any{"backend"}},
+			}
+			if !reflect.DeepEqual(got["visibleWhen"], want) {
+				t.Fatal(got["visibleWhen"])
+			}
+		case "voice.provider":
+			if _, ok := got["visibleWhen"]; ok {
+				t.Fatal(got)
+			}
+		}
+	}
+}
