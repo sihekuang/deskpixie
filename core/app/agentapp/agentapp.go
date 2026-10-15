@@ -137,13 +137,14 @@ type Agent struct {
 	gens   map[string]int               // per agent: invalidates a probe still running for an older flag
 
 	// model is the coordinator's --model ("" = Claude Code's default). The probes are seams:
-	// claudeListsAuto runs `claude --help`, managedOff reads the managed settings file.
+	// claudeListsAuto runs `claude --help` (unknown when it can't tell), managedOff reads the
+	// managed settings file.
 	model           string
 	kind            agent.AgentKind   // the coordinator's agent
 	coordModel      string            // the --model the Claude coordinator was started with
 	workerModel     map[string]string // the --model each Claude worker was started with
 	recipes         agent.WorkerRecipes
-	claudeListsAuto func() bool
+	claudeListsAuto func() agent.ClaudeAuto
 	managedOff      func() bool
 	restart         func() // the coordinator restart (tests replace it)
 
@@ -200,7 +201,12 @@ func Build(c Config) *Agent {
 	}
 	a := &Agent{paths: NewPaths(c.AppSupport), hooks: c.Hooks, manual: map[string]bool{}, causes: map[string]agent.ManualCause{},
 		gens: map[string]int{}, workerModel: map[string]string{},
-		claudeListsAuto: claudeListsAuto, managedOff: managedOff}
+		managedOff: managedOff}
+	home, environ := c.Home, c.Environ
+	if environ == nil {
+		environ = os.Environ()
+	}
+	a.claudeListsAuto = func() agent.ClaudeAuto { return claudeAuto(home, environ, isFile, runHelp) }
 	a.link = &VoiceLink{refresh: c.Hooks.RefreshTray}
 	paths := a.paths
 

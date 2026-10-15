@@ -31,11 +31,23 @@ func (c ManualCause) Reason() string {
 	return "auto mode isn't available for your account right now"
 }
 
-func ManualCauseOf(model string, claudeListsAuto, managedOff bool) ManualCause {
+// ClaudeAuto is what `claude --help` said about auto mode: unknown when the probe couldn't tell
+// (claude not found, an error, a timeout).
+type ClaudeAuto int
+
+const (
+	ClaudeAutoUnknown ClaudeAuto = iota
+	ClaudeListsAuto
+	ClaudeLacksAuto
+)
+
+// ManualCauseOf: the most likely cause. An unknown probe never blames Claude Code; the cause
+// falls through to the organization's setting or "unavailable right now".
+func ManualCauseOf(model string, claude ClaudeAuto, managedOff bool) ManualCause {
 	switch {
 	case !ModelSupportsAuto(model):
 		return CauseOldModel
-	case !claudeListsAuto:
+	case claude == ClaudeLacksAuto:
 		return CauseOldClaude
 	case managedOff:
 		return CauseOrgOff

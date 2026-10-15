@@ -1,9 +1,11 @@
 package agentapp
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -135,5 +137,44 @@ func TestHelpListsAuto(t *testing.T) {
 	without := "  --permission-mode <mode>  Permission mode (choices: \"acceptEdits\", \"default\", \"plan\")\n  --other  automatic things\n"
 	if !helpListsAuto(with) || helpListsAuto(without) {
 		t.Fatal("choices")
+	}
+}
+
+// #97: the probe finds claude the way the session host's panes do (a GUI app's PATH is minimal),
+// and says "unknown" when it can't tell, so Claude Code is never blamed for a probe failure.
+func TestClaudeAutoProbe(t *testing.T) {
+	const with = "  --permission-mode <mode>  Permission mode (choices: \"acceptEdits\", \"auto\", \"default\")\n"
+	const without = "  --permission-mode <mode>  Permission mode (choices: \"acceptEdits\", \"default\")\n"
+	minimal := []string{"PATH=/usr/bin:/bin", "ANTHROPIC_API_KEY=x"}
+	installed := func(p string) bool { return p == "/h/.local/bin/claude" }
+	var ranBin string
+	var ranEnv []string
+	ok := func(help string) func(string, []string) (string, error) {
+		return func(bin string, env []string) (string, error) { ranBin, ranEnv = bin, env; return help, nil }
+	}
+	if got := claudeAuto("/h", minimal, installed, ok(with)); got != agent.ClaudeListsAuto || ranBin != "/h/.local/bin/claude" {
+		t.Fatalf("lists: %v %q", got, ranBin)
+	}
+	path := ""
+	for _, kv := range ranEnv {
+		if strings.HasPrefix(kv, "ANTHROPIC_") {
+			t.Fatalf("unscrubbed: %q", kv)
+		}
+		if v, found := strings.CutPrefix(kv, "PATH="); found {
+			path = v
+		}
+	}
+	if !strings.Contains(path, "/h/.local/bin") {
+		t.Fatalf("PATH not extended: %q", path)
+	}
+	if got := claudeAuto("/h", minimal, installed, ok(without)); got != agent.ClaudeLacksAuto {
+		t.Fatalf("lacks: %v", got)
+	}
+	if got := claudeAuto("/h", minimal, func(string) bool { return false }, ok(without)); got != agent.ClaudeAutoUnknown {
+		t.Fatalf("not found: %v", got)
+	}
+	failing := func(string, []string) (string, error) { return "", errors.New("signal: killed") }
+	if got := claudeAuto("/h", minimal, installed, failing); got != agent.ClaudeAutoUnknown {
+		t.Fatalf("error: %v", got)
 	}
 }

@@ -600,7 +600,11 @@ func TestUpdatesIsTheBubblesCurrentList(t *testing.T) {
 
 func manualProbes(f *fixture, model string, lists, org bool) {
 	f.agent.model, f.agent.coordModel = model, model
-	f.agent.claudeListsAuto = func() bool { return lists }
+	claude := agent.ClaudeLacksAuto
+	if lists {
+		claude = agent.ClaudeListsAuto
+	}
+	f.agent.claudeListsAuto = func() agent.ClaudeAuto { return claude }
 	f.agent.managedOff = func() bool { return org }
 }
 
@@ -634,7 +638,7 @@ func TestAnAgentClearedBeforeTheProbeFinishesShowsNothing(t *testing.T) {
 	f := newFixture(t, nil)
 	manualProbes(f, "", true, false)
 	release := make(chan struct{})
-	f.agent.claudeListsAuto = func() bool { <-release; return true }
+	f.agent.claudeListsAuto = func() agent.ClaudeAuto { <-release; return agent.ClaudeListsAuto }
 	f.agent.ManualMode(agent.Coordinator, true)
 	f.agent.ManualMode(agent.Coordinator, false)
 	close(release)
