@@ -314,12 +314,29 @@ type PaneEvent struct {
 	Status PaneStatus // PaneEventStatus only
 }
 
-// AgentInfo is a running agent as the session host lists it. Cwd "" means unknown.
+// Origin says who started an agent: Pixie (in Herdr or tmux) or you (with pix, #89).
+type Origin int
+
+const (
+	OriginPixie Origin = iota
+	OriginUser
+)
+
+// AgentInfo is a running agent as the session host lists it. Cwd "" means unknown. The fields
+// after Status are set for sessions you started with pix only.
 type AgentInfo struct {
 	Name   string
 	Pane   string
 	Cwd    string
 	Status PaneStatus
+
+	Origin           Origin
+	Tool             string // claude | codex
+	Repo             string // the git root's folder name, "" outside a repo
+	Where            string // terminal or IDE, e.g. "WebStorm"
+	Description      string
+	PastDescriptions []string
+	Reachable        bool // pix is connected (false for a few seconds after it dropped)
 }
 
 // EnvVar is one environment entry (Rust's (String, String) pair).
