@@ -123,14 +123,15 @@ public enum TrayMenu {
         case settings
         /// Opens the Mic Mode picker (`MicModes.show`).
         case micMode
-        /// `app.action {id}`; `focusCanvas` when the user asked for a canvas page, so the
-        /// canvas window comes forward (core-initiated opens never take focus).
         /// Put this text on the pasteboard; nothing is sent to the core.
         case copy(String)
+        /// `app.action {id}`; `focusCanvas` when the user asked for a canvas page, so the
+        /// canvas window comes forward (core-initiated opens never take focus).
         case core(String, focusCanvas: Bool = false)
     }
 
     /// Prefix of a copy-only row's id; the rest is the text to copy.
+    /// Reserved: no core action id may start with it (such a row would copy, never reach the core).
     public static let copyPrefix = "copy:"
 
     public static func route(_ id: String) -> Route {
