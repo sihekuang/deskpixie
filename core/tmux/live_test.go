@@ -1143,16 +1143,23 @@ func (m modeRecipes) Prepare(l agent.WorkerLaunch) (agent.PreparedWorker, error)
 		return p, err
 	}
 	args := slices.Clone(p.Spec.Args)
+	replaced := false
 	for i := 0; i+1 < len(args); i++ {
 		if args[i] == "--permission-mode" {
 			args[i+1] = m.mode
+			replaced = true
 		}
+	}
+	if !replaced {
+		// Fails the start (and so the smoke): the override would otherwise be a silent no-op.
+		return agent.PreparedWorker{}, fmt.Errorf("smoke: the worker recipe has no --permission-mode to override: %q", p.Spec.Args)
 	}
 	p.Spec.Args = args
 	return p, nil
 }
 
-// modeLog records each agent's permission_mode reports and Manual flags.
+// modeLog records each agent's permission_mode reports and whether it was ever flagged Manual
+// (the flag is cleared again when the agent ends, so the latest value is not kept).
 type modeLog struct {
 	mu     sync.Mutex
 	modes  map[string][]string // agent → permission_mode values its hooks carried
@@ -1162,7 +1169,7 @@ type modeLog struct {
 func (m *modeLog) ManualMode(agent string, manual bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.manual[agent] = manual
+	m.manual[agent] = m.manual[agent] || manual
 }
 
 func (m *modeLog) add(agent, mode string) {
@@ -1581,6 +1588,9 @@ func TestLiveManualClaudeWorkerRunsRoutineWorkWithoutAsking(t *testing.T) {
 		if !slices.Contains(modes, "default") {
 			return fmt.Errorf("no hook of %s delivered permission_mode \"default\" (saw %v)", worker, modes)
 		}
+		if !manual {
+			return fmt.Errorf("%s was never flagged Manual through Deps.Modes", worker)
+		}
 		if view.Status != agent.JobDone {
 			return fmt.Errorf("%s ended %v (last progress: %v)", id, view.Status, view.LastProgress)
 		}
@@ -1590,7 +1600,8 @@ func TestLiveManualClaudeWorkerRunsRoutineWorkWithoutAsking(t *testing.T) {
 		}
 		used := toolUses(r.home, filepath.Join(r.repo, ".worktrees", slug))
 		info(t, "the worker's tool uses (its Claude transcript)", fmt.Sprintf("%q", used))
-		if !slices.Contains(used, "Bash git status") || !slices.ContainsFunc(used, func(u string) bool {
+		ranStatus := slices.ContainsFunc(used, func(u string) bool { return strings.HasPrefix(u, "Bash ") && strings.Contains(u, "git status") })
+		if !ranStatus || !slices.ContainsFunc(used, func(u string) bool {
 			return u == "Write" || u == "Edit"
 		}) {
 			return fmt.Errorf("%s's transcript shows no git status and file write: %q", worker, used)
