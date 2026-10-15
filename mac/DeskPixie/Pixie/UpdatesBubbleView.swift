@@ -11,7 +11,8 @@ struct UpdatesBubbleView: View {
     let more: Int
     let onLine: (UpdateLine) -> Void
     let onMore: () -> Void
-    /// Allow or Deny on a permission question (token, allow).
+    /// Allow or Deny on a permission question (token, allow). The controller ignores a tap that
+    /// comes too soon after the buttons appear (`UpdatesBubbleModel.acceptsDecision`).
     let onDecide: (String, Bool) -> Void
     /// A click on the badge (opens the bubble, like hovering).
     let onBadge: () -> Void

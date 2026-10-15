@@ -59,6 +59,10 @@ public struct UpdatesBubbleModel: Sendable {
     /// How long the open-under-the-pointer bubble takes to count as seen (fixed, not a setting).
     public static let seenAfter: TimeInterval = 1
 
+    /// How long Allow and Deny ignore taps after a question's buttons appear (#97), so a click
+    /// landing as the bubble pops never approves.
+    public static let decisionGuard: TimeInterval = 0.75
+
     /// Below this opacity the bubble is too faded to count as looked at.
     public static let hoverMinAlpha: CGFloat = 0.1
 
@@ -89,6 +93,8 @@ public struct UpdatesBubbleModel: Sendable {
     private var heldPop = false
     /// The first list after launch is the restored outbox: badge, never a pop.
     private var applied = false
+    /// When each question's Allow and Deny (by token) appeared; only while they are showing.
+    private var decisionsSince: [String: TimeInterval] = [:]
 
     public init(popSecs: TimeInterval = 6, maxLines: Int = 5) {
         self.popSecs = popSecs
@@ -118,6 +124,7 @@ public struct UpdatesBubbleModel: Sendable {
 
     /// The core sent its current list (`updates` event).
     public mutating func apply(_ new: [UpdateLine], now: TimeInterval, pop: PopPermission) {
+        defer { noteDecisions(now) }
         let old = Set(lines.map(\.id))
         let added = new.filter { !old.contains($0.id) }
         lines = new
@@ -159,6 +166,7 @@ public struct UpdatesBubbleModel: Sendable {
         shownSince = [:]
         seenSent = []
         noteShown(now)
+        noteDecisions(now)
     }
 
     /// The pointer left: back to the badge, or hidden when nothing unheard is left.
@@ -167,12 +175,14 @@ public struct UpdatesBubbleModel: Sendable {
         shownSince = [:]
         seenSent = []
         phase = lines.isEmpty ? .hidden : .badge
+        decisionsSince = [:]
     }
 
     /// Advances timers. Returns the ids to send to `agent.updatesSeen`: each shown line once per
     /// expansion, after it has been shown `seenAfter` (lines added while open count from when
     /// they appeared).
     public mutating func tick(now: TimeInterval) -> [UInt64] {
+        defer { noteDecisions(now) }
         switch phase {
         case .popped(let until) where now >= until:
             phase = .badge
@@ -202,5 +212,28 @@ public struct UpdatesBubbleModel: Sendable {
             phase = .popped(until: now + popSecs)
         }
         heldPop = false
+        noteDecisions(now)
+    }
+
+    /// Whether a tap on Allow or Deny for this question counts: only once its buttons have been
+    /// showing `decisionGuard` (a tap on buttons not showing never counts).
+    public mutating func acceptsDecision(token: String, now: TimeInterval) -> Bool {
+        noteDecisions(now)
+        guard let since = decisionsSince[token] else { return false }
+        return now - since >= Self.decisionGuard
+    }
+
+    /// Stamps the questions whose Allow and Deny show now (the bubble is open and the row is
+    /// listed) and forgets the rest, so buttons that reappear are guarded again.
+    private mutating func noteDecisions(_ now: TimeInterval) {
+        guard isExpanded || isPopped else {
+            decisionsSince = [:]
+            return
+        }
+        let showing = Set(shown.filter(\.offersDecision).compactMap(\.token))
+        decisionsSince = decisionsSince.filter { showing.contains($0.key) }
+        for token in showing where decisionsSince[token] == nil {
+            decisionsSince[token] = now
+        }
     }
 }

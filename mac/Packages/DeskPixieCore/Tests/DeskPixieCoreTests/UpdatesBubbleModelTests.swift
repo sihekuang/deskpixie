@@ -21,6 +21,46 @@ final class UpdatesBubbleModelTests: XCTestCase {
         XCTAssertFalse(jobQuestion.offersDecision)
     }
 
+    private func question(_ id: UInt64, _ token: String) -> UpdateLine {
+        UpdateLine(id: id, text: "Run it? Say confirm \(token).", kind: "question", at: Int64(id), job: nil,
+                   worker: nil, token: token)
+    }
+
+    /// #97: a click landing as the buttons appear never approves: Allow and Deny ignore taps for
+    /// 0.75 s after that question's buttons appear.
+    func testAllowAndDenyIgnoreTapsJustAfterTheButtonsAppear() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        m.apply([question(1, "hawk")], now: 10, pop: .allowed)       // pops: buttons appear at 10
+        XCTAssertFalse(m.acceptsDecision(token: "hawk", now: 10.2))
+        XCTAssertTrue(m.acceptsDecision(token: "hawk", now: 10.8))
+    }
+
+    func testTheGuardIsPerQuestion() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        m.apply([question(1, "hawk")], now: 10, pop: .allowed)
+        m.apply([question(1, "hawk"), question(2, "lynx")], now: 11, pop: .allowed)
+        XCTAssertTrue(m.acceptsDecision(token: "hawk", now: 11.2))
+        XCTAssertFalse(m.acceptsDecision(token: "lynx", now: 11.2))
+        XCTAssertTrue(m.acceptsDecision(token: "lynx", now: 11.8))
+    }
+
+    func testButtonsThatReappearAreGuardedAgain() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        m.apply([question(1, "hawk")], now: 10, pop: .allowed)
+        _ = m.tick(now: 17)                                         // collapsed to the badge
+        XCTAssertEqual(m.phase, .badge)
+        XCTAssertFalse(m.acceptsDecision(token: "hawk", now: 17.5)) // no buttons on a badge
+        m.pointerEntered(now: 20)
+        XCTAssertFalse(m.acceptsDecision(token: "hawk", now: 20.2))
+        XCTAssertTrue(m.acceptsDecision(token: "hawk", now: 20.8))
+    }
+
+    func testATapOnAQuestionNotShownIsIgnored() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        m.apply([question(1, "hawk")], now: 10, pop: .allowed)
+        XCTAssertFalse(m.acceptsDecision(token: "owl", now: 12))
+    }
+
     func testFirstListAfterLaunchIsBadgeOnly() {
         var m = UpdatesBubbleModel()
         m.apply([line(1)], now: 0, pop: .allowed)

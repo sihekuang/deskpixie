@@ -180,7 +180,11 @@ final class UpdatesBubbleController {
             count: model.count, phase: model.phase, shown: model.shown, more: model.more,
             onLine: { [weak self] in self?.clicked($0) },
             onMore: { [weak self] in self?.onTalk?() },
-            onDecide: { [weak self] token, allow in self?.call("agent.decide", DecideArgs(token: token, allow: allow)) },
+            onDecide: { [weak self] token, allow in
+                // A tap within decisionGuard of the buttons appearing is a stray click: ignored.
+                guard let self, self.model.acceptsDecision(token: token, now: Self.now) else { return }
+                self.call("agent.decide", DecideArgs(token: token, allow: allow))
+            },
             onBadge: { [weak self] in
                 guard let self, self.panel.alphaValue >= UpdatesBubbleModel.hoverMinAlpha else { return }
                 self.model.pointerEntered(now: Self.now)
