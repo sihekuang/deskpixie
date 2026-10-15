@@ -1,6 +1,6 @@
 # Fewer approvals — #97 (widened)
 
-Status: design approved in chat by the owner 2026-10-15; this spec awaits review.
+Status: approved by the owner 2026-10-15 (spec reviewed; §6 tap-to-approve kept).
 Related: #80 (setup checks; gets the auto-mode row), #87/#88 (Codex coordinator spec, whose
 "nothing is typed into a trust screen" rule changes here for workers).
 
