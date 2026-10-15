@@ -322,6 +322,24 @@ func TestRuntimeHandOffDelegatesAndInjects(t *testing.T) {
 	if len(s.commands(CmdToolResult)) != 0 {
 		t.Fatal("the hand-off is not a tool result for the model")
 	}
+	// The delegate call started background work: once Pixie has said so, the conversation
+	// ends (well before the 7 s idle timeout).
+	for _, ev := range []Event{evResponseCreated, said("assistant", "I've handed that to the coordinator."), evResponseDone} {
+		s.events <- ev
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		s.mu.Lock()
+		closed := s.closed
+		s.mu.Unlock()
+		if closed {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the conversation stayed open after the hand-off was said")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func TestRuntimeHandOffWithDelegationOffSaysWhy(t *testing.T) {
@@ -353,5 +371,66 @@ func TestRuntimeHandOffNeedsADelegateTool(t *testing.T) {
 	defer r.Close()
 	if r.conv.handOff {
 		t.Fatal("hand-off armed without a delegate tool")
+	}
+}
+
+// A hand-off the app made (the claim check or the safety net) ends the conversation once
+// Pixie's acknowledgement has played, like a delegate call does: the work runs in the
+// background and its result comes back on its own.
+func TestAClaimedHandOffEndsTheConversationOnceItIsTrue(t *testing.T) {
+	c := newClaimConv(true, true)
+	userTurn(c, "build me a small dashboard app", ms(t0(), 100))
+	reply(c, "I've handed that off to the coordinator.", ms(t0(), 500))
+	if h := handOffs(ticks(c, ms(t0(), 500), 3*time.Second)); len(h) != 1 || !h[0].Claim {
+		t.Fatalf("%+v", h)
+	}
+	c.Step(HandOffDoneAfterReplyInput(Notice{}), ms(t0(), 3600))
+	ticks(c, ms(t0(), 3600), time.Second)
+	if c.IsActive() {
+		t.Fatal("still open after the claimed hand-off came true")
+	}
+}
+
+func TestASafetyNetHandOffEndsAfterPixieSaysSo(t *testing.T) {
+	c := newHandOffConv(true)
+	userTurn(c, "What's the price of bitcoin right now?", ms(t0(), 100))
+	reply(c, "I'm not sure, I can't check live prices.", ms(t0(), 500))
+	if len(handOffs(ticks(c, ms(t0(), 500), 3*time.Second))) != 1 {
+		t.Fatal("no hand-off")
+	}
+	fx := c.Step(HandOffDoneAfterReplyInput(Notice{Text: HandedOffPrefix + "What's the price of bitcoin right now?"}), ms(t0(), 3600))
+	if len(injects(fx)) != 1 || !c.IsActive() {
+		t.Fatalf("injects %v active %v: the notice must be said before the end", injects(fx), c.IsActive())
+	}
+	reply(c, "I've handed that to the coordinator; I'll let you know.", ms(t0(), 4000))
+	ticks(c, ms(t0(), 4000), time.Second)
+	if c.IsActive() {
+		t.Fatal("still open after Pixie said it handed off")
+	}
+}
+
+func TestAHandOffThatDoesntEndKeepsListening(t *testing.T) {
+	// A "Check: " fact (or an answer to a coordinator question) stays open for its answer.
+	c := newHandOffConv(true)
+	userTurn(c, "Who won the game last night?", ms(t0(), 100))
+	reply(c, "I don't know.", ms(t0(), 500))
+	ticks(c, ms(t0(), 500), 3*time.Second)
+	c.Step(HandOffDoneInput(Notice{}), ms(t0(), 3600))
+	ticks(c, ms(t0(), 3600), 2*time.Second)
+	if !c.IsActive() {
+		t.Fatal("ended without being asked to")
+	}
+}
+
+func TestTheUserTalkingCancelsTheEndAfterAHandOff(t *testing.T) {
+	c := newClaimConv(true, true)
+	userTurn(c, "build me a small dashboard app", ms(t0(), 100))
+	reply(c, "I've handed that off to the coordinator.", ms(t0(), 500))
+	ticks(c, ms(t0(), 500), 3*time.Second)
+	userTurn(c, "and make it dark", ms(t0(), 3550))
+	c.Step(HandOffDoneAfterReplyInput(Notice{}), ms(t0(), 3600))
+	ticks(c, ms(t0(), 3600), time.Second)
+	if !c.IsActive() {
+		t.Fatal("ended while the user was saying more")
 	}
 }
