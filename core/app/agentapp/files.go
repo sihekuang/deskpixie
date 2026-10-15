@@ -315,15 +315,26 @@ func InstallFor(paths Paths, port uint16, projectsRoot string, stateHooks bool) 
 	if err := writeIfChanged(filepath.Join(paths.Workspace, "AGENTS.md"), RenderAgentsMd(paths.Canvas, projectsRoot)); err != nil {
 		return err
 	}
+	workerRules := WorkerAllowRules(projectsRoot)
+	if projectsRoot == "" {
+		workerRules = nil // workers are off
+	}
 	for _, f := range []struct {
 		path  string
 		text  string
 		hooks []HookTimeout
+		rules []string
 	}{
-		{paths.Settings, RenderSettings(port), HookTimeouts},
-		{paths.WorkerSettings, RenderWorkerSettings(port), WorkerHookTimeouts},
+		{paths.Settings, RenderSettings(port), HookTimeouts, CoordinatorAllowRules(paths.Workspace, paths.Canvas)},
+		{paths.WorkerSettings, RenderWorkerSettings(port), WorkerHookTimeouts, workerRules},
 	} {
 		text, hooks := f.text, f.hooks
+		if len(f.rules) > 0 {
+			var err error
+			if text, err = WithAllowRules(text, f.rules); err != nil {
+				return err
+			}
+		}
 		if stateHooks {
 			var err error
 			if text, err = WithStateHooks(text); err != nil {

@@ -366,7 +366,7 @@ func TestBuildInstallsFilesClearsStaleMcpAndTrustsTheWorkspace(t *testing.T) {
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
 		t.Fatal("stale MCP config left")
 	}
-	if readFile(t, paths.Settings) != RenderSettings(settings.Default().Agent.Port) {
+	if readFile(t, paths.Settings) != shippedCoordinatorSettings(t, paths, settings.Default().Agent.Port) {
 		t.Fatal("settings not installed")
 	}
 	claude := readFile(t, filepath.Join(home, ".claude.json"))
