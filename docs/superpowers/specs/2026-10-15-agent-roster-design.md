@@ -11,15 +11,16 @@ Pixie can reach. Hovering shows the list; clicking a row takes you to that agent
 Today the only way to find out is to ask, and the coordinator answers from two tools
 (`list_workers`, `list_sessions`); nothing on screen shows either number.
 
-Success: with the agent feature on, a chip under Pixie always shows the two counts, and they
-match what is actually running within about a second; hovering lists every agent with its
+Success: while any worker or session of yours is running, a chip under Pixie shows the two
+counts (never counting the coordinator), and they match what is actually running within about a second; hovering lists every agent with its
 status; clicking a row brings its terminal forward.
 
 ## 2. Decisions (from the design discussion)
 
-- A small **chip under Pixie**, always shown while the agent feature is on; hover or click
-  opens the list. Not an always-open list, not part of the updates bubble.
-- **The coordinator counts as one of Pixie's agents**, listed first. (Bit is Pixie's name, the
+- A small **chip under Pixie**, shown while anything is counted; hover or click opens the
+  list. Not an always-open list, not part of the updates bubble.
+- **The coordinator is never counted.** It is listed first under Pixie's agents, with its
+  status, but neither the chip nor the section header counts it. (Bit is Pixie's name, the
   character; the coordinator is the Claude Code or Codex agent behind it. The list says
   "Coordinator".)
 - Clicking one of **Pixie's agents** brings its Herdr/tmux tab forward and opens the terminal,
@@ -30,15 +31,15 @@ status; clicking a row brings its terminal forward.
 
 ## 3. What it shows
 
-**Chip:** `⚙ 4 · ⌨ 2`. ⚙ is Pixie's agents (the coordinator plus every other pane in Pixie's
-Herdr/tmux session); ⌨ is your reachable `pix` sessions. `· ⌨ 0` is left out (`⚙ 1`). The
-chip hides only when the agent feature is off or nothing is listed at all (coordinator not up,
-no sessions).
+**Chip:** `⚙ 3 · ⌨ 2`. ⚙ is Pixie's agents other than the coordinator (its workers and any
+other pane in Pixie's Herdr/tmux session); ⌨ is your reachable `pix` sessions. A zero side is
+left out (`⚙ 3`, `⌨ 2`). The chip hides when both are zero (only the coordinator running, or
+the agent feature off).
 
 **List** (opened from the chip), two sections:
 
 ```
-Pixie's agents (4)
+Pixie's agents (3)
  ○ Coordinator            idle
  ● fix-upload             working   deskpixie
  ◐ docs-pass              blocked   deskpixie
@@ -75,7 +76,8 @@ clickable).
 | Pixie faded (proximity) | Chip stays opaque, like the updates badge. |
 | Pixie hidden | Chip and list hide. |
 | Updates bubble showing | It stays at Pixie's side; the chip is under Pixie and no wider than Pixie, so they never overlap. The open list may cover the bubble while you hover; it is ordered above it and closes when the pointer leaves. |
-| App launch / agent feature turned on | Chip appears once the first list arrives. |
+| App launch / agent feature turned on | Chip appears once the first list arrives with a non-zero count. |
+| Last worker and session end | Chip hides (the coordinator alone isn't counted); an open list closes. |
 | Agent feature off | Chip hidden; no events. |
 
 ## 5. Architecture
@@ -134,7 +136,7 @@ clickable).
 
 ## 7. Testing
 
-- **Go:** `BuildRoster` table tests: coordinator only; coordinator + workers; an unowned pane;
+- **Go:** `BuildRoster` table tests: coordinator only (listed, counts 0/0); coordinator + workers; an unowned pane;
   reachable and unreachable sessions; labels for described / undescribed / no-repo sessions;
   status mapping. Runtime: a fake host whose events trigger one debounced emit; an unchanged
   list emits nothing; the backstop tick picks up a change without an event. App: `agent.roster`
@@ -145,7 +147,7 @@ clickable).
   flips above at the bottom edge; width capped at Pixie's); `EngineEvent` decodes
   `agents`.
 - **Live:** extend `TestLivePixSessionThroughTheHerdrCoordinator` to read `agent.roster` while
-  `pix claude` runs: one coordinator, one of yours, with `App` set.
+  `pix claude` runs: the coordinator listed but not counted (agent count 0), one of yours, with `App` set.
 
 ## 8. Out of scope
 
