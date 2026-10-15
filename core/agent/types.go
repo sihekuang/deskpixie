@@ -322,15 +322,20 @@ const (
 	OriginUser
 )
 
-// AgentInfo is a running agent as the session host lists it. Cwd "" means unknown. The fields
-// after Status are set for sessions you started with pix only.
+// AgentInfo is a running agent as the session host lists it. Cwd "" means unknown. User is
+// set for sessions you started with pix only (a pointer, so AgentInfo stays comparable).
 type AgentInfo struct {
 	Name   string
 	Pane   string
 	Cwd    string
 	Status PaneStatus
 
-	Origin           Origin
+	Origin Origin
+	User   *UserSession
+}
+
+// UserSession is what pix tells about a session you started yourself.
+type UserSession struct {
 	Tool             string // claude | codex
 	Repo             string // the git root's folder name, "" outside a repo
 	Where            string // terminal or IDE, e.g. "WebStorm"
