@@ -126,17 +126,60 @@ func (a toolAdapter) Invoke(ctx context.Context, args json.RawMessage) voice.Too
 	return voice.ToolOutcome{Output: out, EndConversation: end}
 }
 
-// LocalTools are the tools every conversation has: end_conversation plus the local ones, which
-// answer the time, the weather, arithmetic, timers and media at once.
-func LocalTools(homeCity string, alarm tools.Alarm) *voice.ToolRegistry {
+// LocalToolDeps are the local tools' outside boundaries; zero values pick the real ones (the
+// wall clock, Open-Meteo, Music/Spotify). Tests inject fakes.
+type LocalToolDeps struct {
+	Clock      tools.Clock
+	TimerClock tools.TimerClock
+	Places     tools.Geocoder
+	Sky        tools.WeatherSource
+	Player     tools.MediaPlayer
+}
+
+// NewLocalTools are Pixie's local tools (timer, get_weather, media, get_time, calculate). The
+// app builds them once and hands the same instances to the voice loop and to the coordinator's
+// MCP server, so a timer set by either rings through alarm. homeCity is voice.homeCity: the
+// weather's default place, whatever the voice provider (or none).
+func NewLocalTools(homeCity string, alarm tools.Alarm, d LocalToolDeps) []tools.Tool {
 	om := tools.NewOpenMeteo()
+	if d.Clock == nil {
+		d.Clock = tools.SystemClock{}
+	}
+	if d.Places == nil {
+		d.Places = om
+	}
+	if d.Sky == nil {
+		d.Sky = om
+	}
+	if d.Player == nil {
+		d.Player = tools.NewMacPlayers()
+	}
+	timers := tools.NewTimers(alarm)
+	if d.TimerClock != nil {
+		timers = tools.NewTimersWithClock(alarm, d.TimerClock)
+	}
+	return []tools.Tool{
+		tools.TimerTool{Timers: timers},
+		tools.GetWeather{Places: d.Places, Sky: d.Sky, Home: homeCity},
+		tools.Media{Player: d.Player},
+		tools.GetTime{Clock: d.Clock, Places: d.Places},
+		tools.Calculate{},
+	}
+}
+
+// VoiceTools are the tools every conversation has: end_conversation plus local, which answer
+// the time, the weather, arithmetic, timers and media at once.
+func VoiceTools(local []tools.Tool) *voice.ToolRegistry {
 	reg := voice.DefaultTools()
-	reg.Register(AdaptTool(tools.GetTime{Clock: tools.SystemClock{}, Places: om}))
-	reg.Register(AdaptTool(tools.GetWeather{Places: om, Sky: om, Home: homeCity}))
-	reg.Register(AdaptTool(tools.Calculate{}))
-	reg.Register(AdaptTool(tools.TimerTool{Timers: tools.NewTimers(alarm)}))
-	reg.Register(AdaptTool(tools.Media{Player: tools.NewMacPlayers()}))
+	for _, t := range local {
+		reg.Register(AdaptTool(t))
+	}
 	return reg
+}
+
+// LocalTools is VoiceTools over freshly built local tools (the real boundaries).
+func LocalTools(homeCity string, alarm tools.Alarm) *voice.ToolRegistry {
+	return VoiceTools(NewLocalTools(homeCity, alarm, LocalToolDeps{}))
 }
 
 // VoiceLink is what the timer alarm needs of the voice loop (*voice.Runtime).

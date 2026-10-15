@@ -48,18 +48,44 @@ func (f DeliverFunc) Deliver(ev agent.HookEvent) bool { return f(ev) }
 // ErrNotLoopback: Serve only listens on loopback.
 var ErrNotLoopback = errors.New("the hook server only listens on loopback")
 
+// LocalTool is one of Pixie's local tools (core/tools.Tool: timer, get_weather, media,
+// get_time, calculate), served to the coordinator as is. Failures come back in-band as
+// {"error": "..."} output.
+type LocalTool interface {
+	Name() string
+	Description() string
+	// Parameters is the arguments' JSON schema (the MCP inputSchema).
+	Parameters() json.RawMessage
+	Invoke(ctx context.Context, args json.RawMessage) (output json.RawMessage, endConversation bool, err error)
+}
+
+// Options are what the MCP server offers beyond the worker tools.
+type Options struct {
+	// CoordinatorTools are listed and callable by the coordinator only (never a worker). They
+	// are the app's own instances, shared with the voice loop, and run right here, not in the
+	// agent runtime.
+	CoordinatorTools []LocalTool
+	// NoWorkerTools: workers are off, so the coordinator's worker tools are neither listed
+	// nor callable.
+	NoWorkerTools bool
+}
+
 // Server routes the hook and MCP endpoints. Make it with NewServer; it is an http.Handler.
 type Server struct {
 	tokens *Tokens
 	rt     Runtime
+	opts   Options
 	// The waits below; tests shorten them (Rust tests pause the tokio clock instead).
 	permissionLimit time.Duration
 	mcpCallLimit    time.Duration
 }
 
 // NewServer is Rust's `router(tokens, events)`.
-func NewServer(tokens *Tokens, rt Runtime) *Server {
-	return &Server{tokens: tokens, rt: rt, permissionLimit: PermissionLimit, mcpCallLimit: McpCallLimit}
+func NewServer(tokens *Tokens, rt Runtime) *Server { return NewServerWith(tokens, rt, Options{}) }
+
+// NewServerWith is NewServer with the coordinator's local tools (and workers maybe off).
+func NewServerWith(tokens *Tokens, rt Runtime, opts Options) *Server {
+	return &Server{tokens: tokens, rt: rt, opts: opts, permissionLimit: PermissionLimit, mcpCallLimit: McpCallLimit}
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -97,12 +123,17 @@ func Listen(port int) (net.Listener, error) {
 // waiting hooks, and returns ctx's error). The listener must be bound to a loopback address
 // (127.0.0.1:<agent.port>); anything else is refused with ErrNotLoopback.
 func Serve(ctx context.Context, ln net.Listener, tokens *Tokens, rt Runtime) error {
+	return ServeWith(ctx, ln, tokens, rt, Options{})
+}
+
+// ServeWith is Serve with Options (see NewServerWith).
+func ServeWith(ctx context.Context, ln net.Listener, tokens *Tokens, rt Runtime, opts Options) error {
 	addr, ok := ln.Addr().(*net.TCPAddr)
 	if !ok || !addr.IP.IsLoopback() {
 		return ErrNotLoopback
 	}
 	srv := &http.Server{
-		Handler:           NewServer(tokens, rt),
+		Handler:           NewServerWith(tokens, rt, opts),
 		ReadHeaderTimeout: 10 * time.Second,
 		BaseContext:       func(net.Listener) context.Context { return ctx },
 	}

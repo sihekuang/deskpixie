@@ -2,6 +2,7 @@ package app
 
 import (
 	"github.com/sihekuang/deskpixie/core/settings"
+	"github.com/sihekuang/deskpixie/core/tools"
 	"github.com/sihekuang/deskpixie/core/voice"
 )
 
@@ -28,6 +29,9 @@ type AgentHooks struct {
 	Notify func(title, body string)
 	// Updates is the updates bubble's list (the `updates` event's lines; never nil).
 	Updates func(items any)
+	// LocalTools are Pixie's local tools (NewLocalTools), the very instances the voice loop
+	// holds: the agent serves them to the coordinator over MCP. Never to workers.
+	LocalTools []tools.Tool
 }
 
 // Agent is the running delegation agent.
