@@ -22,6 +22,9 @@ final class AgentRosterController {
     private var below = true
     private var timer: Timer?
     private var eventsApplied = 0
+    /// The chip alone, measured while closed: the open height must not depend on the phase, or
+    /// the side flips when the list opens (and flickers against the poll).
+    private var chipHeight: CGFloat = 22
 
     init(engine: CoreEngine, worker: CoreWorker, pixie: PixieController) {
         self.engine = engine
@@ -70,8 +73,16 @@ final class AgentRosterController {
     private func clicked(_ r: RosterRow) {
         guard AgentRosterModel.clickable(r) else { return }
         if r.kind == "session" {
-            guard let id = r.app, let app = NSRunningApplication.runningApplications(withBundleIdentifier: id).first else { return }
-            app.activate()
+            guard let id = r.app,
+                  let app = NSRunningApplication.runningApplications(withBundleIdentifier: id).first,
+                  let url = app.bundleURL else { return }
+            // Launch Services activates like a Dock click; NSRunningApplication.activate() can be
+            // ignored from an inactive accessory app.
+            let cfg = NSWorkspace.OpenConfiguration()
+            cfg.activates = true
+            NSWorkspace.shared.openApplication(at: url, configuration: cfg) { _, error in
+                if let error { Self.log.error("activate \(id, privacy: .public): \(String(describing: error), privacy: .public)") }
+            }
         } else {
             let engine = engine, name = r.name
             worker.async {
@@ -121,13 +132,14 @@ final class AgentRosterController {
             hide()
             return
         }
+        if !model.open { chipHeight = size.height }
         let top = ScreenDisplays.primaryMaxY
         let bit = pixie.panel.frame
         let screen = NSScreen.screens.first { $0.frame.contains(NSPoint(x: bit.midX, y: bit.midY)) }
             ?? pixie.panel.screen ?? NSScreen.main
         let area = DesktopSpace.desktopRect(screen?.visibleFrame ?? bit, primaryMaxY: top)
         let openHeight = CGFloat(min(model.view.agents.count, AgentRosterModel.maxRows + 1)
-                                 + min(model.view.yours.count, AgentRosterModel.maxRows + 1) + 3) * 22 + size.height
+                                 + min(model.view.yours.count, AgentRosterModel.maxRows + 1) + 3) * 22 + chipHeight
         let (rect0, b) = ChipPlacement.frame(pixie: DesktopSpace.desktopRect(bit, primaryMaxY: top),
                                             panel: size, screen: area, openHeight: openHeight)
         var rect = rect0
@@ -142,6 +154,10 @@ final class AgentRosterController {
             if !(s.width > 0 && s.height > 0) { hide(); return }
         }
         panel.setFrame(ScreenDisplays.appKitFrame(topLeft: rect.origin, size: rect.size), display: true)
+        if model.open && panel.parent != nil {
+            // Above the updates bubble (a sibling child panel): re-adding puts it last.
+            pixie.panel.removeChildWindow(panel)
+        }
         if panel.parent == nil { pixie.panel.addChildWindow(panel, ordered: .above) }
         if !panel.isVisible { panel.orderFrontRegardless() }
         if panel.alphaValue != 1 { panel.alphaValue = 1 }
@@ -151,6 +167,7 @@ final class AgentRosterController {
         if panel.parent != nil { pixie.panel.removeChildWindow(panel) }
         if panel.isVisible { panel.orderOut(nil) }
         model.open = false
+        setRoot()
     }
 
     private struct RosterReply: Decodable { var roster: RosterView }
