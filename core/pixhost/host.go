@@ -144,6 +144,9 @@ func (h *Host) serve(c net.Conn) {
 	h.lost(s, c)
 }
 
+// duplicateReason refuses a second pix on a conversation already connected.
+const duplicateReason = "this conversation is already connected to DeskPixie from another pix"
+
 func (h *Host) register(hello wire.Msg, c net.Conn) (*session, string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -152,8 +155,10 @@ func (h *Host) register(hello wire.Msg, c net.Conn) (*session, string) {
 			if s.sessionID != hello.SessionID {
 				continue
 			}
-			if s.conn != nil {
-				return nil, "this conversation is already connected to DeskPixie from another pix"
+			// Only the pix that held it may take back an unreachable session (it asks for its
+			// own address); another pix on the same conversation is a duplicate.
+			if s.conn != nil || hello.Address != s.addr {
+				return nil, duplicateReason
 			}
 			if s.dropTimer != nil {
 				s.dropTimer.Stop()
@@ -214,9 +219,27 @@ func (h *Host) onMsg(s *session, m wire.Msg) bool {
 			}
 			h.mu.Unlock()
 		case "session":
+			// The id usually arrives after registering (at the first hook), so the duplicate
+			// check runs here too: the later pix is refused and runs on without Pixie.
 			h.mu.Lock()
-			s.sessionID = m.SessionID
+			dup := false
+			for _, o := range h.sessions {
+				dup = dup || (o != s && m.SessionID != "" && o.sessionID == m.SessionID)
+			}
+			if !dup {
+				s.sessionID = m.SessionID
+			}
+			conn := s.conn
 			h.mu.Unlock()
+			if dup {
+				if conn != nil {
+					s.wmu.Lock()
+					wire.Encode(conn, wire.Msg{Kind: wire.KindRefused, Reason: duplicateReason})
+					s.wmu.Unlock()
+				}
+				h.remove(s)
+				return true
+			}
 		case "exited":
 			h.remove(s)
 			return true

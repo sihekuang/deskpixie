@@ -92,6 +92,16 @@ func (c *Client) connect(ctx context.Context) (registered, refused bool) {
 		if err != nil {
 			break
 		}
+		if m.Kind == wire.KindRefused {
+			// Refused after registering (another pix holds this conversation): stop for good.
+			c.mu.Lock()
+			c.conn = nil
+			c.mu.Unlock()
+			if c.OnRefused != nil {
+				c.OnRefused(m.Reason)
+			}
+			return false, true
+		}
 		if m.Kind == wire.KindCommand {
 			go func(m wire.Msg) {
 				r := c.OnCommand(m)

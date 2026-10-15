@@ -262,3 +262,29 @@ func TestScreenMarkersDontFlipStatusTheWrongWay(t *testing.T) {
 		t.Fatal("no marker, no match")
 	}
 }
+
+func TestRefusedAfterRegisteringStopsReconnecting(t *testing.T) {
+	d, sock := newFakeDaemon(t, "")
+	refused := make(chan string, 1)
+	c := &Client{Sock: sock, Hello: wire.Msg{Kind: wire.KindRegister}, OnRefused: func(r string) { refused <- r },
+		OnCommand: func(wire.Msg) wire.Msg { return wire.Msg{} }}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() { c.Run(ctx); close(done) }()
+	conn := <-d.conn
+	wire.Encode(conn, wire.Msg{Kind: wire.KindRefused, Reason: "this conversation is already connected"})
+	select {
+	case r := <-refused:
+		if r != "this conversation is already connected" {
+			t.Fatal(r)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("refusal not reported")
+	}
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("still reconnecting after a refusal")
+	}
+}

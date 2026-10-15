@@ -172,7 +172,8 @@ func TestReRegisterKeepsAddress(t *testing.T) {
 	p, r := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api", SessionID: "s-1"})
 	p.c.Close()
 	eventually(t, "drop not noticed", func() bool { l := listed(t, h); return len(l) == 1 && !l[0].User.Reachable })
-	_, r2 := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api", SessionID: "s-1"})
+	// pix asks for the address it held (Client keeps it), as the real client does.
+	_, r2 := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api", SessionID: "s-1", Address: r.Address})
 	if r2.Address != r.Address {
 		t.Fatalf("%s != %s", r2.Address, r.Address)
 	}
@@ -189,7 +190,7 @@ func TestSessionIDLaterStillMatches(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	p.c.Close()
 	eventually(t, "drop not noticed", func() bool { l := listed(t, h); return len(l) == 1 && !l[0].User.Reachable })
-	_, r2 := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api", SessionID: "s-2"})
+	_, r2 := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api", SessionID: "s-2", Address: r.Address})
 	if r2.Address != r.Address {
 		t.Fatalf("%s != %s", r2.Address, r.Address)
 	}
@@ -314,4 +315,37 @@ func TestPreviousAddressNotTakenFromOthers(t *testing.T) {
 		t.Fatalf("%+v", r3)
 	}
 	_ = h
+}
+
+func TestASessionIDArrivingLaterIsCheckedForDuplicates(t *testing.T) {
+	// pix registers before any hook has told it the session id; `pix claude --resume X` in a
+	// second tab learns X only at its first hook.
+	h, sock := newHost(t)
+	a, _ := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api"})
+	wire.Encode(a.c, wire.Msg{Kind: wire.KindEvent, Event: "session", SessionID: "s-1"})
+	b, _ := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api"})
+	eventually(t, "both listed", func() bool { return len(listed(t, h)) == 2 })
+	wire.Encode(b.c, wire.Msg{Kind: wire.KindEvent, Event: "session", SessionID: "s-1"})
+	b.c.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if m, err := b.dec.Next(); err != nil || m.Kind != wire.KindRefused || m.Reason == "" {
+		t.Fatalf("the second pix must be refused: %+v %v", m, err)
+	}
+	eventually(t, "only the first listed", func() bool { return len(listed(t, h)) == 1 })
+}
+
+func TestAnUnreachableSessionIsNotTakenOverByAnotherPix(t *testing.T) {
+	h, sock := newHost(t)
+	a, ra := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api", SessionID: "s-1"})
+	a.c.Close() // unreachable, kept for a while
+	eventually(t, "unreachable", func() bool { l := listed(t, h); return len(l) == 1 && !l[0].User.Reachable })
+	// Another pix on the same conversation, not asking for a's address.
+	_, rb := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api", SessionID: "s-1"})
+	if rb.Kind != wire.KindRefused {
+		t.Fatalf("must not take over %s: %+v", ra.Address, rb)
+	}
+	// a itself comes back with its address.
+	_, ra2 := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api", SessionID: "s-1", Address: ra.Address})
+	if ra2.Kind != wire.KindRegistered || ra2.Address != ra.Address {
+		t.Fatalf("%+v", ra2)
+	}
 }
