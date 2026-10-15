@@ -339,6 +339,7 @@ type UserSession struct {
 	Tool             string // claude | codex
 	Repo             string // the git root's folder name, "" outside a repo
 	Where            string // terminal or IDE, e.g. "WebStorm"
+	App              string // the terminal app's bundle id, e.g. "com.jetbrains.WebStorm" ("" = unknown)
 	Description      string
 	PastDescriptions []string
 	Reachable        bool // pix is connected (false for a few seconds after it dropped)
