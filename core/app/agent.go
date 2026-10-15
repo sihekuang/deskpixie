@@ -53,6 +53,8 @@ type Agent interface {
 	AttachVoice(v AgentVoice)
 	// OnMouth is each mouth level the voice loop reports (the echo gate).
 	OnMouth(level int)
+	// Decide: a tap on Allow or Deny in the bubble for the permission question with this token.
+	Decide(token string, allow bool)
 	// UpdatesSeen: the updates bubble showed these lines long enough to count as heard.
 	UpdatesSeen(ids []uint64)
 	// Updates is the bubble's current list (the `updates` event's lines), for the shell's first

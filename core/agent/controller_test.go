@@ -1167,3 +1167,36 @@ func TestARestartedCoordinatorIsClearedAndFlaggedAgain(t *testing.T) {
 		t.Fatalf("%s", fmtEffects(fx))
 	}
 }
+
+// ---------- tap to approve (#97) ----------
+
+func TestATapOnAllowDecidesLikeASpokenConfirm(t *testing.T) {
+	c := workingOnJob1()
+	items, _ := lastUpdates(t, askPush(c, 7, T0))
+	if len(items) != 1 || items[0].Token != "hawk" {
+		t.Fatalf("%+v", items)
+	}
+	fx := visible(c.Step(DecideInput(items[0].Token, true), T0))
+	wantEffects(t, fx, eDecide(7, Allow()), eChime, eNotify("Coordinator: allowed"))
+	wantJobStatus(t, c, 1, JobWorking)
+}
+
+func TestATapOnDenyDeniesAndAnotherTapOrAnExpiredTokenDoesNothing(t *testing.T) {
+	c := workingOnJob1()
+	askPush(c, 7, T0)
+	fx := visible(c.Step(DecideInput("hawk", false), T0))
+	wantEffects(t, fx[:1], eDecide(7, Deny("The user said no.")))
+	wantNone(t, visible(c.Step(DecideInput("hawk", true), T0)))
+	wantNone(t, visible(c.Step(DecideInput("expired-or-unknown", true), T0)))
+}
+
+func TestOnlyAPendingQuestionCarriesAToken(t *testing.T) {
+	c := workingOnJob1()
+	askPush(c, 7, T0)
+	c.Step(DecideInput("hawk", true), T0)
+	for _, it := range c.bubbleItems() {
+		if it.Token != "" {
+			t.Fatalf("%+v", it)
+		}
+	}
+}

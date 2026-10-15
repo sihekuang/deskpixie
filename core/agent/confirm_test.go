@@ -339,3 +339,18 @@ func TestSpokenPathsShortenTheProjectsRootFirst(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func TestDecideTokenDecidesOnceAndIgnoresUnknownTokens(t *testing.T) {
+	c := NewConfirmations(120_000)
+	tok, _ := c.Request(1, Coordinator, "", 0)
+	if _, ok := c.DecideToken("nope", true); ok {
+		t.Fatal("unknown token decided")
+	}
+	d, ok := c.DecideToken(tok, true)
+	if !ok || !d.Allow || d.Pending.ID != 1 {
+		t.Fatalf("%+v", d)
+	}
+	if _, ok := c.DecideToken(tok, false); ok {
+		t.Fatal("decided twice")
+	}
+}

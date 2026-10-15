@@ -131,6 +131,7 @@ const (
 	InUpdatesSeen                         // IDs: the updates bubble showed these lines long enough to count as heard
 	InPresence                            // Away: the user is away (screen locked, displays asleep or idle) or back
 	InMode                                // Agent, Mode: the permission_mode a Claude agent's hook reported
+	InDecide                              // Token, Allow: a tap on Allow or Deny in the updates bubble
 )
 
 // Input is one stimulus for AgentController.Step. Build it with the *Input constructors.
@@ -170,6 +171,9 @@ type Input struct {
 	IDs []uint64
 	// Away (InPresence).
 	Away bool
+	// Token and Allow (InDecide): the confirm word tapped on, and the answer.
+	Token string
+	Allow bool
 }
 
 // RestoredInput: keep says the coordinator was kept running over the quit: its open jobs stay
@@ -225,6 +229,11 @@ func WorkerFailedInput(name, reason string) Input {
 }
 func WorkerClosedInput(name string) Input { return Input{Kind: InWorkerClosed, Name: name} }
 func OpenRefusedInput() Input             { return Input{Kind: InOpenRefused} }
+
+// DecideInput is a tap on Allow or Deny for the permission question with this confirm word.
+func DecideInput(token string, allow bool) Input {
+	return Input{Kind: InDecide, Token: token, Allow: allow}
+}
 func UpdatesSeenInput(ids []uint64) Input { return Input{Kind: InUpdatesSeen, IDs: ids} }
 func PresenceInput(away bool) Input       { return Input{Kind: InPresence, Away: away} }
 func ModeInput(agent, mode string) Input  { return Input{Kind: InMode, Agent: agent, Mode: mode} }
@@ -587,6 +596,11 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 		c.openRefused(now, &fx)
 	case InUpdatesSeen:
 		c.updatesSeen(in.IDs, &fx)
+	case InDecide:
+		// A token already decided (by voice or an earlier tap) or expired settles nothing.
+		if d, ok := c.confirms.DecideToken(in.Token, in.Allow); ok {
+			c.applyDecided(d, now, &fx)
+		}
 	case InPresence:
 		c.setAway(in.Away, now, &fx)
 	}
@@ -1244,15 +1258,21 @@ func (c *AgentController) onMode(agent, mode string, now Millis, fx *[]Effect) {
 
 func (c *AgentController) onUserSaid(text string, now Millis, fx *[]Effect) {
 	for _, d := range c.confirms.OnTranscript(text) {
-		decision := Deny("The user said no.")
-		said := "Coordinator: denied"
-		if d.Allow {
-			decision, said = Allow(), "Coordinator: allowed"
-		}
-		*fx = append(*fx, decideEffect(d.Pending.ID, decision))
-		c.resumeJob(d.Pending.Job, now, fx)
-		c.deliver(NewLine(LineInfo, said), now, fx)
+		c.applyDecided(d, now, fx)
 	}
+}
+
+// applyDecided turns one settled request into its effects: the decision, the job resuming, and
+// the line saying so. A spoken answer and a tap on the bubble both end here.
+func (c *AgentController) applyDecided(d Decided, now Millis, fx *[]Effect) {
+	decision := Deny("The user said no.")
+	said := "Coordinator: denied"
+	if d.Allow {
+		decision, said = Allow(), "Coordinator: allowed"
+	}
+	*fx = append(*fx, decideEffect(d.Pending.ID, decision))
+	c.resumeJob(d.Pending.Job, now, fx)
+	c.deliver(NewLine(LineInfo, said), now, fx)
 }
 
 // resumeJob moves a job in Question back to Working once nothing for it is pending.

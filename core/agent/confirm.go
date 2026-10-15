@@ -178,6 +178,16 @@ func (c *Confirmations) Remove(id RequestID) (Pending, bool) {
 	return p, true
 }
 
+// DecideToken settles the request with token from a tap on Pixie's bubble (#97): the same
+// outcome as the confirm word (allow) or a refusal (deny). Unknown or used tokens do nothing.
+func (c *Confirmations) DecideToken(token string, allow bool) (Decided, bool) {
+	p, ok := c.take(token)
+	if !ok {
+		return Decided{}, false
+	}
+	return Decided{p, allow}, true
+}
+
 func (c *Confirmations) take(token string) (Pending, bool) {
 	at := slices.IndexFunc(c.pending, func(p Pending) bool { return p.Token == token })
 	if at < 0 {

@@ -14,6 +14,9 @@ type UpdateItem struct {
 	// Job and Worker: what the line is about (a click focuses that pane).
 	Job    JobID  `json:"job,omitempty"`
 	Worker string `json:"worker,omitempty"`
+	// Token is the confirm word of a permission question still waiting; the bubble's Allow and
+	// Deny buttons answer with it (#97). Empty for every other line.
+	Token string `json:"token,omitempty"`
 }
 
 // bubbleItems: the undelivered lines, minus permission questions no longer pending. Never nil.
@@ -23,7 +26,11 @@ func (c *AgentController) bubbleItems() []UpdateItem {
 		if l.Token != nil && !c.confirms.IsPendingToken(*l.Token) {
 			continue
 		}
-		items = append(items, UpdateItem{ID: l.ID, Text: l.Text, Kind: l.Kind, At: l.At, Job: l.Job, Worker: l.Worker})
+		item := UpdateItem{ID: l.ID, Text: l.Text, Kind: l.Kind, At: l.At, Job: l.Job, Worker: l.Worker}
+		if l.Token != nil {
+			item.Token = *l.Token
+		}
+		items = append(items, item)
 	}
 	return items
 }

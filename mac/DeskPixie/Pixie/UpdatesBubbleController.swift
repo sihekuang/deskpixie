@@ -180,6 +180,7 @@ final class UpdatesBubbleController {
             count: model.count, phase: model.phase, shown: model.shown, more: model.more,
             onLine: { [weak self] in self?.clicked($0) },
             onMore: { [weak self] in self?.onTalk?() },
+            onDecide: { [weak self] token, allow in self?.call("agent.decide", DecideArgs(token: token, allow: allow)) },
             onBadge: { [weak self] in
                 guard let self, self.panel.alphaValue >= UpdatesBubbleModel.hoverMinAlpha else { return }
                 self.model.pointerEntered(now: Self.now)
@@ -239,6 +240,7 @@ final class UpdatesBubbleController {
 
     private struct UpdatesReply: Decodable { var lines: [UpdateLine] }
     private struct SeenArgs: Encodable, Sendable { let ids: [UInt64] }
+    private struct DecideArgs: Encodable, Sendable { let token: String; let allow: Bool }
     private struct FocusJobArgs: Encodable, Sendable { let job: String; let worker: String }
 }
 

@@ -8,6 +8,19 @@ final class UpdatesBubbleModelTests: XCTestCase {
         UpdateLine(id: id, text: "line \(id)", kind: "reply", at: Int64(id), job: nil, worker: nil)
     }
 
+    func testAPendingQuestionOffersAllowAndDeny() throws {
+        let decode = { (json: String) throws -> UpdateLine in
+            try JSONDecoder().decode(UpdateLine.self, from: Data(json.utf8))
+        }
+        let line = try decode(#"{"id":1,"text":"Run git push in focus? Say confirm hawk.","kind":"question","at":1,"token":"hawk"}"#)
+        XCTAssertEqual(line.token, "hawk")
+        XCTAssertTrue(line.offersDecision)
+        let info = try decode(#"{"id":2,"text":"Done.","kind":"reply","at":2}"#)
+        XCTAssertFalse(info.offersDecision)
+        let jobQuestion = try decode(#"{"id":3,"text":"Which one?","kind":"question","at":3}"#)
+        XCTAssertFalse(jobQuestion.offersDecision)
+    }
+
     func testFirstListAfterLaunchIsBadgeOnly() {
         var m = UpdatesBubbleModel()
         m.apply([line(1)], now: 0, pop: .allowed)

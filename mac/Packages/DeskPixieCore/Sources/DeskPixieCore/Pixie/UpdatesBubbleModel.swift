@@ -14,14 +14,21 @@ public struct UpdateLine: Decodable, Sendable, Equatable, Identifiable {
     public let job: String?
     /// The worker the line is about, when it is about one.
     public let worker: String?
+    /// The confirm word of a permission question still waiting; `agent.decide` takes it back.
+    public let token: String?
 
-    public init(id: UInt64, text: String, kind: String, at: Int64, job: String?, worker: String?) {
+    /// Whether the row shows Allow and Deny buttons.
+    public var offersDecision: Bool { kind == "question" && token != nil }
+
+    public init(id: UInt64, text: String, kind: String, at: Int64, job: String?, worker: String?,
+                token: String? = nil) {
         self.id = id
         self.text = text
         self.kind = kind
         self.at = at
         self.job = job
         self.worker = worker
+        self.token = token
     }
 }
 

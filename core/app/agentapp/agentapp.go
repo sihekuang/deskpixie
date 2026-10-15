@@ -587,6 +587,9 @@ func (a *Agent) OpenTerminal() {
 	})
 }
 
+// Decide: a tap on Allow or Deny in the bubble for the question with this confirm word.
+func (a *Agent) Decide(token string, allow bool) { a.handle.Decide(token, allow) }
+
 // UpdatesSeen: the updates bubble showed these lines long enough to count as heard.
 func (a *Agent) UpdatesSeen(ids []uint64) { a.handle.UpdatesSeen(ids) }
 
