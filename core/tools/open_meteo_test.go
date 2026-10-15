@@ -31,6 +31,29 @@ func TestAQualifierIsSplitOffTheName(t *testing.T) {
 	}
 }
 
+func TestATrailingStateOrCountryWithoutACommaIsTheQualifier(t *testing.T) {
+	for _, c := range []struct{ in, name, q string }{
+		{"Bothell WA", "Bothell", "washington"},
+		{"Portland Maine", "Portland", "maine"},
+		{"Raleigh North Carolina", "Raleigh", "north carolina"},
+		{"Salt Lake City UT", "Salt Lake City", "utah"},
+		{"London UK", "London", "gb"},
+		{"Washington DC", "Washington", "district of columbia"},
+		// Multi-word names that don't end in a state or country stay whole.
+		{"New York", "New York", ""},
+		{"San Jose", "San Jose", ""},
+		{"Kansas City", "Kansas City", ""},
+		// A single word is a name, even when it's also a state.
+		{"Washington", "Washington", ""},
+		{"Texas", "Texas", ""},
+	} {
+		n, q := splitQuery(c.in)
+		if n != c.name || q != c.q {
+			t.Errorf("%q -> %q,%q want %q,%q", c.in, n, q, c.name, c.q)
+		}
+	}
+}
+
 func TestStateCodesAndCountryAliasesAreSpelledOut(t *testing.T) {
 	for in, want := range map[string]string{"Portland, ME": "maine", "Springfield, IL": "illinois", "London, UK": "gb", "Paris, USA": "us"} {
 		if _, q := splitQuery(in); q != want {
@@ -134,5 +157,31 @@ func TestOpenMeteoOverHTTP(t *testing.T) {
 	om.ForecastURL = srv.URL + "/nope"
 	if _, err := om.Forecast(context.Background(), *p, Metric); err == nil || err.Error() != "HTTP 500" {
 		t.Fatal(err)
+	}
+}
+
+// A name with a region we don't recognise at the end finds the place with the shorter name, and a
+// place that doesn't exist stops after a bounded number of tries.
+func TestFindRetriesWithTheEndAsTheQualifier(t *testing.T) {
+	var names []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := r.URL.Query().Get("name")
+		names = append(names, n)
+		if n == "Toronto" {
+			_, _ = w.Write([]byte(`{"results":[{"name":"Toronto","latitude":43.7,"longitude":-79.4,"country_code":"CA","timezone":"America/Toronto","country":"Canada","admin1":"Ontario"}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"generationtime_ms":0.3}`))
+	}))
+	defer srv.Close()
+	om := NewOpenMeteo()
+	om.GeocodingURL = srv.URL
+	p, err := om.Find(context.Background(), "Toronto Ontario")
+	if err != nil || p == nil || p.Region != "Ontario" {
+		t.Fatal(p, err, names)
+	}
+	names = nil
+	if p, err := om.Find(context.Background(), "Nowhere Big Little Town"); p != nil || err != nil || len(names) != 3 {
+		t.Fatal(p, err, names)
 	}
 }
