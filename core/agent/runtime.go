@@ -489,8 +489,12 @@ func (h *AgentHandle) OpenTerminal(ctx context.Context) error {
 		return err
 	}
 	h.Input(EnsureCoordinatorInput())
-	// A coordinator already running is brought to the front; one being started is focused when it is up.
-	focusQuietly(ctx, h.deps.Host.Session(), Coordinator)
+	// The agent waiting at a prompt in its terminal, else the coordinator (one already running
+	// is brought to the front; one being started is focused when it is up).
+	h.ctlMu.Lock()
+	target := h.ctl.OpenTarget()
+	h.ctlMu.Unlock()
+	focusQuietly(ctx, h.deps.Host.Session(), target)
 	return h.deps.Launcher.Open(Attach{Argv: h.deps.Host.AttachCommand(), Dir: h.deps.TerminalDir})
 }
 

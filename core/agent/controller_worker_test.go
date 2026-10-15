@@ -714,3 +714,22 @@ func TestAResultAfterTheJobEndedIsNotSpoken(t *testing.T) {
 		t.Fatal(fmtEffects(fx))
 	}
 }
+
+// #110: a click on Pixie opens the agent waiting at a prompt in its terminal, else the coordinator.
+func TestAClickOnPixieOpensTheWorkerWaitingInItsTerminal(t *testing.T) {
+	c := wctl()
+	p := admitOK(t, c, Codex)
+	up(c, p.Name, PaneIdle)
+	if got := c.OpenTarget(); got != Coordinator {
+		t.Fatalf("nothing waiting: %q", got)
+	}
+	c.Step(paneStatus(p.Name, PaneBlocked), T0)
+	c.Step(TickInput(), T0+WorkerBlockedGraceMs)
+	if got := c.OpenTarget(); got != p.Name {
+		t.Fatalf("waiting worker: %q", got)
+	}
+	c.Step(paneStatus(p.Name, PaneWorking), T0+WorkerBlockedGraceMs+1)
+	if got := c.OpenTarget(); got != Coordinator {
+		t.Fatalf("no longer waiting: %q", got)
+	}
+}
