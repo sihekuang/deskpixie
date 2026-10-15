@@ -140,3 +140,12 @@ func TestPixiesPromptsNameTheCoordinator(t *testing.T) {
 		t.Error(Delegate{}.Description())
 	}
 }
+
+// #83: a failed local tool (the weather lookup that can't find the place) is checked with the
+// coordinator, not answered with "I can't".
+func TestAFailedLocalToolIsCheckedWithTheCoordinator(t *testing.T) {
+	if !strings.Contains(DelegationPersona, "If one of your own tools fails or finds nothing") ||
+		!strings.Contains(DelegationPersona, `call delegate with "Check: "`) {
+		t.Fatal("delegation rules lack the failed-tool fallback")
+	}
+}

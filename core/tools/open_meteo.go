@@ -80,6 +80,24 @@ func (o *OpenMeteo) Find(ctx context.Context, query string) (*Place, error) {
 	if name == "" {
 		return nil, nil
 	}
+	p, err := o.find(ctx, name, qualifier)
+	if p != nil || err != nil || qualifier != "" {
+		return p, err
+	}
+	// Nothing for the whole name and no qualifier was recognised: the end may be a region we
+	// don't know ("Toronto Ontario", "Bothell Washington State"). Try the shorter names, with the
+	// rest as the qualifier, at most twice.
+	words := strings.Fields(name)
+	for i, tries := len(words)-1, 0; i >= 1 && tries < 2; i, tries = i-1, tries+1 {
+		rest := expand(strings.ToLower(strings.Join(words[i:], " ")))
+		if p, err := o.find(ctx, strings.Join(words[:i], " "), rest); p != nil || err != nil {
+			return p, err
+		}
+	}
+	return nil, nil
+}
+
+func (o *OpenMeteo) find(ctx context.Context, name, qualifier string) (*Place, error) {
 	count := "1"
 	if qualifier != "" {
 		count = "10"
@@ -117,7 +135,8 @@ func (o *OpenMeteo) Forecast(ctx context.Context, p Place, u Units) (Forecast, e
 
 // splitQuery turns "Portland, Oregon, USA" into ("Portland", "oregon"): Open-Meteo searches names
 // only, so the next part after the name narrows the results. A state abbreviation or a country
-// alias is spelled out ("ME" -> "maine", "UK" -> "gb"). An empty qualifier means none.
+// alias is spelled out ("ME" -> "maine", "UK" -> "gb"). Without a comma, a known state or country
+// at the end is split off the same way. An empty qualifier means none.
 func splitQuery(query string) (string, string) {
 	parts := strings.Split(query, ",")
 	name := strings.TrimSpace(parts[0])
@@ -125,6 +144,19 @@ func splitQuery(query string) (string, string) {
 	if len(parts) > 1 {
 		if q := strings.TrimSpace(parts[1]); q != "" {
 			qualifier = expand(strings.ToLower(q))
+		}
+		return name, qualifier
+	}
+	// No comma: a known state or country at the end is the qualifier ("Bothell WA",
+	// "Raleigh North Carolina", "London UK"). A single word is always the name.
+	words := strings.Fields(name)
+	for n := 2; n >= 1; n-- {
+		if len(words) <= n {
+			continue
+		}
+		tail := strings.ToLower(strings.Join(words[len(words)-n:], " "))
+		if q := expand(tail); q != tail || isKnownState(q) {
+			return strings.Join(words[:len(words)-n], " "), q
 		}
 	}
 	return name, qualifier
