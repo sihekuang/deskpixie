@@ -78,6 +78,13 @@ it moves on. Pixie only ever says descriptions, never internal names.
 
 Quitting DeskPixie never ends a session you started.
 
+## Seeing what's running
+
+A chip under Pixie counts what's running: `⚙ 3 · ⌨ 2` is three of Pixie's agents (its workers;
+the coordinator is never counted) and two of your `pix` sessions. Hover it for the list; click
+a row to bring that agent forward (Pixie's in its Herdr/tmux tab, yours by bringing its
+terminal app to the front). With nothing but the coordinator running, there is no chip.
+
 ## Pixie never types over you
 
 For Claude Code, Pixie's messages go into Claude's own inbox, so your typing is never touched.

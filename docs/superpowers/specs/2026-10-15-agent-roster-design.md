@@ -1,6 +1,6 @@
 # Agent roster: what's running, beside Pixie (#91)
 
-Status: design approved in conversation 2026-10-15; spec for review. Builds on `pix` (#89, PR #90).
+Status: implemented on branch agent-roster (#91).
 
 ## 1. Goal
 
