@@ -121,6 +121,24 @@ func (t clientDelegation) Invoke(ctx context.Context, raw json.RawMessage) ToolO
 	return o
 }
 
+// routedHandOff is the hand-off (#71/#72) through the client delegation router: its result
+// reads like the delegate tool's ({"job_id"} or {"error"}), for HandOffNotice.
+type routedHandOff struct{ router Tool }
+
+func (h routedHandOff) Invoke(ctx context.Context, raw json.RawMessage) ToolOutcome {
+	var r ClientDelegationResult
+	_ = json.Unmarshal(h.router.Invoke(ctx, raw).Output, &r)
+	out := map[string]string{}
+	switch {
+	case r.JobID != "":
+		out["job_id"] = r.JobID
+	case r.Error != "":
+		out["error"] = r.Error
+	}
+	b, _ := json.Marshal(out)
+	return ToolOutcome{Output: b}
+}
+
 // goodbyes end a conversation when they are the whole utterance or its end (normalized).
 var goodbyes = []string{
 	"bye", "goodbye", "bye bye", "good bye", "see you", "see ya", "see you later", "talk later",

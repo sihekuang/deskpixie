@@ -251,3 +251,31 @@ func TestTranscriptMatchers(t *testing.T) {
 		}
 	}
 }
+
+// #75 in client mode: Bit claims it passed the user's answer on without a delegation; the
+// app's hand-off carries Answer, so the router gives it to answer_job, not a new job.
+func TestClientModeClaimedAnswerIsHandedOffAsAnAnswer(t *testing.T) {
+	c := newClientConv()
+	c.Step(InjectInput(Notice{Text: "Agent question: what colour should the chart be?"}), ms(t0(), 100))
+	reply(c, "What colour should the chart be?", ms(t0(), 400))
+	userTurn(c, "make it blue", ms(t0(), 2000))
+	reply(c, "Got it, I've passed that on to the agent.", ms(t0(), 2500))
+	h := handOffs(ticks(c, ms(t0(), 2500), 3*time.Second))
+	if len(h) != 1 || !h[0].Answer || h[0].Text != "make it blue" {
+		t.Fatalf("%+v", h)
+	}
+
+	reg := NewToolRegistry()
+	del := &recTool{name: DelegateTool, out: `{"job_id":"job_new"}`}
+	ans := &recTool{name: AnswerJobTool, out: `{"job_id":"job_3","status":"answered"}`}
+	reg.Register(del)
+	reg.Register(ans)
+	raw, _ := json.Marshal(ClientDelegationArgs{Task: "make it blue", Answer: true})
+	out := routedHandOff{clientDelegation{reg: reg}}.Invoke(context.Background(), raw)
+	if string(out.Output) != `{"job_id":"job_3"}` || len(del.got) != 0 {
+		t.Fatalf("%s %v", out.Output, del.got)
+	}
+	if n, _ := HandOffNotice("make it blue", out.Output); !strings.HasPrefix(n.Text, HandedOffPrefix) {
+		t.Fatalf("%+v", n)
+	}
+}

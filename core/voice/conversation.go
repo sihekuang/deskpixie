@@ -152,7 +152,9 @@ type Effect struct {
 	Context string     // EfHandOff
 	// Claim (EfHandOff): Pixie already said it handed it off, so a successful hand-off says
 	// nothing more (#72).
-	Claim  bool
+	Claim bool
+	// Answer (EfHandOff, client delegation): the user is answering a relayed "Agent question:".
+	Answer bool
 	Signal VoiceSignal // EfSignal
 }
 
@@ -790,7 +792,11 @@ func (c *Conversation) handOffTask(task string, claim bool, fx []Effect) []Effec
 	c.hoPending++
 	c.pendingTools++
 	c.hoHandedOff = true
-	return append(fx, Effect{Kind: EfHandOff, Text: task, Context: c.handOffContext(), Claim: claim})
+	answer := c.clientDelegation && c.answerTurn
+	if answer {
+		c.answerTurn = false
+	}
+	return append(fx, Effect{Kind: EfHandOff, Text: task, Context: c.handOffContext(), Claim: claim, Answer: answer})
 }
 
 // handOffContext is the earlier turns, for a delegated task's context ("" when none).

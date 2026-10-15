@@ -789,13 +789,13 @@ func (r *Runtime) apply(fx Effect) {
 	case EfSignal:
 		r.publish(fx.Signal)
 	case EfHandOff:
-		r.handOff(fx.Text, fx.Context, fx.Claim)
+		r.handOff(fx.Text, fx.Context, fx.Claim, fx.Answer)
 	}
 }
 
 // handOff delegates task through the delegate tool, as if the model had called it, and feeds
 // back the notice Pixie then says (#71).
-func (r *Runtime) handOff(task, context string, claim bool) {
+func (r *Runtime) handOff(task, context string, claim, answer bool) {
 	gen := r.gen
 	deliver := func(n Notice) {
 		select {
@@ -813,9 +813,16 @@ func (r *Runtime) handOff(task, context string, claim bool) {
 		args["context"] = context
 	}
 	raw, _ := json.Marshal(args)
+	invoke := tool.Invoke
+	if router, ok := r.tools.Get(ClientDelegationTool); ok {
+		// Client delegation (#70): the same routing as GPT-Live's own delegations, so an answer
+		// to an "Agent question:" goes to answer_job rather than a new job (#75).
+		invoke = routedHandOff{router}.Invoke
+		raw, _ = json.Marshal(ClientDelegationArgs{Task: task, Context: context, Answer: answer})
+	}
 	ctx := r.ctx
 	go func() {
-		out := tool.Invoke(ctx, raw)
+		out := invoke(ctx, raw)
 		n, why := HandOffNotice(task, out.Output)
 		if claim {
 			log.Printf("voice: Pixie said it handed a request off without calling delegate: %s", why)
