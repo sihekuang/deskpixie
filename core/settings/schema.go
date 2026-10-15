@@ -181,6 +181,18 @@ var NoiseModels = []Opt{
 	{"dfn3", "DeepFilterNet3 (steady noise only)", mac},
 }
 
+// GPT-Live delegation modes (voice.liveDelegation).
+const (
+	LiveDelegationBackend = "backend"
+	LiveDelegationAgent   = "agent"
+)
+
+// LiveDelegations are voice.liveDelegation's choices.
+var LiveDelegations = []Opt{
+	{LiveDelegationBackend, "OpenAI backend model", AllPlatforms},
+	{LiveDelegationAgent, "Straight to the coordinator (experimental)", AllPlatforms},
+}
+
 // Suggested voice models and voices per provider. The Gemini lists mirror core/voice/gemini
 // (DefaultModel, the legacy preview its docs name, and Voices); a test keeps them in step.
 var (
@@ -298,6 +310,7 @@ var Fields = []FieldSpec{
 	macOnly(spec("voice.outputDevice", SectionVoice, "Speaker", "Where Pixie's voice plays. If it isn't connected, Pixie uses the system default until it is.", choiceKind(SourceOutputDevices), ApplyLive)),
 	spec("voice.noisyRoom", SectionVoice, "Noisy room", "Pixie ignores quieter voices in the background, like a TV or people nearby. Speak up a little to interrupt Pixie. With OpenAI GPT-Live this only changes Pixie's instructions.", boolKind, ApplyRestart),
 	spec("voice.liveBackendModel", SectionVoice, "Backend model (GPT-Live)", "Only for OpenAI GPT-Live: the model that runs Pixie's tools while GPT-Live talks.", openChoice(Choices{Source: SourceStatic, Static: LiveBackendModels}), ApplyRestart),
+	spec("voice.liveDelegation", SectionVoice, "GPT-Live delegation", "Only for OpenAI GPT-Live. OpenAI backend model: a backend model runs Pixie's tools (the time, weather, timers, music) and hands other work to the coordinator. Straight to the coordinator: GPT-Live hands everything it can't answer itself to the coordinator, with no backend model; Pixie knows the time from the clock, and the weather, timers and music go through the coordinator too, so they take longer.", staticChoice(LiveDelegations), ApplyRestart),
 	spec("voice.handOffWhenUnsure", SectionVoice, "Hand off when Pixie doesn't know", "When Pixie can't answer a question or request itself, it hands it to the coordinator instead of saying it doesn't know.", boolKind, ApplyRestart),
 	spec("voice.checkClaims", SectionVoice, "Check Pixie's claims", "When Pixie says it did something, like setting a timer or handing a task off, the app checks it really did and corrects it if not.", boolKind, ApplyRestart),
 	spec("voice.idleTimeoutSecs", SectionVoice, "Silence timeout (seconds)", "A conversation ends after this much silence.", intKind(1, 600, false), ApplyRestart),

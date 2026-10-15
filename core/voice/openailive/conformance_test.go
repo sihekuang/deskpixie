@@ -33,8 +33,27 @@ type confReply struct {
 type fakeLive struct {
 	mu      sync.Mutex
 	script  []confReply
-	start   map[string]any // the session.start received
-	clients []string       // client event types received, in order (audio excluded)
+	start   map[string]any   // the session.start received
+	clients []string         // client event types received, in order (audio excluded)
+	msgs    []map[string]any // the client events themselves (audio excluded)
+	// Client delegation mode: each user turn is transcribed as the next of said (one delta
+	// when the turn starts) instead of "word " per loud frame, and a reply's tool
+	// voice.ClientDelegationTool is a session.delegation.created with target client.
+	client bool
+	said   []string
+}
+
+// sent returns the client events of type typ received so far.
+func (s *fakeLive) sent(typ string) []map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []map[string]any
+	for _, m := range s.msgs {
+		if m["type"] == typ {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 type fakeConn struct {
@@ -93,7 +112,15 @@ func (f *fakeConn) speak() {
 		}
 		f.write(map[string]any{"type": "session.output_audio.delta", "delta": delta, "start_ms": ms, "end_ms": ms + confFrameMs})
 		ms += confFrameMs
-		if f.sent == 1 && f.tool != "" && !f.toolsSent {
+		if f.sent == 1 && f.tool == voice.ClientDelegationTool && !f.toolsSent {
+			f.toolsSent = true
+			f.callSeq++
+			f.write(map[string]any{"type": "session.delegation.created", "delegation": map[string]any{"id": "item_" + string(rune('0'+f.callSeq)), "type": "delegation", "target": "client"}, "offset_ms": ms})
+		}
+		f.srv.mu.Lock()
+		client := f.srv.client
+		f.srv.mu.Unlock()
+		if f.sent == 1 && f.tool != "" && !f.toolsSent && !client {
 			f.toolsSent = true
 			f.callSeq++
 			id := "call_" + string(rune('0'+f.callSeq))
@@ -133,8 +160,11 @@ func (s *fakeLive) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = json.Unmarshal(data, &m)
 		if m.Type != "session.input_audio.append" {
+			var full map[string]any
+			_ = json.Unmarshal(data, &full)
 			s.mu.Lock()
 			s.clients = append(s.clients, m.Type)
+			s.msgs = append(s.msgs, full)
 			s.mu.Unlock()
 		}
 		switch m.Type {
@@ -151,10 +181,21 @@ func (s *fakeLive) serve(w http.ResponseWriter, r *http.Request) {
 			pcm, _ := audio.DecodeLE(raw)
 			if voice.RMS(pcm) > 0.05 {
 				quiet = 0
+				s.mu.Lock()
+				delta := "word "
+				if s.client {
+					delta = ""
+					if !talking && len(s.said) > 0 {
+						delta, s.said = s.said[0], s.said[1:]
+					}
+				}
+				s.mu.Unlock()
 				talking = true
 				f.mu.Lock()
 				f.frames = 0 // barge-in: GPT-Live yields
-				f.write(map[string]any{"type": "session.input_transcript.delta", "delta": "word "})
+				if delta != "" {
+					f.write(map[string]any{"type": "session.input_transcript.delta", "delta": delta})
+				}
 				f.mu.Unlock()
 			} else if talking {
 				if quiet++; quiet >= 5 {
@@ -162,7 +203,8 @@ func (s *fakeLive) serve(w http.ResponseWriter, r *http.Request) {
 					f.startReply(f.nextReply())
 				}
 			}
-		case "response.create":
+		case "response.create", "session.commentary.append":
+			// GPT-Live speaks a commentary (paraphrased), as it does a backend result.
 			f.startReply(confReply{frames: 3})
 		case "session.close":
 			f.mu.Lock()
@@ -224,6 +266,37 @@ func TestGPTLiveAdapterPassesTheConformanceSuite(t *testing.T) {
 	}
 	if items != 1 || creates != 0 {
 		t.Fatalf("tool result events: %d item.create, %d response.create (%v)", items, creates, fs.clients)
+	}
+}
+
+// With client delegation the goodbye is the user's words, not a typed call: the adapter makes
+// the end_conversation call up, and the suite passes unchanged.
+func TestGPTLiveClientModePassesTheConformanceSuite(t *testing.T) {
+	fs := &fakeLive{script: []confReply{{frames: 3}, {frames: 200}, {frames: 1}}, client: true,
+		said: []string{"tell me about the planets", "and the moons", "thanks, that's all, bye"}}
+	srv := httptest.NewServer(http.HandlerFunc(fs.serve))
+	defer srv.Close()
+	url := "ws" + strings.TrimPrefix(srv.URL, "http") + "/v1/live/sessions"
+	cfg := confCfg()
+	cfg.ClientDelegation = true
+	rep, err := vt.Run(New(url), "test-key", cfg, confClips())
+	if err != nil {
+		t.Fatalf("conformance: %v", err)
+	}
+	if len(rep.Steps) != 5 {
+		t.Fatalf("steps %v", rep.Steps)
+	}
+	fs.mu.Lock()
+	d, _ := fs.start["delegation"].(map[string]any)
+	fs.mu.Unlock()
+	if d["type"] != "client" {
+		t.Fatalf("session.start delegation %v", d)
+	}
+	if n := len(fs.sent("response.item.create")) + len(fs.sent("response.create")); n != 0 {
+		t.Fatalf("backend events in client mode: %d", n)
+	}
+	if th := fs.sent("session.thinking.append"); len(th) == 0 || !strings.HasPrefix(th[0]["content"].(string), "Local time now: ") {
+		t.Fatalf("no time context: %v", th)
 	}
 }
 

@@ -262,6 +262,25 @@ func NewRuntime(m Model, c audio.Cleaner, cfg RuntimeConfig, emit func(UIEvent))
 			cfg.Conversation.ClaimTools = append(cfg.Conversation.ClaimTools, name)
 		}
 	}
+	if cfg.Session.ClientDelegation {
+		// The provider has no tools of its own (#70): only a delegate claim can be made good,
+		// and its client delegations go through the clientDelegation router. Registered after
+		// Specs, so it is never declared to a model; the caller's registry is not changed.
+		cfg.Conversation.ClientDelegation = true
+		if _, ok := tools.Get(DelegateTool); ok {
+			cfg.Conversation.ClaimTools = []string{DelegateTool}
+		} else {
+			cfg.Conversation.ClaimTools = nil
+		}
+		withRouter := NewToolRegistry()
+		for _, spec := range cfg.Session.Tools {
+			if t, ok := tools.Get(spec.Name); ok {
+				withRouter.Register(t)
+			}
+		}
+		withRouter.Register(clientDelegation{reg: tools})
+		tools = withRouter
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	r := &Runtime{
 		model:     m,
@@ -770,13 +789,13 @@ func (r *Runtime) apply(fx Effect) {
 	case EfSignal:
 		r.publish(fx.Signal)
 	case EfHandOff:
-		r.handOff(fx.Text, fx.Context, fx.Claim)
+		r.handOff(fx.Text, fx.Context, fx.Claim, fx.Answer)
 	}
 }
 
 // handOff delegates task through the delegate tool, as if the model had called it, and feeds
 // back the notice Pixie then says (#71).
-func (r *Runtime) handOff(task, context string, claim bool) {
+func (r *Runtime) handOff(task, context string, claim, answer bool) {
 	gen := r.gen
 	deliver := func(n Notice) {
 		select {
@@ -794,9 +813,16 @@ func (r *Runtime) handOff(task, context string, claim bool) {
 		args["context"] = context
 	}
 	raw, _ := json.Marshal(args)
+	invoke := tool.Invoke
+	if router, ok := r.tools.Get(ClientDelegationTool); ok {
+		// Client delegation (#70): the same routing as GPT-Live's own delegations, so an answer
+		// to a "Coordinator question:" goes to answer_job rather than a new job (#75).
+		invoke = routedHandOff{router}.Invoke
+		raw, _ = json.Marshal(ClientDelegationArgs{Task: task, Context: context, Answer: answer})
+	}
 	ctx := r.ctx
 	go func() {
-		out := tool.Invoke(ctx, raw)
+		out := invoke(ctx, raw)
 		n, why := HandOffNotice(task, out.Output)
 		if claim {
 			log.Printf("voice: Pixie said it handed a request off without calling delegate: %s", why)

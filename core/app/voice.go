@@ -61,12 +61,14 @@ func PickModel(reg map[string]ModelFactory, s settings.VoiceSettings) (voice.Mod
 // SessionConfig is the session from settings and the instructions.
 func SessionConfig(s settings.VoiceSettings, instructions string) voice.SessionConfig {
 	return voice.SessionConfig{
-		Model:         s.Model,
-		Voice:         s.Voice,
-		Instructions:  instructions,
-		BackendModel:  s.LiveBackendModel,
-		TurnDetection: voice.TurnSemantic,
-		NoisyRoom:     s.NoisyRoom,
+		Model:        s.Model,
+		Voice:        s.Voice,
+		Instructions: instructions,
+		BackendModel: s.LiveBackendModel,
+		// Client delegation straight to the coordinator (GPT-Live only; #70).
+		ClientDelegation: s.LiveDelegation == settings.LiveDelegationAgent,
+		TurnDetection:    voice.TurnSemantic,
+		NoisyRoom:        s.NoisyRoom,
 		// A noisy room asks the provider to reduce noise only while the mic is not cleaned here.
 		ProviderNoiseReduction: s.NoisyRoom && !s.NoiseFilter,
 	}

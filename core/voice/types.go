@@ -41,6 +41,10 @@ type SessionConfig struct {
 	// BackendModel and BackendInstructions are for providers that run tools on a separate
 	// backend model (GPT-Live's Responses delegation); the others ignore them.
 	BackendModel, BackendInstructions string
+	// ClientDelegation: the provider hands turns that need work to the app instead of running
+	// tools itself (GPT-Live's client delegation, voice.liveDelegation "agent": straight to the coordinator; #70). The others
+	// ignore it.
+	ClientDelegation bool
 }
 
 type EventKind int

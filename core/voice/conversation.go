@@ -23,6 +23,9 @@ const (
 	// decides: a late transcript of the user's words, or a provider's late tool call, still
 	// counts (#71).
 	HandOffGrace = 1500 * time.Millisecond
+	// ClientAckGrace: after a client delegation that ends the conversation once acknowledged,
+	// how long it stays open at least, so GPT-Live's hand-off line can start (#70).
+	ClientAckGrace = 3 * time.Second
 )
 
 // Phase is where the conversation is. Rust's Phase carries data in two variants; here that
@@ -149,7 +152,9 @@ type Effect struct {
 	Context string     // EfHandOff
 	// Claim (EfHandOff): Pixie already said it handed it off, so a successful hand-off says
 	// nothing more (#72).
-	Claim  bool
+	Claim bool
+	// Answer (EfHandOff, client delegation): the user is answering a relayed "Coordinator question:".
+	Answer bool
 	Signal VoiceSignal // EfSignal
 }
 
@@ -168,6 +173,9 @@ type ConversationConfig struct {
 	// them from its registry).
 	CheckClaims bool
 	ClaimTools  []string
+	// ClientDelegation: the provider hands turns to the app without a task (SessionConfig.
+	// ClientDelegation; #70). Its ClientDelegationTool calls get the task from the transcript.
+	ClientDelegation bool
 }
 
 // DefaultConversationConfig: 7 s idle, 180 s hold-open.
@@ -223,6 +231,14 @@ type Conversation struct {
 	// tool (GPT-Live's backend can lag) withdraws it while it still waits.
 	claimFix     Notice
 	claimFixTool string
+
+	// Client delegation (#70).
+	clientDelegation bool
+	// questionAsked: a "Coordinator question:" (not a confirm prompt) was relayed since the user's
+	// last turn began; answerTurn: this turn is the user's first since one was relayed.
+	questionAsked, answerTurn bool
+	// endNotBefore: an ending conversation waits until then for GPT-Live's hand-off line.
+	endNotBefore time.Time
 }
 
 // NewConversation starts in PhaseIdle.
@@ -239,8 +255,10 @@ func NewConversation(cfg ConversationConfig) *Conversation {
 		handOff:       cfg.HandOff,
 		checkClaims:   cfg.CheckClaims,
 		claimTools:    cfg.ClaimTools,
-		playbackIdle:  true,
-		toolTurns:     map[string]uint64{},
+
+		clientDelegation: cfg.ClientDelegation,
+		playbackIdle:     true,
+		toolTurns:        map[string]uint64{},
 	}
 }
 
@@ -411,6 +429,11 @@ func (c *Conversation) Step(in Input, now time.Time) []Effect {
 				if !c.providerTurns {
 					c.turnReplySeen = false
 				}
+				if in.EndAfter && c.clientDelegation {
+					// GPT-Live says "checking" at once and its hand-off line a moment later,
+					// in the same reply or a new one: give it ClientAckGrace to start (#70).
+					c.endNotBefore = now.Add(ClientAckGrace)
+				}
 				if c.phase == PhaseThinking {
 					// The follow-up reply gets a full watchdog period.
 					c.thinkingSince = now
@@ -502,12 +525,23 @@ func (c *Conversation) onModel(ev Event, now time.Time, fx []Effect) []Effect {
 		if c.hoTools == nil {
 			c.hoTools = map[string]bool{}
 		}
-		c.hoTools[ev.ToolName] = true
-		c.withdrawClaimFix(ev.ToolName)
+		tool := ev.ToolName
+		if tool == ClientDelegationTool {
+			tool = DelegateTool // for the claim check, a client delegation is a delegate call
+		}
+		c.hoTools[tool] = true
+		c.withdrawClaimFix(tool)
 		c.pendingTools++
 		c.toolTurns[ev.CallID] = c.turn
 		inv := Effect{Kind: EfInvokeTool, CallID: ev.CallID, ToolName: ev.ToolName, Args: ev.Args}
-		if ev.ToolName == DelegateTool && c.hoHandedOff {
+		if ev.ToolName == ClientDelegationTool {
+			if c.hoHandedOff {
+				inv.Canned = alreadyHandedOff
+			} else {
+				inv.Args = c.clientDelegationArgs()
+				c.hoHandedOff = true
+			}
+		} else if ev.ToolName == DelegateTool && c.hoHandedOff {
 			// The app already handed this turn to the agent; a provider that delegates late
 			// (GPT-Live's backend) would start the same job twice.
 			inv.Canned = alreadyHandedOff
@@ -517,6 +551,11 @@ func (c *Conversation) onModel(ev Event, now time.Time, fx []Effect) []Effect {
 		if ev.Role == "user" {
 			fx = append(fx, Effect{Kind: EfSignal, Signal: VoiceSignal{Kind: SigUserSaid, Text: ev.Text}})
 			if t := strings.TrimSpace(ev.Text); t != "" {
+				if c.clientDelegation && c.hoUser != "" && len(c.hoBot) == 0 {
+					// GPT-Live's transcript of one utterance can come in pieces (a pause, or
+					// words said while Pixie talked): keep them all for the task (#70).
+					t = c.hoUser + " " + t
+				}
 				c.hoUser = t
 			}
 		} else if t := strings.TrimSpace(ev.Text); t != "" {
@@ -537,6 +576,9 @@ func (c *Conversation) onModel(ev Event, now time.Time, fx []Effect) []Effect {
 // checkTurnEnd: after a response, back to listening, or end if end_conversation was called.
 func (c *Conversation) checkTurnEnd(now time.Time, fx []Effect) []Effect {
 	if c.openResponses > 0 || !c.turnReplySeen || c.pendingTools > 0 {
+		return fx
+	}
+	if c.ending && now.Before(c.endNotBefore) {
 		return fx
 	}
 	var finished bool
@@ -571,6 +613,9 @@ func (c *Conversation) tryInject(now time.Time, fx []Effect) []Effect {
 	}
 	n := c.injects[0]
 	c.injects = c.injects[1:]
+	if isCoordinatorQuestion(n.Text) && !strings.Contains(n.Text, "Say confirm") {
+		c.questionAsked = true
+	}
 	// What Pixie says next answers the notice, not the user's words.
 	c.hoSettled = true
 	c.phase = PhaseThinking
@@ -638,6 +683,8 @@ func (c *Conversation) resetTurn() {
 	c.newHandOffTurn()
 	c.hoPending = 0
 	c.hoHistory = nil
+	c.questionAsked, c.answerTurn = false, false
+	c.endNotBefore = time.Time{}
 }
 
 // ---------- the hand-off safety net (#71) ----------
@@ -660,6 +707,7 @@ func (c *Conversation) newHandOffTurn() {
 		c.hoHistory = append([]string(nil), c.hoHistory[n-handOffHistoryLines:]...)
 	}
 	c.hoUser, c.hoBot = "", nil
+	c.answerTurn, c.questionAsked = c.questionAsked, false
 	c.hoTool, c.hoSettled, c.hoHandedOff = false, false, false
 	c.hoTools = nil
 	c.claimFix, c.claimFixTool = Notice{}, ""
@@ -749,11 +797,58 @@ func (c *Conversation) handOffTask(task string, claim bool, fx []Effect) []Effec
 	c.hoPending++
 	c.pendingTools++
 	c.hoHandedOff = true
-	ctx := ""
-	if len(c.hoHistory) > 0 {
-		ctx = "Earlier in this voice conversation:\n" + strings.Join(c.hoHistory, "\n")
+	answer := c.clientDelegation && c.answerTurn
+	if answer {
+		c.answerTurn = false
 	}
-	return append(fx, Effect{Kind: EfHandOff, Text: task, Context: ctx, Claim: claim})
+	return append(fx, Effect{Kind: EfHandOff, Text: task, Context: c.handOffContext(), Claim: claim, Answer: answer})
+}
+
+// handOffContext is the earlier turns, for a delegated task's context ("" when none).
+func (c *Conversation) handOffContext() string {
+	if len(c.hoHistory) == 0 {
+		return ""
+	}
+	return "Earlier in this voice conversation:\n" + strings.Join(c.hoHistory, "\n")
+}
+
+// clientDelegationArgs builds a client delegation's task from the transcript (#70): the user's
+// words this turn (a question becomes a "Check: " fact), the earlier turns as context, and
+// whether they answer a relayed "Coordinator question:". Without words this turn it falls back to
+// the user's last earlier line.
+func (c *Conversation) clientDelegationArgs() json.RawMessage {
+	// The user's words since Pixie last spoke: a pause can split one request into turns.
+	said := c.hoUser
+	history := c.hoHistory
+	for len(history) > 0 {
+		rest, ok := strings.CutPrefix(history[len(history)-1], "User: ")
+		if !ok {
+			break
+		}
+		said = strings.TrimSpace(rest + " " + said)
+		history = history[:len(history)-1]
+	}
+	if said == "" {
+		for i := len(history) - 1; i >= 0; i-- {
+			if rest, ok := strings.CutPrefix(history[i], "User: "); ok {
+				said = rest
+				break
+			}
+		}
+	}
+	ctx := ""
+	if len(history) > 0 {
+		ctx = "Earlier in this voice conversation:\n" + strings.Join(history, "\n")
+	}
+	a := ClientDelegationArgs{Task: said, Context: ctx, Answer: c.answerTurn}
+	if !a.Answer && IsQuestion(said) {
+		a.Task = CheckPrefix + said
+	}
+	if a.Answer {
+		c.answerTurn = false // one answer per question
+	}
+	b, _ := json.Marshal(a)
+	return b
 }
 
 // alreadyHandedOff answers a delegate call in a turn the app already handed off.
