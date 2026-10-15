@@ -24,19 +24,30 @@ struct AgentRosterView: View {
 
     private var chip: some View {
         Button(action: onChip) {
-            Text(model.chipText)
-                .font(.caption.weight(.semibold))
+            // SF Symbols, not the ⚙/⌨ characters: those render tiny at small text sizes.
+            HStack(spacing: 10) {
+                if model.view.agentCount > 0 { count("gearshape.fill", model.view.agentCount) }
+                if model.view.yourCount > 0 { count("keyboard", model.view.yourCount) }
+            }
+                .font(.title3.weight(.semibold))
                 .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 3)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
                 .background(Capsule().fill(.regularMaterial))
                 .overlay(Capsule().strokeBorder(.separator))
         }
         .buttonStyle(.plain)
         .frame(maxWidth: maxChipWidth)
         .accessibilityLabel("\(model.view.agentCount) of Pixie's agents, \(model.view.yourCount) of your sessions")
+    }
+
+    private func count(_ symbol: String, _ n: Int) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: symbol)
+            Text("\(n)")
+        }
     }
 
     private var list: some View {
