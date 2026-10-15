@@ -204,8 +204,10 @@ type Conversation struct {
 	thinkingSince        time.Time
 	stalledSince         time.Time // Speaking looks stalled: quiet playback, no reply open/pending/expected
 	playbackIdle         bool
-	pendingTools         int  // until they finish, ResponseDone doesn't end the turn
-	ending               bool // end_conversation was called: end once the reply finished playing
+	pendingTools         int    // until they finish, ResponseDone doesn't end the turn
+	ending               bool   // end_conversation was called: end once the reply finished playing
+	endWhy               string // why ending was set ("goodbye", "after a hand-off")
+	endReason            string // why the last conversation ended (#71's voice log)
 	micLive              bool
 	micAskedAt           time.Time
 	turn                 uint64            // counts the user's turns (each SpeechStarted)
@@ -319,9 +321,10 @@ func (c *Conversation) Step(in Input, now time.Time) []Effect {
 			fx = append(fx, Effect{Kind: EfConnect}, pixieFx(StateThinking))
 		case PhaseConnecting:
 			c.phase = PhaseIdle
+			c.endReason = "hotkey while connecting"
 			fx = append(fx, Effect{Kind: EfClose}, pixieFx(c.restState()), c.closedSignal())
 		default:
-			fx = c.end(fx, true)
+			fx = c.end(fx, true, "hotkey")
 		}
 	case InOpen:
 		// Only from rest: a conversation starting, open, closing or showing an error is left alone.
@@ -368,7 +371,7 @@ func (c *Conversation) Step(in Input, now time.Time) []Effect {
 			c.phase = PhaseIdle
 			fx = append(fx, pixieFx(c.restState()))
 		case c.listeningArmed() && c.micLive && c.pendingTools == 0 && elapsed(c.silenceSince, now, c.timeout()):
-			fx = c.end(fx, false)
+			fx = c.end(fx, false, "silence timeout")
 		case c.phase == PhaseThinking && c.openResponses == 0 && c.pendingTools == 0 &&
 			elapsed(c.thinkingSince, now, ReplyWatchdog):
 			c.thinkingSince = time.Time{}
@@ -377,7 +380,7 @@ func (c *Conversation) Step(in Input, now time.Time) []Effect {
 		case c.phase == PhaseSpeaking && elapsed(c.stalledSince, now, ReplyWatchdog):
 			c.stalledSince = time.Time{}
 			if c.ending {
-				fx = c.end(fx, false)
+				fx = c.end(fx, false, c.endingWhy()+" (the reply stalled)")
 			} else {
 				c.listen(now)
 				fx = append(fx, pixieFx(StateListening))
@@ -417,12 +420,12 @@ func (c *Conversation) Step(in Input, now time.Time) []Effect {
 				// talking, or who has already asked something new, interrupted it.
 				talking := c.phase == PhaseListening && c.silenceSince.IsZero()
 				if thisTurn && !talking {
-					c.ending = true
+					c.ending, c.endWhy = true, "goodbye"
 				}
 			} else {
 				if in.EndAfter && thisTurn && !(c.phase == PhaseListening && c.silenceSince.IsZero()) {
 					// Ends once the reply below has played; the user talking cancels it.
-					c.ending = true
+					c.ending, c.endWhy = true, "after a hand-off"
 				}
 				// The adapter asks the model for a reply that uses the result. A provider that
 				// owns turn-taking may not reply; its next reply opens a response anyway.
@@ -594,7 +597,7 @@ func (c *Conversation) checkTurnEnd(now time.Time, fx []Effect) []Effect {
 		return fx
 	}
 	if c.ending {
-		return c.end(fx, false)
+		return c.end(fx, false, c.endingWhy())
 	}
 	if c.phase != PhaseListening {
 		c.thinkingSince = time.Time{}
@@ -634,7 +637,19 @@ func (c *Conversation) closedSignal() Effect {
 	return Effect{Kind: EfSignal, Signal: VoiceSignal{Kind: SigClosed, Undelivered: undelivered}}
 }
 
-func (c *Conversation) end(fx []Effect, flush bool) []Effect {
+// EndReason is why the last conversation ended ("" before any has): "silence timeout",
+// "hotkey", "goodbye", "after a hand-off", "error: …". For the voice log (#71).
+func (c *Conversation) EndReason() string { return c.endReason }
+
+func (c *Conversation) endingWhy() string {
+	if c.endWhy == "" {
+		return "ending"
+	}
+	return c.endWhy
+}
+
+func (c *Conversation) end(fx []Effect, flush bool, reason string) []Effect {
+	c.endReason = reason
 	if flush {
 		fx = append(fx, Effect{Kind: EfFlushPlayback})
 	}
@@ -654,6 +669,7 @@ func (c *Conversation) fail(f Failure, now time.Time, fx []Effect) []Effect {
 	if !c.IsActive() {
 		return fx
 	}
+	c.endReason = "error: " + f.Status()
 	fx = append(fx,
 		Effect{Kind: EfFlushPlayback},
 		Effect{Kind: EfStopMic},
@@ -677,7 +693,7 @@ func (c *Conversation) resetTurn() {
 	c.playbackIdle = true
 	c.pendingTools = 0
 	clear(c.toolTurns)
-	c.ending = false
+	c.ending, c.endWhy = false, ""
 	c.micLive = false
 	c.micAskedAt = time.Time{}
 	c.newHandOffTurn()

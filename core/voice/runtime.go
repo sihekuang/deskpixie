@@ -78,6 +78,8 @@ type RuntimeConfig struct {
 	RecordDir    string
 	MouthLevels  int // the active pack's mouth level count
 	Conversation ConversationConfig
+	// Log, when set, gets one line per conversation event (#71's voice log).
+	Log *VoiceLog
 	// OnMicSent, when set, is called on the runtime goroutine right after Session.Send
 	// returns for a mic frame, with the time PushMic was given for it. For latency metrics.
 	OnMicSent func(capturedAt time.Time)
@@ -554,9 +556,17 @@ func (r *Runtime) run() {
 				if debugEnabled() {
 					log.Printf("[voice] %s: %s", ev.Role, ev.Text)
 				}
+				who := ev.Role
+				if who == "assistant" {
+					who = "pixie"
+				}
+				r.cfg.Log.Printf("%s: %s", who, ev.Text)
 				r.emit(UIEvent{Kind: "transcript", Role: ev.Role, Text: ev.Text})
 			case ev.Kind == EvError && !ev.Fatal:
 				log.Printf("voice: model warning: %s", ev.Message)
+				r.cfg.Log.Printf("model warning: %s", ev.Message)
+			case ev.Kind == EvError:
+				r.cfg.Log.Printf("model error: %s", ev.Message)
 			}
 			r.input(ModelInput(ev))
 		case f := <-r.mic:
@@ -595,6 +605,7 @@ func (r *Runtime) onToolDone(t toolResult) {
 	if len(out) == 0 {
 		out = json.RawMessage("null")
 	}
+	r.cfg.Log.Printf("tool result %s: %s", t.callID, clipLog(string(out)))
 	r.send(Command{Kind: CmdToolResult, CallID: t.callID, Output: out, Respond: !t.outcome.EndConversation})
 	if t.outcome.EndAfterReply && !t.outcome.EndConversation {
 		r.input(ToolDoneAfterReplyInput(t.callID))
@@ -629,8 +640,12 @@ func (r *Runtime) input(in Input) {
 	for len(r.pending) > 0 {
 		next := r.pending[0]
 		r.pending = r.pending[1:]
+		before := r.conv.Phase()
 		for _, fx := range r.conv.Step(next, time.Now()) {
 			r.apply(fx)
+		}
+		if after := r.conv.Phase(); after != before {
+			r.cfg.Log.Printf("phase %s -> %s", before, after)
 		}
 	}
 	r.resting.Store(r.conv.Phase() == PhaseIdle)
@@ -695,6 +710,7 @@ func (r *Runtime) send(c Command) {
 }
 
 func (r *Runtime) apply(fx Effect) {
+	r.logEffect(fx)
 	switch fx.Kind {
 	case EfConnect:
 		r.gen++
@@ -824,6 +840,7 @@ func (r *Runtime) handOff(task, context string, claim, answer bool) {
 	go func() {
 		out := invoke(ctx, raw)
 		n, why := HandOffNotice(task, out.Output)
+		r.cfg.Log.Printf("hand-off result: %s", why)
 		if claim {
 			log.Printf("voice: Pixie said it handed a request off without calling delegate: %s", why)
 			if strings.HasPrefix(n.Text, HandedOffPrefix) {
@@ -866,5 +883,51 @@ func (r *Runtime) updateMouth() {
 	if level != r.mouth {
 		r.mouth = level
 		r.emit(UIEvent{Kind: "mouth", Level: level})
+	}
+}
+
+// logEffect writes the effects worth reading back to the voice log (#71).
+func (r *Runtime) logEffect(fx Effect) {
+	l := r.cfg.Log
+	if l == nil {
+		return
+	}
+	switch fx.Kind {
+	case EfConnect:
+		l.Printf("connecting to %s", r.model.Name())
+	case EfInvokeTool:
+		if fx.Canned != nil {
+			l.Printf("tool call %s %s (%s): already handed off, not run", fx.ToolName, fx.CallID, clipLog(string(fx.Args)))
+			return
+		}
+		l.Printf("tool call %s %s: %s", fx.ToolName, fx.CallID, clipLog(string(fx.Args)))
+	case EfHandOff:
+		kind := "unanswered request"
+		switch {
+		case fx.Claim:
+			kind = "claimed but not done"
+		case fx.Answer:
+			kind = "answer to a coordinator question"
+		}
+		l.Printf("app hand-off (%s): %s", kind, clipLog(fx.Text))
+	case EfInject:
+		l.Printf("notice to Pixie: %s", clipLog(fx.Text))
+	case EfInterrupt:
+		l.Printf("the user interrupted Pixie")
+	case EfSignal:
+		switch fx.Signal.Kind {
+		case SigOpened:
+			l.Printf("conversation opened")
+		case SigClosed:
+			reason := r.conv.EndReason()
+			if reason == "" {
+				reason = "unknown"
+			}
+			if n := len(fx.Signal.Undelivered); n > 0 {
+				l.Printf("conversation closed: %s (%d notices left for later)", reason, n)
+			} else {
+				l.Printf("conversation closed: %s", reason)
+			}
+		}
 	}
 }
