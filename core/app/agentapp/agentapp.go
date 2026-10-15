@@ -132,13 +132,17 @@ type Agent struct {
 	status, hint string
 	// Manual mode (#97): which agents are flagged, and why (set once per change, off the
 	// controller's goroutine, since the probes run a program).
-	manual  map[string]bool
-	cause   *agent.ManualCause
-	modeGen int
+	manual map[string]bool
+	causes map[string]agent.ManualCause // per flagged agent, computed from the model it started with
+	gens   map[string]int               // per agent: invalidates a probe still running for an older flag
 
 	// model is the coordinator's --model ("" = Claude Code's default). The probes are seams:
 	// claudeListsAuto runs `claude --help`, managedOff reads the managed settings file.
 	model           string
+	kind            agent.AgentKind   // the coordinator's agent
+	coordModel      string            // the --model the Claude coordinator was started with
+	workerModel     map[string]string // the --model each Claude worker was started with
+	recipes         agent.WorkerRecipes
 	claudeListsAuto func() bool
 	managedOff      func() bool
 	restart         func() // the coordinator restart (tests replace it)
@@ -194,7 +198,8 @@ func Build(c Config) *Agent {
 	if c.Listen == nil {
 		c.Listen = func(port uint16) (net.Listener, error) { return httpserver.Listen(int(port)) }
 	}
-	a := &Agent{paths: NewPaths(c.AppSupport), hooks: c.Hooks, manual: map[string]bool{},
+	a := &Agent{paths: NewPaths(c.AppSupport), hooks: c.Hooks, manual: map[string]bool{}, causes: map[string]agent.ManualCause{},
+		gens: map[string]int{}, workerModel: map[string]string{},
 		claudeListsAuto: claudeListsAuto, managedOff: managedOff}
 	a.link = &VoiceLink{refresh: c.Hooks.RefreshTray}
 	paths := a.paths
@@ -359,9 +364,14 @@ func Build(c Config) *Agent {
 	}
 	var workerDeps *agent.WorkerDeps
 	if workersOn {
-		workerDeps = WorkerAdapters(paths, ws.Root, c.Home, s.Port, model, tokens)
+		workerDeps = WorkerAdapters(paths, ws.Root, c.Home, s.Port, a.currentModel, tokens)
+		workerDeps.Recipes = &modelRecipes{WorkerRecipes: workerDeps.Recipes, a: a}
+		a.recipes = workerDeps.Recipes
 	}
-	a.model = model
+	a.model, a.kind = model, kind
+	if kind == agent.Claude {
+		a.coordModel = model
+	}
 	a.handle = agent.NewRuntimeWithWorkers(deps, cfg, workerDeps)
 	a.restart = a.handle.Restart
 	a.toAgent = a.handle.Voice
@@ -397,16 +407,23 @@ func (a *Agent) Tray() app.AgentTray {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	t := app.AgentTray{Enabled: true, Jobs: rows, Status: a.status, Hint: a.hint}
-	if a.cause != nil && len(a.manual) > 0 {
-		subject := "A worker"
-		if a.manual[agent.Coordinator] {
-			subject = "Coordinator"
+	subject, name := "A worker", ""
+	if a.manual[agent.Coordinator] {
+		subject, name = "Coordinator", agent.Coordinator
+	} else {
+		for w := range a.manual {
+			if _, known := a.causes[w]; known && (name == "" || w < name) {
+				name = w
+			}
 		}
-		t.Mode = subject + " is in Manual mode: " + a.cause.Reason()
-		switch *a.cause {
-		case agent.CauseOldModel:
+	}
+	if cause, ok := a.causes[name]; ok && a.manual[name] {
+		t.Mode = subject + " is in Manual mode: " + cause.Reason()
+		switch {
+		case cause == agent.CauseOldModel && !agent.ModelSupportsAuto(a.model):
+			// Offered only while the setting still names the old model: afterwards it is applied.
 			t.ModeFix = &app.TrayFix{ID: "agent:fix-model", Title: "Use a supported model"}
-		case agent.CauseOldClaude:
+		case cause == agent.CauseOldClaude:
 			t.ModeFix = &app.TrayFix{Title: "Copy update command", Copy: "claude update"}
 		}
 	}
@@ -422,33 +439,69 @@ func (a *Agent) ManualMode(name string, manual bool) {
 		a.mu.Unlock()
 		return
 	}
+	a.gens[name]++
+	gen := a.gens[name]
 	if manual {
 		a.manual[name] = true
 	} else {
 		delete(a.manual, name)
+		delete(a.causes, name)
 	}
-	a.modeGen++
-	gen, model, any := a.modeGen, a.model, len(a.manual) > 0
-	if !any {
-		a.cause = nil
+	// The cause uses the model this agent was started with, not the setting now.
+	model := a.model
+	if name == agent.Coordinator {
+		model = a.coordModel
+	} else if m, ok := a.workerModel[name]; ok {
+		model = m
 	}
 	lists, off := a.claudeListsAuto, a.managedOff
 	a.mu.Unlock()
 	call(a.hooks.RefreshTray)
-	if !any {
-		return
+	if !manual || a.ctx.Err() != nil {
+		return // quitting: no new goroutine beside Shutdown's wait
 	}
 	a.wg.Go(func() {
 		c := agent.ManualCauseOf(model, lists(), off())
 		a.mu.Lock()
-		if a.modeGen != gen {
+		if a.gens[name] != gen {
 			a.mu.Unlock()
 			return // changed since: its own probe answers
 		}
-		a.cause = &c
+		a.causes[name] = c
 		a.mu.Unlock()
 		call(a.hooks.RefreshTray)
 	})
+}
+
+// currentModel is agent.model now (read by each Claude worker's spawn).
+func (a *Agent) currentModel() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.model
+}
+
+// modelRecipes records the model each Claude worker was started with.
+type modelRecipes struct {
+	agent.WorkerRecipes
+	a *Agent
+}
+
+func (m *modelRecipes) Prepare(l agent.WorkerLaunch) (agent.PreparedWorker, error) {
+	model := m.a.currentModel()
+	p, err := m.WorkerRecipes.Prepare(l)
+	if err == nil && l.Kind == agent.Claude {
+		m.a.mu.Lock()
+		m.a.workerModel[l.Name] = model
+		m.a.mu.Unlock()
+	}
+	return p, err
+}
+
+func (m *modelRecipes) Discard(name string) {
+	m.a.mu.Lock()
+	delete(m.a.workerModel, name)
+	m.a.mu.Unlock()
+	m.WorkerRecipes.Discard(name)
 }
 
 // setHint shows a host hint (IntegrationHint) in the tray, logged once per line.
@@ -489,12 +542,25 @@ func (a *Agent) Menu(id string) bool {
 		a.handle.Restart()
 	case "agent:fix-model":
 		// Inside DeskPixie, so it runs directly (#80): agent.model back to Claude Code's default.
+		// New Claude workers read it at spawn; running workers are left alone (their flag clears
+		// when they end). The coordinator restarts only if it is a Claude one that is itself in
+		// Manual mode.
 		a.mu.Lock()
 		a.model = ""
+		claude := a.kind == agent.Claude
+		restart := claude && a.manual[agent.Coordinator]
+		if claude {
+			a.coordModel = ""
+		}
 		a.mu.Unlock()
-		a.handle.ClearCoordinatorModel()
+		if claude {
+			a.handle.ClearCoordinatorModel()
+		}
 		call(a.hooks.ClearModel)
-		a.restart()
+		if restart {
+			a.restart()
+		}
+		call(a.hooks.RefreshTray)
 	default:
 		job, ok := strings.CutPrefix(id, "agent:cancel:")
 		if !ok {

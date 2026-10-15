@@ -23,7 +23,8 @@ type FileWorkerRecipes struct {
 	mcpDir         string // <app_data>/agent/mcp: one 0600 MCP config per agent
 	workerSettings string // <app_data>/agent/worker-settings.json
 	port           uint16
-	model          string // agent.model (Claude workers only); "" = none
+	model          string        // agent.model (Claude workers only); "" = none
+	modelSrc       func() string // when set, read at each spawn instead of model
 	trust          agent.TrustStore
 	codexExtraArgs CodexExtraArgs
 	trustRoots     []string // Codex's trust screen is answered only for a repo strictly inside one
@@ -54,6 +55,12 @@ func (r *FileWorkerRecipes) insideTrustRoots(repo string) bool {
 	return false
 }
 
+// WithModelSource makes the Claude workers' model a live value, read at each spawn.
+func (r *FileWorkerRecipes) WithModelSource(src func() string) *FileWorkerRecipes {
+	r.modelSrc = src
+	return r
+}
+
 // WithCodexExtraArgs is for the live smoke only: extra arguments appended to a Codex worker's
 // command line, by repo. The app never trusts a folder for the user, so it never calls this.
 func (r *FileWorkerRecipes) WithCodexExtraArgs(extra CodexExtraArgs) *FileWorkerRecipes {
@@ -74,11 +81,15 @@ func (r *FileWorkerRecipes) claude(l agent.WorkerLaunch) (agent.PreparedWorker, 
 	if err := WritePrivate(config, agent.McpConfigJSON(r.port, l.Token)); err != nil {
 		return agent.PreparedWorker{}, fmt.Errorf("cannot write the worker's MCP config: %w", err)
 	}
+	model := r.model
+	if r.modelSrc != nil {
+		model = strings.TrimSpace(r.modelSrc())
+	}
 	return agent.PreparedWorker{Spec: agent.AgentSpec{
 		Name: l.Name,
 		Kind: agent.Claude,
 		Cwd:  l.Worktree,
-		Args: agent.ClaudeWorkerArgs(r.workerSettings, config, r.model),
+		Args: agent.ClaudeWorkerArgs(r.workerSettings, config, model),
 		Env:  []agent.EnvVar{{Key: agent.TokenEnv, Value: l.Token}},
 	}}, nil
 }
