@@ -226,3 +226,16 @@ func TestKeysAndClose(t *testing.T) {
 		t.Fatal("close did not end the agent")
 	}
 }
+
+func TestReRegisterSendsAddressAndSessionID(t *testing.T) {
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}})
+	h.s.Hook("Stop", map[string]any{"session_id": "s-7"})
+	waitEvent(t, h.d.events, "session id", func(m wire.Msg) bool { return m.Event == "session" })
+	h.conn.Close() // the daemon restarts
+	hello := waitEvent(t, h.d.events, "re-register", func(m wire.Msg) bool { return m.Kind == wire.KindRegister })
+	if hello.Address != "repo-claude" || hello.SessionID != "s-7" {
+		t.Fatalf("%+v", hello)
+	}
+	h.s.runner.Hangup()
+	h.s.finish()
+}

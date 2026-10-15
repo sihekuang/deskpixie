@@ -58,7 +58,10 @@ func (c *Client) connect(ctx context.Context) (registered, refused bool) {
 	defer conn.Close()
 	stop := context.AfterFunc(ctx, func() { conn.Close() })
 	defer stop()
-	if wire.Encode(conn, c.Hello) != nil {
+	c.mu.Lock()
+	hello := c.Hello
+	c.mu.Unlock()
+	if wire.Encode(conn, hello) != nil {
 		return false, false
 	}
 	dec := wire.NewDecoder(conn)
@@ -74,6 +77,7 @@ func (c *Client) connect(ctx context.Context) (registered, refused bool) {
 	}
 	c.mu.Lock()
 	c.conn = conn
+	c.Hello.Address = reply.Address // asked for again after a reconnect
 	c.mu.Unlock()
 	if c.OnRegistered != nil {
 		c.OnRegistered(reply.Address)
@@ -100,6 +104,13 @@ func (c *Client) connect(ctx context.Context) (registered, refused bool) {
 	c.conn = nil
 	c.mu.Unlock()
 	return true, false
+}
+
+// SetSessionID makes the next registration carry the agent's session id.
+func (c *Client) SetSessionID(id string) {
+	c.mu.Lock()
+	c.Hello.SessionID = id
+	c.mu.Unlock()
 }
 
 // Send writes m when connected; otherwise it is dropped (Resend restores the state).

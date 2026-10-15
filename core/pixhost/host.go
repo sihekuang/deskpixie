@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -166,7 +167,10 @@ func (h *Host) register(hello wire.Msg, c net.Conn) (*session, string) {
 	for a := range h.sessions {
 		taken = append(taken, a)
 	}
-	addr, ok := Address(hello.GitRoot, hello.Tool, taken)
+	addr, ok := hello.Address, agent.IsWorkerName(hello.Address) && !slices.Contains(taken, hello.Address)
+	if !ok {
+		addr, ok = Address(hello.GitRoot, hello.Tool, taken)
+	}
 	if !ok {
 		return nil, "no free name for this session"
 	}

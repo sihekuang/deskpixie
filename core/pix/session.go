@@ -190,6 +190,7 @@ func (s *Session) setSessionID(id string) {
 	s.sessionID = id
 	s.mu.Unlock()
 	if changed {
+		s.client.SetSessionID(id)
 		s.client.Send(wire.Msg{Kind: wire.KindEvent, Event: "session", SessionID: id})
 	}
 }

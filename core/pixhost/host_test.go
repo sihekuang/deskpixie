@@ -289,3 +289,29 @@ func TestShutdownLeavesNoSocket(t *testing.T) {
 		t.Fatal("socket left behind")
 	}
 }
+
+func TestRegisterPrefersPreviousAddress(t *testing.T) {
+	// After an app restart the new daemon knows nothing; pix says which address it had.
+	_, sock := newHost(t)
+	_, r := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api", Address: "api-claude-2"})
+	if r.Address != "api-claude-2" {
+		t.Fatalf("%+v", r)
+	}
+}
+
+func TestPreviousAddressNotTakenFromOthers(t *testing.T) {
+	h, sock := newHost(t, "api-claude-2") // a worker has it now
+	_, r := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api", Address: "api-claude-2"})
+	if r.Address == "api-claude-2" {
+		t.Fatal("must not take a name in use")
+	}
+	_, r2 := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api", Address: r.Address})
+	if r2.Address == r.Address {
+		t.Fatal("must not take another live session's address")
+	}
+	_, r3 := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api", Address: "Not Valid!"})
+	if r3.Kind != wire.KindRegistered || r3.Address == "Not Valid!" {
+		t.Fatalf("%+v", r3)
+	}
+	_ = h
+}
