@@ -33,6 +33,8 @@ final class EngineCoordinator {
     private(set) var pixie: PixieController?
     /// The updates bubble beside Pixie, and the presence that holds its pops (both once Pixie is up).
     private var bubble: UpdatesBubbleController?
+    /// The agent roster chip under Pixie (#91).
+    private var roster: AgentRosterController?
     private var presence: PresenceMonitor?
     /// The combo the Carbon hotkey is bound to right now (nil = none).
     var boundCombo: String? { hotkeys.boundCombo }
@@ -99,6 +101,7 @@ final class EngineCoordinator {
                 pixie = m
                 m.onDoubleClick = { [weak self] in self?.talk() }
                 m.show()
+                roster = AgentRosterController(engine: engine, worker: worker, pixie: m)
                 startBubble(pixie: m, settings: snapshot.flatMap(BubbleSettingsValues.fromSnapshot) ?? .defaults)
             } else {
                 appState.engineError = "Could not load the pixie pack"
@@ -142,6 +145,7 @@ final class EngineCoordinator {
         voiceIO.stop()
         presence?.stop()
         bubble?.stop()
+        roster?.stop()
         pixie?.stop()
         // Quitting while the core is still starting: dp_configure may be blocked on another
         // thread; tearing the core down under it is unsafe, and there is nothing to save.
@@ -408,6 +412,8 @@ final class EngineCoordinator {
             canvas.show(url: url, title: title)
         case .updates(let lines):
             bubble?.apply(lines: lines)
+        case .agents(let view):
+            roster?.apply(view: view)
         }
     }
 

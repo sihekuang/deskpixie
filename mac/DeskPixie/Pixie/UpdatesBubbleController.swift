@@ -47,7 +47,7 @@ final class UpdatesBubbleController {
         panel = PixiePanel(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
         hosting = BubbleHostingView(rootView: AnyView(EmptyView()))
         panel.contentView = hosting
-        pixie.onFrameChange = { [weak self] _ in self?.layout() }
+        pixie.observeFrame { [weak self] _ in self?.layout() }
         timer = Timer.scheduledTimer(withTimeInterval: Self.pollInterval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.poll() }
         }

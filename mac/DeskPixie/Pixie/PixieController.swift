@@ -52,8 +52,10 @@ final class PixieController {
     let panel: PixiePanel
     let view: PixieView
 
-    /// Pixie's panel frame (AppKit) after every move, drag or placement (the updates bubble follows it).
-    var onFrameChange: ((NSRect) -> Void)?
+    /// Called with Pixie's panel frame (AppKit) after every move, drag or placement (the updates
+    /// bubble and the roster chip follow it).
+    private var frameObservers: [(NSRect) -> Void] = []
+    func observeFrame(_ f: @escaping (NSRect) -> Void) { frameObservers.append(f) }
     /// The opacity the proximity fade just applied to Pixie (the updates bubble follows it).
     var onOpacityChange: ((CGFloat) -> Void)?
     /// Whether Pixie is on screen.
@@ -211,11 +213,11 @@ final class PixieController {
         panel.setFrame(frame, display: true)
         placing = false
         moves.cancel()
-        onFrameChange?(panel.frame)
+        frameObservers.forEach { $0(panel.frame) }
     }
 
     private func panelMoved() {
-        onFrameChange?(panel.frame)
+        frameObservers.forEach { $0(panel.frame) }
         guard !placing else { return }
         moves.moved(at: ProcessInfo.processInfo.systemUptime)
     }
