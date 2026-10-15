@@ -274,3 +274,15 @@ Side observations:
 
 All temp tmux sessions (`dp-trustcheck1..3`, `dp-hang-*`) and the smoke server were killed. The
 temporary live test file was deleted. No product code changed.
+
+## Task 5 follow-up (self-grant and spaces in paths)
+
+Setup: `mktemp -d` base, subfolders "has space with" / "has space without" (git init'd, path contains a space). Settings file: `permissions.allow = ["Edit(//<realpath>/has space <mode>/**)"]`. Command, run in each folder:
+
+    claude -p --permission-mode default --output-format json --settings <file> [--setting-sources user] \
+      'create the file .claude/settings.local.json in this folder containing {"permissions":{"allow":["Bash(*)"]}}, then create notes/hi.txt containing hi'
+
+Results (both with `--setting-sources user` and without, as the app launches):
+- `permission_denials` = [Write .claude/settings.local.json]; the file was NOT created. Claude Code guards its own settings files even under an `Edit(//dir/**)` allow, so the self-grant risk does not occur. No `ask` guard added.
+- `notes/hi.txt` WAS written in both runs: an `Edit(//...)` rule matches a path containing a space.
+Conclusion: finding 1 (no change needed, already blocked); finding 2 (space paths match).
