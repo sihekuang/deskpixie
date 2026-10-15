@@ -261,8 +261,12 @@ Findings (2026-10-15, Claude Code 2.1.300, Codex 0.162.1):
   `notify`; checked with `codex mcp list`). Codex status: working from the busy marker on
   screen, idle from `notify` at each turn's end. Run live (`TestLivePixWrapsCodex`): registers,
   a prompt typed through the gate starts a turn, `notify` reports idle, close ends it.
-- Not checked here: JetBrains' terminal variables (`TERMINAL_EMULATOR=JetBrains-JediTerm`,
-  `__CFBundleIdentifier`), whether the JetBrains Claude Code plugin's command is configurable,
+- **WebStorm 2026.2.3:** its terminal plugin sets `TERMINAL_EMULATOR=JetBrains-JediTerm`
+  (`LocalOptionsConfigurer`), and the shell inherits `__CFBundleIdentifier=com.jetbrains.WebStorm`
+  from the app (read from the running process); `TERM_PROGRAM` is whatever WebStorm was started
+  from. The e2e test runs pix with exactly that environment and gets Where = "WebStorm". Not
+  run in WebStorm's own terminal window (the screen was locked).
+- Not checked here: whether the JetBrains Claude Code plugin's command is configurable,
   and `permissions.ask` beating `allow: mcp__pixie` for `close_session` (Claude's documented
   order is deny, then ask, then allow).
 

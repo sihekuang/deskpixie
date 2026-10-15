@@ -46,7 +46,8 @@ func buildPix(t *testing.T, dir string) {
 func cleanEnv(extra ...string) []string {
 	var env []string
 	for _, kv := range os.Environ() {
-		if k, _, _ := strings.Cut(kv, "="); k == "PIX_SESSION" || k == "PIXIE_AGENT_TOKEN" || k == "PIX_SOCK" || k == "PATH" || k == "HOME" {
+		if k, _, _ := strings.Cut(kv, "="); k == "PIX_SESSION" || k == "PIXIE_AGENT_TOKEN" || k == "PIX_SOCK" || k == "PATH" || k == "HOME" ||
+			k == "TERMINAL_EMULATOR" || k == "TERM_PROGRAM" || k == "__CFBundleIdentifier" {
 			continue
 		}
 		env = append(env, kv)
@@ -98,7 +99,11 @@ func TestEndToEnd(t *testing.T) {
 	stdin, stdout, toPix, fromPix := tty, tty, ptmx, ptmx
 	cmd := exec.Command(filepath.Join(bin, "pix"), "--description", "e2e session", "claude")
 	cmd.Dir = bin // not a git repo: the address is repo-…
-	cmd.Env = cleanEnv("PATH="+bin+":/usr/bin:/bin", "HOME="+bin, "DESKPIXIE_PIX_SOCK="+sock)
+	// WebStorm's terminal, as read from WebStorm 2026.2.3: its terminal plugin sets
+	// TERMINAL_EMULATOR, the shell inherits the app's bundle id, and TERM_PROGRAM is whatever
+	// WebStorm itself was started from.
+	cmd.Env = cleanEnv("PATH="+bin+":/usr/bin:/bin", "HOME="+bin, "DESKPIXIE_PIX_SOCK="+sock,
+		"TERMINAL_EMULATOR=JetBrains-JediTerm", "__CFBundleIdentifier=com.jetbrains.WebStorm", "TERM_PROGRAM=WarpTerminal")
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stdout
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
@@ -122,7 +127,8 @@ func TestEndToEnd(t *testing.T) {
 		info, ok = only(t, host)
 		return ok && info.Status == agent.PaneIdle && info.User.Reachable
 	})
-	if info.Name != "repo-claude-2" || info.Origin != agent.OriginUser || info.User.Description != "e2e session" || info.User.Tool != "claude" {
+	if info.Name != "repo-claude-2" || info.Origin != agent.OriginUser || info.User.Description != "e2e session" || info.User.Tool != "claude" ||
+		info.User.Where != "WebStorm" {
 		t.Fatalf("%+v %+v", info, info.User)
 	}
 	addr := info.Name
