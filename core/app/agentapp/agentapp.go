@@ -25,6 +25,8 @@ import (
 	"github.com/sihekuang/deskpixie/core/agent/httpserver"
 	"github.com/sihekuang/deskpixie/core/agent/proc"
 	"github.com/sihekuang/deskpixie/core/app"
+	"github.com/sihekuang/deskpixie/core/pix/wire"
+	"github.com/sihekuang/deskpixie/core/pixhost"
 	"github.com/sihekuang/deskpixie/core/settings"
 	"github.com/sihekuang/deskpixie/core/tmux"
 	"github.com/sihekuang/deskpixie/core/voice"
@@ -105,6 +107,9 @@ type Config struct {
 	IDs       agent.IdSource             // nil = RandomIDs
 	// Listen binds the hook/MCP server; nil = httpserver.Listen (127.0.0.1:port).
 	Listen func(port uint16) (net.Listener, error)
+	// PixSocket is where sessions you start with pix connect (#89); "" = wire.SocketPath
+	// under AppSupport.
+	PixSocket string
 }
 
 // Agent is the running delegation agent (app.Agent).
@@ -112,6 +117,7 @@ type Agent struct {
 	handle  *agent.AgentHandle
 	link    *VoiceLink
 	session agent.SessionHost
+	pixSock string // where pix sessions connect; "" when not listening
 	paths   Paths
 	hooks   app.AgentHooks
 	addr    string
@@ -218,6 +224,28 @@ func Build(c Config) *Agent {
 		log.Printf("agent: unknown sessionHost %q", s.SessionHost)
 		setProblem("Coordinator: invalid settings (see log)")
 		session = Unavailable{Err: agent.HostError{Kind: agent.HostOther, Detail: "unknown sessionHost " + s.SessionHost}}
+	}
+	// Sessions you start yourself with pix (#89) sit next to the primary host's agents.
+	if c.PixSocket == "" {
+		c.PixSocket = wire.SocketPath(c.AppSupport, os.Getuid(), os.TempDir())
+	}
+	primary := session
+	ph := pixhost.New(c.PixSocket, func() []string {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		var names []string
+		if list, err := primary.List(ctx); err == nil {
+			for _, ag := range list {
+				names = append(names, ag.Name)
+			}
+		}
+		return names
+	})
+	if err := ph.Listen(); err != nil {
+		log.Printf("agent: pix: %v", err) // delegation still works without it
+	} else {
+		session = agent.NewCompositeHost(primary, ph)
+		a.pixSock = c.PixSocket
 	}
 	a.session = session
 	termFactory, ok := c.Terminals[s.Terminal]

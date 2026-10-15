@@ -101,3 +101,20 @@ func TestCompositeFocusOnlyForPrimaryAgents(t *testing.T) {
 		t.Fatalf("focused %v", f)
 	}
 }
+
+type stoppable struct {
+	*agenttest.FakeSessionHost
+	stopped *int
+}
+
+func (s stoppable) Shutdown()          { *s.stopped++ }
+func (s stoppable) Owns(n string) bool { return false }
+
+func TestCompositeShutdownStopsBoth(t *testing.T) {
+	n := 0
+	c := agent.NewCompositeHost(stoppable{agenttest.NewFakeSessionHost(), &n}, stoppable{agenttest.NewFakeSessionHost(), &n})
+	c.Shutdown()
+	if n != 2 {
+		t.Fatalf("stopped %d of 2 hosts", n)
+	}
+}

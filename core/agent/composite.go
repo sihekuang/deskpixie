@@ -120,3 +120,12 @@ func (c *CompositeHost) ReportStatus(agent string, status PaneStatus) {
 		r.ReportStatus(agent, status)
 	}
 }
+
+// Shutdown stops both hosts (each one that has a Shutdown: Herdr's event pump, pix's socket).
+func (c *CompositeHost) Shutdown() {
+	for _, h := range []SessionHost{c.primary, c.secondary} {
+		if s, ok := h.(interface{ Shutdown() }); ok {
+			s.Shutdown()
+		}
+	}
+}
