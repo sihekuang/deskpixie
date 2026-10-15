@@ -234,6 +234,9 @@ func Build(c Config) *Agent {
 	if !workersOn {
 		kept.Workers = nil
 	}
+	// The coordinator's agent (#87): a kept coordinator of the other kind is replaced.
+	kind := CoordinatorKind(s.CoordinatorKind)
+	kept = KeptFor(kept, kind)
 	tokens := httpserver.NewTokens()
 	coordinatorToken := kept.CoordinatorToken
 	if coordinatorToken != "" {
@@ -243,23 +246,27 @@ func Build(c Config) *Agent {
 		coordinatorToken = tokens.Issue(agent.Coordinator)
 	}
 	// Always: besides the worker tools (workers on), the pixie MCP server serves the coordinator
-	// Pixie's local tools (timer, weather, music, time, math).
-	if err := WriteCoordinatorMcp(paths, s.Port, coordinatorToken); err != nil {
-		log.Printf("agent: cannot write the coordinator's MCP config: %v", err)
-		setProblem("Coordinator: invalid settings (see log)")
+	// Pixie's local tools (timer, weather, music, time, math). Codex takes it by -c overrides
+	// with the bearer from its env: no file.
+	if kind == agent.Claude {
+		if err := WriteCoordinatorMcp(paths, s.Port, coordinatorToken); err != nil {
+			log.Printf("agent: cannot write the coordinator's MCP config: %v", err)
+			setProblem("Coordinator: invalid settings (see log)")
+		}
 	}
-	model := ""
+	model, codexModel := "", ""
 	if s.Model != nil {
 		model = *s.Model
 	}
-	recipe := agent.CoordinatorRecipe{
-		Cwd:  paths.Workspace,
-		Args: CoordinatorArgs(paths, model, true),
-		Env:  []agent.EnvVar{{Key: agent.TokenEnv, Value: coordinatorToken}},
-		// A coordinator found running is the kept one: adopted as it is.
-		AdoptEarlier: kept.CoordinatorToken != "",
-		ResumeLast:   true,
+	if s.CodexModel != nil {
+		codexModel = *s.CodexModel
 	}
+	// tmux detects no agent status: the coordinator reports its own through hooks.
+	recipe := CoordinatorRecipeFor(kind, paths, model, codexModel, s.Port, s.SessionHost == tmux.Name)
+	recipe.Env = []agent.EnvVar{{Key: agent.TokenEnv, Value: coordinatorToken}}
+	// A coordinator found running is the kept one: adopted as it is.
+	recipe.AdoptEarlier = kept.CoordinatorToken != ""
+	recipe.ResumeLast = true
 	deps := agent.Deps{
 		Host:        agent.NewAgentHost(session, c.Clock, recipe),
 		Voice:       a.link,
@@ -292,6 +299,7 @@ func Build(c Config) *Agent {
 			Workers:             ws.Policy,
 			SpeakWorkerReports:  s.Workers.SpeakResults,
 			OpenConversation:    s.OpenConversationForUpdates,
+			CoordinatorKind:     kind,
 		},
 		Warm: s.Warm,
 		// Stepped before the warm start: a disabled app never starts the coordinator.

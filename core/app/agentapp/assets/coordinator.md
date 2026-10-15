@@ -46,7 +46,7 @@ End every reply with one `<spoken>` block per request you worked on in that turn
 - If you were told a request was cancelled, stop work on it and reply with
   `<spoken ref="…" status="failed">Stopped.</spoken>`.
 
-Do not use the AskUserQuestion tool; ask with `status="question"` instead.
+{{ASK_RULE}}
 
 ## Memory (required)
 
