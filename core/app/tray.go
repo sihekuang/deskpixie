@@ -19,6 +19,16 @@ type AppState struct {
 	Agent        AgentState   `json:"agent"`
 	StatusLines  []string     `json:"statusLines"`
 	Hotkey       string       `json:"hotkey"`
+	// AgentModeFix is the one-click fix for the Manual-mode line: ID set, Go handles
+	// `app.action`; Copy set, Swift copies the text and calls nothing.
+	AgentModeFix *TrayFix `json:"agentModeFix,omitempty"`
+}
+
+// TrayFix is a fix offered under the Manual-mode line.
+type TrayFix struct {
+	ID    string `json:"id,omitempty"`
+	Title string `json:"title"`
+	Copy  string `json:"copy,omitempty"`
 }
 
 // PackRef is one Tray ▸ Pixie row.

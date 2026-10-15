@@ -129,3 +129,11 @@ func TestTheUpdatesSinkHandsTheListToTheHook(t *testing.T) {
 	}
 	updatesSink{}.Updates([]agent.UpdateItem{}) // no hook: ignored
 }
+
+func TestHelpListsAuto(t *testing.T) {
+	with := "  --permission-mode <mode>  Permission mode (choices: \"acceptEdits\", \"auto\", \"default\")\n"
+	without := "  --permission-mode <mode>  Permission mode (choices: \"acceptEdits\", \"default\", \"plan\")\n  --other  automatic things\n"
+	if !helpListsAuto(with) || helpListsAuto(without) {
+		t.Fatal("choices")
+	}
+}

@@ -130,6 +130,18 @@ type Agent struct {
 
 	mu           sync.Mutex
 	status, hint string
+	// Manual mode (#97): which agents are flagged, and why (set once per change, off the
+	// controller's goroutine, since the probes run a program).
+	manual  map[string]bool
+	cause   *agent.ManualCause
+	modeGen int
+
+	// model is the coordinator's --model ("" = Claude Code's default). The probes are seams:
+	// claudeListsAuto runs `claude --help`, managedOff reads the managed settings file.
+	model           string
+	claudeListsAuto func() bool
+	managedOff      func() bool
+	restart         func() // the coordinator restart (tests replace it)
 
 	ctx      context.Context
 	cancel   context.CancelFunc
@@ -182,7 +194,8 @@ func Build(c Config) *Agent {
 	if c.Listen == nil {
 		c.Listen = func(port uint16) (net.Listener, error) { return httpserver.Listen(int(port)) }
 	}
-	a := &Agent{paths: NewPaths(c.AppSupport), hooks: c.Hooks}
+	a := &Agent{paths: NewPaths(c.AppSupport), hooks: c.Hooks, manual: map[string]bool{},
+		claudeListsAuto: claudeListsAuto, managedOff: managedOff}
 	a.link = &VoiceLink{refresh: c.Hooks.RefreshTray}
 	paths := a.paths
 
@@ -311,6 +324,7 @@ func Build(c Config) *Agent {
 		Kept:        KeptFile(paths.Kept()),
 		Updates:     updatesSink{c.Hooks},
 		Roster:      rosterSink{c.Hooks},
+		Modes:       a,
 	}
 	// Exactly 127.0.0.1 (the hook server refuses any non-loopback listener). Bound before the
 	// runtime is built, so a busy port is known before a warm start could launch anything.
@@ -347,7 +361,9 @@ func Build(c Config) *Agent {
 	if workersOn {
 		workerDeps = WorkerAdapters(paths, ws.Root, c.Home, s.Port, model, tokens)
 	}
+	a.model = model
 	a.handle = agent.NewRuntimeWithWorkers(deps, cfg, workerDeps)
+	a.restart = a.handle.Restart
 	a.toAgent = a.handle.Voice
 	a.ctx, a.cancel = context.WithCancel(context.Background())
 	a.wg.Go(func() { a.handle.Run(a.ctx) })
@@ -380,7 +396,59 @@ func (a *Agent) Tray() app.AgentTray {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return app.AgentTray{Enabled: true, Jobs: rows, Status: a.status, Hint: a.hint}
+	t := app.AgentTray{Enabled: true, Jobs: rows, Status: a.status, Hint: a.hint}
+	if a.cause != nil && len(a.manual) > 0 {
+		subject := "A worker"
+		if a.manual[agent.Coordinator] {
+			subject = "Coordinator"
+		}
+		t.Mode = subject + " is in Manual mode: " + a.cause.Reason()
+		switch *a.cause {
+		case agent.CauseOldModel:
+			t.ModeFix = &app.TrayFix{ID: "agent:fix-model", Title: "Use a supported model"}
+		case agent.CauseOldClaude:
+			t.ModeFix = &app.TrayFix{Title: "Copy update command", Copy: "claude update"}
+		}
+	}
+	return t
+}
+
+// ManualMode is agent.ModeSink: a Claude agent entered or left Manual mode. The flag is kept at
+// once; the cause is worked out off the caller's goroutine (the controller's effect loop must
+// not wait on `claude --help`) and the tray refreshed when it is known.
+func (a *Agent) ManualMode(name string, manual bool) {
+	a.mu.Lock()
+	if manual == a.manual[name] {
+		a.mu.Unlock()
+		return
+	}
+	if manual {
+		a.manual[name] = true
+	} else {
+		delete(a.manual, name)
+	}
+	a.modeGen++
+	gen, model, any := a.modeGen, a.model, len(a.manual) > 0
+	if !any {
+		a.cause = nil
+	}
+	lists, off := a.claudeListsAuto, a.managedOff
+	a.mu.Unlock()
+	call(a.hooks.RefreshTray)
+	if !any {
+		return
+	}
+	a.wg.Go(func() {
+		c := agent.ManualCauseOf(model, lists(), off())
+		a.mu.Lock()
+		if a.modeGen != gen {
+			a.mu.Unlock()
+			return // changed since: its own probe answers
+		}
+		a.cause = &c
+		a.mu.Unlock()
+		call(a.hooks.RefreshTray)
+	})
 }
 
 // setHint shows a host hint (IntegrationHint) in the tray, logged once per line.
@@ -419,6 +487,14 @@ func (a *Agent) Menu(id string) bool {
 		a.OpenTerminal()
 	case "agent:restart":
 		a.handle.Restart()
+	case "agent:fix-model":
+		// Inside DeskPixie, so it runs directly (#80): agent.model back to Claude Code's default.
+		a.mu.Lock()
+		a.model = ""
+		a.mu.Unlock()
+		a.handle.ClearCoordinatorModel()
+		call(a.hooks.ClearModel)
+		a.restart()
 	default:
 		job, ok := strings.CutPrefix(id, "agent:cancel:")
 		if !ok {

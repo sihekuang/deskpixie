@@ -25,6 +25,8 @@ type AgentHooks struct {
 	Celebrate, FlashError func()
 	// RefreshTray: the agent's tray rows or status changed.
 	RefreshTray func()
+	// ClearModel sets agent.model back to null (Claude Code's default) in settings.json.
+	ClearModel func()
 	// Notify shows a macOS notification (no sound: the agent chimes on its own).
 	Notify func(title, body string)
 	// Updates is the updates bubble's list (the `updates` event's lines; never nil).

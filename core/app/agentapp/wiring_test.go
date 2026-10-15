@@ -597,3 +597,61 @@ func TestUpdatesIsTheBubblesCurrentList(t *testing.T) {
 		return ok && items != nil && len(items) == 0
 	})
 }
+
+func manualProbes(f *fixture, model string, lists, org bool) {
+	f.agent.model = model
+	f.agent.claudeListsAuto = func() bool { return lists }
+	f.agent.managedOff = func() bool { return org }
+}
+
+func TestManualModeShowsTheCauseAndTheModelFix(t *testing.T) {
+	f := newFixture(t, nil)
+	manualProbes(f, "claude-sonnet-4-5", true, false)
+	f.agent.ManualMode(agent.Coordinator, true)
+	waitFor(t, "the cause", func() bool { return f.agent.Tray().Mode != "" })
+	tr := f.agent.Tray()
+	if tr.Mode != "Coordinator is in Manual mode: its model is too old for auto mode" || tr.ModeFix == nil || tr.ModeFix.ID != "agent:fix-model" {
+		t.Fatalf("%+v", tr)
+	}
+	f.agent.ManualMode(agent.Coordinator, false)
+	if tr := f.agent.Tray(); tr.Mode != "" || tr.ModeFix != nil {
+		t.Fatalf("not cleared: %+v", tr)
+	}
+}
+
+func TestOldClaudeOffersTheUpdateCommandToCopy(t *testing.T) {
+	f := newFixture(t, nil)
+	manualProbes(f, "", false, false)
+	f.agent.ManualMode("fix-login", true)
+	waitFor(t, "the cause", func() bool { return f.agent.Tray().Mode != "" })
+	tr := f.agent.Tray()
+	if tr.Mode != "A worker is in Manual mode: Claude Code is too old for auto mode" || tr.ModeFix == nil || tr.ModeFix.Copy != "claude update" || tr.ModeFix.ID != "" {
+		t.Fatalf("%+v", tr)
+	}
+}
+
+func TestAnAgentClearedBeforeTheProbeFinishesShowsNothing(t *testing.T) {
+	f := newFixture(t, nil)
+	manualProbes(f, "", true, false)
+	release := make(chan struct{})
+	f.agent.claudeListsAuto = func() bool { <-release; return true }
+	f.agent.ManualMode(agent.Coordinator, true)
+	f.agent.ManualMode(agent.Coordinator, false)
+	close(release)
+	time.Sleep(50 * time.Millisecond)
+	if tr := f.agent.Tray(); tr.Mode != "" {
+		t.Fatalf("%+v", tr)
+	}
+}
+
+func TestFixModelClearsTheModelAndRestarts(t *testing.T) {
+	var cleared, restarted atomic.Int32
+	f := newFixture(t, func(c *Config) {
+		c.Hooks.ClearModel = func() { cleared.Add(1) }
+	})
+	f.agent.restart = func() { restarted.Add(1) }
+	manualProbes(f, "claude-sonnet-4-5", true, false)
+	if !f.agent.Menu("agent:fix-model") || cleared.Load() != 1 || restarted.Load() != 1 || f.agent.model != "" {
+		t.Fatal("fix not applied", cleared.Load(), restarted.Load())
+	}
+}

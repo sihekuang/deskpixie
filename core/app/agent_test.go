@@ -392,3 +392,28 @@ func TestAgentRosterIsEmptyWithoutAnAgent(t *testing.T) {
 		t.Fatal(string(out))
 	}
 }
+
+func TestTheManualModeLineAndFixReachAppState(t *testing.T) {
+	line := "Coordinator is in Manual mode: its model is too old for auto mode"
+	f := &fakeAgent{tray: AgentTray{Enabled: true, Mode: line, ModeFix: &TrayFix{ID: "agent:fix-model", Title: "Use a supported model"}}}
+	h := newHarness(t, withAgent(f))
+	s := h.state()
+	if !slices.Contains(s.StatusLines, line) {
+		t.Fatal(s.StatusLines)
+	}
+	b, _ := json.Marshal(s)
+	if !strings.Contains(string(b), `"agentModeFix":{"id":"agent:fix-model","title":"Use a supported model"}`) {
+		t.Fatal(string(b))
+	}
+}
+
+func TestTheClearModelHookSavesNullAgentModel(t *testing.T) {
+	f := &fakeAgent{tray: AgentTray{Enabled: true}}
+	h := newHarness(t, withAgent(f))
+	m := "claude-sonnet-4-5"
+	h.app.save(func(c *settings.Config) { c.Agent.Model = &m })
+	f.hooks.ClearModel()
+	if h.app.store.Current().Agent.Model != nil {
+		t.Fatal("model not cleared")
+	}
+}

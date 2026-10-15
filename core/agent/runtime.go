@@ -654,6 +654,11 @@ func (h *AgentHandle) Voice(sig VoiceSignal) { h.Input(VoiceInput(sig)) }
 // Restart is tray ▸ Restart coordinator.
 func (h *AgentHandle) Restart() { h.Input(RestartInput()) }
 
+// ClearCoordinatorModel makes the coordinator's next launches use Claude Code's default model.
+func (h *AgentHandle) ClearCoordinatorModel() {
+	h.deps.Host.ClearModel()
+}
+
 // Shutdown is the app's quit: deny pending permissions and stop the panes, in parallel,
 // within ShutdownLimit in all.
 func (h *AgentHandle) Shutdown() {
