@@ -124,8 +124,13 @@ type AgentSettings struct {
 	Terminal    string  `json:"terminal"`
 	HerdrPath   *string `json:"herdrPath"`
 	// TmuxPath is the tmux program for sessionHost "tmux" (nil finds it).
-	TmuxPath              *string `json:"tmuxPath"`
-	Model                 *string `json:"model"`
+	TmuxPath *string `json:"tmuxPath"`
+	// CoordinatorKind is the coordinator's agent: "claude" (Claude Code) or "codex" (#87).
+	CoordinatorKind string `json:"coordinatorKind"`
+	// Model is Claude Code's --model (the coordinator when it is Claude Code, and Claude workers).
+	Model *string `json:"model"`
+	// CodexModel is Codex's -m for a Codex coordinator (nil: Codex decides).
+	CodexModel            *string `json:"codexModel"`
 	Warm                  bool    `json:"warm"`
 	Port                  uint16  `json:"port"`
 	KeepPanesOnQuit       bool    `json:"keepPanesOnQuit"`
@@ -168,7 +173,8 @@ func Default() Config {
 		Notifications: NotificationSettings{DebounceSecs: 20, Bubble: BubbleSettings{Enabled: true, PopSecs: 6, Lines: 5}, AwayAfterMins: 5},
 		Agent: AgentSettings{
 			Enabled: true, SessionHost: "herdr", Session: "deskpixie", Terminal: "warp",
-			Port: 48217, HoldOpenSecs: 180, PermissionTimeoutSecs: 120, NotifyPerMinute: 4,
+			CoordinatorKind: CoordinatorClaude,
+			Port:            48217, HoldOpenSecs: 180, PermissionTimeoutSecs: 120, NotifyPerMinute: 4,
 			Narration: true, ProjectsRoot: "~/Documents/Projects",
 			// Handed-off work keeps running when the app quits; the next start adopts it.
 			KeepPanesOnQuit: true,
@@ -197,6 +203,7 @@ func (c Config) Clone() Config {
 	out.Agent.HerdrPath = clonePtr(c.Agent.HerdrPath)
 	out.Agent.TmuxPath = clonePtr(c.Agent.TmuxPath)
 	out.Agent.Model = clonePtr(c.Agent.Model)
+	out.Agent.CodexModel = clonePtr(c.Agent.CodexModel)
 	if c.Agent.Workers.Kinds != nil {
 		out.Agent.Workers.Kinds = append([]string{}, c.Agent.Workers.Kinds...)
 	}

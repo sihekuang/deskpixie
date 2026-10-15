@@ -278,6 +278,37 @@ var AgentModels = []Opt{
 	{"claude-fable-5-1", "Claude Fable 5.1", AllPlatforms},
 }
 
+// Coordinator kinds (agent.coordinatorKind).
+const (
+	CoordinatorClaude = "claude"
+	CoordinatorCodex  = "codex"
+)
+
+// CoordinatorKinds are the agents that may be the coordinator.
+var CoordinatorKinds = []Opt{
+	{CoordinatorClaude, "Claude Code", AllPlatforms},
+	{CoordinatorCodex, "Codex", AllPlatforms},
+}
+
+// CodexModels are suggested values of Codex's -m for the coordinator: "" (null) leaves it to
+// Codex, then the GPT models Codex 0.162 lists.
+var CodexModels = []Opt{
+	{"", "Default (Codex decides)", AllPlatforms},
+	{"gpt-6.1-sol", "GPT-6.1 Sol", AllPlatforms},
+	{"gpt-6-astra", "GPT-6 Astra", AllPlatforms},
+	{"gpt-6-sol", "GPT-6 Sol", AllPlatforms},
+	{"gpt-6-luna", "GPT-6 Luna", AllPlatforms},
+	{"gpt-5.6-sol", "GPT-5.6 Sol", AllPlatforms},
+	{"gpt-5.6-terra", "GPT-5.6 Terra", AllPlatforms},
+	{"gpt-5.6-luna", "GPT-5.6 Luna", AllPlatforms},
+}
+
+// claudeCoordinator / codexCoordinator: the coordinator is that agent.
+var (
+	claudeCoordinator = Condition{Key: "agent.coordinatorKind", In: []string{CoordinatorClaude}}
+	codexCoordinator  = Condition{Key: "agent.coordinatorKind", In: []string{CoordinatorCodex}}
+)
+
 // WorkerKinds are the agents that may work as workers.
 var WorkerKinds = []Opt{
 	{"claude", "Claude Code", AllPlatforms},
@@ -338,9 +369,12 @@ var Fields = []FieldSpec{
 	spec("voice.idleTimeoutSecs", SectionVoice, "Silence timeout (seconds)", "A conversation ends after this much silence.", intKind(1, 600, false), ApplyRestart),
 	spec("voice.homeCity", SectionVoice, "Home city", "Where Pixie checks the weather when you don't name a place, e.g. Portland, Oregon.", textKind(true), ApplyRestart),
 	spec("voice.personaPath", SectionVoice, "Persona file", "A Markdown file that replaces Pixie's personality. Empty uses the built-in one.", pathKind(false, true), ApplyRestart),
-	spec("agent.enabled", SectionAgent, "Delegation", "Let Pixie hand work to the coordinator, a Claude Code agent.", boolKind, ApplyRestart),
+	spec("agent.enabled", SectionAgent, "Delegation", "Let Pixie hand work to the coordinator, a Claude Code or Codex agent.", boolKind, ApplyRestart),
 	spec("agent.terminal", SectionAgent, "Terminal", "Where the coordinator's session opens when you click Pixie.", choiceKind(SourceTerminals), ApplyRestart),
-	spec("agent.model", SectionAgent, "Coordinator model", "Claude Code's --model for the coordinator. Default lets Claude Code decide.", openChoice(Choices{Source: SourceStatic, Static: AgentModels, Null: true}), ApplyRestart),
+	spec("agent.coordinatorKind", SectionAgent, "Coordinator agent", "The agent that runs as the coordinator: Claude Code, or OpenAI's Codex.", staticChoice(CoordinatorKinds), ApplyRestart),
+	// The model list follows the coordinator agent. agent.model also applies to Claude workers.
+	visibleWhen(spec("agent.model", SectionAgent, "Coordinator model", "Claude Code's --model for the coordinator (and Claude workers). Default lets Claude Code decide.", openChoice(Choices{Source: SourceStatic, Static: AgentModels, Null: true}), ApplyRestart), claudeCoordinator),
+	visibleWhen(spec("agent.codexModel", SectionAgent, "Coordinator model", "Codex's model for the coordinator. Default lets Codex decide.", openChoice(Choices{Source: SourceStatic, Static: CodexModels, Null: true}), ApplyRestart), codexCoordinator),
 	spec("agent.warm", SectionAgent, "Start at launch", "Start the coordinator when the app starts, not on first use.", boolKind, ApplyRestart),
 	spec("agent.narration", SectionAgent, "Narration", "Pixie says what the coordinator is doing.", boolKind, ApplyRestart),
 	spec("agent.openConversationForUpdates", SectionAgent, "Open a conversation for updates", "When a job finishes or fails, or the coordinator asks you something, while you're not talking to Pixie, Pixie starts a conversation to tell you and then listens for your answer.", boolKind, ApplyRestart),
