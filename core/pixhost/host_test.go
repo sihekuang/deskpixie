@@ -349,3 +349,11 @@ func TestAnUnreachableSessionIsNotTakenOverByAnotherPix(t *testing.T) {
 		t.Fatalf("%+v", ra2)
 	}
 }
+
+func TestRegisterCarriesTheAppBundleID(t *testing.T) {
+	h, sock := newHost(t)
+	dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api", Where: "iTerm", App: "com.googlecode.iterm2"})
+	if l := listed(t, h); len(l) != 1 || l[0].User.App != "com.googlecode.iterm2" {
+		t.Fatalf("%+v", l[0].User)
+	}
+}

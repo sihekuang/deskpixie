@@ -23,6 +23,10 @@ func Where(env func(string) string) string {
 	return "terminal"
 }
 
+// AppID is the bundle id of the app pix runs in: macOS sets __CFBundleIdentifier for an app and
+// its terminals inherit it (WebStorm's terminal: com.jetbrains.WebStorm). "" when unknown.
+func AppID(env func(string) string) string { return env("__CFBundleIdentifier") }
+
 // Nested: already inside a pix session or a Pixie-started agent; pix then just runs the tool.
 func Nested(env func(string) string) bool {
 	return env("PIX_SESSION") != "" || env("PIXIE_AGENT_TOKEN") != ""

@@ -41,6 +41,7 @@ type Msg struct {
 	Cwd         string   `json:"cwd,omitempty"`
 	GitRoot     string   `json:"gitRoot,omitempty"`
 	Where       string   `json:"where,omitempty"`
+	App         string   `json:"app,omitempty"`
 	SessionID   string   `json:"sessionId,omitempty"`
 	Description string   `json:"description,omitempty"`
 	Address     string   `json:"address,omitempty"`
