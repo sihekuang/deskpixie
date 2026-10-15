@@ -246,6 +246,29 @@ func TestTranscriptMatchers(t *testing.T) {
 		{"confirm hawk", false, false, true},
 		{"ok confirm hawk", false, false, true},
 		{"confirm that the build is green please", false, false, false},
+		// #93: the usual ways of signing off.
+		{"Thank you.", true, false, false},
+		{"Thanks!", true, false, false},
+		{"Okay, thank you.", true, false, false},
+		{"Perfect, thanks.", true, false, false},
+		{"That's all, thanks.", true, false, false},
+		{"That's it for now.", true, false, false},
+		{"Thanks Pixie, that's all for now.", true, false, false},
+		{"Bye Pixie.", true, false, false},
+		{"Goodbye Pixie.", true, false, false},
+		{"I'm good, thanks.", true, false, false},
+		{"Nope, I'm good.", true, false, false},
+		{"Nothing else.", true, false, false},
+		{"We're done here.", true, true, false}, // "were" opens a question; harmless here
+		{"Never mind.", true, false, false},
+		{"Okay, I'm all set.", true, false, false},
+		// A thanks after a request, or before one, is not a goodbye.
+		{"set a timer for ten minutes, thanks", false, false, false},
+		{"thanks, now make it blue", false, false, false},
+		{"thank you, can you also check the build", false, false, false},
+		{"okay", false, false, false},
+		{"good", false, false, false},
+		{"the build is all good", false, false, false},
 	} {
 		if IsGoodbye(tc.said) != tc.bye || IsQuestion(tc.said) != tc.question || IsConfirmWords(tc.said) != tc.confirm {
 			t.Errorf("%q: bye=%v question=%v confirm=%v", tc.said, IsGoodbye(tc.said), IsQuestion(tc.said), IsConfirmWords(tc.said))

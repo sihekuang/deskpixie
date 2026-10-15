@@ -144,12 +144,36 @@ var goodbyes = []string{
 	"bye", "goodbye", "bye bye", "good bye", "see you", "see ya", "see you later", "talk later",
 	"talk to you later", "thats all", "thats it", "thats all bye", "im done", "were done",
 	"good night", "later", "catch you later", "have a good one", "take care",
+	"thats all for now", "thats it for now", "were done here", "nothing else", "never mind",
+	"nevermind",
 }
 
+// courtesy words make up a closing like "okay, thank you" or "nope, I'm good, thanks": an
+// utterance of only these, with a thanks or an "I'm good" in it, is a goodbye (#93). A thanks
+// next to anything else ("set a timer, thanks") is not.
+var courtesy = map[string]bool{
+	"ok": true, "okay": true, "alright": true, "all": true, "right": true, "perfect": true,
+	"great": true, "cool": true, "awesome": true, "nice": true, "wonderful": true, "got": true,
+	"it": true, "sounds": true, "good": true, "no": true, "nope": true, "yeah": true, "yes": true,
+	"yep": true, "well": true, "oh": true, "so": true, "um": true, "uh": true, "thanks": true,
+	"thank": true, "you": true, "much": true, "a": true, "lot": true, "very": true, "again": true,
+	"im": true, "thats": true, "for": true, "now": true, "set": true, "fine": true, "hey": true, "pixie": true, "bit": true,
+}
+
+// closers: the courtesy words that end a conversation by themselves.
+var closers = []string{"thanks", "thank you", "im good", "im all good", "all good", "im fine", "im all set", "all set"}
+
+// assistantNames trail a goodbye ("bye Pixie") without changing it.
+var assistantNames = map[string]bool{"pixie": true, "bit": true}
+
 // IsGoodbye reports whether the user's words end the conversation: a goodbye at the end, with
-// at most a few polite words before it ("thanks, that's all, bye"), and no request.
+// at most a few polite words before it ("thanks, that's all, bye"), or a closing made only of
+// courtesy words ("okay, thank you"), and no request.
 func IsGoodbye(said string) bool {
 	words := strings.Fields(normalize(said))
+	for len(words) > 1 && assistantNames[words[len(words)-1]] {
+		words = words[:len(words)-1]
+	}
 	if len(words) == 0 || len(words) > 8 {
 		return false
 	}
@@ -162,7 +186,12 @@ func IsGoodbye(said string) bool {
 			return true
 		}
 	}
-	return false
+	for _, w := range words {
+		if !courtesy[w] {
+			return false
+		}
+	}
+	return hasAnyPhrase(text, closers)
 }
 
 // IsQuestion reports whether the user's words ask a question (not a request to do something).
