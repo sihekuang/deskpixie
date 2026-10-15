@@ -13,6 +13,7 @@ import (
 
 	"github.com/sihekuang/deskpixie/core/agent"
 	"github.com/sihekuang/deskpixie/core/agent/agenttest"
+	"github.com/sihekuang/deskpixie/core/agent/terminal"
 	"github.com/sihekuang/deskpixie/core/settings"
 )
 
@@ -33,6 +34,15 @@ func TestRegistriesNameTheShippedAdapters(t *testing.T) {
 	}
 	if n := Terminals()["iterm"](runner, "/Users/x").Name(); n != "iterm" {
 		t.Fatal(n)
+	}
+}
+
+// #98: every shipped terminal reuses one already attached to the session.
+func TestEveryTerminalReusesAnAttachedOne(t *testing.T) {
+	for name, f := range Terminals() {
+		if _, ok := f(&agenttest.FakeRunner{}, "/Users/x").(*terminal.ReusingLauncher); !ok {
+			t.Fatalf("%s doesn't reuse an attached terminal", name)
+		}
 	}
 }
 
