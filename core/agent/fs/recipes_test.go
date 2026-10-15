@@ -23,7 +23,7 @@ func launch(kind agent.AgentKind) agent.WorkerLaunch {
 func TestAClaudeWorkerGetsTrustAPrivateMcpConfigAndItsArgs(t *testing.T) {
 	d := tempDir(t)
 	trust := &recordingTrust{}
-	r := NewFileWorkerRecipes(filepath.Join(d, "mcp"), filepath.Join(d, "worker-settings.json"), 48217, "haiku", trust)
+	r := NewFileWorkerRecipes(filepath.Join(d, "mcp"), filepath.Join(d, "worker-settings.json"), 48217, "haiku", trust, "")
 	p, err := r.Prepare(launch(agent.Claude))
 	if err != nil {
 		t.Fatal(err)
@@ -83,7 +83,7 @@ func (noTrust) Grant(dir string) ([]string, error) {
 
 func TestARefusedTrustFailsTheStartAndWritesNothing(t *testing.T) {
 	d := tempDir(t)
-	r := NewFileWorkerRecipes(filepath.Join(d, "mcp"), filepath.Join(d, "w.json"), 1, "", noTrust{})
+	r := NewFileWorkerRecipes(filepath.Join(d, "mcp"), filepath.Join(d, "w.json"), 1, "", noTrust{}, "")
 	_, err := r.Prepare(launch(agent.Claude))
 	if err == nil || !strings.Contains(err.Error(), "outside the trusted roots") {
 		t.Fatal(err)
@@ -95,7 +95,7 @@ func TestARefusedTrustFailsTheStartAndWritesNothing(t *testing.T) {
 
 func TestABadWorkerNameIsRefused(t *testing.T) {
 	d := tempDir(t)
-	r := NewFileWorkerRecipes(filepath.Join(d, "mcp"), filepath.Join(d, "w.json"), 1, "", &recordingTrust{})
+	r := NewFileWorkerRecipes(filepath.Join(d, "mcp"), filepath.Join(d, "w.json"), 1, "", &recordingTrust{}, "")
 	l := launch(agent.Claude)
 	l.Name = "../escape"
 	if _, err := r.Prepare(l); err == nil {
@@ -143,17 +143,17 @@ func added(p agent.PreparedWorker) []string {
 }
 
 func codexRecipes(d string) *FileWorkerRecipes {
-	return NewFileWorkerRecipes(filepath.Join(d, "mcp"), filepath.Join(d, "w.json"), 1, "", &recordingTrust{})
+	return NewFileWorkerRecipes(filepath.Join(d, "mcp"), filepath.Join(d, "w.json"), 1, "", &recordingTrust{}, "")
 }
 
-func TestACodexWorkerNeedsNoFileAndNeverTrustsAFolder(t *testing.T) {
+func TestACodexWorkerNeedsNoFile(t *testing.T) {
 	d := tempDir(t)
 	_, git, l := gitLayout(t, d, "fix")
 	for _, sub := range []string{"refs/heads/pixie", "logs/refs/heads/pixie"} {
 		mustMkdir(t, filepath.Join(git, sub))
 	}
 	trust := &recordingTrust{}
-	r := NewFileWorkerRecipes(filepath.Join(d, "mcp"), filepath.Join(d, "w.json"), 48217, "haiku", trust)
+	r := NewFileWorkerRecipes(filepath.Join(d, "mcp"), filepath.Join(d, "w.json"), 48217, "haiku", trust, "")
 	p, err := r.Prepare(l)
 	if err != nil {
 		t.Fatal(err)
@@ -213,7 +213,7 @@ func TestACodexWorkerNeedsNoFileAndNeverTrustsAFolder(t *testing.T) {
 		}
 		return nil
 	}
-	smoke := NewFileWorkerRecipes(filepath.Join(d, "mcp"), filepath.Join(d, "w.json"), 48217, "", trust).WithCodexExtraArgs(extra)
+	smoke := NewFileWorkerRecipes(filepath.Join(d, "mcp"), filepath.Join(d, "w.json"), 48217, "", trust, "").WithCodexExtraArgs(extra)
 	sp, err := smoke.Prepare(l)
 	if err != nil {
 		t.Fatal(err)
@@ -353,7 +353,7 @@ func TestATamperedWorktreeGitFileCannotPointOutsideTheGitDir(t *testing.T) {
 	mustMkdir(t, filepath.Join(repo, ".git/worktrees"))
 	mustMkdir(t, outside)
 	mustMkdir(t, filepath.Join(repo, ".worktrees/fix"))
-	r := NewFileWorkerRecipes(filepath.Join(d, "mcp"), filepath.Join(d, "w.json"), 1, "", &recordingTrust{})
+	r := NewFileWorkerRecipes(filepath.Join(d, "mcp"), filepath.Join(d, "w.json"), 1, "", &recordingTrust{}, "")
 	l := launch(agent.Codex)
 	l.Repo, l.Worktree = repo, filepath.Join(repo, ".worktrees/fix")
 	git := filepath.Join(repo, ".git")
@@ -386,7 +386,7 @@ func TestATamperedWorktreeGitFileCannotPointOutsideTheGitDir(t *testing.T) {
 
 func TestARepoWithoutAGitDirGetsNoAddDir(t *testing.T) {
 	d := tempDir(t)
-	r := NewFileWorkerRecipes(filepath.Join(d, "mcp"), filepath.Join(d, "w.json"), 1, "", &recordingTrust{})
+	r := NewFileWorkerRecipes(filepath.Join(d, "mcp"), filepath.Join(d, "w.json"), 1, "", &recordingTrust{}, "")
 	l := launch(agent.Codex)
 	l.Repo = filepath.Join(d, "nothing")
 	p, err := r.Prepare(l)
@@ -410,4 +410,31 @@ func TestStaleMcpConfigsAreCleared(t *testing.T) {
 		t.Fatal("keep.txt removed")
 	}
 	ClearMcpDir(filepath.Join(d, "missing")) // no folder: fine
+}
+
+func TestACodexWorkerAnswersTrustOnlyInsideTheProjectsRoot(t *testing.T) {
+	root := t.TempDir()
+	inside := filepath.Join(root, "repo")
+	mustMkdir(t, inside)
+	outside := t.TempDir()
+	d := tempDir(t)
+	r := NewFileWorkerRecipes(filepath.Join(d, "mcp"), filepath.Join(d, "w.json"), 1, "", &recordingTrust{}, root)
+	for _, c := range []struct {
+		repo   string
+		answer bool
+	}{{inside, true}, {outside, false}, {root, false}, {root + "2", false}} {
+		p, err := r.Prepare(agent.WorkerLaunch{Name: "w", Kind: agent.Codex, Repo: c.repo, Worktree: c.repo})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := p.Refusal != nil && p.Refusal.Answer != nil; got != c.answer {
+			t.Errorf("%s: answer %v", c.repo, got)
+		}
+		if p.Refusal == nil || p.Refusal.Reason != agent.CodexTrustRefusal(c.repo) {
+			t.Errorf("%s: refusal text changed", c.repo)
+		}
+	}
+	if p, _ := r.Prepare(agent.WorkerLaunch{Name: "w", Kind: agent.Codex, Repo: inside, Worktree: inside}); !slices.Equal(p.Refusal.Answer, []string{"Enter"}) {
+		t.Errorf("answer %v", p.Refusal.Answer)
+	}
 }

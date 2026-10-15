@@ -759,7 +759,7 @@ func TestLiveWorkerSmoke(t *testing.T) {
 	handle = agent.NewRuntimeWithWorkers(deps, agent.RuntimeConfig{Settings: settings}, &agent.WorkerDeps{
 		Worktrees: worktrees,
 		Tokens:    tokens,
-		Recipes:   agentfs.NewFileWorkerRecipes(paths.McpDir, paths.WorkerSettings, port, "haiku", workerTrust).WithCodexExtraArgs(extra),
+		Recipes:   agentfs.NewFileWorkerRecipes(paths.McpDir, paths.WorkerSettings, port, "haiku", workerTrust, "").WithCodexExtraArgs(extra),
 	})
 	ws.handle = handle
 	close(handleReady)

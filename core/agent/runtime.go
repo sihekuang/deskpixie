@@ -58,6 +58,8 @@ const (
 	ReadyWindow = 55 * time.Second
 	// StartScreenPoll is between two reads of the start screen.
 	StartScreenPoll = 300 * time.Millisecond
+	// AnswerGrace is how long a refusal screen may stay after its Answer was sent.
+	AnswerGrace = 3 * time.Second
 )
 
 // LiveWorktreesFile holds the live workers' repos and worktree slugs (`{"repo":…,"slug":…}`
@@ -1539,15 +1541,27 @@ func checkStartScreen(ctx context.Context, session SessionHost, name string, ref
 		}
 	}
 	last := ""
-	var since time.Time // when the marker began to show on every read; zero: it doesn't
+	answeredAt := make([]time.Time, len(refusals)) // when each refusal's Answer was sent; zero: not yet
+	var since time.Time                            // when the marker began to show on every read; zero: it doesn't
 	for {
 		text, err := within(ctx, max(time.Until(deadline), 0), func(c context.Context) (string, error) {
 			return session.Read(c, name, 40)
 		})
 		if err == nil {
-			for _, refusal := range refusals {
-				if ShowsAnyScreen(text, refusal.Screens) {
-					return errors.New(refusal.Reason)
+			for i, r := range refusals {
+				if !ShowsAnyScreen(text, r.Screens) {
+					continue
+				}
+				if r.Answer != nil && answeredAt[i].IsZero() {
+					if err := session.SendKeys(ctx, name, r.Answer); err != nil {
+						return errors.New(r.Reason)
+					}
+					answeredAt[i] = time.Now()
+					log.Printf("agent: answered %s's start screen with %v", name, r.Answer)
+					continue
+				}
+				if r.Answer == nil || time.Since(answeredAt[i]) >= AnswerGrace {
+					return errors.New(r.Reason)
 				}
 			}
 			last = lastLine(text)

@@ -164,6 +164,6 @@ func WorkerAdapters(paths Paths, root, home string, port uint16, model string, t
 	return &agent.WorkerDeps{
 		Worktrees: worktrees,
 		Tokens:    tokens,
-		Recipes:   agentfs.NewFileWorkerRecipes(paths.McpDir, paths.WorkerSettings, port, strings.TrimSpace(model), trust),
+		Recipes:   agentfs.NewFileWorkerRecipes(paths.McpDir, paths.WorkerSettings, port, strings.TrimSpace(model), trust, root),
 	}
 }

@@ -66,6 +66,7 @@ type hostState struct {
 	startAttempts int
 	faults        []Fault
 	screens       map[string]string
+	afterKeys     map[string]string // screen to show once keys are sent to the agent
 	hangStart     bool
 	panicStart    bool
 	dieOnStart    bool
@@ -231,6 +232,17 @@ func (f *FakeSessionHost) SetScreen(name, text string) {
 	f.with(func(s *hostState) { s.screens[name] = text })
 }
 
+// SetScreenAfterKeys: the first SendKeys to name switches its screen to text (a dialog that goes
+// away once answered).
+func (f *FakeSessionHost) SetScreenAfterKeys(name, text string) {
+	f.with(func(s *hostState) {
+		if s.afterKeys == nil {
+			s.afterKeys = map[string]string{}
+		}
+		s.afterKeys[name] = text
+	})
+}
+
 // Kill: the agent's process dies; its pane disappears and Exited is reported once.
 func (f *FakeSessionHost) Kill(name string) {
 	f.with(func(s *hostState) {
@@ -340,6 +352,10 @@ func (f *FakeSessionHost) SendKeys(_ context.Context, name string, keys []string
 			return
 		}
 		s.keys = append(s.keys, Keys{name, slices.Clone(keys)})
+		if next, ok := s.afterKeys[name]; ok {
+			s.screens[name] = next
+			delete(s.afterKeys, name)
+		}
 		interrupt = slices.Contains(keys, "Escape") && !slices.Contains(s.faults, IgnoreEscape) && s.agents[name].Status == agent.PaneWorking
 	})
 	if err != nil {

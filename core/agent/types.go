@@ -461,10 +461,15 @@ type WorkerLaunch struct {
 
 // StartRefusal is a screen that fails a start: when the pane shows one of Screens during its
 // start (every marker of a group in its bottom ScreenBottomLines lines; e.g. a folder-trust
-// prompt the app won't answer for the user), the start fails with Reason and nothing is typed.
+// prompt the app won't answer for the user), the start fails with Reason and nothing is typed,
+// unless Answer is set.
 type StartRefusal struct {
 	Screens [][]string
 	Reason  string
+	// Answer, when set, is sent once (SendKeys) the first time the screen shows; the start then
+	// goes on, and fails with Reason if the screen is still there after AnswerGrace (#97: Codex's
+	// trust screen in a repo under the projects root). Nil: never answered, the start fails.
+	Answer []string
 }
 
 // ScreenBottomLines is how many non-empty lines at the bottom of a screen a dialog is looked for in.
