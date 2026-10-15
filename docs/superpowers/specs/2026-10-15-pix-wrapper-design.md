@@ -245,6 +245,12 @@ Findings (2026-10-15, Claude Code 2.1.300, Codex 0.162.1):
   inbox socket starts a turn (Claude shows it as "Another Claude session sent a message");
   hooks report working → idle; `set_description` reaches Bit's list; Esc interrupts; the
   address survives a daemon restart; close ends the session.
+- **Final review fixes:** close_session is confirmed by the app (a spoken confirm word) for
+  Claude and Codex coordinators (a Codex coordinator approves pixie tools itself, and Claude's
+  permission hook could not voice an MCP tool); a session id arriving after registering is
+  checked for duplicates; only a lone Enter opens the typing gate, and only once the turn
+  starts; scripted runs (`-p`, pipes, subcommands) pass straight through. In a real terminal
+  Claude draws spaces as cursor moves, so screen markers are matched without spaces.
 - **Claude fires no Stop hook on an interrupt.** pix watches the screen for "What should Claude
   do instead?" and reports idle (`TestClaudeInterruptOnScreenMeansIdle`).
 - **MCP tools ask for permission by default**, so pix's per-run settings allow

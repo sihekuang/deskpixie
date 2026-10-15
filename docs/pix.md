@@ -36,9 +36,11 @@ login-bug session doing?".
    alias claude='pix claude'
    alias codex='pix codex'
    ```
-   With them, plain `claude` and `codex` go through pix. Without them, plain `claude` is
-   untouched: pix never edits `~/.claude.json`, `~/.claude/settings.json` or
-   `~/.codex/config.toml`.
+   With them, plain `claude` and `codex` go through pix. Scripted and one-shot runs are passed
+   straight through, exactly as without pix: `claude -p …`, anything with piped input or
+   output, subcommands such as `claude mcp` or `codex exec`, and `--version`. Without the
+   aliases, plain `claude` is untouched: pix never edits `~/.claude.json`,
+   `~/.claude/settings.json` or `~/.codex/config.toml`.
 
 Check it with `pix version`.
 
@@ -70,7 +72,9 @@ it moves on. Pixie only ever says descriptions, never internal names.
 - **Message it:** in Claude Code it shows as "Another Claude session sent a message: …", and
   Claude answers it like any prompt; in Codex it is typed in for you.
 - **Interrupt it:** like pressing Esc. The session keeps running.
-- **Close it:** only when you ask, and you're asked to confirm.
+- **Close it:** only when you ask, and Pixie asks you to confirm first, with a confirm word
+  ("Close your session login bug? Say confirm hawk."), whether the coordinator is Claude Code
+  or Codex.
 
 Quitting DeskPixie never ends a session you started.
 
@@ -80,7 +84,9 @@ For Claude Code, Pixie's messages go into Claude's own inbox, so your typing is 
 Claude takes them at once when idle, or after its current turn.
 
 For Codex, pix has to type the message in. It waits until Codex is idle **and** you have typed
-nothing since your last Enter and have stopped typing for a moment. While a message waits, the
+nothing since your last Enter and have stopped typing for a moment. Option+Enter, Ctrl-J and
+pasted lines keep your draft, so they don't count as Enter; after Enter, pix also waits until
+Codex has started on what you sent. While a message waits, the
 tab title starts with 📨 and the count.
 
 ## Why it's built this way
