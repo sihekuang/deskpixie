@@ -173,6 +173,8 @@ private final class WindowObservers {
 /// the warning (or notice) line and the Restart bar.
 struct SettingsTabView: View {
     let model: SettingsModel
+    /// The pix command row (#89); the login shell's PATH is read once, when Settings opens.
+    @State private var pix = PixCommandModel(installer: .forThisApp(path: PixInstaller.loginShellPath()))
     let section: SettingsSection
 
     var body: some View {
@@ -230,6 +232,42 @@ struct SettingsTabView: View {
                 .help(help)
             } note: {
                 NoteText(text: help, isError: false)
+            }
+        case .pix(let help):
+            row(label: "pix command") {
+                HStack(spacing: 6) {
+                    switch pix.state {
+                    case .installed:
+                        Button("Uninstall") { pix.uninstall() }
+                            .help("Removes ~/.local/bin/pix.")
+                    case .notInstalled, .broken:
+                        Button("Install") { pix.install() }
+                            .help("Links ~/.local/bin/pix to the pix inside DeskPixie, so it updates with the app.")
+                    case .other:
+                        EmptyView()
+                    }
+                    Button("Copy Aliases") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(PixInstaller.aliases, forType: .string)
+                    }
+                    .help("Copies alias lines for ~/.zshrc, so plain `claude` and `codex` run through pix.")
+                }
+                .onAppear { pix.refresh() }
+            } note: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(pix.stateText)
+                        .font(.callout)
+                        .accessibilityLabel("pix command: \(pix.stateText)")
+                    if let error = pix.error {
+                        NoteText(text: error, isError: true)
+                    }
+                    if !pix.onPath {
+                        NoteText(text: "~/.local/bin is not on your PATH. Add to ~/.zshrc: \(PixInstaller.pathLine)", isError: false)
+                    }
+                    NoteText(text: help, isError: false)
+                    Link("How pix works", destination: URL(string: "https://github.com/sihekuang/deskpixie/blob/main/docs/pix.md")!)
+                        .font(.callout)
+                }
             }
         case .secret(let id, let label, let help):
             row(label: SettingsLayout.labelText(label)) {
