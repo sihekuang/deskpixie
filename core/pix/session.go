@@ -209,6 +209,9 @@ func (s *Session) flushSoon() {
 }
 
 func (s *Session) setStatus(st string) {
+	if st == "working" {
+		s.gate.Started()
+	}
 	s.mu.Lock()
 	s.status = st
 	s.mu.Unlock()

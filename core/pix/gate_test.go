@@ -24,6 +24,7 @@ func TestGateHoldsWhileTyping(t *testing.T) {
 		t.Fatal("unsent text after quiet time: still not clear")
 	}
 	g.Keys([]byte("\r"), t0.Add(6*time.Second))
+	g.Started()
 	if g.Clear(t0.Add(7 * time.Second)) {
 		t.Fatal("within quiet period after Enter: not clear")
 	}
@@ -58,6 +59,7 @@ func TestGateUnsureAfterEditingKey(t *testing.T) {
 		t.Fatal("unsure: not clear")
 	}
 	g.Keys([]byte("\r"), t0.Add(11*time.Second))
+	g.Started() // the line had text: clear once the turn starts
 	if !g.Clear(t0.Add(13 * time.Second)) {
 		t.Fatal("Enter resets unsure")
 	}
@@ -111,5 +113,54 @@ func TestGateLoneEscapeOnEmptyLineStaysClear(t *testing.T) {
 	g.Keys([]byte{0x1b}, t0.Add(3*time.Second))
 	if g.Clear(t0.Add(10 * time.Second)) {
 		t.Fatal("Esc with text typed: unsure")
+	}
+}
+
+// Keys that add a line to your draft, or accept a completion, leave your text in the box.
+func TestGateMultiLineKeysKeepTheDraft(t *testing.T) {
+	t0 := time.Unix(100, 0)
+	for name, keys := range map[string][]string{
+		"Option+Enter (ESC CR)": {"fix the", "\x1b\r"},
+		"Ctrl-J":                {"fix the", "\n"},
+		"backslash Enter":       {"fix the \\", "\r"},
+		"pasted lines":          {"fix the", "one\rtwo"},
+	} {
+		var g Gate
+		for _, k := range keys {
+			g.Keys([]byte(k), t0)
+		}
+		if g.Clear(t0.Add(10 * time.Second)) {
+			t.Errorf("%s: your draft is still there, not clear", name)
+		}
+	}
+}
+
+func TestGateEnterWaitsForTheTurnToStart(t *testing.T) {
+	// Enter may have only picked a completion (@file); the text is gone once the agent works.
+	var g Gate
+	t0 := time.Unix(100, 0)
+	g.Keys([]byte("look at @src/ma"), t0)
+	g.Keys([]byte("\r"), t0)
+	if g.Clear(t0.Add(10 * time.Second)) {
+		t.Fatal("Enter alone: not clear until the turn starts")
+	}
+	g.Started()
+	if !g.Clear(t0.Add(10 * time.Second)) {
+		t.Fatal("the turn started: clear")
+	}
+}
+
+func TestGateSlashCommandAndEmptyEnterNeedNoTurn(t *testing.T) {
+	t0 := time.Unix(100, 0)
+	var g Gate
+	g.Keys([]byte("/status"), t0)
+	g.Keys([]byte("\r"), t0)
+	if !g.Clear(t0.Add(10 * time.Second)) {
+		t.Fatal("a slash command runs on Enter: clear")
+	}
+	var e Gate
+	e.Keys([]byte("\r"), t0)
+	if !e.Clear(t0.Add(10 * time.Second)) {
+		t.Fatal("Enter on an empty line: clear")
 	}
 }
