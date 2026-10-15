@@ -9,6 +9,20 @@ type SecondaryHost interface {
 	Owns(name string) bool
 }
 
+// ChangeNotifier is a host whose list can change without a pane event (a pix session
+// connected, dropped or was described): Changes gets a signal then (coalesced, never blocks).
+type ChangeNotifier interface {
+	Changes() <-chan struct{}
+}
+
+// Changes is the secondary's change signal; nil when it has none.
+func (c *CompositeHost) Changes() <-chan struct{} {
+	if n, ok := c.secondary.(ChangeNotifier); ok {
+		return n.Changes()
+	}
+	return nil
+}
+
 // CompositeHost is the primary host (Herdr or tmux) plus a secondary one, as one SessionHost:
 // starts go to the primary, per-agent calls to whichever host owns the agent, and lists and
 // events are merged. Focus and tab labels apply to the primary's agents only.
@@ -66,6 +80,51 @@ func (c *CompositeHost) List(ctx context.Context) ([]AgentInfo, error) {
 	}
 	if more, err := c.secondary.List(ctx); err == nil {
 		out = append(out, more...)
+	}
+	return out, nil
+}
+
+// PassiveLister is a host that can list its agents without starting anything: ListRunning is
+// the agents if the host is already running; a host that isn't running lists none.
+// A wrapper around a SessionHost must forward ListRunning too, or its passive list silently
+// becomes an active one (ListRunning falls back to List, which may start the host).
+type PassiveLister interface {
+	ListRunning(ctx context.Context) ([]AgentInfo, error)
+}
+
+// ListRunning lists h passively when it can (PassiveLister), else with its List. Wrappers
+// must implement PassiveLister by forwarding to this, or the fallback to List starts the host.
+func ListRunning(ctx context.Context, h SessionHost) ([]AgentInfo, error) {
+	if p, ok := h.(PassiveLister); ok {
+		return p.ListRunning(ctx)
+	}
+	return h.List(ctx)
+}
+
+// ListParts is a passive list split by host, each part with its own error.
+type ListParts struct {
+	Primary, Secondary       []AgentInfo
+	PrimaryErr, SecondaryErr error
+}
+
+// ListRunningParts lists the primary passively (it is never started) and the secondary, each
+// part on its own: one failing never hides the other.
+func (c *CompositeHost) ListRunningParts(ctx context.Context) ListParts {
+	var p ListParts
+	p.Primary, p.PrimaryErr = ListRunning(ctx, c.primary)
+	p.Secondary, p.SecondaryErr = c.secondary.List(ctx)
+	return p
+}
+
+// ListRunning is List without starting the primary.
+func (c *CompositeHost) ListRunning(ctx context.Context) ([]AgentInfo, error) {
+	p := c.ListRunningParts(ctx)
+	if p.PrimaryErr != nil {
+		return nil, p.PrimaryErr
+	}
+	out := p.Primary
+	if p.SecondaryErr == nil {
+		out = append(out, p.Secondary...)
 	}
 	return out, nil
 }

@@ -906,6 +906,38 @@ func TestCloseAndKeysNeverStartAServer(t *testing.T) {
 	}
 }
 
+// The roster's passive list: with no server running it lists none and starts nothing.
+func TestListRunningNeverStartsAServer(t *testing.T) {
+	t.Parallel()
+	runner := newFakeRunner()
+	runner.answer(hostBin+" status --json", runOK(`{"client":{"protocol":17},"server":{"running":false,"protocol":null,"compatible":null,"socket":"/tmp/shh-none.sock"}}`))
+	sup, err := NewSupervisor(hostBin, pairs("HERDR_SESSION", hostSession), runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := NewHost(hostSession, "/Users/x", sup.WithTiming(10*time.Millisecond, 100*time.Millisecond))
+	defer h.Shutdown()
+	list, err := h.ListRunning(bg)
+	if err != nil || len(list) != 0 {
+		t.Fatalf("%+v %v", list, err)
+	}
+	if runner.spawnedCount() != 0 {
+		t.Fatal("no server was started")
+	}
+}
+
+// With a server running, the passive list is the running agents.
+func TestListRunningListsTheRunningAgents(t *testing.T) {
+	t.Parallel()
+	server := herdrtest.Start(t)
+	h := newTestHost(t, server)
+	mustStart(t, h, "coordinator")
+	list, err := h.ListRunning(bg)
+	if err != nil || len(list) != 1 || list[0].Name != "coordinator" {
+		t.Fatalf("%+v %v", list, err)
+	}
+}
+
 // Replacing a live agent (a coordinator left by an earlier run): the new tab opens before the
 // old pane closes, so a late close of the old pane can't end the new agent, and the old
 // agent's close is not reported as an exit of the name.

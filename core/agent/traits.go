@@ -109,6 +109,11 @@ type PixieCue interface {
 	Cue(cue Cue)
 }
 
+// RosterSink gets the roster beside Pixie whenever it changes (#91).
+type RosterSink interface {
+	Roster(v RosterView)
+}
+
 // UpdatesSink is the updates bubble: it gets the unheard lines whenever they change (an empty
 // list, never nil, for none).
 type UpdatesSink interface {

@@ -127,6 +127,7 @@ type IntegrationCheck struct {
 }
 
 var _ agent.SessionHost = (*IntegrationCheck)(nil)
+var _ agent.PassiveLister = (*IntegrationCheck)(nil)
 
 func NewIntegrationCheck(inner agent.SessionHost, missing func() bool, hint Hint) *IntegrationCheck {
 	return &IntegrationCheck{inner: inner, missing: missing, hint: hint}
@@ -174,6 +175,12 @@ func (c *IntegrationCheck) CloseExact(ctx context.Context, name, pane string) er
 
 func (c *IntegrationCheck) List(ctx context.Context) ([]agent.AgentInfo, error) {
 	return c.inner.List(ctx)
+}
+
+// ListRunning forwards the passive list: the roster must read Herdr without starting it, and
+// a wrapper that dropped this would turn that into an active List (see agent.PassiveLister).
+func (c *IntegrationCheck) ListRunning(ctx context.Context) ([]agent.AgentInfo, error) {
+	return agent.ListRunning(ctx, c.inner)
 }
 
 func (c *IntegrationCheck) Subscribe() <-chan agent.PaneEvent { return c.inner.Subscribe() }

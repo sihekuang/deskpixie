@@ -234,7 +234,9 @@ func Build(c Config) *Agent {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		var names []string
-		if list, err := primary.List(ctx); err == nil {
+		// Passive: a stopped primary has no agents whose names could clash, and a pix hello
+		// must not start it.
+		if list, err := agent.ListRunning(ctx, primary); err == nil {
 			for _, ag := range list {
 				names = append(names, ag.Name)
 			}
@@ -308,6 +310,7 @@ func Build(c Config) *Agent {
 		IDs:         c.IDs,
 		Kept:        KeptFile(paths.Kept()),
 		Updates:     updatesSink{c.Hooks},
+		Roster:      rosterSink{c.Hooks},
 	}
 	// Exactly 127.0.0.1 (the hook server refuses any non-loopback listener). Bound before the
 	// runtime is built, so a busy port is known before a warm start could launch anything.
@@ -455,6 +458,23 @@ func (a *Agent) FocusJob(job, worker string) {
 	a.wg.Go(func() {
 		if err := a.handle.FocusJob(a.ctx, agent.JobID(job), worker); err != nil {
 			log.Printf("agent: focus job: %v", err)
+			a.setStatus(TerminalFailureStatus(err.Error()))
+		}
+	})
+}
+
+// Roster is the roster beside Pixie (agent.RosterView).
+func (a *Agent) Roster() any { return a.handle.Roster() }
+
+// FocusAgent is a click on one of Pixie's agents in the roster (async). A failure becomes the
+// tray status line, as for FocusJob.
+func (a *Agent) FocusAgent(name string) {
+	if a.ctx.Err() != nil {
+		return // quitting
+	}
+	a.wg.Go(func() {
+		if err := a.handle.FocusAgent(a.ctx, name); err != nil {
+			log.Printf("agent: focus agent: %v", err)
 			a.setStatus(TerminalFailureStatus(err.Error()))
 		}
 	})

@@ -641,6 +641,11 @@ func (h *Host) List(ctx context.Context) ([]agent.AgentInfo, error) {
 	return out, nil
 }
 
+var _ agent.PassiveLister = (*Host)(nil)
+
+// ListRunning is List, which already never starts a server (no server lists none).
+func (h *Host) ListRunning(ctx context.Context) ([]agent.AgentInfo, error) { return h.List(ctx) }
+
 func (h *Host) checkVersionLocked(ctx context.Context) error {
 	h.ensureMu.Lock()
 	defer h.ensureMu.Unlock()

@@ -118,3 +118,25 @@ func TestCompositeShutdownStopsBoth(t *testing.T) {
 		t.Fatalf("stopped %d of 2 hosts", n)
 	}
 }
+
+type notifyingUser struct {
+	userHost
+	ch chan struct{}
+}
+
+func (n notifyingUser) Changes() <-chan struct{} { return n.ch }
+
+func TestCompositeForwardsTheSecondarysChanges(t *testing.T) {
+	_, _, user := newComposite(t)
+	if agent.NewCompositeHost(agenttest.NewFakeSessionHost(), user).Changes() != nil {
+		t.Fatal("a secondary without changes gives nil")
+	}
+	n := notifyingUser{user, make(chan struct{}, 1)}
+	c := agent.NewCompositeHost(agenttest.NewFakeSessionHost(), n)
+	n.ch <- struct{}{}
+	select {
+	case <-c.Changes():
+	case <-time.After(time.Second):
+		t.Fatal("not forwarded")
+	}
+}

@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+	"github.com/sihekuang/deskpixie/core/agent"
 	agentfs "github.com/sihekuang/deskpixie/core/agent/fs"
 	"github.com/sihekuang/deskpixie/core/app"
 	"github.com/sihekuang/deskpixie/core/app/agentapp"
@@ -140,14 +141,14 @@ func TestLivePixSessionThroughTheHerdrCoordinator(t *testing.T) {
 	var env []string
 	for _, kv := range os.Environ() {
 		k, _, _ := strings.Cut(kv, "=")
-		if k == "PIX_SESSION" || k == "PIXIE_AGENT_TOKEN" || k == "CLAUDECODE" || strings.HasPrefix(k, "CLAUDE_CODE_") || strings.HasPrefix(k, "HERDR_") {
+		if k == "PIX_SESSION" || k == "__CFBundleIdentifier" || k == "PIXIE_AGENT_TOKEN" || k == "CLAUDECODE" || strings.HasPrefix(k, "CLAUDE_CODE_") || strings.HasPrefix(k, "HERDR_") {
 			continue
 		}
 		env = append(env, kv)
 	}
 	pix := exec.Command(filepath.Join(bin, "pix"), "--description", "marmalade jar", "claude", "--model", "haiku")
 	pix.Dir = work
-	pix.Env = append(env, "PATH="+bin+":"+os.Getenv("PATH"), "DESKPIXIE_PIX_SOCK="+sock)
+	pix.Env = append(env, "PATH="+bin+":"+os.Getenv("PATH"), "DESKPIXIE_PIX_SOCK="+sock, "__CFBundleIdentifier=com.googlecode.iterm2")
 	pix.Stdin, pix.Stdout, pix.Stderr = tty, tty, tty
 	if err := pix.Start(); err != nil {
 		t.Fatal(err)
@@ -207,6 +208,23 @@ func TestLivePixSessionThroughTheHerdrCoordinator(t *testing.T) {
 		}
 	}
 	t.Log("ok   coordinator replied")
+
+	// 1b. The roster beside Pixie: the coordinator listed but not counted; your session counted,
+	// with its terminal's bundle id (#91).
+	var view agent.RosterView
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(200 * time.Millisecond) {
+		view, _ = a.Roster().(agent.RosterView)
+		if view.YourCount == 1 && len(view.Agents) > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("roster: %+v", view)
+		}
+	}
+	if view.AgentCount != 0 || view.Agents[0].Kind != "coordinator" || view.Yours[0].Label != "marmalade jar" || view.Yours[0].App != "com.googlecode.iterm2" {
+		t.Fatalf("roster: %+v", view)
+	}
+	t.Log("ok   roster: coordinator listed, not counted; your session counted")
 
 	// 2. close_session asks first; pix ends only after the confirm word.
 	ask("Use the close_session tool to close my session described as \"marmalade jar\". Then reply with the single word closed.")

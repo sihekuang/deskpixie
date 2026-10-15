@@ -238,3 +238,19 @@ func TestAFailedSessionSkipsTheCheck(t *testing.T) {
 		t.Fatal("checked after a failed session")
 	}
 }
+
+// The roster lists passively through agent.ListRunning; a wrapper that dropped ListRunning
+// would silently turn that into an active List, which starts `herdr server`.
+func TestIntegrationCheckForwardsThePassiveList(t *testing.T) {
+	spy := &activeListSpy{FakeSessionHost: agenttest.NewFakeSessionHost()}
+	host, _ := checkedOver(spy, true)
+	if _, ok := any(host).(agent.PassiveLister); !ok {
+		t.Fatal("IntegrationCheck is not an agent.PassiveLister")
+	}
+	if _, err := agent.ListRunning(context.Background(), host); err != nil {
+		t.Fatal(err)
+	}
+	if spy.active.Load() != 0 || spy.passive.Load() != 1 {
+		t.Fatalf("active List %d, ListRunning %d; want 0 and 1", spy.active.Load(), spy.passive.Load())
+	}
+}

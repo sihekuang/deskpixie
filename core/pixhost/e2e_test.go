@@ -128,7 +128,7 @@ func TestEndToEnd(t *testing.T) {
 		return ok && info.Status == agent.PaneIdle && info.User.Reachable
 	})
 	if info.Name != "repo-claude-2" || info.Origin != agent.OriginUser || info.User.Description != "e2e session" || info.User.Tool != "claude" ||
-		info.User.Where != "WebStorm" {
+		info.User.Where != "WebStorm" || info.User.App != "com.jetbrains.WebStorm" {
 		t.Fatalf("%+v %+v", info, info.User)
 	}
 	addr := info.Name

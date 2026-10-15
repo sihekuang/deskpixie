@@ -86,6 +86,9 @@ func (c *AgentController) dropDecidedQuestions(fx *[]Effect) {
 	}
 }
 
+// WorkerRows are the workers of open jobs and any still running (list_workers' rows).
+func (c *AgentController) WorkerRows() []WorkerRow { return c.jobs.WorkerRows() }
+
 // FocusTarget is the pane a click on a bubble line focuses: the line's worker if its pane is
 // up, else the job's first worker whose pane is up, else the coordinator.
 func (c *AgentController) FocusTarget(job JobID, worker string) string {

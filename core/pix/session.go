@@ -56,9 +56,9 @@ func (w *screenWatch) saw(chunk, marker string) bool {
 }
 
 type sessionOpts struct {
-	tool, description, daemonSock, home, where string
-	stdin, stdout                              *os.File
-	agent                                      Launch
+	tool, description, daemonSock, home, where, app string
+	stdin, stdout                                   *os.File
+	agent                                           Launch
 }
 
 // Session is one wrapped agent: its PTY, delivery, and connection to DeskPixie.
@@ -297,7 +297,7 @@ func (s *Session) start(ctx context.Context) error {
 	s.client = &Client{
 		Sock: s.o.daemonSock,
 		Hello: wire.Msg{Kind: wire.KindRegister, Tool: s.o.tool, Cwd: cwd, GitRoot: gitRoot(cwd),
-			Where: s.o.where, Description: s.o.description},
+			Where: s.o.where, App: s.o.app, Description: s.o.description},
 		OnCommand: s.command,
 		OnRefused: func(r string) {
 			s.mu.Lock()
@@ -366,7 +366,7 @@ func Run(args []string, env func(string) string, home string) int {
 		return 2
 	}
 	s := newSession(sessionOpts{tool: tool, description: desc, home: home, stdin: os.Stdin, stdout: os.Stdout,
-		agent: launch, where: Where(env), daemonSock: DaemonSocket(home, env)})
+		agent: launch, where: Where(env), app: AppID(env), daemonSock: DaemonSocket(home, env)})
 	stop, err := ServeLocal(localSock, s)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "pix:", err)

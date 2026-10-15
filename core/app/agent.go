@@ -29,6 +29,8 @@ type AgentHooks struct {
 	Notify func(title, body string)
 	// Updates is the updates bubble's list (the `updates` event's lines; never nil).
 	Updates func(items any)
+	// Roster is the roster beside Pixie (the `agents` event's roster), on every change (#91).
+	Roster func(view any)
 	// LocalTools are Pixie's local tools (NewLocalTools), the very instances the voice loop
 	// holds: the agent serves them to the coordinator over MCP. Never to workers.
 	LocalTools []tools.Tool
@@ -58,6 +60,10 @@ type Agent interface {
 	SetAway(away bool)
 	// FocusJob is a click on a bubble line: focus that job's (or worker's) pane in a terminal (async).
 	FocusJob(job, worker string)
+	// Roster is the roster beside Pixie as it is now, for the shell's first read.
+	Roster() any
+	// FocusAgent is a click on one of Pixie's agents in the roster: its pane in a terminal (async).
+	FocusAgent(name string)
 	// Shutdown is the app's quit: deny pending permissions, stop the panes, clear the MCP
 	// configs, stop the session host and the hook server. Idempotent; blocks ~3 s at most.
 	Shutdown()

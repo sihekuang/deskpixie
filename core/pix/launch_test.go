@@ -95,3 +95,12 @@ func TestPlanLaunchUnknownTool(t *testing.T) {
 		t.Fatal("want error")
 	}
 }
+
+func TestAppIDIsTheInheritedBundleID(t *testing.T) {
+	if got := AppID(envOf(map[string]string{"__CFBundleIdentifier": "com.jetbrains.WebStorm"})); got != "com.jetbrains.WebStorm" {
+		t.Fatal(got)
+	}
+	if got := AppID(envOf(nil)); got != "" {
+		t.Fatal(got)
+	}
+}

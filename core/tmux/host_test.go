@@ -356,6 +356,18 @@ func TestListShowsLiveAgentsAndAdoptsThoseLeftByAnEarlierRun(t *testing.T) {
 	}
 }
 
+// The roster's passive list: with no server it lists none and starts nothing.
+func TestListRunningWithNoServerListsNoneAndStartsNothing(t *testing.T) {
+	r := newRig(t)
+	got, err := r.h.ListRunning(bg)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if n := len(r.run.CallsOf("new-session")); n != 0 {
+		t.Fatalf("started a server: %d", n)
+	}
+}
+
 func TestReadIsTheLastLinesOfTheScreenWithoutTheBlankRowsBelow(t *testing.T) {
 	r := newRig(t)
 	if _, err := r.h.StartAgent(bg, claudeSpec("coordinator")); err != nil {

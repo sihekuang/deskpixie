@@ -18,19 +18,21 @@ import (
 // touchpoints), against a fake app.Agent.
 
 type fakeAgent struct {
-	mu       sync.Mutex
-	menu     []string
-	opened   int
-	mouths   []int
-	attached AgentVoice
-	shut     int
-	tray     AgentTray
-	hooks    AgentHooks
-	cfg      settings.Config
-	seen     [][]uint64
-	away     []bool
-	focused  [][2]string
-	updates  any
+	mu            sync.Mutex
+	menu          []string
+	opened        int
+	mouths        []int
+	attached      AgentVoice
+	shut          int
+	tray          AgentTray
+	hooks         AgentHooks
+	cfg           settings.Config
+	seen          [][]uint64
+	away          []bool
+	focused       [][2]string
+	updates       any
+	roster        any
+	focusedAgents []string
 }
 
 func (f *fakeAgent) Tools() []voice.Tool { return []voice.Tool{namedTool("delegate")} }
@@ -63,7 +65,13 @@ func (f *fakeAgent) UpdatesSeen(ids []uint64) {
 	f.seen = append(f.seen, ids)
 	f.mu.Unlock()
 }
-func (f *fakeAgent) Updates() any      { f.mu.Lock(); defer f.mu.Unlock(); return f.updates }
+func (f *fakeAgent) Updates() any { f.mu.Lock(); defer f.mu.Unlock(); return f.updates }
+func (f *fakeAgent) Roster() any  { f.mu.Lock(); defer f.mu.Unlock(); return f.roster }
+func (f *fakeAgent) FocusAgent(name string) {
+	f.mu.Lock()
+	f.focusedAgents = append(f.focusedAgents, name)
+	f.mu.Unlock()
+}
 func (f *fakeAgent) SetAway(away bool) { f.mu.Lock(); f.away = append(f.away, away); f.mu.Unlock() }
 func (f *fakeAgent) FocusJob(job, worker string) {
 	f.mu.Lock()
@@ -346,5 +354,41 @@ func TestACoordinatorTimerRingsThroughTheAppEvenWithoutAVoiceLoop(t *testing.T) 
 	ev := h.waitFor("notify", func(e event) bool { return e["title"] == "Timer done" }, 2*time.Second)
 	if ev["body"] != "pasta (2 minutes)" || ev["sound"] != "glass" {
 		t.Fatal(ev)
+	}
+}
+
+func TestTheRosterHookEmitsAnAgentsEvent(t *testing.T) {
+	f := &fakeAgent{}
+	h := newHarness(t, withAgent(f))
+	f.hooks.Roster(map[string]any{"agent_count": 1})
+	e := h.waitFor("agents", nil, time.Second)
+	if b, _ := json.Marshal(e); string(b) != `{"kind":"agents","roster":{"agent_count":1}}` {
+		t.Fatal(string(b))
+	}
+}
+
+func TestAgentRosterAndFocusAgentReachTheAgent(t *testing.T) {
+	f := &fakeAgent{roster: map[string]any{"your_count": 2}}
+	h := newHarness(t, withAgent(f))
+	if out := h.call("agent.roster", nil); string(out) != `{"roster":{"your_count":2}}` {
+		t.Fatal(string(out))
+	}
+	h.call("agent.focusAgent", map[string]any{"name": "deskpixie-claude"})
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !slices.Equal(f.focusedAgents, []string{"deskpixie-claude"}) {
+		t.Fatal(f.focusedAgents)
+	}
+}
+
+func TestAgentRosterIsEmptyWithoutAnAgent(t *testing.T) {
+	h := newHarness(t, func(d *Deps, _ *harness) {
+		d.Agent = func(settings.Config, string, AgentHooks) Agent { return nil }
+	})
+	if out := h.call("agent.roster", nil); string(out) != `{"roster":{"agents":[],"yours":[],"agent_count":0,"your_count":0}}` {
+		t.Fatal(string(out))
+	}
+	if out := h.call("agent.focusAgent", map[string]any{"name": "x"}); string(out) != "{}" {
+		t.Fatal(string(out))
 	}
 }

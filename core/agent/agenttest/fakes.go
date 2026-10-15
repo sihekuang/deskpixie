@@ -627,6 +627,24 @@ func (r *RecordingUpdates) Lists() [][]agent.UpdateItem {
 	return slices.Clone(r.lists)
 }
 
+// RecordingRoster records every roster sent beside Pixie.
+type RecordingRoster struct {
+	mu    sync.Mutex
+	views []agent.RosterView
+}
+
+func (r *RecordingRoster) Roster(v agent.RosterView) {
+	r.mu.Lock()
+	r.views = append(r.views, v)
+	r.mu.Unlock()
+}
+
+func (r *RecordingRoster) Views() []agent.RosterView {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.views)
+}
+
 // ---------- store, clock, ids, trust ----------
 
 // MemStore keeps line files in memory. The zero value is ready to use; copies share nothing,
