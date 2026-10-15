@@ -70,9 +70,11 @@ targets:
           cd "$SRCROOT/../core"
           unset GOFLAGS
           make build-dylib
+          VERSION="$MARKETING_VERSION" make build-pix
         outputFiles:
           - "$(SRCROOT)/../core/build/libdeskpixie.dylib"
           - "$(SRCROOT)/../core/build/libdeskpixie.h"
+          - "$(SRCROOT)/../core/build/pix"
     postCompileScripts:
       - name: Copy libdeskpixie.dylib into Frameworks
         script: |
@@ -91,6 +93,21 @@ targets:
           - "$(SRCROOT)/../core/build/libdeskpixie.dylib"
         outputFiles:
           - "$(BUILT_PRODUCTS_DIR)/$(FRAMEWORKS_FOLDER_PATH)/libdeskpixie.dylib"
+      - name: Copy pix into Helpers
+        # pix, the terminal wrapper for sessions you start yourself (#89). Settings links
+        # ~/.local/bin/pix here, so it updates with the app.
+        script: |
+          set -e
+          DST="$BUILT_PRODUCTS_DIR/$CONTENTS_FOLDER_PATH/Helpers"
+          mkdir -p "$DST"
+          cp -pf "$SRCROOT/../core/build/pix" "$DST/pix"
+          ID="${EXPANDED_CODE_SIGN_IDENTITY:--}"
+          if [ "$ID" = "-" ]; then FLAGS=""; else FLAGS="--timestamp --options runtime"; fi
+          codesign --force --sign "$ID" $FLAGS --identifier com.sihekuang.deskpixie.pix "$DST/pix"
+        inputFiles:
+          - "$(SRCROOT)/../core/build/pix"
+        outputFiles:
+          - "$(BUILT_PRODUCTS_DIR)/$(CONTENTS_FOLDER_PATH)/Helpers/pix"
       - name: Bundle libdf + DeepFilterNet3 model when built
         # core/Makefile build-dylib stages these when libdf is present (it is committed under
         # core/audio/denoise/libdf); otherwise the core is built without the deepfilter tag and the noise

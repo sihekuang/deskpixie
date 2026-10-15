@@ -47,7 +47,7 @@ release: project
 verify-release:
 	@set -e; APP="$(RELEASE_APP)"; test -d "$$APP"; \
 	codesign --verify --deep --strict --verbose=2 "$$APP"; \
-	for f in Frameworks/libdeskpixie.dylib Frameworks/libdf.dylib \
+	for f in Frameworks/libdeskpixie.dylib Frameworks/libdf.dylib Helpers/pix \
 		Resources/DeepFilterNet3.tar.gz Resources/design-system Resources/pixies \
 		Resources/Assets.car Resources/AppIcon.icns; do \
 		test -e "$$APP/Contents/$$f" || { echo "error: missing Contents/$$f" >&2; exit 1; }; \
@@ -62,6 +62,8 @@ verify-release:
 				|| { echo "error: $$(basename "$$bin") -> $$ref not in Frameworks" >&2; exit 1; }; \
 		done; \
 	done; \
+	"$$APP/Contents/Helpers/pix" version >/dev/null \
+		|| { echo "error: Contents/Helpers/pix does not run" >&2; exit 1; }; \
 	codesign -d --entitlements - "$$APP" 2>/dev/null | grep -q 'device.audio-input' \
 		|| { echo "error: audio-input entitlement missing" >&2; exit 1; }; \
 	echo "verify-release: OK ($$APP, $$(defaults read "$$PWD/$$APP/Contents/Info" CFBundleShortVersionString))"

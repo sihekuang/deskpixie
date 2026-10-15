@@ -58,7 +58,7 @@ codesign -dvv "$APP" 2>&1 | head -20
 ENT=$(codesign -d --entitlements - "$APP" 2>&1)
 grep -q 'device.audio-input' <<<"$ENT" || err "audio-input entitlement missing from signed app"
 # Every Mach-O must carry Developer ID + hardened runtime + timestamp for notarization.
-for f in "$APP" "$APP"/Contents/Frameworks/*.dylib; do
+for f in "$APP" "$APP"/Contents/Frameworks/*.dylib "$APP"/Contents/Helpers/pix; do
   INFO=$(codesign -dvv "$f" 2>&1)
   grep -q '^Authority=Developer ID Application' <<<"$INFO" || err "$f is not signed with Developer ID"
   grep -q 'flags=.*runtime' <<<"$INFO" || err "$f lacks the hardened runtime"

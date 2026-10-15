@@ -1,4 +1,4 @@
-.PHONY: build-dylib test test-denoise libdf clean
+.PHONY: build-dylib build-pix test test-denoise libdf clean
 # Match the app's deployment target, or ld warns "dylib built for newer version".
 MACOS_MIN := 14.0
 
@@ -25,6 +25,11 @@ build-dylib:
 		rm -f build/libdf.dylib build/DeepFilterNet3.tar.gz; \
 		echo "noise filter: libdf not found ($(LIBDF)); it will pass audio through. See make libdf."; \
 	fi
+
+# pix: the terminal wrapper bundled at Contents/Helpers/pix (#89). Plain Go, host arch like the dylib.
+build-pix:
+	MACOSX_DEPLOYMENT_TARGET=$(MACOS_MIN) CGO_ENABLED=0 go build -trimpath \
+		-ldflags "-X main.version=$${VERSION:-dev}" -o build/pix ./cmd/pix
 
 # Re-copy libdf.dylib and the DeepFilterNet3 model into audio/denoise/libdf from Howl (both are
 # committed; this refreshes or upgrades them, see audio/denoise/libdf/VERSION.md).
