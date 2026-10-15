@@ -73,6 +73,8 @@ type Settings struct {
 	// CoordinatorKind (`agent.coordinatorKind`, #87): the coordinator's agent, named in the
 	// tray when it can't start.
 	CoordinatorKind AgentKind
+	// SpokenPaths: folders a spoken approval names short (#97).
+	SpokenPaths SpokenPaths
 }
 
 // DefaultSettings: 4 notifications a minute, 2-minute permission timeout, narration on.
@@ -1159,7 +1161,7 @@ func (c *AgentController) onPermission(id RequestID, agent, toolName string, too
 	} else if refs := c.inbox.InFlightRefs(); len(refs) == 1 && c.jobs.IsOpen(refs[0]) {
 		job = refs[0]
 	}
-	if !VoiceConfirmable(toolName, toolInput) {
+	if !VoiceConfirmableWith(toolName, toolInput, c.settings.SpokenPaths) {
 		*fx = append(*fx, decideEffect(id, Deny(unreadableDenial)))
 		c.deliver(NewLine(LineInfo, unreadableNotice), now, fx)
 		return
@@ -1174,7 +1176,7 @@ func (c *AgentController) onPermission(id RequestID, agent, toolName string, too
 			c.saveJob(job, fx)
 		}
 	}
-	text := ConfirmQuestionLine(Describe(toolName, toolInput, label), token)
+	text := ConfirmQuestionLine(DescribeWith(toolName, toolInput, label, c.settings.SpokenPaths), token)
 	q := Line{Text: text, Kind: LineQuestion, Token: &token, Job: job}
 	if agent != Coordinator {
 		q.Worker = agent

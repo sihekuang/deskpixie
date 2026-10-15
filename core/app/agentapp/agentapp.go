@@ -320,6 +320,10 @@ func Build(c Config) *Agent {
 		setProblem("Coordinator: hook port busy")
 		ln = nil
 	}
+	spoken := agent.SpokenPaths{Home: c.Home}
+	if workersOn {
+		spoken.ProjectsRoot = ws.Root
+	}
 	cfg := agent.RuntimeConfig{
 		Settings: agent.Settings{
 			NotifyPerMinute:     int(max(s.NotifyPerMinute, 1)),
@@ -331,6 +335,7 @@ func Build(c Config) *Agent {
 			SpeakWorkerReports:  s.Workers.SpeakResults,
 			OpenConversation:    s.OpenConversationForUpdates,
 			CoordinatorKind:     kind,
+			SpokenPaths:         spoken,
 		},
 		Warm: s.Warm,
 		// Stepped before the warm start: a disabled app never starts the coordinator.

@@ -281,9 +281,52 @@ func filePathOf(input any) string {
 // command that is too long to read out (speakable form over MaxSpokenCommand) or that spans
 // lines. Callers deny the rest with "Too long to approve by voice; run it yourself or shorten it."
 func VoiceConfirmable(toolName string, toolInput any) bool {
+	return VoiceConfirmableWith(toolName, toolInput, SpokenPaths{})
+}
+
+// SpokenPaths are the folders a spoken command names short (#97): the projects root as
+// "projects/" and the home folder as "home/". Empty fields shorten nothing.
+type SpokenPaths struct{ ProjectsRoot, Home string }
+
+// ShortenPaths replaces "<root>/" with "projects/" and "<home>/" with "home/" where the path
+// starts a word (start of the command or after a space, quote or '='), root first. Only what is
+// read and measured changes; the command that runs is untouched.
+func ShortenPaths(cmd string, p SpokenPaths) string {
+	for _, a := range [][2]string{{p.ProjectsRoot, "projects/"}, {p.Home, "home/"}} {
+		root := strings.TrimRight(a[0], "/")
+		if root == "" {
+			continue
+		}
+		prefix := root + "/"
+		var b strings.Builder
+		for i := 0; i < len(cmd); {
+			starts := i == 0 || strings.ContainsRune(" \t'\"=", rune(cmd[i-1]))
+			if starts && strings.HasPrefix(cmd[i:], prefix) {
+				b.WriteString(a[1])
+				i += len(prefix)
+				continue
+			}
+			b.WriteByte(cmd[i])
+			i++
+		}
+		cmd = b.String()
+	}
+	return cmd
+}
+
+// DescribeWith is Describe with paths read short.
+func DescribeWith(toolName string, toolInput any, agent string, p SpokenPaths) string {
+	if toolName == "Bash" {
+		toolInput = map[string]any{"command": ShortenPaths(stringField(toolInput, "command"), p)}
+	}
+	return Describe(toolName, toolInput, agent)
+}
+
+// VoiceConfirmableWith is VoiceConfirmable with paths read short.
+func VoiceConfirmableWith(toolName string, toolInput any, p SpokenPaths) bool {
 	switch toolName {
 	case "Bash":
-		raw := stringField(toolInput, "command")
+		raw := ShortenPaths(stringField(toolInput, "command"), p)
 		return isSpeakableText(raw) && utf8.RuneCountInString(SpeakableCommand(raw)) <= MaxSpokenCommand
 	case "Edit", "Write", "Read", "NotebookEdit":
 		name, ok := pathFileName(filePathOf(toolInput))
