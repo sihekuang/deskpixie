@@ -262,6 +262,25 @@ func NewRuntime(m Model, c audio.Cleaner, cfg RuntimeConfig, emit func(UIEvent))
 			cfg.Conversation.ClaimTools = append(cfg.Conversation.ClaimTools, name)
 		}
 	}
+	if cfg.Session.ClientDelegation {
+		// The provider has no tools of its own (#70): only a delegate claim can be made good,
+		// and its client delegations go through the clientDelegation router. Registered after
+		// Specs, so it is never declared to a model; the caller's registry is not changed.
+		cfg.Conversation.ClientDelegation = true
+		if _, ok := tools.Get(DelegateTool); ok {
+			cfg.Conversation.ClaimTools = []string{DelegateTool}
+		} else {
+			cfg.Conversation.ClaimTools = nil
+		}
+		withRouter := NewToolRegistry()
+		for _, spec := range cfg.Session.Tools {
+			if t, ok := tools.Get(spec.Name); ok {
+				withRouter.Register(t)
+			}
+		}
+		withRouter.Register(clientDelegation{reg: tools})
+		tools = withRouter
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	r := &Runtime{
 		model:     m,

@@ -68,6 +68,10 @@ type VoiceSettings struct {
 	NoisyRoom       bool    `json:"noisyRoom"`
 	// LiveBackendModel is the Responses model that runs Pixie's tools on OpenAI GPT-Live.
 	LiveBackendModel string  `json:"liveBackendModel"`
+	// LiveDelegation is how OpenAI GPT-Live gets work done: LiveDelegationBackend (the
+	// Responses backend model runs Pixie's tools) or LiveDelegationAgent (client delegation
+	// straight to the coordinator; experimental, #70).
+	LiveDelegation string `json:"liveDelegation"`
 	InputDevice      *string `json:"inputDevice"`
 	OutputDevice     *string `json:"outputDevice"`
 	HomeCity         *string `json:"homeCity"`
@@ -157,6 +161,7 @@ func Default() Config {
 		Voice: VoiceSettings{
 			Provider: "openai-realtime", Audio: "macos-vpio", Model: "gpt-realtime", Voice: "marin",
 			Chimes: true, IdleTimeoutSecs: 7, NoiseModel: "hush", LiveBackendModel: "gpt-6-luna",
+			LiveDelegation:    LiveDelegationBackend,
 			HandOffWhenUnsure: true, CheckClaims: true,
 		},
 		Canvas:        CanvasSettings{AutoOpen: true, Keep: 50},

@@ -268,3 +268,18 @@ func TestEveryLocalToolIsOnTheKeepListAndOffTheDelegateList(t *testing.T) {
 		}
 	}
 }
+
+// voice.liveDelegation (#70): the default keeps GPT-Live's backend; "agent" is client delegation.
+func TestLiveDelegationSetting(t *testing.T) {
+	s := settings.Default().Voice
+	if s.LiveDelegation != settings.LiveDelegationBackend || SessionConfig(s, "").ClientDelegation {
+		t.Fatalf("default %q", s.LiveDelegation)
+	}
+	s.LiveDelegation = settings.LiveDelegationAgent
+	if !SessionConfig(s, "").ClientDelegation {
+		t.Fatal("agent mode not passed")
+	}
+	if f := settings.FieldByPath("voice.liveDelegation"); f == nil || f.Section != settings.SectionVoice {
+		t.Fatalf("field %+v", f)
+	}
+}

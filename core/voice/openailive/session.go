@@ -83,6 +83,7 @@ func (m *model) Connect(ctx context.Context, cfg voice.SessionConfig, apiKey str
 		return nil, e
 	}
 	cd := newCodec()
+	cd.client = cfg.ClientDelegation
 	body, _ := json.Marshal(sessionStart(cfg, cd.nextID()))
 	if err := conn.Write(setupCtx, websocket.MessageText, body); err != nil {
 		return fail(fmt.Errorf("gpt-live: connect: %w", err))
@@ -106,6 +107,9 @@ func (m *model) Connect(ctx context.Context, cfg voice.SessionConfig, apiKey str
 		notify: make(chan struct{}, 1),
 	}
 	s.lastRx.Store(time.Now().UnixNano())
+	if err := s.write(cd.timeContext(m.now())); err != nil {
+		return fail(err)
+	}
 	s.events <- voice.Event{Kind: voice.EvReady}
 	go s.emitter()
 	go s.readLoop()
@@ -237,7 +241,9 @@ func (s *session) clock() {
 		}
 		s.mu.Lock()
 		if !s.closing.Load() {
-			s.queue(s.cd.poll(s.now()))
+			now := s.now()
+			s.queue(s.cd.poll(now))
+			_ = s.write(s.cd.timeContext(now)) // a failed write ends the session
 		}
 		s.mu.Unlock()
 	}

@@ -19,6 +19,16 @@ const livePolicies = `Speaking (GPT-Live):
 - Delegation policy: every tool named above (get_time, get_weather, calculate, timer, media, end_conversation, delegate, jobs, answer_job and any others) runs through your backend. Whenever these instructions say to call a tool, delegate to the backend before you answer, and never guess the answer while you wait. When the backend's result arrives, say it in one or two short sentences.
 - Read any confirm phrase ("Say confirm <word>") exactly as written, word for word.`
 
+// clientPolicies replace livePolicies with client delegation (voice.liveDelegation "agent",
+// #70): GPT-Live has no backend and no tools; the app routes each delegation to Bit's agent.
+const clientPolicies = `Speaking (GPT-Live):
+- Backchannel policy: keep backchannels ("mm-hm", "right") rare and short, and never talk over the user while they are giving you a task.
+- Interruption policy: when the user starts talking over you, stop and listen, unless it is only a short acknowledgement like "yeah" or "ok".%s
+- Delegation policy: in this session you have no tools of your own. Wherever the instructions above say to call a tool (delegate, get_weather, calculate, timer, media, jobs, answer_job, recall or any other), delegate instead: the app gives the user's request, with the recent conversation, to Bit's agent, which can do all of that and more (live information, the weather, timers, music, the user's projects, files and jobs). Delegate before you answer anything that needs a tool or that you aren't certain of; while you wait say only a very short acknowledgement, and never guess the answer. When the user answers an "Agent question:", delegate their answer too, unless it is a confirm word.
+- Time policy: the current local date and time arrive as quiet context ("Local time now: …"). Answer questions about the time or date from the latest one, without delegating. Simple arithmetic you may do yourself.
+- Ending policy: you can't end the conversation yourself. When the user says goodbye, say a short goodbye; the app ends the conversation.
+- Read any confirm phrase ("Say confirm <word>") exactly as written, word for word.`
+
 const noisyRoomPolicy = ` The room is noisy: ignore quieter voices in the background, like a TV or people nearby, and only stop for the user speaking clearly to you.`
 
 // backendPreamble starts the backend model's instructions; Pixie's full instructions follow, so
@@ -46,7 +56,24 @@ func sessionStart(cfg voice.SessionConfig, eventID string) obj {
 	if cfg.NoisyRoom {
 		noisy = noisyRoomPolicy
 	}
-	live := strings.TrimSpace(cfg.Instructions + "\n\n" + strings.Replace(livePolicies, "%s", noisy, 1))
+	policies := livePolicies
+	if cfg.ClientDelegation {
+		policies = clientPolicies
+	}
+	live := strings.TrimSpace(cfg.Instructions + "\n\n" + strings.Replace(policies, "%s", noisy, 1))
+	session := obj{
+		"model":        model,
+		"instructions": live,
+		"audio": obj{
+			"format": obj{"type": "audio/pcm", "rate": audio.SampleRate},
+			"output": obj{"voice": v},
+		},
+		"store": false,
+	}
+	if cfg.ClientDelegation {
+		session["delegation"] = obj{"type": "client"}
+		return obj{"type": "session.start", "event_id": eventID, "session": session}
+	}
 	backendModel := cfg.BackendModel
 	if backendModel == "" {
 		backendModel = DefaultBackendModel
@@ -72,20 +99,8 @@ func sessionStart(cfg voice.SessionConfig, eventID string) obj {
 		responses["tool_choice"] = "auto"
 		responses["parallel_tool_calls"] = true
 	}
-	return obj{
-		"type":     "session.start",
-		"event_id": eventID,
-		"session": obj{
-			"model":        model,
-			"instructions": live,
-			"audio": obj{
-				"format": obj{"type": "audio/pcm", "rate": audio.SampleRate},
-				"output": obj{"voice": v},
-			},
-			"delegation": obj{"type": "responses", "responses": responses},
-			"store":      false,
-		},
-	}
+	session["delegation"] = obj{"type": "responses", "responses": responses}
+	return obj{"type": "session.start", "event_id": eventID, "session": session}
 }
 
 func pcmToBase64(pcm []int16) string { return base64.StdEncoding.EncodeToString(audio.EncodeLE(pcm)) }

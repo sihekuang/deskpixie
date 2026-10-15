@@ -7,6 +7,7 @@ import (
 	"log"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/sihekuang/deskpixie/core/audio"
 	"github.com/sihekuang/deskpixie/core/voice"
@@ -60,9 +61,20 @@ type codec struct {
 	backendNews  time.Time
 
 	usageSeconds float64
+
+	// Client delegation (#70): delegations handed to the app, by id, until it answers them;
+	// the goodbye calls the codec made up (their results go nowhere); the minute of the last
+	// time context sent.
+	client      bool
+	clientCalls map[string]bool
+	byeCalls    map[string]bool
+	byeSeq      int
+	timeSent    string
 }
 
-func newCodec() *codec { return &codec{aEndMs: -1, pendingCalls: map[string]bool{}} }
+func newCodec() *codec {
+	return &codec{aEndMs: -1, pendingCalls: map[string]bool{}, clientCalls: map[string]bool{}, byeCalls: map[string]bool{}}
+}
 
 func (c *codec) nextID() string {
 	c.seq++
@@ -92,11 +104,45 @@ func (c *codec) deltaToPCM(b64 string) ([]int16, bool) {
 // closeUser ends the user's turn: their words, then SpeechStopped.
 func (c *codec) closeUser(out []voice.Event) []voice.Event {
 	c.uOpen, c.uDeferred = false, false
-	if t := strings.TrimSpace(c.uText.String()); t != "" {
+	t := strings.TrimSpace(c.uText.String())
+	if t != "" {
 		out = append(out, voice.Event{Kind: voice.EvTranscript, Role: "user", Text: t})
 	}
 	c.uText.Reset()
-	return append(out, voice.Event{Kind: voice.EvSpeechStopped})
+	out = append(out, voice.Event{Kind: voice.EvSpeechStopped})
+	if c.client && voice.IsGoodbye(t) {
+		// No typed end_conversation with client delegation: a goodbye ends the conversation
+		// once Bit's reply to it has played (#70).
+		c.byeSeq++
+		id := fmt.Sprintf("bye_%d", c.byeSeq)
+		c.byeCalls[id] = true
+		out = append(out, voice.Event{Kind: voice.EvToolCall, CallID: id, ToolName: voice.EndConversationTool, Args: json.RawMessage(`{}`)})
+	}
+	return out
+}
+
+// onClientDelegation: GPT-Live handed this turn to the app (no task text). Its decision means
+// the user's turn is over, so their words go out first; then the call, which the conversation
+// fills in from the transcript.
+func (c *codec) onClientDelegation(id string) []voice.Event {
+	var out []voice.Event
+	if c.uOpen {
+		if c.uDeferred {
+			// Said over Bit: the words count, but no turn starts.
+			c.uOpen, c.uDeferred = false, false
+			if t := strings.TrimSpace(c.uText.String()); t != "" {
+				out = append(out, voice.Event{Kind: voice.EvTranscript, Role: "user", Text: t})
+			}
+			c.uText.Reset()
+		} else {
+			out = c.closeUser(out)
+		}
+	}
+	if id == "" {
+		return out
+	}
+	c.clientCalls[id] = true
+	return append(out, voice.Event{Kind: voice.EvToolCall, CallID: id, ToolName: voice.ClientDelegationTool, Args: json.RawMessage(`{}`)})
 }
 
 // closeAssistant ends Pixie's reply: its words, then ResponseDone; a user turn that was waiting
@@ -150,9 +196,12 @@ func (c *codec) decode(data []byte, now time.Time) []voice.Event {
 		}
 		return []voice.Event{{Kind: voice.EvSpeechStarted}}
 	case "session.delegation.created":
-		if m.Delegation.Target == "responses" {
+		switch {
+		case m.Delegation.Target == "responses":
 			c.awaiting++
 			c.backendNews = now
+		case m.Delegation.Target == "client" && c.client:
+			return c.onClientDelegation(m.Delegation.ID)
 		}
 	case "response.event":
 		return c.onBackend(m, now)
@@ -285,6 +334,14 @@ func (c *codec) encode(cmd voice.Command, now time.Time) ([]obj, []voice.Event) 
 		c.muted, c.mutedLoud = true, now
 		return nil, c.closeAssistant(nil)
 	case voice.CmdToolResult:
+		if c.byeCalls[cmd.CallID] {
+			delete(c.byeCalls, cmd.CallID)
+			return nil, nil // made up here: nobody waits for it
+		}
+		if c.clientCalls[cmd.CallID] {
+			delete(c.clientCalls, cmd.CallID)
+			return c.clientReply(cmd.CallID, cmd.Output), nil
+		}
 		delete(c.pendingCalls, cmd.CallID)
 		c.backendNews = now
 		out := []obj{{"type": "response.item.create", "event_id": c.nextID(),
@@ -320,7 +377,8 @@ func (c *codec) inject(text string, respond bool) []obj {
 	return out
 }
 
-// splitContent cuts text to at most n bytes, at the last sentence end (or space) before n.
+// splitContent cuts text to at most n bytes, at the last sentence end (or space) before n,
+// never inside a UTF-8 character.
 func splitContent(text string, n int) (head, rest string) {
 	text = strings.TrimSpace(text)
 	if len(text) <= n {
@@ -332,6 +390,59 @@ func splitContent(text string, n int) (head, rest string) {
 	}
 	if cut <= 0 {
 		cut = n - 1
+		for cut > 0 && !utf8.RuneStart(text[cut+1]) {
+			cut--
+		}
 	}
 	return strings.TrimSpace(text[:cut+1]), strings.TrimSpace(text[cut+1:])
+}
+
+// clientReply answers a client delegation with what became of it (voice.ClientDelegationResult):
+// commentary when Bit should say something now, thinking when it is only context.
+func (c *codec) clientReply(id string, output []byte) []obj {
+	var r voice.ClientDelegationResult
+	_ = json.Unmarshal(output, &r)
+	speak, text := true, ""
+	switch {
+	case r.Routed == "delegate" && r.Check:
+		speak = false
+		text = "The app gave this question to the agent (" + r.JobID + "). Its answer arrives later as an \"Agent reply:\" line; until then don't answer it yourself. If you haven't yet, say only that you're checking."
+	case r.Routed == "delegate":
+		text = "The app handed this to the agent as " + r.JobID + ". Tell the user in a few words that you've passed it on and will let them know; don't answer it yourself."
+	case r.Routed == "answer_job":
+		text = "The app passed the user's answer to the agent (" + r.JobID + "). Say in a few words that you've passed it on."
+	case r.Routed == "none":
+		speak = false
+		text = "Nothing was sent to the agent: " + r.Note + ". Say nothing about it."
+	case strings.HasPrefix(r.Error, "Delegation is off ("):
+		text = "This can't be handed off: " + strings.TrimSuffix(r.Error, ".") + ". Tell the user in one short sentence that you can't hand it off and why."
+	case r.Error != "":
+		text = "Handing this off failed: " + r.Error + ". Tell the user in one short sentence."
+	default:
+		speak = false
+		text = "The app has this in hand; don't hand it off again: " + string(output)
+	}
+	kind := "session.thinking.append"
+	if speak {
+		kind = "session.commentary.append"
+	}
+	head, _ := splitContent(text, maxContent)
+	return []obj{{"type": kind, "event_id": c.nextID(), "delegation_id": id, "content": head}}
+}
+
+// timeContext is the current local time as quiet context, once a minute (client delegation
+// only: without get_time, GPT-Live answers the time from it; #70).
+func (c *codec) timeContext(now time.Time) []obj {
+	if !c.client {
+		return nil
+	}
+	key := now.Format("2006-01-02 15:04")
+	if key == c.timeSent {
+		return nil
+	}
+	c.timeSent = key
+	zone, _ := now.Zone()
+	text := fmt.Sprintf("Local time now: %s (%s, UTC%s).", now.Format("Monday, 2 January 2006, 3:04 PM"),
+		zone, now.Format("-07:00"))
+	return []obj{{"type": "session.thinking.append", "event_id": c.nextID(), "delegation_id": nil, "content": text}}
 }
