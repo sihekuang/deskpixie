@@ -754,6 +754,16 @@ func (h *AgentHandle) mcp(agent string, call McpCall) McpReply {
 	if call.Kind == CallStartWorker {
 		return h.startWorker(agent, call.Worker)
 	}
+	if isSessionCall(call.Kind) {
+		// Sessions you started with pix (#89): the host answers, not the controller; they
+		// are not workers and have no job.
+		if agent != Coordinator {
+			return McpReply{Err: errors.New("This tool is not available to you.")}
+		}
+		ctx, cancel := context.WithTimeout(h.ctx, OpLimit)
+		defer cancel()
+		return sessionTool(ctx, h.deps.Host.Session(), call)
+	}
 	r := h.stepLocked(McpInput(agent, call))
 	if r == nil || r.Kind != EfToolResult {
 		return McpReply{Err: errors.New("The call was not processed.")}

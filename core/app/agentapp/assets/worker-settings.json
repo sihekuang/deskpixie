@@ -10,7 +10,8 @@
       "Read(./.env*)",
       "Edit(./.env*)",
       "Read(**/.env*)",
-      "Edit(**/.env*)"
+      "Edit(**/.env*)",
+      "mcp__pixie__close_session"
     ],
     "deny": ["AskUserQuestion"],
     "allow": ["mcp__pixie", "mcp__mascot"]

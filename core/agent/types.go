@@ -582,6 +582,11 @@ const (
 	CallReportResult
 	CallAskCoordinator
 	CallReportBlocked
+	CallListSessions
+	CallMessageSession
+	CallInterruptSession
+	CallCloseSession
+	CallDescribeSession
 )
 
 // McpCall is one pixie MCP tool call, arguments checked and cleaned. Only the fields of its

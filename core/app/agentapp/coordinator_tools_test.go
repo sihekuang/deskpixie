@@ -122,7 +122,7 @@ func TestTheCoordinatorAlwaysGetsThePixieMcpServer(t *testing.T) {
 	}
 }
 
-func TestWithWorkersOffTheCoordinatorListsOnlyTheLocalToolsWordedForIt(t *testing.T) {
+func TestWithWorkersOffTheCoordinatorListsTheLocalAndSessionToolsWordedForIt(t *testing.T) {
 	f, _, _ := localFixture(t, nil)
 	token := f.startCoordinator(t)
 	got := f.listedTools(t, token)
@@ -131,7 +131,7 @@ func TestWithWorkersOffTheCoordinatorListsOnlyTheLocalToolsWordedForIt(t *testin
 		names = append(names, k)
 	}
 	slices.Sort(names)
-	want := slices.Clone(localToolNames)
+	want := append(slices.Clone(localToolNames), agent.SessionTools[:]...) // sessions don't need workers (#89)
 	slices.Sort(want)
 	if !slices.Equal(names, want) {
 		t.Fatal(names)

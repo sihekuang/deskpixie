@@ -15,10 +15,10 @@ import (
 // #87: Codex as the coordinator, on the app side.
 
 func TestClaudesCoordinatorMdIsUnchanged(t *testing.T) {
-	// The renderings before #87, byte for byte.
+	// The renderings since #89 (sessions you start with pix), byte for byte.
 	for _, c := range []struct{ root, sum string }{
-		{"", "d212fe6cf1494a606fb9dbc88cf5f8362363b833fd97ea3240fc9f76e95b9537"},
-		{"/Users/x/code", "9deca40b279e964a83fc9cc72f2b52ac6db4b00620a949da6a9c1d7fe13fe7fc"},
+		{"", "9b5c781c8df8b8812177f0d0897aeb6417f2cc30b17a286aa3c0207ff8bc9bc3"},
+		{"/Users/x/code", "4e3312025fe9ddb9da3003af49279e8b9958b14a7f95a2442e3eaf18ee7a5b29"},
 	} {
 		if got := fmt.Sprintf("%x", sha256.Sum256([]byte(RenderClaudeMd("/data/canvas", c.root)))); got != c.sum {
 			t.Fatal(c.root, got)

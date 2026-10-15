@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sihekuang/deskpixie/core/agent"
 	"github.com/sihekuang/deskpixie/core/tools"
 	"github.com/sihekuang/deskpixie/core/tools/toolstest"
 )
@@ -111,7 +112,7 @@ var localNames = []string{"calculate", "get_time", "get_weather", "media", "time
 func TestTheCoordinatorAlsoListsPixiesLocalToolsWithTheirOwnSchemas(t *testing.T) {
 	r := lrig(false)
 	got := listed(t, r, r.coordinator)
-	want := sortStrings(append(append([]string{}, localNames...), "list_workers", "message_worker", "start_worker", "stop_worker"))
+	want := sortStrings(append(append(append([]string{}, localNames...), "list_workers", "message_worker", "start_worker", "stop_worker"), agent.SessionTools[:]...))
 	if !reflect.DeepEqual(names(got), want) {
 		t.Fatal(names(got))
 	}
@@ -220,9 +221,9 @@ func TestALocalToolsInBandErrorIsAToolError(t *testing.T) {
 	}
 }
 
-func TestWithWorkersOffTheCoordinatorHasOnlyTheLocalTools(t *testing.T) {
+func TestWithWorkersOffTheCoordinatorHasTheLocalAndSessionTools(t *testing.T) {
 	r := lrig(true)
-	if got := names(listed(t, r, r.coordinator)); !reflect.DeepEqual(got, localNames) {
+	if got := names(listed(t, r, r.coordinator)); !reflect.DeepEqual(got, sortStrings(append(append([]string{}, localNames...), agent.SessionTools[:]...))) {
 		t.Fatal(got)
 	}
 	v := rpc(t, r.app, r.coordinator, toolCall("list_workers", map[string]any{}))
@@ -234,5 +235,18 @@ func TestWithWorkersOffTheCoordinatorHasOnlyTheLocalTools(t *testing.T) {
 	}
 	if got := callOK(t, r, "calculate", map[string]any{"expression": "2+2"}); got["result"] != "4" {
 		t.Fatal(got)
+	}
+}
+
+func TestWithWorkersOffSessionToolsStillReachTheApp(t *testing.T) {
+	r := lrig(true)
+	pending := rpcAsync(t, r.app, r.coordinator, toolCall("list_sessions", map[string]any{}))
+	ev := r.rt.recv(t)
+	if ev.Call.Kind != agent.CallListSessions {
+		t.Fatalf("%+v", ev.Call)
+	}
+	ev.McpReply <- agent.McpReply{Value: map[string]any{"sessions": []any{}}}
+	if v := awaitRPC(t, pending); get(v, "result", "isError") == true {
+		t.Fatal(toJSON(v))
 	}
 }
