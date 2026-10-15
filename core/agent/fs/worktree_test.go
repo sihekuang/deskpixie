@@ -1101,3 +1101,35 @@ func TestCreateProjectRefusesBadNamesWithoutTouchingDisk(t *testing.T) {
 		t.Fatalf("disk changed: %v -> %v", before, after)
 	}
 }
+
+// The first commit keeps the user's own git identity and fills in only what is missing.
+func TestCreateProjectFillsInOnlyTheMissingIdentity(t *testing.T) {
+	for _, c := range []struct{ config, want string }{
+		{"", "DeskPixie <deskpixie@localhost>"},
+		{"[user]\n\temail = me@x\n", "DeskPixie <me@x>"},
+		{"[user]\n\tname = Me\n", "Me <deskpixie@localhost>"},
+		{"[user]\n\tname = Me\n\temail = me@x\n", "Me <me@x>"},
+	} {
+		f := newFixture(t)
+		mustWrite(t, filepath.Join(f.home, ".gitconfig"), c.config)
+		path, err := f.fs().CreateProject("p")
+		if err != nil {
+			t.Fatalf("%q: %v", c.config, err)
+		}
+		if got := f.gitRaw(path, "log", "--format=%an <%ae>"); got != c.want {
+			t.Errorf("%q: %q", c.config, got)
+		}
+	}
+}
+
+// gitRaw is git without the fixture's own identity, so the repo's commits show as made.
+func (f *fixture) gitRaw(dir string, args ...string) string {
+	f.t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = []string{"PATH=" + gitPath, "HOME=" + f.home}
+	out, err := cmd.Output()
+	if err != nil {
+		f.t.Fatalf("git %v: %v", args, err)
+	}
+	return strings.TrimSpace(string(out))
+}

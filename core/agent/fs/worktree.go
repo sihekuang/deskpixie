@@ -826,10 +826,14 @@ func (g *GitWorktrees) CreateProject(name string) (string, error) {
 	if _, err := g.git(by, dir, "init", "-q", "-b", "main"); err != nil {
 		return fail("initialise git", err)
 	}
-	args := []string{"commit", "-q", "--allow-empty", "-m", "Start " + name}
-	if out, _ := g.run(by, dir, "config", "user.email"); strings.TrimSpace(out.Stdout) == "" {
-		args = append([]string{"-c", "user.name=DeskPixie", "-c", "user.email=deskpixie@localhost"}, args...)
+	// The user's own identity where set; a fallback only for whichever of name and email is missing.
+	var args []string
+	for _, id := range []struct{ key, fallback string }{{"user.name", "DeskPixie"}, {"user.email", "deskpixie@localhost"}} {
+		if out, _ := g.run(by, dir, "config", id.key); strings.TrimSpace(out.Stdout) == "" {
+			args = append(args, "-c", id.key+"="+id.fallback)
+		}
 	}
+	args = append(args, "commit", "-q", "--allow-empty", "-m", "Start "+name)
 	if _, err := g.git(by, dir, args...); err != nil {
 		return fail("make the first commit", err)
 	}
