@@ -93,7 +93,8 @@ clickable).
 - **Runtime wiring** (`core/agent/runtime.go`): the runtime already consumes the merged
   `CompositeHost.Subscribe` stream. Each pane event (start, status, exit) and each job change
   schedules a rebuild, debounced to 250 ms; a 30 s ticker rebuilds as a backstop. A rebuild
-  calls `Host.List`, takes the controller's worker rows (under `ctlMu`), builds the view, and
+  lists the hosts passively (`CompositeHost.ListRunningParts`: the primary through
+  `agent.PassiveLister` so Herdr is never started, the secondary on its own), takes the controller's worker rows (under `ctlMu`), builds the view, and
   emits only if it differs from the last one. `AgentHandle.Roster() RosterView` returns the last
   view for the app's first read.
 - **App** (`core/app/app.go`): a new hook `Roster func(any)` emits `agents` with the view;
@@ -118,8 +119,10 @@ clickable).
   the pixie panel, built like `UpdatesBubbleController` (pointer polled at 0.1 s; opaque through
   proximity fade; hidden with Pixie). Reads `agent.roster` at start, applies `agents` events
   (counting events so a slow first read never overwrites a newer event).
-- **Clicks:** a Pixie agent row calls `agent.focusAgent`; a session row with an `app` activates
-  `NSRunningApplication.runningApplications(withBundleIdentifier:).first`.
+- **Clicks:** a Pixie agent row calls `agent.focusAgent`; a session row with an `app` finds the
+  running app (`NSRunningApplication.runningApplications(withBundleIdentifier:).first`) and
+  brings it forward with `NSWorkspace.openApplication` (Launch Services, like a Dock click),
+  not `NSRunningApplication.activate`, which an inactive accessory app can have ignored.
 - **`PixieController.onFrameChange`** becomes a list of observers (today the updates bubble
   owns the only slot); both controllers subscribe.
 - **Updates bubble:** unchanged. The chip's width is capped at Pixie's width (smaller text if
@@ -128,11 +131,15 @@ clickable).
 
 ## 6. Error handling
 
-- `Host.List` fails: keep the last view and log; the next event or tick retries.
-- The secondary (`pix`) host fails: `CompositeHost.List` already returns the primary's agents;
-  "yours" shows what it last had only if the list succeeds, otherwise 0.
+- The roster lists passively (`ListRunning`): it never starts Herdr or tmux; a host that
+  isn't running lists no agents.
+- Pixie's host fails to list: keep the last Pixie's-agents part (none if never sent) and log
+  once per change of the error; your sessions still refresh. The next event or tick retries.
+- The secondary (`pix`) host fails: keep the last "yours" part; Pixie's agents still refresh.
 - Activating an app that isn't running (it quit since): nothing happens.
-- `agent.focusAgent` for a name that is gone: no-op, like `focusJob`.
+- `agent.focusAgent` for a name that is gone: like `focusJob`, the focus quietly does nothing
+  and the terminal still opens on Pixie's session (ensuring the coordinator), so the click
+  shows the coordinator.
 
 ## 7. Testing
 

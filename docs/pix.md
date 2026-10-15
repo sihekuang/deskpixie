@@ -85,6 +85,10 @@ the coordinator is never counted) and two of your `pix` sessions. Hover it for t
 a row to bring that agent forward (Pixie's in its Herdr/tmux tab, yours by bringing its
 terminal app to the front). With nothing but the coordinator running, there is no chip.
 
+A session started by an older `pix`, or in a terminal Pixie doesn't recognise, is listed but
+its row isn't clickable. A session Pixie just lost contact with shows greyed out and isn't
+counted until it reconnects.
+
 ## Pixie never types over you
 
 For Claude Code, Pixie's messages go into Claude's own inbox, so your typing is never touched.
