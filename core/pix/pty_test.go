@@ -3,6 +3,8 @@ package pix
 import (
 	"bytes"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -92,4 +94,33 @@ func sockDir(t *testing.T) string {
 	}
 	t.Cleanup(func() { os.RemoveAll(d) })
 	return d
+}
+
+func TestWaitReturnsWhenADescendantKeepsTheTerminal(t *testing.T) {
+	// A leftover child in its own session (out of the agent's process group) holds the PTY
+	// open, so its output never ends; pix must still finish when the agent does.
+	// (On macOS the agent's exit revokes the terminal, so this guards against a regression.)
+	inR, _, _, outW := pipes(t)
+	pidFile := filepath.Join(t.TempDir(), "orphan")
+	r := &Runner{Launch: Launch{Path: "/bin/sh", Args: []string{"-c",
+		`perl -MPOSIX -e 'exit 0 if fork; POSIX::setsid(); open(F, ">` + pidFile + `"); print F $$; close F; sleep 4' & sleep 0.2; exit 5`}}, Stdin: inR, Stdout: outW}
+	if err := r.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan int, 1)
+	go func() { done <- r.Wait() }()
+	select {
+	case code := <-done:
+		if code != 5 {
+			t.Fatalf("code %d", code)
+		}
+		b, _ := os.ReadFile(pidFile)
+		pid, _ := strconv.Atoi(strings.TrimSpace(string(b)))
+		if pid == 0 || syscall.Kill(pid, 0) != nil {
+			t.Fatal("the leftover child should still be running")
+		}
+		syscall.Kill(pid, syscall.SIGKILL)
+	case <-time.After(2 * time.Second):
+		t.Fatal("Wait hangs while a descendant holds the terminal")
+	}
 }
