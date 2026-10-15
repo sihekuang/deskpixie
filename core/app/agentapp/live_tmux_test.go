@@ -9,7 +9,7 @@ package agentapp_test
 // As TestLiveDelegationEndToEnd, with agent.sessionHost = tmux on the smoke server
 // (`tmux -L deskpixie-smoke`, never the app's "deskpixie" nor the default socket): Build installs
 // the Claude settings with the state hooks, the coordinator's Stop-hook reply must reach the
-// voice loop as "Agent reply: pong", and Shutdown closes its window. The server is killed at
+// voice loop as "Coordinator reply: pong", and Shutdown closes its window. The server is killed at
 // the end.
 
 import (
@@ -120,18 +120,18 @@ func TestLiveTmuxDelegationEndToEnd(t *testing.T) {
 		t.Fatalf("delegate failed: %s", out.Output)
 	}
 
-	// Only the coordinator's own answer counts: an "Agent reply:" whose text is just "pong".
+	// Only the coordinator's own answer counts: an "Coordinator reply:" whose text is just "pong".
 	deadline := time.Now().Add(4 * time.Minute)
 	reply := ""
 	for reply == "" {
 		for _, text := range v.all() {
-			body, ok := strings.CutPrefix(text, "Agent reply:")
+			body, ok := strings.CutPrefix(text, "Coordinator reply:")
 			if !ok {
 				continue
 			}
 			if !isPong(body) {
 				notesMu.Lock()
-				t.Fatalf("the voice loop got %q, not an Agent reply of pong; injected %q; notifications %q; tray %+v", text, v.all(), notes, a.Tray())
+				t.Fatalf("the voice loop got %q, not a Coordinator reply of pong; injected %q; notifications %q; tray %+v", text, v.all(), notes, a.Tray())
 			}
 			reply = text
 		}
@@ -140,7 +140,7 @@ func TestLiveTmuxDelegationEndToEnd(t *testing.T) {
 		}
 		if time.Now().After(deadline) {
 			notesMu.Lock()
-			t.Fatalf("no Agent reply with pong within 4 minutes; injected %q; notifications %q; tray %+v", v.all(), notes, a.Tray())
+			t.Fatalf("no Coordinator reply with pong within 4 minutes; injected %q; notifications %q; tray %+v", v.all(), notes, a.Tray())
 		}
 		time.Sleep(time.Second)
 	}

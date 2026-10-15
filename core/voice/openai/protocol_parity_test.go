@@ -253,8 +253,8 @@ func TestEncodeToolResult(t *testing.T) {
 
 func TestEncodeInjectAddsAUserTextItemAndAsksForAReply(t *testing.T) {
 	d := &decoder{}
-	jeq(t, d.encode(voice.Command{Kind: voice.CmdInject, Text: "Agent reply: done.", Respond: true}),
-		`[{"type":"conversation.item.create","item":{"type":"message","role":"user","content":[{"type":"input_text","text":"Agent reply: done."}]}},{"type":"response.create"}]`)
+	jeq(t, d.encode(voice.Command{Kind: voice.CmdInject, Text: "Coordinator reply: done.", Respond: true}),
+		`[{"type":"conversation.item.create","item":{"type":"message","role":"user","content":[{"type":"input_text","text":"Coordinator reply: done."}]}},{"type":"response.create"}]`)
 	if n := len(d.encode(voice.Command{Kind: voice.CmdInject, Text: "x"})); n != 1 {
 		t.Fatal("respond: false → no response.create")
 	}

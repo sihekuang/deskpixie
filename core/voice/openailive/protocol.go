@@ -21,12 +21,12 @@ const livePolicies = `Speaking (GPT-Live):
 
 const noisyRoomPolicy = ` The room is noisy: ignore quieter voices in the background, like a TV or people nearby, and only stop for the user speaking clearly to you.`
 
-// backendPreamble starts the backend model's instructions; Bit's full instructions follow, so
+// backendPreamble starts the backend model's instructions; Pixie's full instructions follow, so
 // the tool rules (when to delegate, jobs, answer_job, end_conversation) are the same as on the
 // other providers.
-const backendPreamble = `You are the backend for Bit, a voice assistant. A separate voice model talks with the user and hands you the conversation whenever a tool may be needed. Choose and call the right tools by the rules below, then answer in one or two short, plain, spoken-style sentences for the voice to say. Call end_conversation only when the user has clearly said goodbye.
+const backendPreamble = `You are the backend for Pixie, a voice assistant. A separate voice model talks with the user and hands you the conversation whenever a tool may be needed. Choose and call the right tools by the rules below, then answer in one or two short, plain, spoken-style sentences for the voice to say. Call end_conversation only when the user has clearly said goodbye.
 
-Bit's instructions:
+Pixie's instructions:
 `
 
 // sessionStart builds the session.start message. The config is strict: no unknown fields.

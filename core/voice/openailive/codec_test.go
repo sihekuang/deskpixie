@@ -65,7 +65,7 @@ func wantKinds(t *testing.T, evs []voice.Event, want ...voice.EventKind) {
 var loud, quiet = tone(2400, 8000), tone(2400, 0)
 
 func TestSessionStartShape(t *testing.T) {
-	cfg := voice.SessionConfig{Model: "gpt-live-1", Voice: "voice_abc", Instructions: "be Bit", NoisyRoom: true,
+	cfg := voice.SessionConfig{Model: "gpt-live-1", Voice: "voice_abc", Instructions: "be Pixie", NoisyRoom: true,
 		Tools: []voice.ToolSpec{{Name: "get_time", Description: "time", Parameters: json.RawMessage(`{"type":"object","properties":{"city":{"type":"string"}}}`)}, {Name: "end_conversation"}}}
 	var got map[string]any
 	_ = json.Unmarshal(msg(sessionStart(cfg, "c_1")), &got)
@@ -87,7 +87,7 @@ func TestSessionStartShape(t *testing.T) {
 		t.Fatalf("format %v", f)
 	}
 	instr := s["instructions"].(string)
-	if !strings.HasPrefix(instr, "be Bit\n\n") || !strings.Contains(instr, "Interruption policy") || !strings.Contains(instr, "The room is noisy") {
+	if !strings.HasPrefix(instr, "be Pixie\n\n") || !strings.Contains(instr, "Interruption policy") || !strings.Contains(instr, "The room is noisy") {
 		t.Fatalf("instructions %q", instr)
 	}
 	d := s["delegation"].(map[string]any)
@@ -95,7 +95,7 @@ func TestSessionStartShape(t *testing.T) {
 		t.Fatalf("delegation %v", d)
 	}
 	r := d["responses"].(map[string]any)
-	if r["model"] != DefaultBackendModel || !strings.HasSuffix(r["instructions"].(string), "be Bit") || r["tool_choice"] != "auto" {
+	if r["model"] != DefaultBackendModel || !strings.HasSuffix(r["instructions"].(string), "be Pixie") || r["tool_choice"] != "auto" {
 		t.Fatalf("responses %v", r)
 	}
 	tools := r["tools"].([]any)
@@ -123,7 +123,7 @@ func TestReadyOnce(t *testing.T) {
 	wantKinds(t, c.decode(msg(map[string]any{"type": "session.started"}), at(0)))
 }
 
-// A turn: the user's words open their span; Bit's first loud audio closes it and opens a
+// A turn: the user's words open their span; Pixie's first loud audio closes it and opens a
 // reply; quiet ends the reply with its transcript.
 func TestTurnFromTranscriptsAndAudio(t *testing.T) {
 	c := newCodec()
@@ -170,14 +170,14 @@ func TestGapInsideReplyIsFilled(t *testing.T) {
 	}
 }
 
-// The user talking over Bit is GPT-Live's call: no SpeechStarted while Bit talks. If Bit
-// stops, the user's turn starts then; if Bit talks through it, it was a backchannel.
+// The user talking over Pixie is GPT-Live's call: no SpeechStarted while Pixie talks. If Pixie
+// stops, the user's turn starts then; if Pixie talks through it, it was a backchannel.
 func TestBargeInDeferredUntilBitStops(t *testing.T) {
 	c := newCodec()
 	c.decode(outDelta(loud, 0), at(0))
 	wantKinds(t, c.decode(inText("wait"), at(100)))
 	wantKinds(t, c.poll(at(400)))
-	evs := c.poll(at(700)) // Bit quiet since 0 ms + 700
+	evs := c.poll(at(700)) // Pixie quiet since 0 ms + 700
 	wantKinds(t, evs, voice.EvResponseDone, voice.EvSpeechStarted)
 	wantKinds(t, c.poll(at(900)), voice.EvTranscript, voice.EvSpeechStopped)
 }
@@ -189,7 +189,7 @@ func TestBackchannelIsNotATurn(t *testing.T) {
 	for ms := 100; ms <= 1000; ms += 100 {
 		c.decode(outDelta(loud, int64(ms)), at(ms))
 	}
-	evs := c.poll(at(1000)) // user quiet 900 ms while Bit still talks
+	evs := c.poll(at(1000)) // user quiet 900 ms while Pixie still talks
 	wantKinds(t, evs, voice.EvTranscript)
 	if evs[0].Role != "user" {
 		t.Fatalf("%+v", evs[0])
@@ -300,9 +300,9 @@ func TestInjectKinds(t *testing.T) {
 		respond bool
 		kind    string
 	}{
-		{"Agent reply: done.", true, "session.commentary.append"},
-		{"Agent reply: done.", false, "session.thinking.append"},
-		{"Agent question: delete it? Say confirm hawk.", true, "session.instructions.append"},
+		{"Coordinator reply: done.", true, "session.commentary.append"},
+		{"Coordinator reply: done.", false, "session.thinking.append"},
+		{"Coordinator question: delete it? Say confirm hawk.", true, "session.instructions.append"},
 	} {
 		msgs, _ := c.encode(voice.Command{Kind: voice.CmdInject, Text: tc.text, Respond: tc.respond}, at(0))
 		if len(msgs) != 1 || msgs[0]["type"] != tc.kind || msgs[0]["delegation_id"] != nil {

@@ -1,6 +1,6 @@
 import AppKit
 
-/// Borderless, non-activating, transparent floating panel that hosts Bit on every Space.
+/// Borderless, non-activating, transparent floating panel that hosts Pixie on every Space.
 final class PixiePanel: NSPanel {
     /// Creates the panel at `frame` (AppKit coordinates; the controller restores the saved spot).
     init(frame: NSRect) {

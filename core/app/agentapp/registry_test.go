@@ -62,7 +62,7 @@ func TestAMissingTmuxIsNotFoundNamingTmux(t *testing.T) {
 	p := "/definitely/not/tmux"
 	s.TmuxPath = &p
 	_, err := SessionHosts()["tmux"](HostDeps{Settings: s, Home: "/nonexistent-home", Runner: &agenttest.FakeRunner{}, Hint: noHint})
-	if !agent.IsHostError(err, agent.HostNotFound) || HostProblem(err) != "Agent: tmux not found" {
+	if !agent.IsHostError(err, agent.HostNotFound) || HostProblem(err) != "Coordinator: tmux not found" {
 		t.Fatal(err)
 	}
 }
@@ -188,7 +188,7 @@ func TestAMissingClaudeIntegrationPostsTheHintOnce(t *testing.T) {
 	if got := p.Posted(); !reflect.DeepEqual(got, []string{IntegrationHint}) {
 		t.Fatal("posted once:", got)
 	}
-	if IntegrationHint != "Agent: run `herdr integration install claude`" {
+	if IntegrationHint != "Coordinator: run `herdr integration install claude`" {
 		t.Fatal(IntegrationHint)
 	}
 	if p.asked.Load() != 1 {

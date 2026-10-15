@@ -195,9 +195,9 @@ public enum TrayMenu {
                 sub.append(.submenu(title: "Cancel job", enabled: !agent.jobs.isEmpty, items: agent.jobs.map {
                     .action(Row(id: "agent:cancel:\($0.id)", title: $0.label))
                 }))
-                sub.append(.action(Row(id: "agent:open", title: "Open agent terminal")))
-                sub.append(.action(Row(id: "agent:restart", title: "Restart agent")))
-                items.append(.submenu(title: "Agent", enabled: true, items: sub))
+                sub.append(.action(Row(id: "agent:open", title: "Open coordinator terminal")))
+                sub.append(.action(Row(id: "agent:restart", title: "Restart coordinator")))
+                items.append(.submenu(title: "Coordinator", enabled: true, items: sub))
             }
             items.append(.separator)
         }

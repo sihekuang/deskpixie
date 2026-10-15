@@ -177,7 +177,7 @@ func setupMessage(cfg voice.SessionConfig) obj {
 	case cfg.TurnDetection == voice.TurnManual:
 		detection = obj{"disabled": true}
 	case cfg.NoisyRoom:
-		// Low sensitivity: a TV or people nearby no longer cut Bit off.
+		// Low sensitivity: a TV or people nearby no longer cut Pixie off.
 		detection = obj{"disabled": false, "startOfSpeechSensitivity": "START_SENSITIVITY_LOW"}
 	default:
 		detection = obj{"disabled": false}

@@ -226,7 +226,7 @@ func openVoice(t *testing.T, f *fixture) *fakeVoice {
 }
 
 // The whole flow over the fakes and the real hook server: delegate → the coordinator is started
-// and prompted → its Stop hook carries the reply → Bit is injected with it, Bit celebrates.
+// and prompted → its Stop hook carries the reply → Pixie is injected with it, Pixie celebrates.
 func TestEndToEndDelegateToStopHookToVoiceInject(t *testing.T) {
 	f := newFixture(t, nil)
 	v := openVoice(t, f)
@@ -251,9 +251,9 @@ func TestEndToEndDelegateToStopHookToVoiceInject(t *testing.T) {
 		t.Fatal(status)
 	}
 	waitFor(t, "the reply injected", func() bool {
-		return slices.Contains(v.Injected(), "Agent reply: There are twelve open issues.")
+		return slices.Contains(v.Injected(), "Coordinator reply: There are twelve open issues.")
 	})
-	waitFor(t, "Bit celebrates", func() bool { c, _ := f.rec.counts(); return c == 1 })
+	waitFor(t, "Pixie celebrates", func() bool { c, _ := f.rec.counts(); return c == 1 })
 	waitFor(t, "the job to leave the tray", func() bool { return len(f.agent.Tray().Jobs) == 0 })
 }
 
@@ -265,7 +265,7 @@ func TestAFailedJobFlashesTheErrorState(t *testing.T) {
 	f.post(t, "/hooks/stop", f.coordinatorToken(t), map[string]any{
 		"last_assistant_message": `<spoken ref="` + string(job) + `" status="failed">I could not.</spoken>`,
 	})
-	waitFor(t, "Bit flashes the error", func() bool { _, e := f.rec.counts(); return e == 1 })
+	waitFor(t, "Pixie flashes the error", func() bool { _, e := f.rec.counts(); return e == 1 })
 }
 
 func TestTheTrayShowsOpenJobsAndTheMenuActsOnThem(t *testing.T) {
@@ -307,7 +307,7 @@ func TestOpenTerminalAttachesAndAFailureNamesTheTerminal(t *testing.T) {
 	}
 	f.launcher.SetFail("no app")
 	f.agent.OpenTerminal()
-	waitFor(t, "the failure line", func() bool { return strings.HasPrefix(f.agent.Tray().Status, "Agent: ") })
+	waitFor(t, "the failure line", func() bool { return strings.HasPrefix(f.agent.Tray().Status, "Coordinator: ") })
 }
 
 func TestUserWordsHeardWhileBitSpeaksNeverReachTheAgent(t *testing.T) {
@@ -322,7 +322,7 @@ func TestUserWordsHeardWhileBitSpeaksNeverReachTheAgent(t *testing.T) {
 	v := newFakeVoice()
 	f.agent.AttachVoice(v)
 	v.signals <- voice.VoiceSignal{Kind: voice.SigOpened}
-	f.agent.OnMouth(3) // Bit speaks
+	f.agent.OnMouth(3) // Pixie speaks
 	v.signals <- voice.VoiceSignal{Kind: voice.SigUserSaid, Text: "confirm hawk"}
 	f.agent.OnMouth(0) // and stops: the tail still drops
 	v.signals <- voice.VoiceSignal{Kind: voice.SigUserSaid, Text: "confirm hawk"}
@@ -378,17 +378,17 @@ func TestSetupProblemsBecomeTheStatusLine(t *testing.T) {
 	busy := newFixture(t, func(c *Config) {
 		c.Listen = func(uint16) (net.Listener, error) { return nil, &net.OpError{Op: "listen"} }
 	})
-	waitFor(t, "port busy", func() bool { return busy.agent.Tray().Status == "Agent: hook port busy" })
+	waitFor(t, "port busy", func() bool { return busy.agent.Tray().Status == "Coordinator: hook port busy" })
 
 	missing := newFixture(t, func(c *Config) { c.Hosts = nil; p := "/definitely/not/herdr"; c.Settings.HerdrPath = &p })
-	waitFor(t, "herdr not found", func() bool { return missing.agent.Tray().Status == "Agent: herdr not found" })
+	waitFor(t, "herdr not found", func() bool { return missing.agent.Tray().Status == "Coordinator: herdr not found" })
 	out := missing.tool(t, "delegate").Invoke(context.Background(), json.RawMessage(`{"task":"x"}`))
 	if !strings.Contains(string(out.Output), "error") {
 		t.Fatal(string(out.Output))
 	}
 
 	unknown := newFixture(t, func(c *Config) { c.Settings.SessionHost = "screen" })
-	waitFor(t, "invalid settings", func() bool { return unknown.agent.Tray().Status == "Agent: invalid settings (see log)" })
+	waitFor(t, "invalid settings", func() bool { return unknown.agent.Tray().Status == "Coordinator: invalid settings (see log)" })
 
 	noTmux := newFixture(t, func(c *Config) {
 		c.Hosts = nil
@@ -396,7 +396,7 @@ func TestSetupProblemsBecomeTheStatusLine(t *testing.T) {
 		p := "/definitely/not/tmux"
 		c.Settings.TmuxPath = &p
 	})
-	waitFor(t, "tmux not found", func() bool { return noTmux.agent.Tray().Status == "Agent: tmux not found" })
+	waitFor(t, "tmux not found", func() bool { return noTmux.agent.Tray().Status == "Coordinator: tmux not found" })
 }
 
 // Under tmux the Claude settings files carry the state hooks; under Herdr they don't.
@@ -564,7 +564,7 @@ func TestADoneReplyWhileClosedOpensAConversationThatSaysIt(t *testing.T) {
 		f.post(t, "/hooks/stop", f.coordinatorToken(t), map[string]any{
 			"last_assistant_message": `<spoken ref="` + string(job) + `" status="done">There are twelve open issues.</spoken>`,
 		})
-		waitFor(t, "Bit celebrates", func() bool { c, _ := f.rec.counts(); return c == 1 })
+		waitFor(t, "Pixie celebrates", func() bool { c, _ := f.rec.counts(); return c == 1 })
 		if !on {
 			time.Sleep(50 * time.Millisecond)
 			if v.Opens() != 0 {
@@ -574,7 +574,7 @@ func TestADoneReplyWhileClosedOpensAConversationThatSaysIt(t *testing.T) {
 		}
 		waitFor(t, "the open", func() bool { return v.Opens() == 1 })
 		v.signals <- voice.VoiceSignal{Kind: voice.SigOpened}
-		want := "Agent replies while you were away:\n- Agent reply: There are twelve open issues."
+		want := "Coordinator replies while you were away:\n- Coordinator reply: There are twelve open issues."
 		waitFor(t, "the reply said", func() bool { return slices.Contains(v.Injected(), want) })
 		time.Sleep(50 * time.Millisecond)
 		if n := len(v.Injected()); n != 1 || v.Opens() != 1 {

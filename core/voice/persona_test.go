@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-func TestDefaultPersonaIsBit(t *testing.T) {
-	if !strings.Contains(DefaultPersona(), "You are Bit") {
+func TestDefaultPersonaIsPixie(t *testing.T) {
+	if !strings.Contains(DefaultPersona(), "You are Pixie") {
 		t.Fatal()
 	}
 }
@@ -31,12 +31,12 @@ func TestInstructionsFallsBack(t *testing.T) {
 	}
 }
 
-// Rust persona.rs tests, by name (TestDefaultPersonaIsBit/TestInstructionsFallsBack above
+// Rust persona.rs tests, by name (TestDefaultPersonaIsPixie/TestInstructionsFallsBack above
 // already covered the fallback; these pin the exact Rust assertions).
 
-func TestDefaultPersonaMentionsBitAndEndConversation(t *testing.T) {
+func TestDefaultPersonaMentionsPixieAndEndConversation(t *testing.T) {
 	p := DefaultPersona()
-	if !strings.Contains(p, "Bit") || !strings.Contains(p, "end_conversation") {
+	if !strings.Contains(p, "Pixie") || !strings.Contains(p, "end_conversation") {
 		t.Fatal(p)
 	}
 }
@@ -73,11 +73,11 @@ func TestMissingOrEmptyPersonaFallsBack(t *testing.T) {
 }
 
 // #72: the knowledge boundary. Facts about the user's world and anything current come from a
-// tool or the agent, never from memory; general knowledge and chat stay with Bit.
+// tool or the coordinator, never from memory; general knowledge and chat stay with Pixie.
 func TestDefaultPersonaDrawsTheKnowledgeBoundary(t *testing.T) {
 	p := DefaultPersona()
 	for _, phrase := range []string{
-		"come only from a tool or the agent, never from memory",
+		"come only from a tool or the coordinator, never from memory",
 		"files, repositories, builds, jobs and workers",
 		"news, prices, scores, software versions and today's events",
 		"If you aren't certain, delegate rather than guess",
@@ -93,7 +93,7 @@ func TestDefaultPersonaDrawsTheKnowledgeBoundary(t *testing.T) {
 	}
 }
 
-// #72: Bit never claims an action it didn't take, and knows what a correction means.
+// #72: Pixie never claims an action it didn't take, and knows what a correction means.
 func TestDefaultPersonaExplainsClaimCorrections(t *testing.T) {
 	p := DefaultPersona()
 	prefix := strings.TrimSuffix(CorrectionPrefix, " ")

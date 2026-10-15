@@ -15,7 +15,7 @@ import (
 	"github.com/sihekuang/deskpixie/core/voice"
 )
 
-// Bit's memory comes from the coordinator side: the job table as a session block, and recall.
+// Pixie's memory comes from the coordinator side: the job table as a session block, and recall.
 
 func memJob(n uint64, task string, status JobStatus, updated Millis) Job {
 	return Job{ID: JobIDFromBits(n), Task: task, Status: status, Created: updated, Updated: updated}
@@ -30,16 +30,16 @@ func TestMemoryFactsListsJobsWithTheirLastReply(t *testing.T) {
 	done := memJob(1, "summarise the open issues", JobDone, memNow-3_600_000)
 	done.Reply = strp("There are 12 open issues; 3 are bugs.")
 	failed := memJob(2, "deploy the site", JobFailed, memNow-30*3_600_000)
-	failed.Reason = strp("the agent stopped")
+	failed.Reason = strp("the coordinator stopped")
 	working := memJob(3, "draft the newsletter", JobWorking, memNow-60_000)
 	working.LastProgress = strp("Writing the intro.")
 	got := MemoryFacts([]Job{done, failed, working}, nil, memNow, time.UTC)
 	want := []string{
 		"- [11:00 AM] done: summarise the open issues. Reply: There are 12 open issues; 3 are bugs.",
-		"- [Mon 6:00 AM] failed: deploy the site. Why: the agent stopped",
+		"- [Mon 6:00 AM] failed: deploy the site. Why: the coordinator stopped",
 		"- [11:59 AM] working: draft the newsletter. Latest: Writing the intro.",
 	}
-	if !strings.HasPrefix(got, "Recent work with the agent") || !strings.HasSuffix(got, strings.Join(want, "\n")) {
+	if !strings.HasPrefix(got, "Recent work with the coordinator") || !strings.HasSuffix(got, strings.Join(want, "\n")) {
 		t.Fatal(got)
 	}
 	if MemoryFacts(nil, nil, memNow, time.UTC) != "" {
@@ -131,7 +131,7 @@ func TestRecallAsksTheCoordinatorAndKeepsListening(t *testing.T) {
 		settle()
 		stopHook(r, `<spoken ref="job_000000000001" status="done">We picked the blue one.</spoken>`)
 		settle()
-		if !slices.Contains(r.voice.Calls(), agenttest.InjectCall("Agent reply: We picked the blue one.")) {
+		if !slices.Contains(r.voice.Calls(), agenttest.InjectCall("Coordinator reply: We picked the blue one.")) {
 			t.Fatal(r.voice.Calls())
 		}
 		if strings.Contains(r.h.Facts(), "Recall:") {

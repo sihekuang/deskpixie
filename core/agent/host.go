@@ -173,7 +173,7 @@ func (h *AgentHost) launch(ctx context.Context, replace, resume bool) (AgentInfo
 	return h.host.StartAgent(ctx, spec)
 }
 
-// Reset is tray ▸ Restart agent: forget the crash history and stop giving up.
+// Reset is tray ▸ Restart coordinator: forget the crash history and stop giving up.
 func (h *AgentHost) Reset() {
 	h.gaveUp.Store(false)
 	h.mu.Lock()

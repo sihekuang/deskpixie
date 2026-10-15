@@ -13,14 +13,14 @@ import (
 type AgentVoice interface {
 	Inject(voice.Notice)
 	HoldOpen(on bool)
-	// Open starts a conversation if Bit is at rest (false: it did nothing).
+	// Open starts a conversation if Pixie is at rest (false: it did nothing).
 	Open() bool
 	Subscribe() <-chan voice.VoiceSignal
 }
 
 // AgentHooks are what the agent may do to the app. Each is safe from any goroutine.
 type AgentHooks struct {
-	// Celebrate (a job done) and FlashError (a job failed): Bit's one-shots.
+	// Celebrate (a job done) and FlashError (a job failed): Pixie's one-shots.
 	Celebrate, FlashError func()
 	// RefreshTray: the agent's tray rows or status changed.
 	RefreshTray func()
@@ -35,11 +35,11 @@ type Agent interface {
 	// Tools are the voice tools (delegate, jobs, answer_job); Persona the persona section.
 	Tools() []voice.Tool
 	Persona() string
-	// Tray is Tray ▸ Agent: job rows, the status line and the standing hint.
+	// Tray is Tray ▸ Coordinator: job rows, the status line and the standing hint.
 	Tray() AgentTray
 	// Menu runs an agent:* menu id; false for an id that is not the agent's.
 	Menu(id string) bool
-	// OpenTerminal is a click on Bit: attach a terminal to the agent session (async).
+	// OpenTerminal is a click on Pixie: attach a terminal to the agent session (async).
 	OpenTerminal()
 	// AttachVoice links the voice loop once it exists.
 	AttachVoice(v AgentVoice)
@@ -60,7 +60,7 @@ type Agent interface {
 }
 
 // AgentFacts is an Agent that also gives each voice session a context block (its recent jobs),
-// so Bit picks up where it left off without a memory of its own.
+// so Pixie picks up where it left off without a memory of its own.
 type AgentFacts interface {
 	Facts() string
 }

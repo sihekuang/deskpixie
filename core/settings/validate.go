@@ -151,7 +151,7 @@ func CheckSession(session string) error {
 		}
 	}
 	if !ok {
-		return fmt.Errorf("the agent session must be a dedicated name (a-z, 0-9, -; not \"default\"), not %q", session)
+		return fmt.Errorf("the coordinator session must be a dedicated name (a-z, 0-9, -; not \"default\"), not %q", session)
 	}
 	return nil
 }

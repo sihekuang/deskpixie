@@ -19,7 +19,7 @@ func protoCfg() voice.SessionConfig {
 	return voice.SessionConfig{
 		Model:        "gemini-3.8-live",
 		Voice:        "Puck",
-		Instructions: "You are Bit.",
+		Instructions: "You are Pixie.",
 		Tools: []voice.ToolSpec{
 			{Name: "end_conversation", Description: "End it.",
 				Parameters: json.RawMessage(`{ "type": "object", "properties": {}, "additionalProperties": false }`)},
@@ -179,7 +179,7 @@ func TestSetupMessageHasTheDocumentedShape(t *testing.T) {
 	if got := at(s, "generationConfig", "speechConfig", "voiceConfig", "prebuiltVoiceConfig", "voiceName"); got != "Puck" {
 		t.Fatal(got)
 	}
-	jsonEq(t, at(s, "systemInstruction"), `{ "parts": [{ "text": "You are Bit." }] }`)
+	jsonEq(t, at(s, "systemInstruction"), `{ "parts": [{ "text": "You are Pixie." }] }`)
 	jsonEq(t, at(s, "realtimeInputConfig"), `{ "automaticActivityDetection": { "disabled": false }, "activityHandling": "START_OF_ACTIVITY_INTERRUPTS" }`)
 	jsonEq(t, at(s, "inputAudioTranscription"), `{}`)
 	jsonEq(t, at(s, "outputAudioTranscription"), `{}`)
@@ -513,8 +513,8 @@ func TestCancelledToolCallsAreWarnedAndTheirResultsDropped(t *testing.T) {
 
 func TestInjectIsClientContentAndItsOwnInterruptIsNotSpeech(t *testing.T) {
 	c := ready(t)
-	enc := c.encode(voice.Command{Kind: voice.CmdInject, Text: "Agent reply: done.", Respond: true})
-	jsonEq(t, enc.messages, `[{ "clientContent": { "turns": [{ "role": "user", "parts": [{ "text": "Agent reply: done." }] }], "turnComplete": true } }]`)
+	enc := c.encode(voice.Command{Kind: voice.CmdInject, Text: "Coordinator reply: done.", Respond: true})
+	jsonEq(t, enc.messages, `[{ "clientContent": { "turns": [{ "role": "user", "parts": [{ "text": "Coordinator reply: done." }] }], "turnComplete": true } }]`)
 	want(t, c.decode(audioMsg([]int16{1})), eCreated, eAudio(1)) // no speech events
 	// Injected mid-reply: the interrupt that follows is ours.
 	c.encode(voice.Command{Kind: voice.CmdInject, Text: "more", Respond: true})

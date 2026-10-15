@@ -1,12 +1,12 @@
-# Bit's memory comes from the coordinator
+# Pixie's memory comes from the coordinator
 
-Bit keeps no memory of its own. The coordinator (the long-running Claude Code session that
-receives every delegated request and keeps its whole conversation) is Bit's memory, reached
+Pixie keeps no memory of its own. The coordinator (the long-running Claude Code session that
+receives every delegated request and keeps its whole conversation) is Pixie's memory, reached
 two ways. Both exist only when delegation is on (`agent.enabled`).
 
 - **Session block** (`core/agent/memory.go`, `AgentHandle.Facts`): on every voice connect (first
   start and each reconnect, through the runtime's `SessionFacts` hook, so the same for every
-  provider: gemini, openai, openailive) the instructions get a "Recent work with the agent" block
+  provider: gemini, openai, openailive) the instructions get a "Recent work with the coordinator" block
   built from the app's job records: each job's time, status and task, plus the coordinator's
   last spoken reply or question (`Job.Reply`, new field in `agent/jobs.jsonl`), the failure
   reason, or the latest progress. Open jobs always, closed ones updated in the last 24 h
@@ -14,11 +14,11 @@ two ways. Both exist only when delegation is on (`agent.enabled`).
   capped as below (open jobs first, then the newest). Recall questions
   are left out. Jobs themselves are kept 14 days (`RetentionMs`) as before.
 - **`recall` voice tool** (`agent.Recall`): when the user refers to something the conversation
-  and the block don't cover, Bit asks the coordinator with a short question. It goes the
+  and the block don't cover, Pixie asks the coordinator with a short question. It goes the
   delegate path as a job whose task starts `Recall: `, with context saying it is a context
   question, not a task; `coordinator.md` tells the coordinator to answer at once from memory
   with `status="done"`. The conversation stays open (like a `Check:` fact) and the answer
-  arrives as an ordinary "Agent reply:" line. It is as fast as the coordinator's next turn: if
+  arrives as an ordinary "Coordinator reply:" line. It is as fast as the coordinator's next turn: if
   the coordinator is busy, the question waits for that turn to end.
 - **Per-turn memories** (`core/agent/memories.go`): every finished coordinator turn, with or
   without a job ref, leaves exactly one memory in `agent/memories.jsonl`. The coordinator writes
@@ -35,7 +35,7 @@ two ways. Both exist only when delegation is on (`agent.enabled`).
     already listed is skipped), the whole block capped at 2600 characters (~650 tokens; jobs
     at most 1500). A `recall` request carries the newest 30 to the coordinator.
 
-`persona.md` and `delegation.md` tell Bit to use these rather than ask the user to repeat
+`persona.md` and `delegation.md` tell Pixie to use these rather than ask the user to repeat
 context.
 
 ## The removed local memory

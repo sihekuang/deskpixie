@@ -147,8 +147,8 @@ type VoiceLink interface {
 	Unsubscribe(<-chan voice.VoiceSignal)
 }
 
-// TimerAlarm: during a conversation Bit says it; otherwise, or if the conversation closes
-// before Bit could, a chime and a macOS notification. Fire is goroutine-safe (it only reads its
+// TimerAlarm: during a conversation Pixie says it; otherwise, or if the conversation closes
+// before Pixie could, a chime and a macOS notification. Fire is goroutine-safe (it only reads its
 // fields and starts a goroutine).
 type TimerAlarm struct {
 	// Voice is the running voice loop, or nil.

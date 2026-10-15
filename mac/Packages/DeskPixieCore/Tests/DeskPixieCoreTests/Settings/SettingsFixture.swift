@@ -13,7 +13,7 @@ enum SettingsFixture {
   "path": "hotkey",
   "section": "Pixie",
   "label": "Voice hotkey",
-  "help": "Starts or ends a conversation with Bit from any app.",
+  "help": "Starts or ends a conversation with Pixie from any app.",
   "kind": {
    "type": "hotkey"
   },
@@ -81,7 +81,7 @@ enum SettingsFixture {
   "path": "proximityFade.enabled",
   "section": "Pixie",
   "label": "Fade near the pointer",
-  "help": "Bit fades as the pointer comes close, so it never blocks your work.",
+  "help": "Pixie fades as the pointer comes close, so it never blocks your work.",
   "kind": {
    "type": "bool"
   },
@@ -96,7 +96,7 @@ enum SettingsFixture {
   "path": "proximityFade.radius",
   "section": "Pixie",
   "label": "Fade distance",
-  "help": "How far from Bit, in points, the fading starts.",
+  "help": "How far from Pixie, in points, the fading starts.",
   "kind": {
    "type": "int",
    "min": 0,
@@ -114,7 +114,7 @@ enum SettingsFixture {
   "path": "voice.provider",
   "section": "Voice",
   "label": "Voice service",
-  "help": "The realtime voice service Bit talks through.",
+  "help": "The realtime voice service Pixie talks through.",
   "kind": {
    "type": "choice",
    "options": [
@@ -208,7 +208,7 @@ enum SettingsFixture {
   "path": "voice.voice",
   "section": "Voice",
   "label": "Voice",
-  "help": "The voice Bit speaks with. The choices follow the voice service.",
+  "help": "The voice Pixie speaks with. The choices follow the voice service.",
   "kind": {
    "type": "choice",
    "options": [
@@ -315,7 +315,7 @@ enum SettingsFixture {
   "path": "voice.chimes",
   "section": "Voice",
   "label": "Chimes",
-  "help": "A rising chime when Bit listens, a falling one when it stops.",
+  "help": "A rising chime when Pixie listens, a falling one when it stops.",
   "kind": {
    "type": "bool"
   },
@@ -372,7 +372,7 @@ enum SettingsFixture {
   "path": "voice.inputDevice",
   "section": "Voice",
   "label": "Microphone",
-  "help": "The mic Bit listens with. If it isn't connected, Bit uses the system default until it is. Bluetooth mics are slow to start and can cut off your first words.",
+  "help": "The mic Pixie listens with. If it isn't connected, Pixie uses the system default until it is. Bluetooth mics are slow to start and can cut off your first words.",
   "kind": {
    "type": "choice",
    "options": [
@@ -405,7 +405,7 @@ enum SettingsFixture {
   "path": "voice.outputDevice",
   "section": "Voice",
   "label": "Speaker",
-  "help": "Where Bit's voice plays. If it isn't connected, Bit uses the system default until it is.",
+  "help": "Where Pixie's voice plays. If it isn't connected, Pixie uses the system default until it is.",
   "kind": {
    "type": "choice",
    "options": [
@@ -429,7 +429,7 @@ enum SettingsFixture {
   "path": "voice.noisyRoom",
   "section": "Voice",
   "label": "Noisy room",
-  "help": "Bit ignores quieter voices in the background, like a TV or people nearby. Speak up a little to interrupt Bit.",
+  "help": "Pixie ignores quieter voices in the background, like a TV or people nearby. Speak up a little to interrupt Pixie.",
   "kind": {
    "type": "bool"
   },
@@ -462,7 +462,7 @@ enum SettingsFixture {
   "path": "voice.homeCity",
   "section": "Voice",
   "label": "Home city",
-  "help": "Where Bit checks the weather when you don't name a place, e.g. Portland, Oregon.",
+  "help": "Where Pixie checks the weather when you don't name a place, e.g. Portland, Oregon.",
   "kind": {
    "type": "text",
    "optional": true
@@ -478,7 +478,7 @@ enum SettingsFixture {
   "path": "voice.personaPath",
   "section": "Voice",
   "label": "Persona file",
-  "help": "A Markdown file that replaces Bit's personality. Empty uses the built-in one.",
+  "help": "A Markdown file that replaces Pixie's personality. Empty uses the built-in one.",
   "kind": {
    "type": "path",
    "dir": false,
@@ -495,7 +495,7 @@ enum SettingsFixture {
   "path": "agent.enabled",
   "section": "Agent",
   "label": "Delegation",
-  "help": "Let Bit hand work to a Claude Code agent.",
+  "help": "Let Pixie hand work to the coordinator, a Claude Code agent.",
   "kind": {
    "type": "bool"
   },
@@ -510,7 +510,7 @@ enum SettingsFixture {
   "path": "agent.terminal",
   "section": "Agent",
   "label": "Terminal",
-  "help": "Where the agent session opens when you click Bit.",
+  "help": "Where the coordinator's session opens when you click Pixie.",
   "kind": {
    "type": "choice",
    "options": [
@@ -540,7 +540,7 @@ enum SettingsFixture {
  {
   "path": "agent.model",
   "section": "Agent",
-  "label": "Agent model",
+  "label": "Coordinator model",
   "help": "Claude Code's --model for the coordinator. Default lets Claude Code decide.",
   "kind": {
    "type": "choice",
@@ -654,7 +654,7 @@ enum SettingsFixture {
   "path": "agent.narration",
   "section": "Agent",
   "label": "Narration",
-  "help": "Bit says what the agent is doing.",
+  "help": "Pixie says what the coordinator is doing.",
   "kind": {
    "type": "bool"
   },
@@ -704,7 +704,7 @@ enum SettingsFixture {
   "path": "agent.workers.enabled",
   "section": "Workers",
   "label": "Workers",
-  "help": "Let the agent start worker agents in git worktrees.",
+  "help": "Let the coordinator start worker agents in git worktrees.",
   "kind": {
    "type": "bool"
   },
@@ -805,7 +805,7 @@ enum SettingsFixture {
   "path": "agent.sessionHost",
   "section": "Advanced",
   "label": "Session host",
-  "help": "The terminal multiplexer that runs the agent. Supported: Herdr 0.7.5 (protocol 17) or 0.9.x (protocol 22), or tmux 3.2 or newer.",
+  "help": "The terminal multiplexer that runs the coordinator. Supported: Herdr 0.7.5 (protocol 17) or 0.9.x (protocol 22), or tmux 3.2 or newer.",
   "kind": {
    "type": "choice",
    "options": [
@@ -840,7 +840,7 @@ enum SettingsFixture {
   "path": "agent.session",
   "section": "Advanced",
   "label": "Session name",
-  "help": "The agent session's name: a-z, 0-9 and -, not \"default\".",
+  "help": "The coordinator session's name: a-z, 0-9 and -, not \"default\".",
   "kind": {
    "type": "text",
    "optional": false
@@ -908,7 +908,7 @@ enum SettingsFixture {
   "path": "agent.keepPanesOnQuit",
   "section": "Advanced",
   "label": "Keep agent panes on quit",
-  "help": "Leave the agent's terminal panes open when the app quits.",
+  "help": "Leave the coordinator's and workers' terminal panes open when the app quits.",
   "kind": {
    "type": "bool"
   },
@@ -941,7 +941,7 @@ enum SettingsFixture {
   "path": "agent.notifyPerMinute",
   "section": "Advanced",
   "label": "Notifications per minute",
-  "help": "The most agent notifications shown in one minute.",
+  "help": "The most coordinator notifications shown in one minute.",
   "kind": {
    "type": "int",
    "min": 1,

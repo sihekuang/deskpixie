@@ -2,7 +2,7 @@ import CoreGraphics
 import Foundation
 import os
 
-/// What the pixie panel does after a mouse event on Bit.
+/// What the pixie panel does after a mouse event on Pixie.
 public enum PixieGestureAction: Equatable, Sendable {
     case none
     /// The press moved past the slop: start the window drag (`performDrag`).
@@ -15,7 +15,7 @@ public enum PixieGestureAction: Equatable, Sendable {
     case openedTerminal
 }
 
-/// Routes mouse events on Bit (player.js gestures, V-043 / D-449): a single click calls
+/// Routes mouse events on Pixie (player.js gestures, V-043 / D-449): a single click calls
 /// `pixie.click`, a double-click talks, a drag moves the panel. Tracks whether a press or drag
 /// is active for the click-through decision.
 @MainActor

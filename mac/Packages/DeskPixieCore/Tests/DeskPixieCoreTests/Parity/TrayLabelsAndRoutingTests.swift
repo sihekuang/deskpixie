@@ -3,7 +3,7 @@ import XCTest
 @testable import DeskPixieCore
 
 /// V-043 / D-449 / D-494: the whole tray menu as the user reads it, built from a representative
-/// `app.state`; where each id goes; and how gestures on Bit are routed (click → `pixie.click`,
+/// `app.state`; where each id goes; and how gestures on Pixie are routed (click → `pixie.click`,
 /// double-click → talk).
 @MainActor
 final class TrayLabelsAndRoutingTests: XCTestCase {
@@ -30,12 +30,12 @@ final class TrayLabelsAndRoutingTests: XCTestCase {
          "canvasRecent":[{"slug":"q3","title":"Q3 revenue"}],
          "agent":{"enabled":true,"jobs":[{"id":"job_1","label":"Fix the login bug — working, 2 min"},
                                          {"id":"job_2","label":"Write tests — waiting, 10 s"}]},
-         "statusLines":["Agent: ready"],"hotkey":"ctrl+alt+Space"}
+         "statusLines":["Coordinator: ready"],"hotkey":"ctrl+alt+Space"}
         """#.utf8))
         let items = TrayMenu.build(s, localStatusLines: ["Hotkey unavailable: ⌃⌥Space"], micModeAvailable: true)
         XCTAssertEqual(render(items), [
             "Hotkey unavailable: ⌃⌥Space (off)", "---",
-            "Agent: ready (off)", "---",
+            "Coordinator: ready (off)", "---",
             "> State",
             "  [x] idle", "  [ ] listening", "  [ ] thinking", "  [ ] delegating", "  [ ] happy", "  [ ] error",
             "[ ] Simulate talking",
@@ -51,14 +51,14 @@ final class TrayLabelsAndRoutingTests: XCTestCase {
             "  > Recent",
             "    Q3 revenue",
             "  Open pages folder",
-            "> Agent",
+            "> Coordinator",
             "  Fix the login bug — working, 2 min (off)",
             "  Write tests — waiting, 10 s (off)",
             "  > Cancel job",
             "    Fix the login bug — working, 2 min",
             "    Write tests — waiting, 10 s",
-            "  Open agent terminal",
-            "  Restart agent",
+            "  Open coordinator terminal",
+            "  Restart coordinator",
             "---",
             "Mic Mode (Voice Isolation)…",
             "Settings… ⌘,",

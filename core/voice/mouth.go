@@ -2,7 +2,7 @@ package voice
 
 import "math"
 
-// Turns the loudness of Bit's own voice into mouth levels (spec §5 "Mouth"). Fast attack,
+// Turns the loudness of Pixie's own voice into mouth levels (spec §5 "Mouth"). Fast attack,
 // slower release, so the mouth snaps open on syllables and eases shut.
 // Port of ai-mascot crates/voice-core/src/mouth_meter.rs.
 

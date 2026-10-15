@@ -3,7 +3,7 @@ import XCTest
 @testable import DeskPixieCore
 
 /// V-031: the 60 Hz cursor poll's decision (actions.rs `spawn_proximity`), extracted from
-/// PixieController: click-through wherever Bit never draws, never mid-press or mid-drag, and
+/// PixieController: click-through wherever Pixie never draws, never mid-press or mid-drag, and
 /// the proximity fade target.
 final class ClickThroughTests: XCTestCase {
     private func fixture(_ name: String, _ ext: String) throws -> URL {
@@ -16,7 +16,7 @@ final class ClickThroughTests: XCTestCase {
         return HitMask.union(pack: pack, sheet: sheet)
     }
 
-    /// 2×2 cell: only (0,0) is Bit.
+    /// 2×2 cell: only (0,0) is Pixie.
     private let tiny = HitMask(width: 2, height: 2, bits: Data([0b0001]))!
     /// Scale 8: the window is 16×16 points at (100, 200) in desktop space (y down).
     private let window = CGRect(x: 100, y: 200, width: 16, height: 16)
@@ -31,7 +31,7 @@ final class ClickThroughTests: XCTestCase {
         let on = decide(CGPoint(x: 104, y: 204))
         XCTAssertFalse(on.ignoresMouseEvents)
         XCTAssertTrue(on.overBit)
-        XCTAssertEqual(on.opacity, 1, "fully visible while over Bit")
+        XCTAssertEqual(on.opacity, 1, "fully visible while over Pixie")
         let off = decide(CGPoint(x: 112, y: 212))
         XCTAssertTrue(off.ignoresMouseEvents, "transparent pixel of the window")
         XCTAssertFalse(off.overBit)
@@ -75,7 +75,7 @@ final class ClickThroughTests: XCTestCase {
         let mask = try bitMask()
         let s: CGFloat = 8
         let w = CGRect(x: 0, y: 0, width: 32 * s, height: 32 * s)
-        // The lowest body row of any frame, plus bob.px (1) below it, is still Bit.
+        // The lowest body row of any frame, plus bob.px (1) below it, is still Pixie.
         let lowest = try XCTUnwrap((0..<32).reversed().first { y in (0..<32).contains { mask.contains(x: $0, y: y) } })
         let col = try XCTUnwrap((0..<32).first { mask.contains(x: $0, y: lowest) })
         XCTAssertTrue(mask.contains(x: col, y: lowest - 1), "the bob smear continues the body downwards")

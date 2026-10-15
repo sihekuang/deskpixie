@@ -30,9 +30,9 @@ func wantRoute(t *testing.T, got []RouteDelivery, want ...RouteDelivery) {
 
 func TestOpenConversationInjectsWithAPrefix(t *testing.T) {
 	r := NewRouter(4)
-	wantRoute(t, r.Route(true, reply("Tests pass."), 0), InjectDelivery(voice.Notice{Text: "Agent reply: Tests pass."}))
-	wantRoute(t, r.Route(true, NewLine(LineQuestion, "Which branch?"), 0), InjectDelivery(voice.Notice{Text: "Agent question: Which branch?"}))
-	wantRoute(t, r.Route(true, NewLine(LineUnsolicited, "Hi."), 0), InjectDelivery(voice.Notice{Text: "Agent says: Hi."}))
+	wantRoute(t, r.Route(true, reply("Tests pass."), 0), InjectDelivery(voice.Notice{Text: "Coordinator reply: Tests pass."}))
+	wantRoute(t, r.Route(true, NewLine(LineQuestion, "Which branch?"), 0), InjectDelivery(voice.Notice{Text: "Coordinator question: Which branch?"}))
+	wantRoute(t, r.Route(true, NewLine(LineUnsolicited, "Hi."), 0), InjectDelivery(voice.Notice{Text: "Coordinator says: Hi."}))
 }
 
 func TestClosedConversationChimesNotifiesAndOutboxes(t *testing.T) {

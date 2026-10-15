@@ -879,7 +879,7 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 	}
 }
 
-// V-037: each fire unsubscribes once its wait ends, whether Bit said it or not.
+// V-037: each fire unsubscribes once its wait ends, whether Pixie said it or not.
 func TestATimerAlarmUnsubscribesAfterEachFire(t *testing.T) {
 	notes := make(chan string, 4)
 	v := &fakeVoice{open: true, sig: make(chan voice.VoiceSignal, 4)}

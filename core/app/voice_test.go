@@ -59,7 +59,7 @@ func TestATimerNoticeLeftUnsaidAtCloseFallsBackToANotification(t *testing.T) {
 	}
 
 	ch = make(chan voice.VoiceSignal, 8)
-	ch <- voice.VoiceSignal{Kind: voice.SigClosed, Undelivered: []voice.Notice{{Text: "Agent reply: x"}}}
+	ch <- voice.VoiceSignal{Kind: voice.SigClosed, Undelivered: []voice.Notice{{Text: "Coordinator reply: x"}}}
 	if bounced(ch, text, alwaysOpen, time.Hour) {
 		t.Error("said before the close")
 	}
@@ -83,8 +83,8 @@ func TestRegistryNamesAreListedForTheSettingsPage(t *testing.T) {
 func TestSessionConfigComesFromSettingsAndPersona(t *testing.T) {
 	s := settings.Default().Voice
 	s.Model, s.Voice = "gpt-realtime-mini", "cedar"
-	c := SessionConfig(s, "You are Bit.")
-	if c.Model != "gpt-realtime-mini" || c.Voice != "cedar" || c.Instructions != "You are Bit." {
+	c := SessionConfig(s, "You are Pixie.")
+	if c.Model != "gpt-realtime-mini" || c.Voice != "cedar" || c.Instructions != "You are Pixie." {
 		t.Fatalf("%+v", c)
 	}
 	if c.TurnDetection != voice.TurnSemantic {
@@ -116,13 +116,13 @@ func TestSessionConfigComesFromSettingsAndPersona(t *testing.T) {
 }
 
 func TestTheDelegationSectionFollowsThePersona(t *testing.T) {
-	if got := Instructions("You are Bit.", ""); got != "You are Bit." {
+	if got := Instructions("You are Pixie.", ""); got != "You are Pixie." {
 		t.Fatal(got)
 	}
-	if got := Instructions("You are Bit.", "  "); got != "You are Bit." {
+	if got := Instructions("You are Pixie.", "  "); got != "You are Pixie." {
 		t.Fatal(got)
 	}
-	if got := Instructions("You are Bit.", "Delegating:\n- x"); got != "You are Bit.\n\nDelegating:\n- x" {
+	if got := Instructions("You are Pixie.", "Delegating:\n- x"); got != "You are Pixie.\n\nDelegating:\n- x" {
 		t.Fatal(got)
 	}
 }
@@ -255,8 +255,8 @@ func TestAToolErrorIsReportedToTheModelInBand(t *testing.T) {
 
 func alwaysOpen() bool { return true }
 
-// #57: every local tool is named in what Bit keeps and what delegate is not for, so nothing
-// else Bit could reach for competes with delegating.
+// #57: every local tool is named in what Pixie keeps and what delegate is not for, so nothing
+// else Pixie could reach for competes with delegating.
 func TestEveryLocalToolIsOnTheKeepListAndOffTheDelegateList(t *testing.T) {
 	desc := agent.Delegate{}.Description()
 	for _, s := range LocalTools("", silentAlarm{}).Specs() {

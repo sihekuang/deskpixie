@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -9,18 +10,18 @@ import (
 
 // Not a Rust test: guards the embedded persona (Rust include_str!).
 func TestDelegationPersonaIsEmbedded(t *testing.T) {
-	if !strings.HasPrefix(DelegationPersona, "Delegating to the agent:\n") || !strings.Contains(DelegationPersona, `"Agent: allowed" or "Agent: denied"`) {
+	if !strings.HasPrefix(DelegationPersona, "Delegating to the coordinator:\n") || !strings.Contains(DelegationPersona, `"Coordinator: allowed" or "Coordinator: denied"`) {
 		t.Fatal(DelegationPersona)
 	}
 }
 
-func TestTheDelegationPersonaUsesTheAgentAsBitsMemory(t *testing.T) {
-	if !strings.Contains(DelegationPersona, "call recall") || !strings.Contains(DelegationPersona, "Recent work with the agent") {
+func TestTheDelegationPersonaUsesTheAgentAsPixiesMemory(t *testing.T) {
+	if !strings.Contains(DelegationPersona, "call recall") || !strings.Contains(DelegationPersona, "Recent work with the coordinator") {
 		t.Fatal(DelegationPersona)
 	}
 }
 
-// #57: Bit delegates by default; only a short, explicit list stays with Bit.
+// #57: Pixie delegates by default; only a short, explicit list stays with Pixie.
 func TestTheDelegationPersonaDelegatesByDefault(t *testing.T) {
 	for _, phrase := range []string{
 		"Delegating is your default",
@@ -39,7 +40,7 @@ func TestTheDelegationPersonaDelegatesByDefault(t *testing.T) {
 	}
 }
 
-// #57: lines that let Bit hedge, ask first or keep work must not come back.
+// #57: lines that let Pixie hedge, ask first or keep work must not come back.
 func TestTheDelegationGuidanceHasNoHedgingLines(t *testing.T) {
 	texts := map[string]string{"persona": voice.DefaultPersona(), "delegation": DelegationPersona, "delegate": Delegate{}.Description()}
 	for name, text := range texts {
@@ -71,7 +72,7 @@ func TestTheDelegateToolSaysItIsTheDefault(t *testing.T) {
 	}
 }
 
-func TestBitsPersonaHandsOffByDefault(t *testing.T) {
+func TestPixiesPersonaHandsOffByDefault(t *testing.T) {
 	p := voice.DefaultPersona()
 	if !strings.Contains(p, "If you have a delegate tool, handing off is your default") ||
 		!strings.Contains(p, "don't ask whether to hand it off") {
@@ -88,11 +89,54 @@ func TestTheRecentWorkBlockSendsNewRequestsToDelegate(t *testing.T) {
 	}
 }
 
-// #71: the app's hand-off notices are explained to Bit.
+// #71: the app's hand-off notices are explained to Pixie.
 func TestTheDelegationPersonaExplainsHandOffNotices(t *testing.T) {
 	for _, prefix := range []string{voice.HandedOffPrefix, voice.CantHandOffPrefix} {
 		if !strings.Contains(DelegationPersona, `Lines starting "`+strings.TrimSuffix(prefix, " ")+`"`) {
 			t.Errorf("the delegation persona doesn't explain %q lines", prefix)
 		}
+	}
+}
+
+// #76: the voice is Pixie and the agent it hands work to is the coordinator, named the same
+// way everywhere, so "hand it to the coordinator" means delegate and Pixie never thinks it is
+// the coordinator.
+func TestPixiesPromptsNameTheCoordinator(t *testing.T) {
+	persona, delegation := voice.DefaultPersona(), DelegationPersona
+	if !strings.HasPrefix(persona, "You are Pixie,") {
+		t.Errorf("the persona doesn't name Pixie: %q", persona[:min(60, len(persona))])
+	}
+	for name, text := range map[string]string{"persona": persona, "delegation": delegation} {
+		if !strings.Contains(text, "the coordinator") {
+			t.Errorf("%s doesn't name the coordinator", name)
+		}
+		for _, bad := range []string{"bigger brain", "You are Bit", "Bit's"} {
+			if strings.Contains(text, bad) {
+				t.Errorf("%s still says %q", name, bad)
+			}
+		}
+		if regexp.MustCompile(`\bBit\b`).MatchString(text) {
+			t.Errorf("%s still calls Pixie Bit", name)
+		}
+		if regexp.MustCompile(`"Agent[ :]`).MatchString(text) {
+			t.Errorf("%s still explains an old \"Agent ...\" line", name)
+		}
+	}
+	for _, phrase := range []string{
+		"The coordinator is a capable agent working in the background.",
+		"You are not the coordinator",
+		"when the user says to hand something to the coordinator, or to ask, tell or give it to the coordinator (or the agent, or Claude), call delegate.",
+	} {
+		if !strings.Contains(delegation, phrase) {
+			t.Errorf("the delegation rules don't say %q", phrase)
+		}
+	}
+	for _, d := range []string{Delegate{}.Description(), Jobs{}.Description(), AnswerJob{}.Description(), Recall{}.Description()} {
+		if !strings.Contains(d, "coordinator") || strings.Contains(d, "the agent") || strings.Contains(d, "bigger brain") {
+			t.Errorf("a tool description doesn't name the coordinator: %q", d)
+		}
+	}
+	if !strings.HasPrefix(Delegate{}.Description(), "Hand a task to the coordinator") {
+		t.Error(Delegate{}.Description())
 	}
 }

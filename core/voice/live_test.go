@@ -392,7 +392,7 @@ func liveProviders() []liveProvider {
 	}
 }
 
-const liveInstructions = "You are Bit, a friendly voice assistant. Answer in one short sentence. " +
+const liveInstructions = "You are Pixie, a friendly voice assistant. Answer in one short sentence. " +
 	"Use the calculate tool for arithmetic."
 
 func TestLiveVoiceProviders(t *testing.T) {
@@ -443,7 +443,7 @@ func TestLiveVoiceProviders(t *testing.T) {
 					r.rt.Hotkey()
 					return
 				}
-				r.say(question) // talk over Bit
+				r.say(question) // talk over Pixie
 				if p.name == openailive.Name {
 					// GPT-Live owns barge-in: it yields, then the user's turn starts.
 					started := r.liveSpy.count(voice.EvSpeechStarted)

@@ -101,7 +101,7 @@ func TestTheAgentGetsTheVoiceLoopAndAddsItsToolsAndPersona(t *testing.T) {
 	if len(tools) != 1 || tools[0].Name() != "delegate" || persona != "Delegating:\n- hand it off" {
 		t.Fatal(tools, persona)
 	}
-	if got := Instructions("You are Bit.", persona); got != "You are Bit.\n\nDelegating:\n- hand it off" {
+	if got := Instructions("You are Pixie.", persona); got != "You are Pixie.\n\nDelegating:\n- hand it off" {
 		t.Fatal(got)
 	}
 }
@@ -121,9 +121,9 @@ func TestTheAgentTrayRowsAndStatusLineReachAppState(t *testing.T) {
 		t.Fatal(s.StatusLines)
 	}
 	f.mu.Lock()
-	f.tray.Status = "Agent: herdr not found"
+	f.tray.Status = "Coordinator: herdr not found"
 	f.mu.Unlock()
-	if s := h.state(); !slices.Contains(s.StatusLines, "Agent: herdr not found") || slices.Contains(s.StatusLines, IntegrationHint) {
+	if s := h.state(); !slices.Contains(s.StatusLines, "Coordinator: herdr not found") || slices.Contains(s.StatusLines, IntegrationHint) {
 		t.Fatal("the runtime status wins over the hint:", s.StatusLines)
 	}
 }
@@ -158,9 +158,9 @@ func TestAgentHooksCelebrateFlashRefreshAndNotify(t *testing.T) {
 	h.waitFor("state", func(e event) bool { return e["state"] == "error" }, time.Second)
 	f.hooks.RefreshTray()
 	h.waitFor("tray", nil, time.Second)
-	f.hooks.Notify("Bit", "Agent reply: done.")
+	f.hooks.Notify("Pixie", "Coordinator reply: done.")
 	n := h.waitFor("notify", nil, time.Second)
-	if n["title"] != "Bit" || n["body"] != "Agent reply: done." {
+	if n["title"] != "Pixie" || n["body"] != "Coordinator reply: done." {
 		t.Fatal(n)
 	}
 	if _, ok := n["sound"]; ok {

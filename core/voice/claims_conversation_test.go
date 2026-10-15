@@ -21,7 +21,7 @@ func newClaimConv(handOff, checkClaims bool) *Conversation {
 	return c
 }
 
-const timerFix = "Agent: correction: no timer was set or changed. Call timer now, or ask the user how long."
+const timerFix = "Coordinator: correction: no timer was set or changed. Call timer now, or ask the user how long."
 
 func TestClaimATimerClaimWithNoTimerCallIsCorrectedOnce(t *testing.T) {
 	c := newClaimConv(true, true)
@@ -37,7 +37,7 @@ func TestClaimATimerClaimWithNoTimerCallIsCorrectedOnce(t *testing.T) {
 	if len(handOffs(fx)) != 0 {
 		t.Fatal("a timer claim is not handed off")
 	}
-	// Bit's reply to the correction is not checked again.
+	// Pixie's reply to the correction is not checked again.
 	fx = reply(c, "Oops, I've set a timer now.", ms(t0(), 6000))
 	fx = append(fx, ticks(c, ms(t0(), 6000), 5*time.Second)...)
 	if got := injects(fx); len(got) != 0 {
@@ -75,7 +75,7 @@ func TestClaimWithoutAUserTranscriptStillCorrects(t *testing.T) {
 	model(c, evSpeechStopped, ms(t0(), 100))
 	fx := reply(c, "I've paused the music.", ms(t0(), 500))
 	fx = append(fx, ticks(c, ms(t0(), 500), 5*time.Second)...)
-	want := "Agent: correction: the music wasn't changed. Call media now, or tell the user it didn't happen."
+	want := "Coordinator: correction: the music wasn't changed. Call media now, or tell the user it didn't happen."
 	if got := injects(fx); len(got) != 1 || got[0] != want {
 		t.Fatalf("injects: %q", got)
 	}
@@ -90,7 +90,7 @@ func TestClaimADelegateClaimDelegatesQuietly(t *testing.T) {
 	if len(h) != 1 || h[0].Text != "Can you fix the failing test in deskpixie?" || !h[0].Claim {
 		t.Fatalf("hand-offs: %+v", h)
 	}
-	// Bit already said it: a successful hand-off says nothing more.
+	// Pixie already said it: a successful hand-off says nothing more.
 	fx = c.Step(HandOffDoneInput(Notice{}), ms(t0(), 6000))
 	fx = append(fx, ticks(c, ms(t0(), 6000), time.Second)...)
 	if len(injects(fx)) != 0 || len(handOffs(fx)) != 0 {
@@ -164,7 +164,7 @@ func TestClaimNotForBitsReplyToANotice(t *testing.T) {
 	fx = reply(c, "Your tea timer is done, so I've stopped the timer.", ms(t0(), 500))
 	fx = append(fx, ticks(c, ms(t0(), 500), 5*time.Second)...)
 	if len(injects(fx)) != 0 {
-		t.Fatal("corrected Bit's reply to a notice")
+		t.Fatal("corrected Pixie's reply to a notice")
 	}
 }
 
@@ -176,7 +176,7 @@ func TestClaimALateToolCallWithdrawsTheWaitingCorrection(t *testing.T) {
 	reply(c, "Setting a timer for ten minutes.", ms(t0(), 500))
 	var fx []Effect
 	for at := ms(t0(), 500); at.Before(ms(t0(), 3000)); at = at.Add(100 * time.Millisecond) {
-		fx = append(fx, tick(c, false, at)...) // Bit's words are still playing
+		fx = append(fx, tick(c, false, at)...) // Pixie's words are still playing
 	}
 	if len(injects(fx)) != 0 {
 		t.Fatal("injected over playback")
@@ -264,7 +264,7 @@ func TestRuntimeDelegateClaimDelegatesWithoutANotice(t *testing.T) {
 	}
 	time.Sleep(300 * time.Millisecond)
 	if n := len(s.commands(CmdInject)); n != 0 {
-		t.Fatalf("Bit already said it; %d injects", n)
+		t.Fatalf("Pixie already said it; %d injects", n)
 	}
 }
 

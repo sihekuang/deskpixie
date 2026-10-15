@@ -1,6 +1,6 @@
 package voice
 
-// Notice is a line the app wants Bit to say something about ("Agent reply: ...").
+// Notice is a line the app wants Pixie to say something about ("Coordinator reply: ...").
 // Port of voice-core types.rs `Notice`.
 type Notice struct {
 	Text string

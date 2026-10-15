@@ -374,32 +374,32 @@ func TestConversation(t *testing.T) {
 		{"inject_while_quietly_listening_is_sent_at_once", func(t *testing.T) {
 			now := t0()
 			c := listening(now)
-			eq(t, c.Step(InjectInput(notice("Agent reply: done")), now), injectFx("Agent reply: done"), pixie(StateThinking))
+			eq(t, c.Step(InjectInput(notice("Coordinator reply: done")), now), injectFx("Coordinator reply: done"), pixie(StateThinking))
 			phase(t, c, PhaseThinking)
 		}},
 		{"inject_waits_while_the_user_talks", func(t *testing.T) {
 			now := t0()
 			c := listening(now)
 			model(c, evSpeechStarted, now)
-			empty(t, c.Step(InjectInput(notice("Agent reply: x")), now))
+			empty(t, c.Step(InjectInput(notice("Coordinator reply: x")), now))
 			empty(t, tick(c, true, ms(now, 100)), "timer disarmed: someone is talking")
 			model(c, evSpeechStopped, ms(now, 200))
 			model(c, evResponseCreated, ms(now, 300))
 			model(c, evResponseDone, ms(now, 400))
 			// Back to listening with the timer armed: the notice goes out on the next tick.
-			eq(t, tick(c, true, ms(now, 500)), injectFx("Agent reply: x"), pixie(StateThinking))
+			eq(t, tick(c, true, ms(now, 500)), injectFx("Coordinator reply: x"), pixie(StateThinking))
 		}},
 		{"inject_is_never_sent_mid_speech", func(t *testing.T) {
 			now := t0()
 			c := speaking(now)
-			empty(t, c.Step(InjectInput(notice("Agent reply: y")), now))
+			empty(t, c.Step(InjectInput(notice("Coordinator reply: y")), now))
 			empty(t, tick(c, false, ms(now, 100)), "still playing")
 			model(c, evResponseDone, ms(now, 200))
-			if contains(tick(c, false, ms(now, 300)), injectFx("Agent reply: y")) {
+			if contains(tick(c, false, ms(now, 300)), injectFx("Coordinator reply: y")) {
 				t.Fatal("injected mid speech")
 			}
 			// Playback drains: Speaking -> Listening, and the notice goes out in the same tick.
-			eq(t, tick(c, true, ms(now, 400)), pixie(StateListening), injectFx("Agent reply: y"), pixie(StateThinking))
+			eq(t, tick(c, true, ms(now, 400)), pixie(StateListening), injectFx("Coordinator reply: y"), pixie(StateThinking))
 		}},
 		{"inject_waits_for_running_tools", func(t *testing.T) {
 			now := t0()

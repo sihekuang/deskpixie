@@ -1,6 +1,6 @@
 package agent
 
-// Bit's memory comes from the coordinator side: Bit keeps no record of its own. Each voice
+// Pixie's memory comes from the coordinator side: Pixie keeps no record of its own. Each voice
 // session (every connect, any provider) gets a compact "Recent work with the agent" block built
 // from the job table (task, status, the coordinator's last reply or progress) and the
 // coordinator's per-turn memories (memories.go), and the `recall` tool asks the coordinator
@@ -38,11 +38,11 @@ const (
 )
 
 const (
-	memoryHeader = "Recent work with the agent (from its job records, oldest first; times are local). " +
+	memoryHeader = "Recent work with the coordinator (from its job records, oldest first; times are local). " +
 		"Use it as background so the user needn't repeat themselves; don't recite it unless asked. " +
 		"New requests and follow-ups still go to delegate. " +
 		"For anything else about earlier talks, call recall:"
-	notesHeader = "Recent work with the agent, in its own notes of its latest turns (oldest first). " +
+	notesHeader = "Recent work with the coordinator, in its own notes of its latest turns (oldest first). " +
 		"Background only: new requests and follow-ups still go to delegate:"
 )
 
@@ -191,21 +191,21 @@ func (h *AgentHandle) recallContext() string {
 }
 
 // recallContext tells the coordinator a recall is a question about the past, not work.
-const recallContext = "This is a context question from Bit, not a task: answer it from what you remember of " +
+const recallContext = "This is a context question from Pixie, not a task: answer it from what you remember of " +
 	"earlier requests and conversations with the user (and your saved memories below or job history if needed). Don't " +
 	"start any work. Reply at once with status done, in one or two sentences; if you don't know, say so."
 
-// Recall is the `recall` tool: Bit asks the coordinator about earlier talks. It goes the
-// delegate path (a job marked with RecallPrefix) and its answer comes back as an Agent reply.
+// Recall is the `recall` tool: Pixie asks the coordinator about earlier talks. It goes the
+// delegate path (a job marked with RecallPrefix) and its answer comes back as a Coordinator reply.
 type Recall struct{ H *AgentHandle }
 
 func (Recall) Name() string { return "recall" }
 
 func (Recall) Description() string {
-	return "Ask the agent what it remembers of earlier conversations and work with the user, when the user " +
+	return "Ask the coordinator what it remembers of earlier conversations and work with the user, when the user " +
 		"refers to something from before (\"that thing we talked about\", \"the earlier report\") that the " +
 		"conversation and your recent-work notes don't cover. Not for new work: use delegate. Returns at once; " +
-		"the answer arrives as an \"Agent reply:\" line."
+		"the answer arrives as an \"Coordinator reply:\" line."
 }
 
 func (Recall) Parameters() json.RawMessage {

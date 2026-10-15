@@ -2,7 +2,7 @@ import CoreGraphics
 import XCTest
 @testable import DeskPixieCore
 
-/// Where the updates bubble sits beside Bit. Desktop coordinates (top-left origin, y down).
+/// Where the updates bubble sits beside Pixie. Desktop coordinates (top-left origin, y down).
 final class BubblePlacementTests: XCTestCase {
     private let bubble = CGSize(width: 240, height: 120)
     private let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
@@ -29,7 +29,7 @@ final class BubblePlacementTests: XCTestCase {
         XCTAssertLessThanOrEqual(f.maxY, screen.maxY)
         let (top, _) = BubblePlacement.frame(pixie: CGRect(x: 100, y: -30, width: 64, height: 64),
                                              bubble: bubble, screen: screen)
-        XCTAssertEqual(top.minY, 0, "Bit partly above the top edge: the bubble stays on screen")
+        XCTAssertEqual(top.minY, 0, "Pixie partly above the top edge: the bubble stays on screen")
     }
 
     func testWorksOnASecondScreenWithAnOffsetOrigin() {
@@ -41,11 +41,11 @@ final class BubblePlacementTests: XCTestCase {
     }
 
     // C2: the side comes from the open bubble's width, so the badge and the bubble that opens
-    // from it sit on the same side of Bit and the bubble covers the badge.
+    // from it sit on the same side of Pixie and the bubble covers the badge.
 
     private let badge = CGSize(width: 28, height: 22)
 
-    /// Bit at `Layout.defaultPosition`: 40 pt from the right edge.
+    /// Pixie at `Layout.defaultPosition`: 40 pt from the right edge.
     private var bitAtDefault: CGRect {
         let size = CGSize(width: 64, height: 64)
         let p = Layout.defaultPosition(primary: Layout.Area(x: 0, y: 0, w: screen.width, h: screen.height), size: size)
@@ -59,7 +59,7 @@ final class BubblePlacementTests: XCTestCase {
         XCTAssertEqual(badgeSide, .left)
         XCTAssertEqual(bubbleSide, .left)
         XCTAssertTrue(f.contains(b), "the open bubble covers the badge it opened from: \(f) \(b)")
-        XCTAssertEqual(b.maxX, bitAtDefault.minX - 8, "the badge sits next to Bit")
+        XCTAssertEqual(b.maxX, bitAtDefault.minX - 8, "the badge sits next to Pixie")
         XCTAssertFalse(b.intersects(bitAtDefault))
     }
 

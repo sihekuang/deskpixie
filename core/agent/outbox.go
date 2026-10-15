@@ -101,7 +101,7 @@ func (o *Outbox) Replay(tokenPending func(string) bool) (*Notice, []string) {
 	if len(items) == 0 {
 		return nil, records
 	}
-	return &Notice{Text: "Agent replies while you were away:\n" + strings.Join(items, "\n")}, records
+	return &Notice{Text: "Coordinator replies while you were away:\n" + strings.Join(items, "\n")}, records
 }
 
 // MarkSeen (the updates bubble was looked at) marks those undelivered lines delivered, except

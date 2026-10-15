@@ -76,17 +76,17 @@ func UpdateQuietMs(n settings.NotificationSettings) agent.Millis {
 func HostProblem(err error) string {
 	var he agent.HostError
 	if errors.As(err, &he) && he.Kind == agent.HostNotFound {
-		return "Agent: " + he.HostName() + " not found"
+		return "Coordinator: " + he.HostName() + " not found"
 	}
-	return "Agent: invalid settings (see log)"
+	return "Coordinator: invalid settings (see log)"
 }
 
 // TerminalFailureStatus is the tray status line for an OpenTerminal failure.
 func TerminalFailureStatus(err string) string {
 	if what, _, ok := strings.Cut(err, ":"); ok && strings.HasPrefix(what, "could not open ") {
-		return "Agent: " + what
+		return "Coordinator: " + what
 	}
-	return "Agent: " + err
+	return "Coordinator: " + err
 }
 
 // Config is what Build needs. The zero test seams pick the real adapters.
@@ -194,7 +194,7 @@ func Build(c Config) *Agent {
 	// tmux detects no agent status: Claude agents report theirs through hooks.
 	if err := InstallFor(paths, s.Port, ws.Root, s.SessionHost == tmux.Name); err != nil {
 		log.Printf("agent: invalid settings: %v", err)
-		setProblem("Agent: invalid settings (see log)")
+		setProblem("Coordinator: invalid settings (see log)")
 	}
 	// MCP configs left by an earlier run hold its (now dead) tokens.
 	agentfs.ClearMcpDir(paths.McpDir)
@@ -216,7 +216,7 @@ func Build(c Config) *Agent {
 		session = h
 	} else {
 		log.Printf("agent: unknown sessionHost %q", s.SessionHost)
-		setProblem("Agent: invalid settings (see log)")
+		setProblem("Coordinator: invalid settings (see log)")
 		session = Unavailable{Err: agent.HostError{Kind: agent.HostOther, Detail: "unknown sessionHost " + s.SessionHost}}
 	}
 	a.session = session
@@ -245,7 +245,7 @@ func Build(c Config) *Agent {
 	if workersOn {
 		if err := WriteCoordinatorMcp(paths, s.Port, coordinatorToken); err != nil {
 			log.Printf("agent: cannot write the coordinator's MCP config: %v", err)
-			setProblem("Agent: invalid settings (see log)")
+			setProblem("Coordinator: invalid settings (see log)")
 		}
 	}
 	model := ""
@@ -279,7 +279,7 @@ func Build(c Config) *Agent {
 	ln, err := c.Listen(s.Port)
 	if err != nil {
 		log.Printf("agent: cannot listen on 127.0.0.1:%d: %v", s.Port, err)
-		setProblem("Agent: hook port busy")
+		setProblem("Coordinator: hook port busy")
 		ln = nil
 	}
 	cfg := agent.RuntimeConfig{
@@ -324,10 +324,10 @@ func (a *Agent) Addr() string { return a.addr }
 func (a *Agent) Tools() []voice.Tool { return DelegationTools(a.handle) }
 func (a *Agent) Persona() string     { return agent.DelegationPersona }
 
-// Facts is Bit's memory for each voice session: the coordinator's recent jobs (app.AgentFacts).
+// Facts is Pixie's memory for each voice session: the coordinator's recent jobs (app.AgentFacts).
 func (a *Agent) Facts() string { return a.handle.Facts() }
 
-// Tray is Tray ▸ Agent: the open jobs, the runtime's status line and the standing hint.
+// Tray is Tray ▸ Coordinator: the open jobs, the runtime's status line and the standing hint.
 func (a *Agent) Tray() app.AgentTray {
 	var rows []app.JobRow
 	for _, j := range a.handle.OpenJobs() {
@@ -367,7 +367,7 @@ func (s statusSink) SetStatus(line string) {
 	s.a.setStatus(line)
 }
 
-// Menu runs Tray ▸ Agent items; false for ids that are not the agent's.
+// Menu runs Tray ▸ Coordinator items; false for ids that are not the agent's.
 func (a *Agent) Menu(id string) bool {
 	switch id {
 	case "agent:open":
@@ -386,7 +386,7 @@ func (a *Agent) Menu(id string) bool {
 	return true
 }
 
-// OpenTerminal is a single click on Bit / Tray ▸ Open agent terminal (async). A failure
+// OpenTerminal is a single click on Pixie / Tray ▸ Open coordinator terminal (async). A failure
 // becomes the tray status line.
 func (a *Agent) OpenTerminal() {
 	if a.ctx.Err() != nil {
@@ -424,7 +424,7 @@ func (a *Agent) FocusJob(job, worker string) {
 }
 
 // AttachVoice connects the voice loop once it exists: injections go to it, and its signals
-// come here. UserSaid heard while Bit speaks, or just after, is dropped as possible echo (R-j).
+// come here. UserSaid heard while Pixie speaks, or just after, is dropped as possible echo (R-j).
 func (a *Agent) AttachVoice(v app.AgentVoice) {
 	a.link.attach(v)
 	signals := v.Subscribe()
@@ -449,7 +449,7 @@ func (a *Agent) AttachVoice(v app.AgentVoice) {
 				if admit {
 					a.toAgent(sig)
 				} else {
-					log.Print("agent: ignored user words heard while Bit was speaking")
+					log.Print("agent: ignored user words heard while Pixie was speaking")
 				}
 			}
 		}

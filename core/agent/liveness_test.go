@@ -56,7 +56,7 @@ func TestAWorkingJobWithNothingBehindItIsNudgedThenFailed(t *testing.T) {
 	wantJobStatus(t, c, 1, JobFailed)
 	wantContains(t, fx, eCue(CueError))
 	wantContains(t, fx, eHold(false))
-	if !spoke(visible(fx), "Agent: a job stopped without finishing: summarise the issues") {
+	if !spoke(visible(fx), "Coordinator: a job stopped without finishing: summarise the issues") {
 		t.Fatalf("not said: %+v", fx)
 	}
 }
@@ -131,7 +131,7 @@ func TestAnUnansweredQuestionExpiresAfterThirtyMinutes(t *testing.T) {
 	wantJobStatus(t, c, 1, JobQuestion)
 	fx := tick(c, T0+QuestionExpiryMs)
 	wantJobStatus(t, c, 1, JobFailed)
-	if !spoke(visible(fx), "Agent: closed a question you didn't answer: summarise the issues") {
+	if !spoke(visible(fx), "Coordinator: closed a question you didn't answer: summarise the issues") {
 		t.Fatalf("not said: %+v", fx)
 	}
 	if !promptWith(fx, questionExpiredNote) {

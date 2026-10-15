@@ -31,7 +31,7 @@ final class EngineCoordinator {
     private lazy var canvas = CanvasWindowController(engine: engine, worker: worker)
 
     private(set) var pixie: PixieController?
-    /// The updates bubble beside Bit, and the presence that holds its pops (both once Bit is up).
+    /// The updates bubble beside Pixie, and the presence that holds its pops (both once Pixie is up).
     private var bubble: UpdatesBubbleController?
     private var presence: PresenceMonitor?
     /// The combo the Carbon hotkey is bound to right now (nil = none).
@@ -184,7 +184,7 @@ final class EngineCoordinator {
 
     // MARK: Actions
 
-    /// Same call as the ⌃⌥Space hotkey and a double-click on Bit. If audio failed to start
+    /// Same call as the ⌃⌥Space hotkey and a double-click on Pixie. If audio failed to start
     /// (e.g. mic permission was denied at launch and granted since), retry it first, so the
     /// conversation does not open a session and wait out the mic timeout.
     func talk() {
@@ -439,8 +439,8 @@ final class EngineCoordinator {
         presence?.awayAfterMins = s.awayAfterMins
     }
 
-    /// Creates the updates bubble beside Bit and the presence monitor. Away/back goes to the
-    /// bubble (held pops) and to the core (`presence.set`: no chime, no conversation by Bit).
+    /// Creates the updates bubble beside Pixie and the presence monitor. Away/back goes to the
+    /// bubble (held pops) and to the core (`presence.set`: no chime, no conversation by Pixie).
     private func startBubble(pixie m: PixieController, settings: BubbleSettingsValues) {
         let b = UpdatesBubbleController(engine: engine, worker: worker, pixie: m)
         b.onTalk = { [weak self] in self?.talk() }

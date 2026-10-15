@@ -2,7 +2,7 @@ import AppKit
 import XCTest
 @testable import DeskPixieCore
 
-/// The menu bar item is Bit's face (idle frame 0 plus the closed mouth) as an 18 pt template
+/// The menu bar item is Pixie's face (idle frame 0 plus the closed mouth) as an 18 pt template
 /// image, so macOS tints it for a light or dark menu bar. `sparkles` only when loading fails.
 @MainActor
 final class MenuBarIconTests: XCTestCase {
@@ -34,7 +34,7 @@ final class MenuBarIconTests: XCTestCase {
         XCTAssertLessThanOrEqual(mask.width, pack.cellWidth)
         XCTAssertLessThanOrEqual(mask.height, pack.cellHeight)
         XCTAssertTrue(a.allSatisfy { $0.allSatisfy { $0 == 0 || $0 == 255 } }, "pure on/off pixels (template)")
-        // Trimmed to Bit: every edge row and column has a pixel.
+        // Trimmed to Pixie: every edge row and column has a pixel.
         XCTAssertTrue(a.first!.contains(255))
         XCTAssertTrue(a.last!.contains(255))
         XCTAssertTrue(a.contains { $0.first == 255 })

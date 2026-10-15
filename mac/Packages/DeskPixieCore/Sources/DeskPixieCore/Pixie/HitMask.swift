@@ -1,7 +1,7 @@
 import CoreGraphics
 import Foundation
 
-/// Which pixels of a cell belong to Bit in *any* frame (ai-mascot `mascot-pack` hit_mask.rs):
+/// Which pixels of a cell belong to Pixie in *any* frame (ai-mascot `mascot-pack` hit_mask.rs):
 /// the union of every body frame, the mouth at every level and face offset, and the body
 /// smeared down by `bob.px`. The cursor poll makes the panel clickable only over these pixels.
 ///
@@ -32,7 +32,7 @@ public struct HitMask: Equatable, Sendable {
         return bits[i / 8] & (1 << UInt8(i % 8)) != 0
     }
 
-    /// packs.rs `hit_at`: whether the cursor is over one of Bit's pixels. `window` is the
+    /// packs.rs `hit_at`: whether the cursor is over one of Pixie's pixels. `window` is the
     /// pixie window, which shows one cell scaled to fill it (desktop coordinates, y down).
     public func hit(cursor: CGPoint, window: CGRect) -> Bool {
         ProximityFade.cursorCell(cursor, rect: window, cell: (width, height)).map { contains(x: $0.x, y: $0.y) } ?? false

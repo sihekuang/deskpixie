@@ -117,7 +117,7 @@ func eventually(t *testing.T, what string, cond func() bool) {
 	}
 }
 
-var testSessionCfg = SessionConfig{Model: "gpt-realtime", Voice: "marin", Instructions: "be Bit"}
+var testSessionCfg = SessionConfig{Model: "gpt-realtime", Voice: "marin", Instructions: "be Pixie"}
 
 func newTestRuntime(t *testing.T, key string) (*Runtime, *fakeModel, *uiLog) {
 	t.Helper()
@@ -353,9 +353,9 @@ func TestRuntimeMicFailedShowsError(t *testing.T) {
 func TestRuntimeTranscriptIsEmitted(t *testing.T) {
 	r, m, ui := newTestRuntime(t, "sk-test")
 	startListening(t, r, m, ui)
-	m.sess.events <- Event{Kind: EvTranscript, Role: "user", Text: "hi Bit"}
+	m.sess.events <- Event{Kind: EvTranscript, Role: "user", Text: "hi Pixie"}
 	eventually(t, "transcript", func() bool {
-		return ui.has(UIEvent{Kind: "transcript", Role: "user", Text: "hi Bit"})
+		return ui.has(UIEvent{Kind: "transcript", Role: "user", Text: "hi Pixie"})
 	})
 }
 

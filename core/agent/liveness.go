@@ -79,7 +79,7 @@ func (c *AgentController) tickLiveness(now Millis, fx *[]Effect) {
 			case w.nudgedAt != 0 && satSub(now, w.since) >= UnbackedFailMs:
 				delete(c.watch, j.ID)
 				c.inbox.DropQueued(j.ID)
-				c.failJobSaying(j.ID, "nothing was running for it", "Agent: a job stopped without finishing: "+short(j.Task), now, fx)
+				c.failJobSaying(j.ID, "nothing was running for it", "Coordinator: a job stopped without finishing: "+short(j.Task), now, fx)
 				changed = true
 			}
 		}
@@ -112,7 +112,7 @@ func (c *AgentController) expireQuestion(j Job, now Millis, fx *[]Effect) {
 	c.forgetUpdates(j.ID)
 	c.stopJobWorkers(j.ID, fx)
 	c.saveJob(j.ID, fx)
-	c.deliver(NewJobLine(LineInfo, "Agent: closed a question you didn't answer: "+short(j.Task), j.ID), now, fx)
+	c.deliver(NewJobLine(LineInfo, "Coordinator: closed a question you didn't answer: "+short(j.Task), j.ID), now, fx)
 	c.inbox.DropQueued(j.ID)
 	c.inbox.Push(MessageForJob(j.ID, questionExpiredNote))
 	c.flush(now, fx)

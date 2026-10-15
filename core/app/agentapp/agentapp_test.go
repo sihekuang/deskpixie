@@ -13,9 +13,9 @@ import (
 
 func TestTerminalFailuresNameTheTerminal(t *testing.T) {
 	for in, want := range map[string]string{
-		"could not open Warp: no app": "Agent: could not open Warp",
-		"could not open iTerm: x":     "Agent: could not open iTerm",
-		"herdr not found":             "Agent: herdr not found",
+		"could not open Warp: no app": "Coordinator: could not open Warp",
+		"could not open iTerm: x":     "Coordinator: could not open iTerm",
+		"herdr not found":             "Coordinator: herdr not found",
 	} {
 		if got := TerminalFailureStatus(in); got != want {
 			t.Errorf("%q: %q", in, got)
@@ -66,19 +66,19 @@ func TestThePermissionTimeoutStaysInsideTheHookLimit(t *testing.T) {
 }
 
 func TestAHostThatCannotBeBuiltIsASetupProblem(t *testing.T) {
-	if got := HostProblem(agent.HostError{Kind: agent.HostNotFound}); got != "Agent: herdr not found" {
+	if got := HostProblem(agent.HostError{Kind: agent.HostNotFound}); got != "Coordinator: herdr not found" {
 		t.Fatal(got)
 	}
-	if got := HostProblem(agent.HostError{Kind: agent.HostNotFound, Host: "tmux"}); got != "Agent: tmux not found" {
+	if got := HostProblem(agent.HostError{Kind: agent.HostNotFound, Host: "tmux"}); got != "Coordinator: tmux not found" {
 		t.Fatal(got)
 	}
-	if got := HostProblem(agent.HostError{Kind: agent.HostOther, Detail: "bad session"}); got != "Agent: invalid settings (see log)" {
+	if got := HostProblem(agent.HostError{Kind: agent.HostOther, Detail: "bad session"}); got != "Coordinator: invalid settings (see log)" {
 		t.Fatal(got)
 	}
 }
 
 func TestTheIntegrationHintIsTheRuledText(t *testing.T) {
-	if IntegrationHint != "Agent: run `herdr integration install claude`" {
+	if IntegrationHint != "Coordinator: run `herdr integration install claude`" {
 		t.Fatal(IntegrationHint)
 	}
 }

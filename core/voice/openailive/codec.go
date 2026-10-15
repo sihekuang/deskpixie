@@ -14,7 +14,7 @@ import (
 
 // Turn timing (spec §3.1). GPT-Live sends no turn events, so the codec derives them.
 const (
-	// assistantQuiet: output quiet this long (and no backend work outstanding) ends Bit's reply.
+	// assistantQuiet: output quiet this long (and no backend work outstanding) ends Pixie's reply.
 	assistantQuiet = 700 * time.Millisecond
 	// userQuiet: no input transcript for this long ends the user's turn (transcripts lag audio).
 	userQuiet = 800 * time.Millisecond
@@ -35,7 +35,7 @@ type codec struct {
 
 	pendingByte []byte // odd trailing byte of the previous output delta
 
-	// Bit's reply (the assistant span).
+	// Pixie's reply (the assistant span).
 	aOpen     bool
 	aLastLoud time.Time
 	aEndMs    int64 // end_ms of the last forwarded delta; -1 = none
@@ -47,11 +47,11 @@ type codec struct {
 
 	// The user's turn (the user span).
 	uOpen     bool
-	uDeferred bool // opened while Bit talked: SpeechStarted waits for Bit to stop
+	uDeferred bool // opened while Pixie talked: SpeechStarted waits for Pixie to stop
 	uLast     time.Time
 	uText     strings.Builder
 
-	// Backend (Responses delegation) work in flight; it holds Bit's reply open so tool calls
+	// Backend (Responses delegation) work in flight; it holds Pixie's reply open so tool calls
 	// come before their ResponseDone.
 	awaiting    int // delegations created whose backend response hasn't started
 	backendOpen int // backend responses started and not finished
@@ -99,8 +99,8 @@ func (c *codec) closeUser(out []voice.Event) []voice.Event {
 	return append(out, voice.Event{Kind: voice.EvSpeechStopped})
 }
 
-// closeAssistant ends Bit's reply: its words, then ResponseDone; a user turn that was waiting
-// for Bit to stop starts now.
+// closeAssistant ends Pixie's reply: its words, then ResponseDone; a user turn that was waiting
+// for Pixie to stop starts now.
 func (c *codec) closeAssistant(out []voice.Event) []voice.Event {
 	c.aOpen = false
 	c.aEndMs = -1
@@ -191,7 +191,7 @@ func (c *codec) onOutputAudio(m serverMsg, now time.Time) []voice.Event {
 	var out []voice.Event
 	if !c.aOpen {
 		if !loud {
-			return nil // GPT-Live idling: not Bit talking
+			return nil // GPT-Live idling: not Pixie talking
 		}
 		if c.uOpen && !c.uDeferred {
 			out = c.closeUser(out)
@@ -256,7 +256,7 @@ func (c *codec) poll(now time.Time) []voice.Event {
 	}
 	if c.uOpen && now.Sub(c.uLast) >= userQuiet {
 		if c.uDeferred {
-			// Bit talked through it (a backchannel or noise): no turn, but keep the words.
+			// Pixie talked through it (a backchannel or noise): no turn, but keep the words.
 			c.uOpen, c.uDeferred = false, false
 			if t := strings.TrimSpace(c.uText.String()); t != "" {
 				out = append(out, voice.Event{Kind: voice.EvTranscript, Role: "user", Text: t})
@@ -299,7 +299,7 @@ func (c *codec) encode(cmd voice.Command, now time.Time) ([]obj, []voice.Event) 
 	return nil, nil
 }
 
-// inject: a notice for Bit to say (commentary, paraphrased) or just know (thinking). A confirm
+// inject: a notice for Pixie to say (commentary, paraphrased) or just know (thinking). A confirm
 // prompt must be read word for word, so it goes in as an instruction.
 func (c *codec) inject(text string, respond bool) []obj {
 	head, rest := splitContent(text, maxContent)

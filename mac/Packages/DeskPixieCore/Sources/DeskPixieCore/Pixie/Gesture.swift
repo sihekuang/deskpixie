@@ -5,7 +5,7 @@ public enum GestureResult: Equatable, Sendable {
     case none, press, drag, wait, double, click
 }
 
-/// Tells a click, a double-click and a drag on Bit apart (port of player-core.js `gesture()`):
+/// Tells a click, a double-click and a drag on Pixie apart (port of player-core.js `gesture()`):
 /// - press, then a move of more than `slop` points → `.drag` (the caller starts the window drag)
 /// - press and release in place → `.wait`; if no second press comes within `double` seconds,
 ///   `expire(now:)` returns `.click`

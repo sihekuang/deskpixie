@@ -33,7 +33,7 @@ type CanvasPage struct {
 	Title string `json:"title"`
 }
 
-// AgentState drives Tray ▸ Agent (shown only when Enabled).
+// AgentState drives Tray ▸ Coordinator (shown only when Enabled).
 type AgentState struct {
 	Enabled bool     `json:"enabled"`
 	Jobs    []JobRef `json:"jobs"`
@@ -55,9 +55,9 @@ type JobRow struct {
 }
 
 // IntegrationHint is the agent's standing tray hint when the runtime has no status.
-const IntegrationHint = "Agent: run `herdr integration install claude`"
+const IntegrationHint = "Coordinator: run `herdr integration install claude`"
 
-// JobItems are the Tray ▸ Agent rows: "<task ≤ 40 chars> — <status>, <age>".
+// JobItems are the Tray ▸ Coordinator rows: "<task ≤ 40 chars> — <status>, <age>".
 func JobItems(jobs []JobRow) []JobRef {
 	const maxTask = 40
 	out := make([]JobRef, 0, len(jobs))

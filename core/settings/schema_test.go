@@ -460,8 +460,8 @@ func TestHandOffWhenUnsureField(t *testing.T) {
 	if f.Section != SectionVoice || f.Apply != ApplyRestart || f.Kind.Type != KindBool {
 		t.Fatalf("%+v", f)
 	}
-	if f.Label != "Hand off when Bit doesn't know" ||
-		f.Help != "When Bit can't answer a question or request itself, it hands it to the agent instead of saying it doesn't know." {
+	if f.Label != "Hand off when Pixie doesn't know" ||
+		f.Help != "When Pixie can't answer a question or request itself, it hands it to the coordinator instead of saying it doesn't know." {
 		t.Fatalf("%q / %q", f.Label, f.Help)
 	}
 }
@@ -474,8 +474,8 @@ func TestCheckClaimsField(t *testing.T) {
 	if f.Section != SectionVoice || f.Apply != ApplyRestart || f.Kind.Type != KindBool {
 		t.Fatalf("%+v", f)
 	}
-	if f.Label != "Check Bit's claims" ||
-		f.Help != "When Bit says it did something, like setting a timer or handing a task off, the app checks it really did and corrects it if not." {
+	if f.Label != "Check Pixie's claims" ||
+		f.Help != "When Pixie says it did something, like setting a timer or handing a task off, the app checks it really did and corrects it if not." {
 		t.Fatalf("%q / %q", f.Label, f.Help)
 	}
 	// It sits right after voice.handOffWhenUnsure.
