@@ -22,7 +22,7 @@ type Client struct {
 	OnCommand    func(wire.Msg) wire.Msg // its reply is sent back as the result
 	OnRegistered func(address string)
 	OnRefused    func(reason string) // the daemon refused; pix runs standalone from then on
-	Resend       func() []wire.Msg    // state to send after each registration
+	Resend       func() []wire.Msg   // state to send after each registration
 
 	mu   sync.Mutex
 	conn net.Conn
