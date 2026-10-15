@@ -391,3 +391,30 @@ func TestInstallForTmuxWritesTheStateHooksAndHerdrDoesNot(t *testing.T) {
 		t.Fatal("herdr: the shipped files")
 	}
 }
+
+// The app itself asks before close_session (agent.CloseSessionTool), for Claude and Codex
+// coordinators alike; Claude asking as well would ask twice.
+func TestCloseSessionIsAskedByTheAppNotClaude(t *testing.T) {
+	var v struct {
+		Permissions struct {
+			Ask []string `json:"ask"`
+		} `json:"permissions"`
+	}
+	if err := json.Unmarshal([]byte(RenderSettings(48217)), &v); err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(v.Permissions.Ask, "mcp__pixie__close_session") {
+		t.Fatalf("close_session must not be in permissions.ask: %v", v.Permissions.Ask)
+	}
+}
+
+func TestCoordinatorPromptExplainsSessionsYouStart(t *testing.T) {
+	for _, root := range []string{"", "/Users/me/Projects"} {
+		md := RenderClaudeMd("/canvas", root)
+		for _, want := range []string{"list_sessions", "message_session", "interrupt_session", "close_session", "describe_session", "pix"} {
+			if !strings.Contains(md, want) {
+				t.Errorf("projects root %q: prompt lacks %q", root, want)
+			}
+		}
+	}
+}

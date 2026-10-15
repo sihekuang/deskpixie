@@ -137,8 +137,9 @@ func newFixture(t *testing.T, change func(*Config)) *fixture {
 		Terminals: map[string]TerminalFactory{"warp": func(agent.CommandRunner, string) agent.TerminalLauncher {
 			return f.launcher
 		}},
-		IDs:    &agenttest.SeqIds{},
-		Listen: func(uint16) (net.Listener, error) { return net.Listen("tcp", "127.0.0.1:0") },
+		IDs:       &agenttest.SeqIds{},
+		Listen:    func(uint16) (net.Listener, error) { return net.Listen("tcp", "127.0.0.1:0") },
+		PixSocket: shortSocket(t),
 	}
 	if change != nil {
 		change(&cfg)

@@ -456,7 +456,12 @@ public enum SettingsLayout {
         /// An API key's row: a secure field with Save / Remove, and where the key comes from;
         /// never the key.
         case secret(id: SettingsSecretID, label: String, help: String)
+        /// The pix command row (#89): install state, Install / Uninstall, the PATH line, Copy Aliases.
+        case pix(help: String)
     }
+
+    /// The pix row's help.
+    public static let pixHelp = "Start Claude Code or Codex with `pix claude` or `pix codex` in any terminal (WebStorm, iTerm, …) and Pixie can see, message and interrupt that session. Quitting DeskPixie never ends it."
 
     public static func extras(_ section: SettingsSection) -> [Extra] {
         switch section {
@@ -469,7 +474,9 @@ public enum SettingsLayout {
         case .advanced:
             return [.button(label: "Settings file", help: "settings.json holds every setting on this page.",
                             title: "Open Settings File", action: .openFile)]
-        case .agent, .workers, .notifications, .canvas:
+        case .agent:
+            return [.pix(help: pixHelp)]
+        case .workers, .notifications, .canvas:
             return []
         }
     }

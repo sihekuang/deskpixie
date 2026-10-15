@@ -4,6 +4,13 @@ A desktop voice pixie: you talk with **Pixie**, and Pixie hands real work to **t
 
 This repo is the port of [ai-mascot](https://github.com/sihekuang/ai-mascot) (Rust/Tauri). See `docs/specs/2026-10-13-deskpixie-port-design.md`.
 
+## Sessions you start yourself
+
+Start Claude Code or Codex with `pix` (`pix claude`, `pix codex`) in any terminal — WebStorm,
+iTerm, VS Code — and Pixie can see, message and interrupt it next to its own workers. Quitting
+DeskPixie never ends those sessions. Install the command from Settings ▸ Coordinator ▸ pix
+command. See [docs/pix.md](docs/pix.md).
+
 ## Supported Herdr versions
 
 Delegation runs the coordinator (Claude Code) in a [Herdr](https://herdr.dev) session. DeskPixie supports

@@ -200,8 +200,8 @@ func IsWorkerName(s string) bool {
 // fillerWords are words a name made from a task skips ("In this repository, create a …").
 var fillerWords = []string{"in", "the", "a", "an", "this", "that", "repository", "repo", "please", "have", "create", "make", "add", "to", "of", "for", "on", "and", "with", "it", "its"}
 
-// taskWords is the task's first three content words (filler words dropped).
-func taskWords(task string) string {
+// TaskWords is the task's first three content words (filler words dropped).
+func TaskWords(task string) string {
 	var out []string
 	for _, w := range strings.Fields(task) {
 		bare := strings.ToLower(strings.TrimFunc(w, func(c rune) bool {
@@ -234,7 +234,7 @@ func WorkerName(repoDir, hint, task string, taken []string) (string, string, boo
 	room := MaxName - len(repo) - 1
 	source := strings.TrimSpace(hint)
 	if source == "" {
-		source = taskWords(task)
+		source = TaskWords(task)
 	}
 	base := Slugify(source, room)
 	// A hint that already starts with the repo would give "focus-focus-…".

@@ -288,9 +288,15 @@ func VoiceConfirmable(toolName string, toolInput any) bool {
 	case "Edit", "Write", "Read", "NotebookEdit":
 		name, ok := pathFileName(filePathOf(toolInput))
 		return ok && isSpeakableText(name)
+	case CloseSessionTool:
+		return isSpeakableText(stringField(toolInput, "name"))
 	}
 	return false
 }
+
+// CloseSessionTool is close_session as a permission request (#89): the app asks before a
+// session you started is closed, whichever agent the coordinator is.
+const CloseSessionTool = "mcp__pixie__close_session"
 
 // isSpeakableText is an allowlist: only characters whose meaning survives being read aloud (or
 // that SpeakableCommand speaks as words). Punctuation a voice may drop (`:` `+` `$` quotes ...) is out.
@@ -323,6 +329,14 @@ func Describe(toolName string, toolInput any, agent string) string {
 			name = "a file"
 		}
 		return fmt.Sprintf("%s the file %s in %s?", toolName, name, agent)
+	}
+	if toolName == CloseSessionTool {
+		// Its description when that reads aloud (Pixie says descriptions, not names).
+		what := stringField(toolInput, "description")
+		if !isSpeakableText(what) {
+			what = stringField(toolInput, "name")
+		}
+		return fmt.Sprintf("Close your session %s?", what)
 	}
 	return fmt.Sprintf("Use %s in %s?", Clean(toolName), agent)
 }

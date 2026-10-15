@@ -331,6 +331,9 @@ final class SettingsLayoutTests: XCTestCase {
                     help: "Type the key here to keep it in the Keychain (used first), or set GEMINI_API_KEY in your environment or a .env file. Keys are never shown here."),
         ])
         XCTAssertTrue(L.extras(.workers).isEmpty)
+        guard case .pix(let help)? = L.extras(.agent).first, L.extras(.agent).count == 1
+        else { return XCTFail("the agent section has the pix command row") }
+        XCTAssertTrue(help.contains("pix claude"), help)
         let s = SettingsSecrets(openai: .found, gemini: .missing)
         XCTAssertEqual(L.secretText(s, .openAI), "Found")
         XCTAssertEqual(L.secretText(s, .gemini), "Missing")

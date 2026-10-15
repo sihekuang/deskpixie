@@ -151,7 +151,7 @@ func Catalog(role Role) []map[string]any {
 // other role is UnknownTool (per-identity tools: a worker can't start workers, the coordinator
 // can't report). args is the decoded JSON arguments (normally map[string]any).
 func ParseToolCall(role Role, name string, args any) (McpCall, error) {
-	allowed := slices.Contains(CoordinatorTools[:], name)
+	allowed := slices.Contains(CoordinatorTools[:], name) || IsSessionTool(name)
 	if role == RoleWorker {
 		allowed = slices.Contains(WorkerTools[:], name)
 	}
@@ -300,6 +300,34 @@ func ParseToolCall(role Role, name string, args any) (McpCall, error) {
 			return McpCall{}, err
 		}
 		return McpCall{Kind: CallAskCoordinator, Question: q, Options: options}, nil
+	case "list_sessions":
+		return McpCall{Kind: CallListSessions}, nil
+	case "message_session":
+		n, err := needName("name")
+		if err != nil {
+			return McpCall{}, err
+		}
+		t, err := needPlain("text", MaxTaskChars)
+		if err != nil {
+			return McpCall{}, err
+		}
+		return McpCall{Kind: CallMessageSession, Name: n, Text: t}, nil
+	case "interrupt_session", "close_session":
+		n, err := needName("name")
+		if err != nil {
+			return McpCall{}, err
+		}
+		if name == "close_session" {
+			return McpCall{Kind: CallCloseSession, Name: n}, nil
+		}
+		return McpCall{Kind: CallInterruptSession, Name: n}, nil
+	case "describe_session":
+		n, err := needName("name")
+		if err != nil {
+			return McpCall{}, err
+		}
+		t, _ := text("text")
+		return McpCall{Kind: CallDescribeSession, Name: n, Text: singleLine(t)}, nil
 	case "report_blocked":
 		r, err := needQuote("reason", MaxReportWords)
 		if err != nil {

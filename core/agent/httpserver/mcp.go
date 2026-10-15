@@ -164,7 +164,7 @@ func (s *Server) call(r *http.Request, agentName string, role agent.Role, params
 		if t := s.localTool(name); t != nil {
 			return s.callLocal(r, t, args), nil
 		}
-		if s.opts.NoWorkerTools {
+		if s.opts.NoWorkerTools && !agent.IsSessionTool(name) {
 			return nil, &rpcFailure{codeInvalidParams, "Unknown tool: " + agent.Quote(name, 4)}
 		}
 	}
@@ -202,7 +202,7 @@ func (s *Server) call(r *http.Request, agentName string, role agent.Role, params
 }
 
 // catalog is role's tools/list: a worker's report tools; the coordinator's worker tools (unless
-// workers are off), then Pixie's local tools.
+// workers are off), the session tools (#89), then Pixie's local tools.
 func (s *Server) catalog(role agent.Role) []map[string]any {
 	if role != agent.RoleCoordinator {
 		return agent.Catalog(role)
@@ -211,6 +211,8 @@ func (s *Server) catalog(role agent.Role) []map[string]any {
 	if !s.opts.NoWorkerTools {
 		out = agent.Catalog(role)
 	}
+	// Sessions you start with pix (#89) don't depend on workers.
+	out = append(out, agent.SessionCatalog()...)
 	for _, t := range s.opts.CoordinatorTools {
 		schema, err := decodeJSON(t.Parameters())
 		if err != nil {
