@@ -1785,8 +1785,10 @@ func (c *AgentController) setStatus(line string, fx *[]Effect) {
 
 // maskPendingTokens: agent text must not be able to imitate a confirm prompt: any word that
 // contains a currently pending confirm word (after folding case, look-alike letters and
-// invisible characters) is removed.
+// invisible characters) is removed. A confirm prompt it made up for a word that is not pending
+// is defused too (see defuseInventedPrompts).
 func maskPendingTokens(text string, tokens []string) string {
+	text = defuseInventedPrompts(text, tokens)
 	if len(tokens) == 0 {
 		return text
 	}

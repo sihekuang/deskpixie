@@ -15,10 +15,10 @@ import (
 // #87: Codex as the coordinator, on the app side.
 
 func TestClaudesCoordinatorMdIsUnchanged(t *testing.T) {
-	// The renderings since sessions get asked about by description (pix, #89), byte for byte; with workers on, since #97 (create_project) and #126 (prefer an existing pix session over a worker).
+	// The renderings since sessions get asked about by description (pix, #89), byte for byte; with workers on, since #97 (create_project) and #126 (prefer an existing pix session over a worker), and #141 (the app asks before a push or merge; no made-up confirm words).
 	for _, c := range []struct{ root, sum string }{
-		{"", "a7f84bc8a4741ff134f245496641916d8acfcb2b014db9a8a318dfa4e01d3ba2"},
-		{"/Users/x/code", "39bbf72e8bd4b9d27f4ddf4a63bc7a23a09c6b773f971f24ed6b054b8998abd0"},
+		{"", "3d0fe80c88da26c07e041bfe2e9a8886bff90a81308ca6d0edbde1c77e11d38c"},
+		{"/Users/x/code", "3925cf3cc53d3ddc80be6e69f1077402562f87dfc11a1d39eea75f044f5da076"},
 	} {
 		if got := fmt.Sprintf("%x", sha256.Sum256([]byte(RenderClaudeMd("/data/canvas", c.root)))); got != c.sum {
 			t.Fatal(c.root, got)

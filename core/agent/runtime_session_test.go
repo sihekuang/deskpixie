@@ -82,3 +82,55 @@ func TestNoLeavesYourSessionRunning(t *testing.T) {
 		}
 	}
 }
+
+func messageCall(r *rtRig, text string) chan McpReply {
+	reply := make(chan McpReply, 1)
+	r.h.Deliver(HookEvent{Kind: HookMcp, Agent: Coordinator, Call: McpCall{Kind: CallMessageSession, Name: "focus-claude", Text: text}, McpReply: reply})
+	return reply
+}
+
+// #141: a message that has your session push or merge goes through the same spoken confirm
+// word as the coordinator's own git push; message_session itself is never asked about.
+func TestAMessageThatPushesOrMergesAsksFirst(t *testing.T) {
+	r, user := pixRig(t)
+	reply := messageCall(r, "Commit, push, open one PR covering #137 and #138, and merge it.")
+	settle()
+	if !hasCall(r.voice.Calls(), agenttest.InjectCall("Coordinator question: Tell your session login bug to push and merge? Say confirm hawk.")) {
+		t.Fatal(r.voice.Calls())
+	}
+	if len(user.Prompts()) != 0 {
+		t.Fatal("sent before you confirmed")
+	}
+	r.h.Voice(VoiceSignal{Kind: voice.SigUserSaid, Text: "confirm hawk"})
+	settle()
+	if got := <-reply; got.Err != nil {
+		t.Fatal(got.Err)
+	}
+	if p := user.Prompts(); len(p) != 1 || !strings.Contains(p[0].Text, "merge it") {
+		t.Fatalf("%+v", p)
+	}
+}
+
+func TestNoKeepsAPushMessageUnsent(t *testing.T) {
+	r, user := pixRig(t)
+	reply := messageCall(r, "Go ahead and git push.")
+	settle()
+	r.h.Voice(VoiceSignal{Kind: voice.SigUserSaid, Text: "no hawk"})
+	settle()
+	if got := <-reply; got.Err == nil || !strings.Contains(got.Err.Error(), "said no") {
+		t.Fatalf("%+v", got)
+	}
+	if len(user.Prompts()) != 0 {
+		t.Fatal("sent although you said no")
+	}
+}
+
+func TestAnOrdinaryMessageIsSentWithoutAsking(t *testing.T) {
+	r, user := pixRig(t)
+	if got := <-messageCall(r, "Run the tests and tell me what fails."); got.Err != nil {
+		t.Fatal(got.Err)
+	}
+	if len(user.Prompts()) != 1 {
+		t.Fatalf("%+v", user.Prompts())
+	}
+}
