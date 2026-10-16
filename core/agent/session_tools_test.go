@@ -14,6 +14,7 @@ import (
 type userFake struct {
 	*agenttest.FakeSessionHost
 	described map[string]string
+	labeled   map[string]bool // sessions with verbatim turned off
 }
 
 func (u *userFake) Owns(n string) bool { _, ok := u.StatusOf(n); return ok }
@@ -23,18 +24,20 @@ func (u *userFake) List(ctx context.Context) ([]agent.AgentInfo, error) {
 		l[i].Origin = agent.OriginUser
 		l[i].Cwd = "/x/focus"
 		l[i].User = &agent.UserSession{Tool: "claude", Repo: "focus", Where: "WebStorm", Description: "login bug",
-			PastDescriptions: []string{"auth"}, Reachable: true,
+			PastDescriptions: []string{"auth"}, Reachable: true, Verbatim: !u.labeled[l[i].Name],
 			Started: time.Now().Add(-90 * time.Minute), LastActive: time.Now().Add(-3 * time.Minute)}
 	}
 	return l, err
 }
-func (u *userFake) SetDescription(n, t string) error { u.described[n] = t; return nil }
+func (u *userFake) SetDescription(n, t string) error    { u.described[n] = t; return nil }
+func (u *userFake) Verbatim(n string) (bool, error)     { return !u.labeled[n], nil }
+func (u *userFake) SetVerbatim(n string, on bool) error { u.labeled[n] = !on; return nil }
 
 func newSessionHarness(t *testing.T) (*agent.CompositeHost, *userFake, *agenttest.FakeSessionHost) {
 	t.Helper()
 	ctx := context.Background()
 	primary := agenttest.NewFakeSessionHost()
-	user := &userFake{FakeSessionHost: agenttest.NewFakeSessionHost(), described: map[string]string{}}
+	user := &userFake{FakeSessionHost: agenttest.NewFakeSessionHost(), described: map[string]string{}, labeled: map[string]bool{}}
 	user.FakeSessionHost.StartAgent(ctx, agent.AgentSpec{Name: "focus-claude"})
 	primary.StartAgent(ctx, agent.AgentSpec{Name: "focus-fix"})
 	return agent.NewCompositeHost(primary, user), user, primary
@@ -68,6 +71,53 @@ func TestMessageAndInterruptSession(t *testing.T) {
 	}
 }
 
+// TestMessageSessionIsVerbatimByDefault (#143): a session is sent the text exactly as given,
+// with no prefix, unless its verbatim setting is off.
+func TestMessageSessionIsVerbatimByDefault(t *testing.T) {
+	c, user, _ := newSessionHarness(t)
+	if r := agent.SessionToolForTest(context.Background(), c, agent.McpCall{Kind: agent.CallMessageSession, Name: "focus-claude", Text: "go ahead"}); r.Err != nil {
+		t.Fatal(r.Err)
+	}
+	if got := user.Prompts(); len(got) != 1 || got[0].Agent != "focus-claude" || got[0].Text != "go ahead" {
+		t.Fatalf("prompts: %v", got)
+	}
+}
+
+// TestSetSessionVerbatim (#143): with verbatim off, a session's messages are prefixed
+// "Coordinator says: "; back on, they're sent as given again. list_sessions shows the setting.
+func TestSetSessionVerbatim(t *testing.T) {
+	c, user, _ := newSessionHarness(t)
+	run := func(call agent.McpCall) agent.McpReply {
+		t.Helper()
+		r := agent.SessionToolForTest(context.Background(), c, call)
+		if r.Err != nil {
+			t.Fatal(r.Err)
+		}
+		return r
+	}
+	listed := func() bool {
+		t.Helper()
+		rows, _ := run(agent.McpCall{Kind: agent.CallListSessions}).Value.(map[string]any)["sessions"].([]agent.SessionRow)
+		return rows[0].Verbatim
+	}
+	if !listed() {
+		t.Fatal("list_sessions must show verbatim on by default")
+	}
+	r := run(agent.McpCall{Kind: agent.CallSetSessionVerbatim, Name: "focus-claude", Verbatim: false})
+	if v, ok := r.Value.(map[string]any)["verbatim"].(bool); !ok || v {
+		t.Fatalf("reply must give the new setting: %v", r.Value)
+	}
+	if listed() {
+		t.Fatal("list_sessions must show verbatim off")
+	}
+	run(agent.McpCall{Kind: agent.CallMessageSession, Name: "focus-claude", Text: "hi"})
+	run(agent.McpCall{Kind: agent.CallSetSessionVerbatim, Name: "focus-claude", Verbatim: true})
+	run(agent.McpCall{Kind: agent.CallMessageSession, Name: "focus-claude", Text: "go ahead"})
+	if got := user.Prompts(); len(got) != 2 || got[0].Text != "Coordinator says: hi" || got[1].Text != "go ahead" {
+		t.Fatalf("prompts: %v", got)
+	}
+}
+
 func TestCloseSession(t *testing.T) {
 	c, user, _ := newSessionHarness(t)
 	if r := agent.SessionToolForTest(context.Background(), c, agent.McpCall{Kind: agent.CallCloseSession, Name: "focus-claude"}); r.Err != nil {
@@ -80,7 +130,7 @@ func TestCloseSession(t *testing.T) {
 
 func TestSessionToolsRefuseWorkers(t *testing.T) {
 	c, _, primary := newSessionHarness(t)
-	for _, k := range []agent.McpCallKind{agent.CallMessageSession, agent.CallInterruptSession, agent.CallCloseSession, agent.CallDescribeSession} {
+	for _, k := range []agent.McpCallKind{agent.CallMessageSession, agent.CallInterruptSession, agent.CallCloseSession, agent.CallDescribeSession, agent.CallSetSessionVerbatim} {
 		r := agent.SessionToolForTest(context.Background(), c, agent.McpCall{Kind: k, Name: "focus-fix", Text: "x"})
 		if r.Err == nil || !strings.Contains(r.Err.Error(), "worker") {
 			t.Fatalf("%v: %v", k, r.Err)
@@ -122,6 +172,7 @@ func TestParseSessionTools(t *testing.T) {
 	}{
 		{"list_sessions", map[string]any{}, agent.McpCall{Kind: agent.CallListSessions}},
 		{"message_session", map[string]any{"name": "focus-claude", "text": "hi"}, agent.McpCall{Kind: agent.CallMessageSession, Name: "focus-claude", Text: "hi"}},
+		{"set_session_verbatim", map[string]any{"name": "focus-claude", "verbatim": true}, agent.McpCall{Kind: agent.CallSetSessionVerbatim, Name: "focus-claude", Verbatim: true}},
 		{"interrupt_session", map[string]any{"name": "focus-claude"}, agent.McpCall{Kind: agent.CallInterruptSession, Name: "focus-claude"}},
 		{"close_session", map[string]any{"name": "focus-claude"}, agent.McpCall{Kind: agent.CallCloseSession, Name: "focus-claude"}},
 		{"describe_session", map[string]any{"name": "focus-claude", "text": " login\nbug "}, agent.McpCall{Kind: agent.CallDescribeSession, Name: "focus-claude", Text: "login bug"}},
@@ -129,7 +180,7 @@ func TestParseSessionTools(t *testing.T) {
 	}
 	for _, c := range cases {
 		got, err := agent.ParseToolCall(agent.RoleCoordinator, c.name, c.args)
-		if err != nil || got.Kind != c.want.Kind || got.Name != c.want.Name || got.Text != c.want.Text {
+		if err != nil || got.Kind != c.want.Kind || got.Name != c.want.Name || got.Text != c.want.Text || got.Verbatim != c.want.Verbatim {
 			t.Errorf("%s: %+v %v", c.name, got, err)
 		}
 	}
@@ -138,5 +189,47 @@ func TestParseSessionTools(t *testing.T) {
 	}
 	if _, err := agent.ParseToolCall(agent.RoleCoordinator, "message_session", map[string]any{"name": "x"}); err == nil {
 		t.Fatal("message_session needs text")
+	}
+}
+
+// TestParseSetSessionVerbatim (#143, #137): verbatim is required, as a boolean or the strings
+// "true"/"false"; anything else is refused. message_session ignores a verbatim argument now
+// that the session's setting decides.
+func TestParseSetSessionVerbatim(t *testing.T) {
+	parse := func(tool string, args map[string]any) (agent.McpCall, error) {
+		return agent.ParseToolCall(agent.RoleCoordinator, tool, args)
+	}
+	for _, c := range []struct {
+		v    any
+		want bool
+	}{{true, true}, {"true", true}, {" TRUE ", true}, {false, false}, {"false", false}} {
+		got, err := parse("set_session_verbatim", map[string]any{"name": "focus-claude", "verbatim": c.v})
+		if err != nil || got.Kind != agent.CallSetSessionVerbatim || got.Name != "focus-claude" || got.Verbatim != c.want {
+			t.Errorf("verbatim %#v: %+v %v", c.v, got, err)
+		}
+	}
+	for _, args := range []map[string]any{{"name": "x"}, {"name": "x", "verbatim": "yes"}, {"name": "x", "verbatim": 1}, {"verbatim": true}} {
+		if _, err := parse("set_session_verbatim", args); err == nil {
+			t.Errorf("%v must be refused", args)
+		}
+	}
+	if got, err := parse("message_session", map[string]any{"name": "x", "text": "hi", "verbatim": "yes"}); err != nil || got.Verbatim {
+		t.Errorf("message_session must ignore a verbatim argument: %+v %v", got, err)
+	}
+	if _, err := agent.ParseToolCall(agent.RoleWorker, "set_session_verbatim", map[string]any{"name": "x", "verbatim": true}); err == nil {
+		t.Error("workers can't use session tools")
+	}
+}
+
+// TestParseOverrideExistingSessionString (#137): start_worker reads its flag as a string too.
+func TestParseOverrideExistingSessionString(t *testing.T) {
+	args := map[string]any{"kind": "claude", "repo": "focus", "task": "fix it", "job_id": "job_0123456789ab", "override_existing_session": "true"}
+	got, err := agent.ParseToolCall(agent.RoleCoordinator, "start_worker", args)
+	if err != nil || !got.Worker.OverrideExistingSession {
+		t.Fatalf("got %+v, %v", got.Worker, err)
+	}
+	args["override_existing_session"] = "maybe"
+	if _, err := agent.ParseToolCall(agent.RoleCoordinator, "start_worker", args); err == nil {
+		t.Fatal(`override_existing_session "maybe" must be refused`)
 	}
 }

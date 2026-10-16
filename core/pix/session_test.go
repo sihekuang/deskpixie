@@ -1,12 +1,15 @@
 package pix
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -161,6 +164,53 @@ func TestSessionPromptIsPastedWhenIdle(t *testing.T) {
 	waitEvent(t, h.d.events, "exited", func(m wire.Msg) bool { return m.Event == "exited" })
 }
 
+// TestSessionTypesPromptAfterWindowSwitch (#138): you switch away from an idle session (the
+// terminal sends a focus-out report), then a message arrives. pix must type it, not hold it.
+func TestSessionTypesPromptAfterWindowSwitch(t *testing.T) {
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "read x; echo seen:$x"}})
+	h.stdinW.WriteString("\x1b[I\x1b[O")
+	time.Sleep(100 * time.Millisecond)
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "while you were away"})
+	waitEvent(t, h.d.events, "prompt result", func(m wire.Msg) bool { return m.ID == "1" && m.Err == "" })
+	done := make(chan int, 1)
+	go func() { done <- h.s.finish() }()
+	select {
+	case code := <-done:
+		var buf bytes.Buffer
+		h.s.o.stdout.Close()
+		buf.ReadFrom(h.out)
+		if code != 0 || !strings.Contains(buf.String(), "seen:") || !strings.Contains(buf.String(), "while you were away") {
+			t.Fatalf("code %d out %q", code, buf.String())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("the message was never typed: %d still queued", h.s.queue.Len())
+	}
+}
+
+// TestSessionTypesPromptWhileMouseMoves (#138): fullscreen Claude Code has the terminal report
+// every mouse move, so your mouse over the window must not hold a message back.
+func TestSessionTypesPromptWhileMouseMoves(t *testing.T) {
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "read x; echo seen:$x"}})
+	h.stdinW.WriteString(mouseReports)
+	time.Sleep(100 * time.Millisecond)
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "while the mouse moves"})
+	waitEvent(t, h.d.events, "prompt result", func(m wire.Msg) bool { return m.ID == "1" && m.Err == "" })
+	h.stdinW.WriteString(mouseReports)
+	done := make(chan int, 1)
+	go func() { done <- h.s.finish() }()
+	select {
+	case code := <-done:
+		var buf bytes.Buffer
+		h.s.o.stdout.Close()
+		buf.ReadFrom(h.out)
+		if code != 0 || !strings.Contains(buf.String(), "while the mouse moves") {
+			t.Fatalf("code %d out %q", code, buf.String())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("the message was never typed: %d still queued", h.s.queue.Len())
+	}
+}
+
 func TestSessionHoldsPromptWhileYouType(t *testing.T) {
 	h := newHarness(t, "codex", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}})
 	h.stdinW.WriteString("half a sent") // no Enter
@@ -186,6 +236,85 @@ func TestPostToolUseDeliversQueued(t *testing.T) {
 	}
 	h.s.runner.Hangup()
 	h.s.finish()
+}
+
+// claudeInbox fakes the ~/.claude/sessions/<pid>.json record and inbox socket Claude Code
+// itself would leave for s's wrapped process, so a prompt command's choice to use it (or not)
+// is actually exercised rather than failing open because no record exists. got receives every
+// {"type":"user",…} message posted to it.
+func claudeInbox(t *testing.T, s *Session) (got chan map[string]any) {
+	t.Helper()
+	pid := s.runner.Pid()
+	start, err := ProcStart(pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessDir := filepath.Join(s.o.home, ".claude", "sessions")
+	if err := os.MkdirAll(sessDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	sock := filepath.Join(sockDir(t), "inbox.sock")
+	l, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { l.Close() })
+	b, _ := json.Marshal(map[string]any{
+		"pid": pid, "sessionId": "s-1", "procStart": start, "peerProtocol": 1, "messagingSocketPath": sock,
+	})
+	if err := os.WriteFile(filepath.Join(sessDir, strconv.Itoa(pid)+".json"), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got = make(chan map[string]any, 4)
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				sc := bufio.NewScanner(c)
+				for sc.Scan() {
+					var m map[string]any
+					if json.Unmarshal(sc.Bytes(), &m) == nil && m["type"] == "user" {
+						got <- m
+					}
+				}
+			}(c)
+		}
+	}()
+	return got
+}
+
+// TestSessionPromptNeverUsesClaudeInbox (#129, extended): a "prompt" command is always typed,
+// same as Codex, never relayed over Claude's inbox socket — even when a usable record for the
+// session is sitting right there. Claude Code labels anything arriving over that socket as
+// coming from a peer session, refuses to treat it as the user's own approval however it's
+// worded, and wraps even a routine coordinator instruction in a generic "another Claude
+// session" notice; typing it directly avoids both. (The "Coordinator says: " label for a
+// non-verbatim message is added a layer up, in core/agent — this package only ever sees the
+// final text to type.)
+func TestSessionPromptNeverUsesClaudeInbox(t *testing.T) {
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "read x; echo seen:$x"}})
+	got := claudeInbox(t, h.s)
+
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "Coordinator says: go ahead"})
+	waitEvent(t, h.d.events, "prompt result", func(m wire.Msg) bool { return m.Kind == wire.KindResult && m.ID == "1" && m.Err == "" })
+
+	select {
+	case m := <-got:
+		t.Fatalf("a prompt must never reach Claude's inbox socket: %v", m)
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	code := h.s.finish()
+	var buf bytes.Buffer
+	h.s.o.stdout.Close()
+	buf.ReadFrom(h.out)
+	if code != 0 || !strings.Contains(buf.String(), "seen:") || !strings.Contains(buf.String(), "go ahead") {
+		t.Fatalf("text must be typed, same as Codex: code %d out %q", code, buf.String())
+	}
 }
 
 func TestHooksReportStatusAndAutoDescription(t *testing.T) {
@@ -815,4 +944,41 @@ func TestACodexApprovalsLastOptionIsEscape(t *testing.T) {
 		t.Fatal(err)
 	}
 	typed(t, h, 0x1b)
+}
+
+// TestSessionTypesPromptAfterIdleNotice (#144): Claude Code notifies "waiting for your input"
+// (idle_prompt) after a minute idle. That isn't a prompt waiting on you: the session is still
+// idle, and a message sent then must be typed, not held until your next turn.
+func TestSessionTypesPromptAfterIdleNotice(t *testing.T) {
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "read x; echo seen:$x"}})
+	h.s.Hook("Notification", map[string]any{"notification_type": "idle_prompt", "message": "Claude is waiting for your input"})
+	if st := h.s.currentStatus(); st != "idle" {
+		t.Fatalf("an idle notice must leave the session idle, got %q", st)
+	}
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "after a minute idle"})
+	waitEvent(t, h.d.events, "prompt result", func(m wire.Msg) bool { return m.ID == "1" && m.Err == "" })
+	done := make(chan int, 1)
+	go func() { done <- h.s.finish() }()
+	select {
+	case code := <-done:
+		var buf bytes.Buffer
+		h.s.o.stdout.Close()
+		buf.ReadFrom(h.out)
+		if code != 0 || !strings.Contains(buf.String(), "after a minute idle") {
+			t.Fatalf("code %d out %q", code, buf.String())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("the message was never typed: %d still queued", h.s.queue.Len())
+	}
+}
+
+// TestPermissionNoticeStillBlocks (#144): a prompt that does wait on you still marks it blocked.
+func TestPermissionNoticeStillBlocks(t *testing.T) {
+	for _, p := range []map[string]any{{"notification_type": "permission_prompt"}, {"notification_type": "elicitation_dialog"}, {}} {
+		h := keyHarness(t, "claude")
+		h.s.Hook("Notification", p)
+		if st := h.s.currentStatus(); st != "blocked" {
+			t.Errorf("%v: got %q, want blocked", p, st)
+		}
+	}
 }

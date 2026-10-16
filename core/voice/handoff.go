@@ -150,6 +150,8 @@ var requestStarts = []string{
 var requestAnywhere = []string{
 	"can you", "could you", "would you", "will you", "can u", "do you know", "i wonder",
 	"i was wondering", "any idea", "tell me", "let me know", "find out", "look up",
+	// "I- I actually want to …": a halting start still says what the user wants (#133).
+	"want to", "wanna",
 }
 
 // requestMinWords: "why?" alone is too little to hand off.

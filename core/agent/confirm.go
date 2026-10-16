@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"unicode"
@@ -397,7 +398,7 @@ func VoiceConfirmableWith(toolName string, toolInput any, p SpokenPaths) bool {
 	case "Edit", "Write", "Read", "NotebookEdit":
 		name, ok := pathFileName(filePathOf(toolInput))
 		return ok && isSpeakableText(name)
-	case CloseSessionTool:
+	case CloseSessionTool, MessageSessionTool:
 		return isSpeakableText(stringField(toolInput, "name"))
 	}
 	return false
@@ -406,6 +407,39 @@ func VoiceConfirmableWith(toolName string, toolInput any, p SpokenPaths) bool {
 // CloseSessionTool is close_session as a permission request (#89): the app asks before a
 // session you started is closed, whichever agent the coordinator is.
 const CloseSessionTool = "mcp__pixie__close_session"
+
+// MessageSessionTool is message_session as a permission request (#141): asked about only when
+// the message has the session do something hard to undo (GatedActions).
+const MessageSessionTool = "mcp__pixie__message_session"
+
+// gatedForms are the hard-to-undo steps a message can hand a session, by each form to its base
+// verb: the ones the coordinator's own settings ask about (git push, publish, deploy), plus merging.
+var gatedForms = map[string]string{
+	"push": "push", "pushes": "push", "pushing": "push", "pushed": "push",
+	"merge": "merge", "merges": "merge", "merging": "merge",
+	"publish": "publish", "publishes": "publish", "publishing": "publish",
+	"deploy": "deploy", "deploys": "deploy", "deploying": "deploy",
+}
+
+// GatedActions are the hard-to-undo steps text asks for, by their base verb, in the order first
+// named ("push", "merge"): none for an ordinary message.
+func GatedActions(text string) []string {
+	var out []string
+	for _, w := range strings.FieldsFunc(strings.ToLower(text), func(r rune) bool { return !unicode.IsLetter(r) }) {
+		if base, ok := gatedForms[w]; ok && !slices.Contains(out, base) {
+			out = append(out, base)
+		}
+	}
+	return out
+}
+
+// spokenList joins words as said aloud: "a", "a and b", "a, b and c".
+func spokenList(words []string) string {
+	if len(words) < 2 {
+		return strings.Join(words, "")
+	}
+	return strings.Join(words[:len(words)-1], ", ") + " and " + words[len(words)-1]
+}
 
 // isSpeakableText is an allowlist: only characters whose meaning survives being read aloud (or
 // that SpeakableCommand speaks as words). Punctuation a voice may drop (`:` `+` `$` quotes ...) is out.
@@ -447,10 +481,39 @@ func Describe(toolName string, toolInput any, agent string) string {
 		}
 		return fmt.Sprintf("Close your session %s?", what)
 	}
+	if toolName == MessageSessionTool {
+		what := stringField(toolInput, "description")
+		if !isSpeakableText(what) {
+			what = stringField(toolInput, "name")
+		}
+		actions, _ := toolInput.(map[string]any)["actions"].([]string)
+		return fmt.Sprintf("Tell your session %s to %s?", what, spokenList(actions))
+	}
 	return fmt.Sprintf("Use %s in %s?", Clean(toolName), agent)
 }
 
 // ConfirmQuestionLine is the spoken question: the description plus `Say confirm <token>.`
 func ConfirmQuestionLine(description, token string) string {
 	return fmt.Sprintf("%s Say confirm %s.", description, token)
+}
+
+// inventedPrompt is a confirm phrase ("say confirm hawk", "approve lark"): a confirm verb and
+// one of Tokens, optionally led by "say".
+var inventedPrompt = regexp.MustCompile(`(?i)\b(say\s+)?(` + strings.Join(verbs, "|") + `)\s+(` + strings.Join(Tokens[:], "|") + `)\b`)
+
+// defuseInventedPrompts (#141): agent text that copies the app's confirm prompt for a word no
+// request is waiting on would have the user say a confirm word nothing listens for. "Say
+// confirm hawk" becomes "Say yes", a plain question the user's answer reaches the job through;
+// "approve hawk" keeps only its verb. A pending word is left for maskPendingTokens to remove.
+func defuseInventedPrompts(text string, pending []string) string {
+	return inventedPrompt.ReplaceAllStringFunc(text, func(m string) string {
+		g := inventedPrompt.FindStringSubmatch(m)
+		if slices.Contains(pending, strings.ToLower(g[3])) {
+			return m
+		}
+		if g[1] != "" {
+			return g[1][:len("say")] + " yes"
+		}
+		return g[2]
+	})
 }

@@ -1,7 +1,6 @@
 package pix
 
 import (
-	"bytes"
 	"fmt"
 	"net/url"
 	"path/filepath"
@@ -304,11 +303,8 @@ func menuOf(input any) (string, []string) {
 	return text, labels
 }
 
-// onlyFocusReports: b is the terminal saying it gained or lost focus, not a key of yours.
-func onlyFocusReports(b []byte) bool {
-	b = bytes.ReplaceAll(bytes.ReplaceAll(b, []byte("\x1b[I"), nil), []byte("\x1b[O"), nil)
-	return len(b) == 0
-}
+// onlyReports: b is the terminal reporting focus or the mouse, not a key of yours.
+func onlyReports(b []byte) bool { return len(withoutReports(b)) == 0 }
 
 // screenFor is vt, or a fresh screen when there is none or the terminal was resized (the agent
 // then draws it all again). PTY reader goroutine only.

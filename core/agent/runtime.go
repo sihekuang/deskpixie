@@ -978,8 +978,15 @@ func (h *AgentHandle) mcp(agent string, call McpCall) McpReply {
 			return McpReply{Err: errors.New("This tool is not available to you.")}
 		}
 		if call.Kind == CallCloseSession {
-			if d := h.confirmClose(call.Name); !d.Allow {
+			if d := h.confirmSession(call.Name, CloseSessionTool, map[string]any{}); !d.Allow {
 				return McpReply{Err: errors.New(d.Message)}
+			}
+		}
+		if call.Kind == CallMessageSession {
+			if actions := GatedActions(call.Text); len(actions) > 0 {
+				if d := h.confirmSession(call.Name, MessageSessionTool, map[string]any{"actions": actions}); !d.Allow {
+					return McpReply{Err: errors.New(d.Message)}
+				}
 			}
 		}
 		ctx, cancel := context.WithTimeout(h.ctx, OpLimit)
@@ -996,15 +1003,16 @@ func (h *AgentHandle) mcp(agent string, call McpCall) McpReply {
 	return McpReply{Value: r.Value}
 }
 
-// confirmClose asks you before close_session ends a session you started, as a permission
+// confirmSession asks you before a session tool does something hard to undo to a session you
+// started (close_session ending it, message_session having it push or merge), as a permission
 // request answered by a spoken confirm word. A name that is not yours is not asked about:
 // sessionTool refuses it.
-func (h *AgentHandle) confirmClose(name string) Decision {
+func (h *AgentHandle) confirmSession(name, toolName string, input map[string]any) Decision {
 	c, ok := h.deps.Host.Session().(*CompositeHost)
 	if !ok || !c.Secondary().Owns(name) {
 		return Allow()
 	}
-	input := map[string]any{"name": name}
+	input["name"] = name
 	ctx, cancel := context.WithTimeout(h.ctx, OpLimit)
 	if list, err := c.Secondary().List(ctx); err == nil {
 		for _, a := range list {
@@ -1015,7 +1023,7 @@ func (h *AgentHandle) confirmClose(name string) Decision {
 	}
 	cancel()
 	rx := make(chan Decision, 1)
-	h.hook(HookEvent{Kind: HookPermission, Agent: Coordinator, ToolName: CloseSessionTool, ToolInput: input, Reply: rx})
+	h.hook(HookEvent{Kind: HookPermission, Agent: Coordinator, ToolName: toolName, ToolInput: input, Reply: rx})
 	select {
 	case d := <-rx:
 		return d

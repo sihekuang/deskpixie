@@ -58,9 +58,14 @@ type claimSpec struct {
 const claimWindow = 5
 
 var claimSpecs = []claimSpec{
+	// Asking the agent covers asking it about a job (jobs), to remember (recall) or an answer.
 	{tool: DelegateTool, backed: []string{DelegateTool, "recall", "answer_job", "jobs"}, groups: []claimGroup{
 		{verbs: words("hand handed handing pass passed passing ask asked asking"),
 			objects: words("coordinator agent agents claude brain")},
+	}},
+	// Handing off is only ever a delegate (or an answer to the agent's question): a status
+	// check before "I'll hand it off now" doesn't do it (#133).
+	{tool: DelegateTool, backed: []string{DelegateTool, "answer_job"}, groups: []claimGroup{
 		{verbs: words("hand handed handing"), objects: words("off")},
 		{verbs: words("start started starting kick kicked kicking open opened opening create created creating queue queued queuing"),
 			objects: words("job")},

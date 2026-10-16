@@ -1216,3 +1216,23 @@ func TestSessionTurnsAreOffByDefaultWithAThirtySecondMinimum(t *testing.T) {
 		t.Fatalf("%+v", s)
 	}
 }
+
+// #141: with no confirm word pending, the coordinator copying the app's confirm prompt ("Say
+// confirm hawk") must not leave the user answering into nothing: it becomes a plain question.
+func TestAnInventedConfirmPromptBecomesAPlainQuestion(t *testing.T) {
+	c := workingOnJob1()
+	openVoice(c)
+	msg := `<spoken ref="job_000000000001" status="question">The merge is gated. Say confirm hawk and I'll merge both fixes.</spoken>`
+	fx := visible(stop(c, msg, T0))
+	wantContains(t, fx, eInject("Coordinator question: The merge is gated. Say yes and I'll merge both fixes."))
+	fx = visible(c.Step(AnswerInput("", "yes"), T0))
+	wantNotContains(t, fx, Effect{Kind: EfAnswerResult, Err: "That job is waiting for a confirm word."})
+	wantJobStatus(t, c, 1, JobWorking)
+}
+
+func TestAnInventedConfirmWordWithoutSayKeepsTheVerb(t *testing.T) {
+	c := workingOnJob1()
+	openVoice(c)
+	fx := visible(stop(c, `<spoken ref="job_000000000001" status="question">Please approve lark to go on.</spoken>`, T0))
+	wantContains(t, fx, eInject("Coordinator question: Please approve to go on."))
+}

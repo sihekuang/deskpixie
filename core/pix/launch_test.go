@@ -75,6 +75,12 @@ func TestPlanLaunchClaude(t *testing.T) {
 	if hooks["PermissionRequest"] == nil {
 		t.Error("no PermissionRequest hook")
 	}
+	// #144: a session idle for a minute gets an idle_prompt Notification; that isn't waiting
+	// on you, so it must not reach pix (it would mark the session blocked and hold messages).
+	note, _ := hooks["Notification"].([]any)
+	if len(note) != 1 || note[0].(map[string]any)["matcher"] != "permission_prompt|elicitation_dialog" {
+		t.Fatalf("Notification: %v", hooks["Notification"])
+	}
 	perms, _ := settings["permissions"].(map[string]any)
 	if allow, _ := perms["allow"].([]any); len(allow) != 1 || allow[0] != "mcp__pixie__set_description" {
 		t.Fatalf("set_description must not ask for permission (and nothing else is allowed): %v", settings["permissions"])
