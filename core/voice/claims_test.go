@@ -54,6 +54,11 @@ func TestFindClaim(t *testing.T) {
 		{"I've asked the agent to remember.", []string{"recall"}, "", false},
 		{"I passed your answer to the agent.", []string{"answer_job"}, "", false},
 		{"I've asked the agent to stop.", []string{"jobs"}, "", false},
+		// a status check or a recall is no hand-off (#133)
+		{"You're right, I'll hand it off now.", []string{"jobs"}, DelegateTool, false},
+		{"I've handed that off to the agent.", []string{"recall"}, DelegateTool, false},
+		{"Let me delegate that.", []string{"jobs"}, DelegateTool, false},
+		{"I've handed that off to the agent.", []string{"answer_job"}, "", false},
 		// timer
 		{"I've set a timer for ten minutes.", nil, TimerToolName, false},
 		{"Sure, I set a ten minute timer.", nil, TimerToolName, false},

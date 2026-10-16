@@ -283,3 +283,65 @@ func TestRuntimeALateDelegateCallStartsNoSecondJob(t *testing.T) {
 		t.Fatalf("%+v", got)
 	}
 }
+
+// #133: the request came in pieces, Pixie's "Mm-hmm." between, and its last piece alone
+// ("agent") is no request: the claimed hand-off takes the whole of it.
+func TestClaimAHandOffClaimTakesARequestSplitAcrossTurns(t *testing.T) {
+	c := newClaimConv(true, true)
+	userTurn(c, "I- I I actually want to have a, I actually want to have a sub session Herder", ms(t0(), 100))
+	reply(c, "Mm-hmm.", ms(t0(), 300))
+	userTurn(c, "agent", ms(t0(), 600))
+	fx := reply(c, "Okay, I'll hand that off and let you know.", ms(t0(), 900))
+	fx = append(fx, ticks(c, ms(t0(), 900), 5*time.Second)...)
+	h := handOffs(fx)
+	if len(h) != 1 || h[0].Text != "I- I I actually want to have a, I actually want to have a sub session Herder agent" || !h[0].Claim {
+		t.Fatalf("hand-offs: %+v", h)
+	}
+}
+
+// What Pixie said in earnest ends the request: an earlier one it answered is not handed off again.
+func TestClaimAHandOffClaimDoesNotReachPastPixiesAnswer(t *testing.T) {
+	c := newClaimConv(true, true)
+	userTurn(c, "Can you check the weather in Bothell?", ms(t0(), 100))
+	reply(c, "It's sunny in Bothell, seventy-four degrees.", ms(t0(), 300))
+	ticks(c, ms(t0(), 300), 3*time.Second)
+	userTurn(c, "Great, thanks!", ms(t0(), 4000))
+	fx := reply(c, "Sure, I'll hand that off.", ms(t0(), 4300))
+	fx = append(fx, ticks(c, ms(t0(), 4300), 5*time.Second)...)
+	if h := handOffs(fx); len(h) != 0 {
+		t.Fatalf("hand-offs: %+v", h)
+	}
+}
+
+// #133 as it happened on 2026-10-16 02:20: the request in three transcripts, Pixie's "Mm-hmm."
+// interrupted between, then a claimed hand-off with no delegate call.
+func TestRuntimeAHandOffClaimAfterASplitRequestDelegatesIt(t *testing.T) {
+	d := &fakeDelegate{}
+	m := &fakeModel{sess: newFakeSession()}
+	ui := &uiLog{}
+	reg := DefaultTools()
+	reg.Register(d)
+	cc := DefaultConversationConfig()
+	cc.CheckClaims = true
+	r := NewRuntime(m, audio.Passthrough{}, RuntimeConfig{
+		Session: testSessionCfg, APIKey: "k", MouthLevels: 4, Tools: reg, Conversation: cc,
+	}, ui.emit)
+	t.Cleanup(r.Close)
+	startListening(t, r, m, ui)
+	s := m.sess
+	for _, ev := range []Event{
+		evSpeechStarted, evSpeechStopped, said("user", "I- I I actually want to"),
+		evSpeechStarted, evSpeechStopped, said("user", "have a, I actually want to have a sub session Herder"),
+		evResponseCreated, said("assistant", "Mm-hmm."),
+		evSpeechStarted, evResponseDone, evSpeechStopped, said("user", "agent"),
+		evResponseCreated, said("assistant", "Okay, I'll hand that off and let you know."), evResponseDone,
+	} {
+		s.events <- ev
+	}
+	waitLong(t, "the delegation", func() bool { return len(d.jobs()) == 1 })
+	task := d.jobs()[0]["task"]
+	if !strings.Contains(task, "sub session Herder agent") {
+		t.Fatalf("task %q", task)
+	}
+	t.Logf("handed off: %q", task)
+}

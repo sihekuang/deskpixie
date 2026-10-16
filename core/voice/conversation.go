@@ -848,10 +848,10 @@ func (c *Conversation) maybeHandOff(now time.Time, fx []Effect) []Effect {
 		return fx
 	}
 	if claim.Tool == DelegateTool {
-		if !IsRequest(c.hoUser) {
+		task := c.requestWords()
+		if !IsRequest(task) {
 			return fx // likely about earlier work: nothing new to hand off
 		}
-		task := c.hoUser
 		if claim.Check {
 			task = "Check: " + task
 		}
@@ -892,6 +892,38 @@ func (c *Conversation) handOffTask(task string, claim bool, fx []Effect) []Effec
 		c.answerTurn = false
 	}
 	return append(fx, Effect{Kind: EfHandOff, Text: task, Context: c.handOffContext(), Claim: claim, Answer: answer})
+}
+
+// backchannels are what Pixie says only to show it is listening: they don't end a request.
+var backchannels = words("mm hmm mmhmm mhm mmm uh huh uhhuh")
+
+// requestWords: the user's words this turn with those of the turns just before it that only
+// got a backchannel from Pixie ("Mm-hmm."), as one request split by pauses (#133).
+func (c *Conversation) requestWords() string {
+	said := c.hoUser
+	for i := len(c.hoHistory) - 1; i >= 0; i-- {
+		line := c.hoHistory[i]
+		if rest, ok := strings.CutPrefix(line, "Pixie: "); ok {
+			if !isBackchannel(rest) {
+				break
+			}
+			continue
+		}
+		if rest, ok := strings.CutPrefix(line, "User: "); ok {
+			said = strings.TrimSpace(rest + " " + said)
+		}
+	}
+	return said
+}
+
+func isBackchannel(said string) bool {
+	toks := strings.Fields(normalize(said))
+	for _, w := range toks {
+		if !inSet(w, backchannels) {
+			return false
+		}
+	}
+	return len(toks) > 0
 }
 
 // handOffContext is the earlier turns, for a delegated task's context ("" when none).
