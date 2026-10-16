@@ -92,11 +92,11 @@ func Catalog(role Role) []map[string]any {
 				"name":        "start_worker",
 				"description": "Start a worker agent on a repository: it gets its own git worktree under <repo>/.worktrees/ on a `pixie/…` branch, works there, and reports back to you as a message. Returns {name, worktree} or an error.",
 				"inputSchema": objectSchema(map[string]any{
-					"kind":   map[string]any{"type": "string", "enum": []string{"claude", "codex"}, "description": "Which agent: claude or codex."},
-					"repo":   map[string]any{"type": "string", "description": "The repository: its folder name under the projects root (e.g. focus), or its path."},
-					"task":   map[string]any{"type": "string", "description": "What the worker must do, completely: it sees nothing else."},
-					"job_id": map[string]any{"type": "string", "description": "The job this work is for: the [ref job_…] of the request."},
-					"name":   map[string]any{"type": "string", "description": "Required: a 2–3 word name for this piece of work, e.g. `fix-login`. Reusing a name reuses that worker's folder and branch."},
+					"kind":                      map[string]any{"type": "string", "enum": []string{"claude", "codex"}, "description": "Which agent: claude or codex."},
+					"repo":                      map[string]any{"type": "string", "description": "The repository: its folder name under the projects root (e.g. focus), or its path."},
+					"task":                      map[string]any{"type": "string", "description": "What the worker must do, completely: it sees nothing else."},
+					"job_id":                    map[string]any{"type": "string", "description": "The job this work is for: the [ref job_…] of the request."},
+					"name":                      map[string]any{"type": "string", "description": "Required: a 2–3 word name for this piece of work, e.g. `fix-login`. Reusing a name reuses that worker's folder and branch."},
 					"override_existing_session": map[string]any{"type": "boolean", "description": "True only when the person explicitly asked for a worker, or to run this separately or in the background, even though a pix session already matches this repo. Set after a refusal names that session; never as a default."},
 				}, "kind", "repo", "task", "job_id"),
 			},
@@ -176,6 +176,24 @@ func ParseToolCall(role Role, name string, args any) (McpCall, error) {
 		}
 		return "", badArgs(k + " is required")
 	}
+	// flag is an optional yes/no. A model sometimes sends "true" as a string (#137): read it,
+	// and refuse anything else rather than quietly taking it as false.
+	flag := func(k string) (bool, error) {
+		switch v := obj[k].(type) {
+		case nil:
+			return false, nil
+		case bool:
+			return v, nil
+		case string:
+			switch strings.ToLower(strings.TrimSpace(v)) {
+			case "true":
+				return true, nil
+			case "false", "":
+				return false, nil
+			}
+		}
+		return false, badArgs(k + " must be true or false")
+	}
 	nonEmpty := func(k, v string) (string, error) {
 		if v == "" {
 			return "", badArgs(k + " is required")
@@ -236,7 +254,10 @@ func ParseToolCall(role Role, name string, args any) (McpCall, error) {
 		if n, ok := text("name"); ok {
 			hint = singleLine(n)
 		}
-		override, _ := obj["override_existing_session"].(bool)
+		override, err := flag("override_existing_session")
+		if err != nil {
+			return McpCall{}, err
+		}
 		return McpCall{Kind: CallStartWorker, Worker: WorkerRequest{Kind: kind, Repo: repo, Task: task, JobID: jobID, Name: hint, OverrideExistingSession: override}}, nil
 	case "create_project":
 		n, err := need("name")
@@ -324,7 +345,10 @@ func ParseToolCall(role Role, name string, args any) (McpCall, error) {
 		if err != nil {
 			return McpCall{}, err
 		}
-		verbatim, _ := obj["verbatim"].(bool)
+		verbatim, err := flag("verbatim")
+		if err != nil {
+			return McpCall{}, err
+		}
 		return McpCall{Kind: CallMessageSession, Name: n, Text: t, Verbatim: verbatim}, nil
 	case "interrupt_session", "close_session":
 		n, err := needName("name")
