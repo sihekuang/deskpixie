@@ -97,7 +97,9 @@ func TestPlanLaunchCodex(t *testing.T) {
 		t.Fatalf("args %q", joined)
 	}
 	// #105: Codex tells pix of an approval prompt with its own OSC 9 notification.
-	for _, want := range []string{`tui.notification_method="osc9"`, `tui.notification_condition="always"`} {
+	// set_description never asks for approval (as for Claude): a session can't stop on it.
+	for _, want := range []string{`tui.notification_method="osc9"`, `tui.notification_condition="always"`,
+		`mcp_servers.pixie.tools.set_description.approval_mode="approve"`} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("no %s: %q", want, joined)
 		}

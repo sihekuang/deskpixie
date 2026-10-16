@@ -69,6 +69,8 @@ func PlanLaunch(tool string, userArgs []string, self, sock, dir string) (Launch,
 		args := []string{
 			"-c", "mcp_servers.pixie.command=" + strconv.Quote(self),
 			"-c", `mcp_servers.pixie.args=["mcp"]`,
+			// Its own tool never asks for approval (Claude's settings allow it the same way).
+			"-c", `mcp_servers.pixie.tools.set_description.approval_mode="approve"`,
 			"-c", "developer_instructions=" + strconv.Quote(Instruction),
 			// Codex runs notify with the turn's JSON as its last argument when a turn ends.
 			"-c", "notify=" + string(notify),
