@@ -11,84 +11,82 @@ import (
 // psBin lists every process: pid, parent, tty and the full command line (-ww: never cut).
 const psBin = "/bin/ps"
 
-// ReusingLauncher brings forward a terminal already attached to the session instead of opening
-// another one (#98): every click on Pixie, an update line or a roster row ends in Open, and the
-// pane is focused before it. In Warp it tries, in turn, the session's focus URL (#115), the
-// window titled for the attach tab (needs Accessibility), then a new terminal replacing the
-// attached ones. With nothing attached (or an attach it can't bring forward, e.g. over ssh), it
-// opens a new terminal through the inner launcher.
-type ReusingLauncher struct {
-	inner  agent.TerminalLauncher
-	runner agent.CommandRunner
+// ReusingPlanner decides to bring forward a terminal already attached to the session instead of
+// a plan for another one (#98): every click on Pixie, an update line or a roster row ends in a
+// Plan, and the pane is focused before it. In Warp it carries, in order, the session's focus URL
+// (#115), the window titled for the attach tab (needs Accessibility), then a new terminal
+// replacing the attached ones — the app walks that ladder itself, since whether each rung
+// succeeds can only be known by trying it live. With nothing attached (or an attach it can't
+// bring forward, e.g. over ssh), it delegates to the inner planner.
+type ReusingPlanner struct {
+	inner  agent.TerminalPlanner
+	runner agent.CommandRunner // ps / ps -E only; nothing here executes an OS action anymore
 }
 
 // Reuse wraps inner (Warp, iTerm) so an attached terminal is reused.
-func Reuse(inner agent.TerminalLauncher, runner agent.CommandRunner) *ReusingLauncher {
-	return &ReusingLauncher{inner: inner, runner: runner}
+func Reuse(inner agent.TerminalPlanner, runner agent.CommandRunner) *ReusingPlanner {
+	return &ReusingPlanner{inner: inner, runner: runner}
 }
 
-func (l *ReusingLauncher) Name() string { return l.inner.Name() }
+func (l *ReusingPlanner) Name() string { return l.inner.Name() }
 
 // windowTitled is a terminal whose attach tab titles its window while the tab is active (Warp,
 // which can't be told which tab to show).
 type windowTitled interface{ WindowTitle() string }
 
-func (l *ReusingLauncher) Open(a agent.Attach) error {
+func (l *ReusingPlanner) Plan(a agent.Attach) (agent.FocusPlan, error) {
 	app, tty, clients, ok := l.attached(a.Argv)
 	if !ok {
-		return l.inner.Open(a)
+		return l.inner.Plan(a)
 	}
 	titled, isTitled := l.inner.(windowTitled)
-	if strings.HasSuffix(app, "/iTerm.app") || !isTitled {
-		return l.bringForward(app, tty)
+	// iTerm's session is selected by its tty; no fallback (iTerm always has the window).
+	if strings.HasSuffix(app, "/iTerm.app") {
+		return agent.FocusPlan{ItermSelect: ItermSelectScript("/dev/" + tty)}, nil
 	}
-	// #115: the attached session's own focus URL shows its exact tab: no window title to trust
-	// (Warp restores a dead tab with the old title) and no Accessibility permission needed.
-	if l.openFocusURL(clients) {
-		return nil
+	// A terminal with no window title to look for is brought forward as an app; no fallback.
+	if !isTitled {
+		return agent.FocusPlan{ActivateApp: app}, nil
 	}
-	// #110: raise the window showing the attach tab; with none (the tab sits behind another, or
-	// macOS refused the window list), end the attached terminals and open one in front, so the
-	// one that shows is the only one (a tab we opened closes when its attach ends).
-	if l.raiseWindow(app, titled.WindowTitle()) {
-		return nil
+	// #115/#110: Warp's own focus URL, then raising the titled window, then (if the app finds
+	// neither live) ending the attached clients and opening a new terminal.
+	plan := agent.FocusPlan{
+		FocusURLs:   l.warpFocusURLs(clients),
+		RaiseScript: raiseWindowScript(app, titled.WindowTitle()),
+		KillPIDs:    clients,
 	}
-	kill := []string{"/bin/kill", "-HUP"}
-	for _, pid := range clients {
-		kill = append(kill, strconv.Itoa(pid))
+	newTerminal, err := l.inner.Plan(a)
+	if err != nil {
+		return agent.FocusPlan{}, err
 	}
-	_, _ = l.runner.Run(kill, baseEnv())
-	return l.inner.Open(a)
+	plan.NewTerminal = newTerminal.NewTerminal
+	return plan, nil
 }
 
 // warpFocusURL is the WARP_FOCUS_URL Warp sets in each session's environment.
 var warpFocusURL = regexp.MustCompile(`(?:^|\s)WARP_FOCUS_URL=(warp://session/[0-9A-Za-z-]+)(?:\s|$)`)
 
-// openFocusURL shows the newest client's Warp session by its WARP_FOCUS_URL (read from its
-// environment, as `ps -E` shows it), else the next one's; false if none has one or opens.
-func (l *ReusingLauncher) openFocusURL(clients []int) bool {
+// warpFocusURLs is every attach client's own WARP_FOCUS_URL (read via `ps -E`), newest first,
+// clients without one skipped.
+func (l *ReusingPlanner) warpFocusURLs(clients []int) []string {
+	var urls []string
 	for i := len(clients) - 1; i >= 0; i-- {
 		pid := strconv.Itoa(clients[i])
 		out, err := l.runner.Run([]string{psBin, "-E", "-ww", "-o", "command=", "-p", pid}, baseEnv())
 		if err != nil || out.Status != 0 {
 			continue
 		}
-		m := warpFocusURL.FindStringSubmatch(out.Stdout)
-		if m == nil {
-			continue
-		}
-		if r, err := l.runner.Run([]string{"/usr/bin/open", m[1]}, baseEnv()); err == nil && r.Status == 0 {
-			return true
+		if m := warpFocusURL.FindStringSubmatch(out.Stdout); m != nil {
+			urls = append(urls, m[1])
 		}
 	}
-	return false
+	return urls
 }
 
-// raiseWindow brings app's window titled title to the front, if it has one (System Events:
-// needs Accessibility and Automation permission, else false).
-func (l *ReusingLauncher) raiseWindow(app, title string) bool {
-	cmd := []string{"/usr/bin/osascript"}
-	for _, s := range []string{
+// raiseWindowScript is the System Events AppleScript that raises app's window titled title (needs
+// Accessibility and Automation permission; its "ok"/"none" result tells the app whether it found one).
+func raiseWindowScript(app, title string) []string {
+	return []string{
 		`tell application "System Events"`,
 		"set p to first application process whose POSIX path of application file is " + quoted(app),
 		"set ws to (windows of p whose name is " + quoted(title) + ")",
@@ -97,11 +95,7 @@ func (l *ReusingLauncher) raiseWindow(app, title string) bool {
 		`perform action "AXRaise" of item 1 of ws`,
 		`return "ok"`,
 		"end tell",
-	} {
-		cmd = append(cmd, "-e", s)
 	}
-	out, err := l.runner.Run(cmd, baseEnv())
-	return err == nil && out.Status == 0 && strings.TrimSpace(out.Stdout) == "ok"
 }
 
 type proc struct {
@@ -113,7 +107,7 @@ type proc struct {
 // attached finds a process running exactly argv (the attach command) and the app it runs in
 // (the nearest ancestor inside a .app bundle), with its tty; clients are every process running
 // argv in that app.
-func (l *ReusingLauncher) attached(argv []string) (app, tty string, clients []int, ok bool) {
+func (l *ReusingPlanner) attached(argv []string) (app, tty string, clients []int, ok bool) {
 	out, err := l.runner.Run([]string{psBin, "-axww", "-o", "pid=,ppid=,tty=,command="}, baseEnv())
 	if err != nil || out.Status != 0 {
 		return "", "", nil, false
@@ -163,19 +157,6 @@ func (l *ReusingLauncher) attached(argv []string) (app, tty string, clients []in
 		}
 	}
 	return app, tty, clients, ok
-}
-
-// bringForward shows the attached terminal: in iTerm the exact window, tab and session (by its
-// tty); elsewhere the app's front window (Warp can't be told which tab to show).
-func (l *ReusingLauncher) bringForward(app, tty string) error {
-	if strings.HasSuffix(app, "/iTerm.app") {
-		cmd := []string{"/usr/bin/osascript"}
-		for _, s := range ItermSelectScript("/dev/" + tty) {
-			cmd = append(cmd, "-e", s)
-		}
-		return run(l.runner, cmd, "iTerm")
-	}
-	return run(l.runner, []string{"/usr/bin/open", "-a", app}, app)
 }
 
 // ItermSelectScript selects the iTerm session on tty (its window and tab too) and activates iTerm.

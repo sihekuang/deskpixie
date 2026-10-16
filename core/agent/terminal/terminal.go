@@ -1,6 +1,6 @@
-// Package terminal opens a terminal window attached to the agent session (Warp via a tab
-// config and warp:// URL, iTerm via AppleScript). Port of ai-mascot crates/terminal-macos.
-// Each launcher runs its commands through an injected agent.CommandRunner.
+// Package terminal decides how to show a terminal attached to the agent session (Warp via a
+// tab config and warp:// URL, iTerm via AppleScript) as a FocusPlan (#116: the core decides, the
+// app shows). Port of ai-mascot crates/terminal-macos.
 package terminal
 
 import (
@@ -87,29 +87,15 @@ func quoted(s string) string {
 	return b.String()
 }
 
-func run(r agent.CommandRunner, argv []string, what string) error {
-	out, err := r.Run(argv, baseEnv())
-	if err != nil {
-		return agent.LaunchError(fmt.Sprintf("could not open %s: %v", what, err))
-	}
-	if out.Status != 0 {
-		return agent.LaunchError(fmt.Sprintf("could not open %s: %s", what, strings.TrimSpace(out.Stderr)))
-	}
-	return nil
+// WarpPlanner keeps one app-owned Tab Config whose single pane runs the attach command, shown
+// with warp://tab_config/<stem>. Deliberate deviation from Rust: no ?new_window=true — a new
+// window also gets Warp's default tab, so one click made two tabs; without it the URL adds
+// exactly one tab to the active window (and launches Warp when it is not running).
+type WarpPlanner struct {
+	dir string // ~/.warp/tab_configs (Warp stable on macOS)
 }
 
-// WarpLauncher keeps one app-owned Tab Config whose single pane runs the attach command,
-// opened with warp://tab_config/<stem>. Deliberate deviation from Rust: no ?new_window=true —
-// a new window also gets Warp's default tab, so one click made two tabs; without it the URL
-// adds exactly one tab to the active window (and launches Warp when it is not running).
-type WarpLauncher struct {
-	runner agent.CommandRunner
-	dir    string // ~/.warp/tab_configs (Warp stable on macOS)
-}
-
-func NewWarpLauncher(runner agent.CommandRunner, dir string) *WarpLauncher {
-	return &WarpLauncher{runner: runner, dir: dir}
-}
+func NewWarpPlanner(dir string) *WarpPlanner { return &WarpPlanner{dir: dir} }
 
 // WarpTabConfig is the TOML for an Attach. The config name and the tab title are the
 // user-visible product name (without a title the tab is named after the herdr path).
@@ -126,16 +112,18 @@ func WarpTabConfig(a agent.Attach) string {
 	return b.String()
 }
 
-func (w *WarpLauncher) Name() string { return "warp" }
+func (w *WarpPlanner) Name() string { return "warp" }
 
 // WindowTitle is the attach tab's title, which its window shows while the tab is active.
-func (w *WarpLauncher) WindowTitle() string { return "DeskPixie" }
+func (w *WarpPlanner) WindowTitle() string { return "DeskPixie" }
 
-func (w *WarpLauncher) Open(a agent.Attach) error {
+func (w *WarpPlanner) Plan(a agent.Attach) (agent.FocusPlan, error) {
 	path := filepath.Join(w.dir, WarpStem+".toml")
 	toml := WarpTabConfig(a)
 	if cur, err := os.ReadFile(path); err != nil || string(cur) != toml {
-		fail := func(e error) error { return agent.LaunchError("could not open Warp: " + e.Error()) }
+		fail := func(e error) (agent.FocusPlan, error) {
+			return agent.FocusPlan{}, agent.LaunchError("could not open Warp: " + e.Error())
+		}
 		if err := os.MkdirAll(w.dir, 0o755); err != nil {
 			return fail(err)
 		}
@@ -150,13 +138,13 @@ func (w *WarpLauncher) Open(a agent.Attach) error {
 		}
 	}
 	url := "warp://tab_config/" + WarpStem
-	return run(w.runner, []string{"/usr/bin/open", url}, "Warp")
+	return agent.FocusPlan{NewTerminal: &agent.NewTerminalAction{Kind: "url", URL: url}}, nil
 }
 
-// ItermLauncher opens a new iTerm window whose session runs the attach command (in a.Dir).
-type ItermLauncher struct{ runner agent.CommandRunner }
+// ItermPlanner opens a new iTerm window whose session runs the attach command (in a.Dir).
+type ItermPlanner struct{}
 
-func NewItermLauncher(runner agent.CommandRunner) *ItermLauncher { return &ItermLauncher{runner} }
+func NewItermPlanner() *ItermPlanner { return &ItermPlanner{} }
 
 // ItermScript is the AppleScript, one entry per line (each becomes one -e argument).
 func ItermScript(a agent.Attach) []string {
@@ -168,20 +156,16 @@ func ItermScript(a agent.Attach) []string {
 	}
 }
 
-func (i *ItermLauncher) Name() string { return "iterm" }
+func (i *ItermPlanner) Name() string { return "iterm" }
 
-func (i *ItermLauncher) Open(a agent.Attach) error {
+func (i *ItermPlanner) Plan(a agent.Attach) (agent.FocusPlan, error) {
 	// AppleScript string literals have no \u escape, so other control characters cannot be passed on.
 	for _, w := range append(slices.Clone(a.Argv), a.Dir) {
 		for _, c := range w {
 			if unicode.IsControl(c) && c != '\n' && c != '\t' && c != '\r' {
-				return agent.LaunchError("could not open iTerm: the command contains control characters")
+				return agent.FocusPlan{}, agent.LaunchError("could not open iTerm: the command contains control characters")
 			}
 		}
 	}
-	cmd := []string{"/usr/bin/osascript"}
-	for _, l := range ItermScript(a) {
-		cmd = append(cmd, "-e", l)
-	}
-	return run(i.runner, cmd, "iTerm")
+	return agent.FocusPlan{NewTerminal: &agent.NewTerminalAction{Kind: "applescript", Script: ItermScript(a)}}, nil
 }
