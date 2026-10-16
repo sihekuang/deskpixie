@@ -119,15 +119,20 @@ func CodexHookArgs(port uint16, hooks []CodexHook) []string {
 	return append(args, "-c", "hooks.state={"+strings.Join(trust, ",")+"}")
 }
 
+// CodexApproveForMe is Codex's "Approve for me" (#112): a reviewer model, not a person at the
+// agent's terminal, rules on each sandbox escalation. It allows low and medium risk actions and
+// denies risky ones; the agent reports what stayed blocked.
+const CodexApproveForMe = `approvals_reviewer="auto_review"`
+
 // CodexCoordinatorArgs are Codex's arguments for the coordinator (AgentHost puts `resume
 // --last` first on a resume): its own process (--no-daemon: hooks and the MCP bearer need this
 // pane's environment), writes to the workspace (its cwd) and the canvas, network on as for the
-// Claude coordinator, escalations through the PermissionRequest hook, the pixie MCP server with
+// Claude coordinator, escalations ruled on by Approve for me, the pixie MCP server with
 // the bearer from PIXIE_AGENT_TOKEN, and the hooks. A blank model is none.
 func CodexCoordinatorArgs(canvas string, port uint16, model string, stateHooks bool) []string {
 	args := []string{
 		"--no-daemon",
-		"-s", "workspace-write", "-a", "on-request",
+		"-s", "workspace-write", "-a", "on-request", "-c", CodexApproveForMe,
 		"--add-dir", canvas,
 		"-c", "sandbox_workspace_write.network_access=true",
 		"-c", "check_for_update_on_startup=false",

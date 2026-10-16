@@ -86,6 +86,8 @@ func TestCodexWorkerArgsFollowTheSpec(t *testing.T) {
 		"workspace-write",
 		"-a",
 		"on-request",
+		"-c",
+		`approvals_reviewer="auto_review"`,
 		"--add-dir",
 		"/p/focus/.git/objects",
 		"--add-dir",

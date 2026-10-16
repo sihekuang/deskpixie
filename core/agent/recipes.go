@@ -146,7 +146,7 @@ var (
 // CodexWorkerArgs: `-s workspace-write -a on-request`, one --add-dir per writable folder, and
 // the pixie MCP server by -c overrides with the bearer read from PIXIE_AGENT_TOKEN.
 func CodexWorkerArgs(writable []string, port uint16) []string {
-	args := []string{"-s", "workspace-write", "-a", "on-request"}
+	args := []string{"-s", "workspace-write", "-a", "on-request", "-c", CodexApproveForMe}
 	for _, dir := range writable {
 		args = append(args, "--add-dir", dir)
 	}

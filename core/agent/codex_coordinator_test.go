@@ -102,7 +102,8 @@ func TestTomlStringsEscapeQuotesAndBackslashes(t *testing.T) {
 
 func TestCodexCoordinatorArgs(t *testing.T) {
 	args := CodexCoordinatorArgs("/data/canvas", 48217, "gpt-6-sol", false)
-	head := []string{"--no-daemon", "-s", "workspace-write", "-a", "on-request", "--add-dir", "/data/canvas"}
+	head := []string{"--no-daemon", "-s", "workspace-write", "-a", "on-request",
+		"-c", `approvals_reviewer="auto_review"`, "--add-dir", "/data/canvas"}
 	if !slices.Equal(args[:len(head)], head) {
 		t.Fatal(args)
 	}
