@@ -164,6 +164,12 @@ func (s *Server) hook(w http.ResponseWriter, r *http.Request, event string) {
 	obj, _ := input.(map[string]any)
 	mode, _ := obj["permission_mode"].(string)
 	mode = clean(mode)
+	// The prompt it took, matched against what the app typed (#128): kept whole, never shown.
+	prompt, submitted := obj["prompt"].(string)
+	if submitted && obj["hook_event_name"] == "UserPromptSubmit" && (event == "mode" || event == "state") {
+		// Before the reply: Claude Code waits for it, so this always comes before the turn's Stop.
+		s.rt.Deliver(agent.HookEvent{Kind: agent.HookSubmit, Agent: agentName, Message: prompt})
+	}
 	switch event {
 	case "stop":
 		if message, ok := obj["last_assistant_message"].(string); ok {

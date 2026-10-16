@@ -91,7 +91,7 @@ func (v *holdVoice) waitFor(t *testing.T, what string, within time.Duration, ok 
 
 // holdApp builds the agent app on the smoke session with a haiku coordinator and no workers,
 // with holdVoice attached and a conversation open. pixSock, if set, is pix's socket.
-func holdApp(t *testing.T, pixSock string) (*agentapp.Agent, *holdVoice, *smoketest.LiveSmoke, string) {
+func holdApp(t *testing.T, pixSock string, edit ...func(*agentapp.Config)) (*agentapp.Agent, *holdVoice, *smoketest.LiveSmoke, string) {
 	t.Helper()
 	sm := smoketest.Smoke(t)
 	tmp := smoketest.CanonicalTemp(t)
@@ -116,11 +116,15 @@ func holdApp(t *testing.T, pixSock string) (*agentapp.Agent, *holdVoice, *smoket
 		t.Fatal(err)
 	}
 	v := &holdVoice{sig: make(chan voice.VoiceSignal, 8)}
-	a := agentapp.Build(agentapp.Config{
+	cfg := agentapp.Config{
 		Settings: s, AppSupport: filepath.Join(tmp, "data"), Home: sm.Home, Environ: sm.Environ, PixSocket: pixSock,
 		Hooks:  app.AgentHooks{Notify: func(_, body string) { v.add("notify: " + body) }},
 		Listen: func(uint16) (net.Listener, error) { return ln, nil },
-	})
+	}
+	for _, e := range edit {
+		e(&cfg)
+	}
+	a := agentapp.Build(cfg)
 	if a == nil {
 		t.Fatal("Build returned nil")
 	}

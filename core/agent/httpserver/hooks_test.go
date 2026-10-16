@@ -479,6 +479,9 @@ func TestTheStateRouteReportsTheCallersStatus(t *testing.T) {
 			t.Fatalf("%s: %d %q", tc.body, code, text)
 		}
 		ev := r.rt.recv(t)
+		if ev.Kind == agent.HookSubmit { // a prompt taken: reported first (#128)
+			ev = r.rt.recv(t)
+		}
 		if ev.Kind != agent.HookState || ev.Agent != "coordinator" || ev.Status != tc.want {
 			t.Fatalf("%s: %+v", tc.body, ev)
 		}
@@ -536,5 +539,26 @@ func TestTheModeRouteDeliversAModeEvent(t *testing.T) {
 	}
 	if status, _ := send(r.app, postReq("/hooks/mode", nil, strings.NewReader(`{}`))); status != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated: %d", status)
+	}
+}
+
+func TestAUserPromptSubmitDeliversThePromptBeforeTheMode(t *testing.T) {
+	r := rig()
+	prompt := "New request from the user: a\n[ref job_000000000001]"
+	body := toJSON(map[string]any{"hook_event_name": "UserPromptSubmit", "prompt": prompt, "permission_mode": "auto"})
+	if status, _ := send(r.app, postReq("/hooks/mode", &r.token, strings.NewReader(body))); status != http.StatusOK {
+		t.Fatal(status)
+	}
+	if ev := r.rt.recv(t); ev.Kind != agent.HookSubmit || ev.Agent != "coordinator" || ev.Message != prompt {
+		t.Fatalf("%+v", ev)
+	}
+	if ev := r.rt.recv(t); ev.Kind != agent.HookMode || ev.PermissionMode != "auto" {
+		t.Fatalf("%+v", ev)
+	}
+	// Any other hook with a "prompt" is not a submit.
+	stopBody := toJSON(map[string]any{"hook_event_name": "Stop", "prompt": "x", "last_assistant_message": "done"})
+	send(r.app, postReq("/hooks/stop", &r.token, strings.NewReader(stopBody)))
+	if ev := r.rt.recv(t); ev.Kind != agent.HookStop {
+		t.Fatalf("%+v", ev)
 	}
 }

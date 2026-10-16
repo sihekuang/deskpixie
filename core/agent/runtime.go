@@ -903,6 +903,8 @@ func (h *AgentHandle) hook(ev HookEvent) {
 	}
 	switch ev.Kind {
 	case HookMode:
+	case HookSubmit:
+		h.Input(SubmitInput(ev.Agent, ev.Message))
 	case HookStop:
 		h.Input(StopInput(ev.Agent, ev.Message))
 	case HookPostTool:

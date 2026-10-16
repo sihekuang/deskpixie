@@ -49,6 +49,10 @@ const (
 	// IdleWithoutStopMs: an Idle/Done with no Stop for the prompt in flight makes the inbox
 	// ready after this long (a lost Stop hook must not wedge it).
 	IdleWithoutStopMs Millis = 10_000
+	// PromptLandMs: a prompt the coordinator hasn't reported taking (its UserPromptSubmit hook)
+	// this long after it was typed, with no other turn running, never landed: it is sent again
+	// (#128). Only once the coordinator has reported a prompt: one without the hook is trusted.
+	PromptLandMs Millis = 15_000
 )
 
 const unreachable = "I couldn't reach the coordinator"
@@ -146,6 +150,7 @@ const (
 	InDecide                               // Token, Allow: a tap on Allow or Deny in the updates bubble
 	InChoose                               // Token, Option: a tap on a session menu's option in the updates bubble (#105)
 	InSessionAnswerFailed                  // Name, Text: EfAnswerSession could not be typed (#105)
+	InSubmit                               // Agent, Message: a Claude agent took a prompt (its UserPromptSubmit hook); Message is the prompt
 )
 
 // Input is one stimulus for AgentController.Step. Build it with the *Input constructors.
@@ -263,6 +268,9 @@ func SessionAnswerFailedInput(name, why string) Input {
 func UpdatesSeenInput(ids []uint64) Input { return Input{Kind: InUpdatesSeen, IDs: ids} }
 func PresenceInput(away bool) Input       { return Input{Kind: InPresence, Away: away} }
 func ModeInput(agent, mode string) Input  { return Input{Kind: InMode, Agent: agent, Mode: mode} }
+func SubmitInput(agent, prompt string) Input {
+	return Input{Kind: InSubmit, Agent: agent, Message: prompt}
+}
 func WorkerScreenInput(name, text string) Input {
 	return Input{Kind: InWorkerScreen, Name: name, Text: text}
 }
@@ -387,8 +395,19 @@ type AgentController struct {
 	awaitingStop bool
 	// idleWaitAt: an Idle/Done came while awaiting the Stop: if the Stop is lost, ready at this time.
 	idleWaitAt optMs
-	held       bool
-	status     string
+	// submits: the coordinator reports each prompt it takes. Only then is a prompt's landing
+	// checked, and a Working with no submitted turn behind it told apart (#127, #128).
+	submits bool
+	// turnOpen: a turn the coordinator took is running (its submit seen, its Stop not yet).
+	turnOpen bool
+	// landing: the prompt in flight (landingRefs, landingText) is not yet seen taken; landBy is
+	// when it counts as lost (unset while another turn runs: it may be queued behind it).
+	landing     bool
+	landingRefs []JobID
+	landingText string
+	landBy      optMs
+	held        bool
+	status      string
 	// injected: recently injected notices and the lines each one carried (none: narration,
 	// which is dropped rather than notified if it bounces).
 	injected []injectedNotice
@@ -552,6 +571,10 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 		}
 	case InMode:
 		c.onMode(in.Agent, in.Mode, now, &fx)
+	case InSubmit:
+		if in.Agent == Coordinator {
+			c.onSubmit(in.Message, now, &fx)
+		}
 	case InStop:
 		if in.Agent == Coordinator {
 			c.onStop(in.Message, now, &fx)
@@ -813,6 +836,13 @@ func (c *AgentController) flush(now Millis, fx *[]Effect) {
 		c.settleAt = optMs{}
 		c.idleWaitAt = optMs{}
 		c.awaitingStop = true
+		if c.submits {
+			c.landing, c.landingRefs, c.landingText = true, prompt.Refs, prompt.Text
+			c.landBy = optMs{}
+			if !c.turnOpen {
+				c.landBy = someMs(now + PromptLandMs)
+			}
+		}
 		for _, r := range prompt.Refs {
 			if c.jobs.IsOpen(r) {
 				c.coordJob = r
@@ -828,6 +858,11 @@ func (c *AgentController) flush(now Millis, fx *[]Effect) {
 }
 
 func (c *AgentController) onCoordinatorStatus(status PaneStatus, now Millis, fx *[]Effect) {
+	if c.submits && status == PaneWorking && !c.turnOpen {
+		// No turn is running: Herdr reads a spinner the TUI keeps while a background agent
+		// runs, at an idle prompt. It neither holds the inbox nor counts as busy (#127).
+		return
+	}
 	c.coordStatus = status
 	idle := status == PaneIdle || status == PaneDone
 	switch {
@@ -916,6 +951,49 @@ func (c *AgentController) ensureCoordinator(fx *[]Effect) {
 	*fx = append(*fx, Effect{Kind: EfStartCoordinator})
 }
 
+// onSubmit: the coordinator took a prompt and started a turn on it: the one in flight if it
+// carries its refs (or, with none, its text), else another (the user's, or a background agent's
+// notification). Either way it is busy until that turn's Stop.
+func (c *AgentController) onSubmit(prompt string, now Millis, fx *[]Effect) {
+	if !c.submits {
+		*fx = append(*fx, logEffect("the coordinator reports the prompts it takes: checking that each one lands"))
+	}
+	c.submits = true
+	c.turnOpen = true
+	c.coordStatus = PaneWorking
+	c.inbox.OnStatus(PaneWorking)
+	c.settleAt = optMs{}
+	c.retryAt = optMs{}
+	c.idleWaitAt = optMs{}
+	if !c.landing {
+		return
+	}
+	if c.isLanding(prompt) {
+		c.stopLanding()
+		c.watchdog = nil
+	} else {
+		c.landBy = optMs{}
+	}
+}
+
+// isLanding: prompt is the one in flight.
+func (c *AgentController) isLanding(prompt string) bool {
+	if len(c.landingRefs) == 0 {
+		return strings.Contains(prompt, strings.TrimSpace(c.landingText))
+	}
+	for _, r := range c.landingRefs {
+		if !strings.Contains(prompt, "[ref "+string(r)+"]") {
+			return false
+		}
+	}
+	return true
+}
+
+func (c *AgentController) stopLanding() {
+	c.landing, c.landingRefs, c.landingText = false, nil, ""
+	c.landBy = optMs{}
+}
+
 // promptFailed: a prompt never reached the coordinator: what it carried goes back to the front
 // of the queue, in order. Nothing was typed, so no Stop or status event will follow: while the
 // coordinator is up it is tried again on a timer (PromptRetryMs, doubling). After
@@ -923,6 +1001,7 @@ func (c *AgentController) ensureCoordinator(fx *[]Effect) {
 func (c *AgentController) promptFailed(now Millis, fx *[]Effect) {
 	*fx = append(*fx, logEffect("prompt failed"))
 	c.promptFailures++
+	c.stopLanding()
 	carried := unique(c.inbox.InFlightRefs())
 	c.inbox.RequeueInFlight()
 	// Nothing was typed: no Stop will come for it.
@@ -944,6 +1023,7 @@ func (c *AgentController) promptFailed(now Millis, fx *[]Effect) {
 // watchdogFired: no Stop or status event since a prompt timed out: its jobs fail out loud.
 func (c *AgentController) watchdogFired(jobs []JobID, now Millis, fx *[]Effect) {
 	*fx = append(*fx, logEffect("no sign of life after a timed-out prompt"))
+	c.stopLanding()
 	for _, id := range jobs {
 		c.inbox.DropInFlight(id)
 		c.inbox.DropQueued(id)
@@ -963,6 +1043,11 @@ func (c *AgentController) tickInbox(now Millis, fx *[]Effect) {
 		c.watchdog = nil
 		c.watchdogFired(w.jobs, now, fx)
 	}
+	if c.landBy.due(now) {
+		*fx = append(*fx, logEffect("prompt not taken by the coordinator: sending it again"))
+		c.watchdog = nil
+		c.promptFailed(now, fx)
+	}
 	settled := c.settleAt.due(now)
 	retry := c.retryAt.due(now)
 	// Idle/Done came but the Stop never did (a lost hook): don't wait for it any longer.
@@ -975,7 +1060,18 @@ func (c *AgentController) tickInbox(now Millis, fx *[]Effect) {
 	}
 	if idleWaited || watched {
 		c.idleWaitAt = optMs{}
-		c.awaitingStop = false
+		// A lost Stop also leaves its turn open.
+		c.turnOpen = false
+		if c.landing && idleWaited && !watched {
+			// That lost Stop was another turn's: the prompt in flight still has to land, on its
+			// own clock from now, before anything else goes out.
+			if !c.landBy.set {
+				c.landBy = someMs(now + PromptLandMs)
+			}
+			idleWaited = false
+		} else {
+			c.awaitingStop = false
+		}
 	}
 	// After a watchdog the coordinator may well be idle: what else is queued gets its chance.
 	if (watched || settled || retry || idleWaited) && c.coordinator == coordUp {
@@ -985,6 +1081,8 @@ func (c *AgentController) tickInbox(now Millis, fx *[]Effect) {
 }
 
 func (c *AgentController) clearTimers() {
+	c.stopLanding()
+	c.turnOpen = false
 	c.retryAt = optMs{}
 	c.settleAt = optMs{}
 	c.watchdog = nil
@@ -1027,17 +1125,26 @@ func (c *AgentController) failJobSaying(id JobID, reason, line string, now Milli
 // ---------- replies ----------
 
 func (c *AgentController) onStop(message string, now Millis, fx *[]Effect) {
+	c.turnOpen = false
 	// The open jobs in the prompt this turn answered.
-	answered := c.openInFlight()
-	// The turn is over. The next prompt goes out on Idle/Done, or after a short settle if Herdr
-	// missed the Idle (the TUI may still be finishing right at the Stop). An Idle that came
-	// first doesn't send at once either: the settle covers it.
-	c.inbox.FinishTurn()
-	c.awaitingStop = false
-	c.idleWaitAt = optMs{}
-	c.promptFailures = 0
-	c.watchdog = nil
-	c.settleAt = someMs(now + StopSettleMs)
+	var answered []JobID
+	if c.landing {
+		// The prompt in flight was never taken: this turn was another's (a background agent's
+		// notification, say), and answers none of it. It has a while from now to land; nothing
+		// else is sent meanwhile.
+		c.landBy = someMs(now + PromptLandMs)
+	} else {
+		answered = c.openInFlight()
+		// The turn is over. The next prompt goes out on Idle/Done, or after a short settle if
+		// Herdr missed the Idle (the TUI may still be finishing right at the Stop). An Idle that
+		// came first doesn't send at once either: the settle covers it.
+		c.inbox.FinishTurn()
+		c.awaitingStop = false
+		c.idleWaitAt = optMs{}
+		c.promptFailures = 0
+		c.watchdog = nil
+		c.settleAt = someMs(now + StopSettleMs)
+	}
 	memory, memoryRef, hasMemory := ParseMemory(message)
 	message = StripMemory(message)
 	tokens := c.pendingTokens()
