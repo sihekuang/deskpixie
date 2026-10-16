@@ -28,6 +28,9 @@ final class EngineCoordinator {
     /// Binding, rollback and the "Hotkey unavailable" line (DeskPixieCore, tested there).
     private var hotkeys: HotkeyBinder!
     private let notifier = Notifier()
+    /// Walks the core's FocusPlan to show a terminal (#116); set in init, since its outcome
+    /// closure needs self.
+    private var terminalFocus: TerminalFocusExecutor!
     private lazy var canvas = CanvasWindowController(engine: engine, worker: worker)
 
     private(set) var pixie: PixieController?
@@ -63,6 +66,14 @@ final class EngineCoordinator {
         self.micRing = micRing
         self.pump = pump
         hotkeys = HotkeyBinder(registrar: hotkey) { [weak self] in self?.talk() }
+        terminalFocus = TerminalFocusExecutor(primitives: SystemTerminalFocusPrimitives()) { [weak self] success, detail in
+            guard let self else { return }
+            let engine = self.engine
+            self.worker.async {
+                do { _ = try engine.call("agent.reportFocusOutcome", ReportFocusOutcomeArgs(success: success, detail: detail)) }
+                catch { Self.log.error("agent.reportFocusOutcome: \(String(describing: error), privacy: .public)") }
+            }
+        }
     }
 
     // MARK: Lifecycle
@@ -420,6 +431,8 @@ final class EngineCoordinator {
             roster?.apply(view: view)
         case .showPane(let r):
             bubble?.showPane(r)
+        case .focusPlan(let plan):
+            terminalFocus.execute(plan)
         }
     }
 
@@ -499,4 +512,10 @@ final class EngineCoordinator {
 /// `presence.set` arguments.
 private struct PresenceArgs: Encodable, Sendable {
     let away: Bool
+}
+
+/// `agent.reportFocusOutcome` arguments: the shell finished executing a FocusPlan (#116).
+private struct ReportFocusOutcomeArgs: Encodable, Sendable {
+    let success: Bool
+    let detail: String
 }
