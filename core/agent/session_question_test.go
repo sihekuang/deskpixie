@@ -187,3 +187,42 @@ func TestASessionsTextNeverSpeaksAPendingConfirmWord(t *testing.T) {
 		}
 	}
 }
+
+// #105: a Claude dialog relayed as shown: Claude's own words, the command beside them, and every
+// option as a button; a confirm word still means its first option (Yes).
+var bashDialog = SessionQuestion{ID: "q8", Label: "api", App: "com.googlecode.iterm2", Kind: "permission",
+	Tool: "Bash", Input: `{"command":"npm test"}`, Text: "Run the tests", Body: "npm test",
+	Prompt: "Do you want to proceed?", Options: []string{"Yes", "Yes, and don't ask again for: npm test", "No"}}
+
+func TestADialogIsToldInClaudesWordsWithItsOptions(t *testing.T) {
+	c := ctl()
+	fx := askSession(c, bashDialog, T0)
+	token := c.confirms.Pending()[0].Token
+	wantContains(t, fx, eNotify("api: Run the tests. Do you want to proceed? Say confirm "+token+", or choose in the bubble."))
+	b := bubbleOf(fx)
+	if len(b) != 1 || b[0].Note != "npm test" || strings.Join(b[0].Options, "|") != strings.Join(bashDialog.Options, "|") {
+		t.Fatalf("%+v", b)
+	}
+	if a := answers(c.Step(ChooseInput(token, 2), T0+1)); len(a) != 1 || a[0].Answer != "2" {
+		t.Fatalf("%s", fmtEffects(a))
+	}
+}
+
+func TestAConfirmWordAnswersADialogsFirstOption(t *testing.T) {
+	c := ctl()
+	askSession(c, bashDialog, T0)
+	token := c.confirms.Pending()[0].Token
+	if a := answers(c.Step(userSaid("confirm "+token), T0+1)); len(a) != 1 || a[0].Answer != "yes" {
+		t.Fatalf("%s", fmtEffects(a))
+	}
+}
+
+func TestADialogNotAboutACommandIsToldByItsQuestion(t *testing.T) {
+	c := ctl()
+	q := SessionQuestion{ID: "q9", Label: "api", Kind: "permission", Tool: "Write", Input: `{"file_path":"/x/notes.txt"}`,
+		Text: "notes.txt", Body: "1 hi", Prompt: "Do you want to create notes.txt?", Options: []string{"Yes", "No"}}
+	fx := askSession(c, q, T0)
+	if !strings.Contains(fmtEffects(fx), `Notify("api: Do you want to create notes.txt?`) {
+		t.Fatalf("%s", fmtEffects(fx))
+	}
+}

@@ -263,7 +263,7 @@ func (h *Host) onMsg(s *session, m wire.Msg) bool {
 		case "question":
 			h.mu.Lock()
 			q := agent.SessionQuestion{ID: m.ID, Label: s.label(), App: s.hello.App, Kind: m.Source,
-				Tool: m.ToolName, Input: m.Input, Text: m.Text, Options: m.Keys}
+				Tool: m.ToolName, Input: m.Input, Text: m.Text, Options: m.Keys, Body: m.Body, Prompt: m.Prompt}
 			h.mu.Unlock()
 			h.broadcast(agent.PaneEvent{Kind: agent.PaneEventQuestion, Agent: s.addr, Question: &q})
 		case "question-gone":

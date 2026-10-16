@@ -23,6 +23,8 @@ type UpdateItem struct {
 	// Options: a session menu's choices (#105): the bubble shows one button each instead of
 	// Allow and Deny, answered with agent.choose.
 	Options []string `json:"options,omitempty"`
+	// Note: shown small under the line, never said (a session dialog's command, #105).
+	Note string `json:"note,omitempty"`
 }
 
 // bubbleItems: the undelivered lines, minus permission questions no longer pending, while Pixie
@@ -38,7 +40,7 @@ func (c *AgentController) bubbleItems() []UpdateItem {
 		if !pending && (l.Token != nil || l.Delivered || c.settings.OpenConversation) {
 			continue
 		}
-		item := UpdateItem{ID: l.ID, Text: l.Text, Kind: l.Kind, At: l.At, Job: l.Job, Worker: l.Worker, App: l.App}
+		item := UpdateItem{ID: l.ID, Text: l.Text, Kind: l.Kind, At: l.At, Job: l.Job, Worker: l.Worker, App: l.App, Note: l.Note}
 		if l.Token != nil {
 			item.Token = *l.Token
 			item.Options = c.confirms.OptionsOf(*l.Token)

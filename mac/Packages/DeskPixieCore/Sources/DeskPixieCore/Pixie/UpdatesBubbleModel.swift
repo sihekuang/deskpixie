@@ -20,6 +20,8 @@ public struct UpdateLine: Decodable, Sendable, Equatable, Identifiable {
     public let app: String?
     /// A session menu's choices (#105): one button each, answered with `agent.choose`.
     public let options: [String]?
+    /// Shown small under the line, never said: a session dialog's command (#105).
+    public let note: String?
 
     /// Whether the row shows Allow and Deny buttons.
     public var offersDecision: Bool { kind == "question" && token != nil && (options ?? []).isEmpty }
@@ -28,7 +30,8 @@ public struct UpdateLine: Decodable, Sendable, Equatable, Identifiable {
     public var offersOptions: Bool { kind == "question" && token != nil && !(options ?? []).isEmpty }
 
     public init(id: UInt64, text: String, kind: String, at: Int64, job: String?, worker: String?,
-                token: String? = nil, app: String? = nil, options: [String]? = nil) {
+                token: String? = nil, app: String? = nil, options: [String]? = nil,
+                note: String? = nil) {
         self.id = id
         self.text = text
         self.kind = kind
@@ -38,6 +41,7 @@ public struct UpdateLine: Decodable, Sendable, Equatable, Identifiable {
         self.token = token
         self.app = app
         self.options = options
+        self.note = note
     }
 }
 

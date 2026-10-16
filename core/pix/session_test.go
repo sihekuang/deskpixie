@@ -599,3 +599,42 @@ func TestAPlanApprovalIsOnlyAnnounced(t *testing.T) {
 		t.Fatal("a plan approval must not be answered from Pixie")
 	}
 }
+
+// #105: a Claude dialog is relayed as drawn: Claude's summary, the command, its question and
+// every option, answered with the option's number.
+const bashDialog = "────────────────────────────────────────\r\n Bash command\r\n Run the tests\r\n" +
+	"╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\r\n npm test\r\n╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\r\n Do you want to proceed?\r\n" +
+	" ❯ 1. Yes\r\n   2. Yes, and don't ask again for: npm test\r\n   3. No\r\n\r\n Esc to cancel"
+
+func TestAClaudeDialogIsRelayedAsShownAndAnsweredByNumber(t *testing.T) {
+	h := keyHarness(t, "claude")
+	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "npm test"}})
+	h.s.runner.OnOutput([]byte(bashDialog))
+	q := askedQuestion(t, h)
+	if q.Text != "Run the tests" || q.Prompt != "Do you want to proceed?" || q.Body != "npm test" ||
+		strings.Join(q.Keys, "|") != "Yes|Yes, and don't ask again for: npm test|No" || q.ToolName != "Bash" {
+		t.Fatalf("%+v", q)
+	}
+	if err := answer(t, h, q.ID, "4"); !strings.Contains(err, "isn't one of its answers") {
+		t.Fatalf("%q", err)
+	}
+	if err := answer(t, h, q.ID, "2"); err != "" {
+		t.Fatal(err)
+	}
+	typed(t, h, '2')
+}
+
+func TestADialogThatIsntReadIsAskedWithoutOptionsSoon(t *testing.T) {
+	h := keyHarness(t, "claude")
+	start := time.Now()
+	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "npm test"}})
+	q := askedQuestion(t, h)
+	if len(q.Keys) != 0 || q.Prompt != "" || time.Since(start) > 3*time.Second {
+		t.Fatalf("%+v after %v", q, time.Since(start))
+	}
+	h.s.runner.OnOutput([]byte(bashDialog))
+	if err := answer(t, h, q.ID, "yes"); err != "" {
+		t.Fatal(err)
+	}
+	typed(t, h, '1')
+}

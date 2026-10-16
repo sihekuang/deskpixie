@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/sihekuang/deskpixie/core/pix/wire"
 )
@@ -112,7 +113,13 @@ type question struct {
 	marker  string // shown while it waits ("" when it was seen on screen to begin with)
 	detail  string // shown with it: this request's own text, so another dialog doesn't count
 	seen    bool   // its marker and detail showed since it was asked
+	// held: its event, not sent yet: a Claude permission waits for its dialog to be read off
+	// the screen (or dialogWait), so DeskPixie gets the dialog as shown.
+	held *wire.Msg
 }
+
+// dialogWait: how long a Claude permission waits for its dialog before it is asked without it.
+const dialogWait = 1500 * time.Millisecond
 
 // ask makes q the prompt waiting on you and tells DeskPixie about it with ev. A prompt still
 // waiting is never replaced (its dialog could be the one on screen): the new one is not asked.
@@ -125,8 +132,32 @@ func (s *Session) ask(q *question, ev wire.Msg) {
 	s.qseq++
 	q.id = "q" + strconv.Itoa(s.qseq)
 	s.q = q
-	s.mu.Unlock()
 	ev.Kind, ev.Event, ev.ID = wire.KindEvent, "question", q.id
+	if q.kind == "permission" && q.marker != "" {
+		q.held = &ev
+		s.mu.Unlock()
+		time.AfterFunc(dialogWait, func() { s.sendHeld(q, nil) })
+		return
+	}
+	s.mu.Unlock()
+	s.client.Send(ev)
+}
+
+// sendHeld asks q's held event, with its dialog d as shown when it was read (nil: not read):
+// Claude's summary, the box's text, the question and every option, a number answering each.
+func (s *Session) sendHeld(q *question, d *dialog) {
+	s.mu.Lock()
+	if s.q != q || q.held == nil {
+		s.mu.Unlock()
+		return
+	}
+	ev := *q.held
+	q.held = nil
+	if d != nil {
+		ev.Text, ev.Body, ev.Prompt, ev.Keys = d.Summary, d.Body, d.Question, d.Options
+		q.options = len(d.Options)
+	}
+	s.mu.Unlock()
 	s.client.Send(ev)
 }
 
@@ -141,8 +172,9 @@ func (s *Session) clearQuestion() {
 	s.mu.Lock()
 	q := s.q
 	s.q = nil
+	told := q != nil && q.held == nil // a held one was never told
 	s.mu.Unlock()
-	if q != nil {
+	if told {
 		s.client.Send(wire.Msg{Kind: wire.KindEvent, Event: "question-gone", ID: q.id})
 	}
 }
@@ -174,8 +206,8 @@ func (s *Session) answer(id, choice string) wire.Msg {
 }
 
 // keys are what answers q with choice: a permission's Yes is Claude's first option (1) or
-// Codex's y, its No is Escape (both); a menu's option is its digit (Claude picks and submits
-// on it).
+// Codex's y, its No is Escape (both); a menu's option, or a Claude dialog's read off the
+// screen, is its digit (Claude picks on it).
 func (q *question) keys(tool, choice string) ([]byte, bool) {
 	switch {
 	case q.kind == "permission" && choice == "no":
@@ -184,7 +216,7 @@ func (q *question) keys(tool, choice string) ([]byte, bool) {
 		return []byte("y"), true
 	case q.kind == "permission" && choice == "yes":
 		return []byte("1"), true
-	case q.kind == "menu":
+	case q.kind == "menu" || q.kind == "permission":
 		if n, err := strconv.Atoi(choice); err == nil && n >= 1 && n <= q.options {
 			return []byte(strconv.Itoa(n)), true
 		}
@@ -199,24 +231,35 @@ type questionWatch struct {
 	for_ *question
 }
 
-func (w *questionWatch) watch(s *Session, out string) {
+func (w *questionWatch) watch(s *Session, out string, vt *screen) {
 	q := s.currentQuestion()
-	if q == nil || q.marker == "" || q.seen {
+	if q == nil || q.marker == "" {
 		return
 	}
 	if w.for_ != q { // a new prompt: only what is shown after it was asked counts
 		w.for_, w.tail = q, ""
 	}
-	w.tail += noSpace(ansi.ReplaceAllString(out, ""))
-	if len(w.tail) > 8192 {
-		w.tail = w.tail[len(w.tail)-8192:]
-	}
-	if strings.Contains(w.tail, noSpace(q.marker)) && strings.Contains(w.tail, noSpace(q.detail)) {
+	s.mu.Lock()
+	seen, held := q.seen, q.held != nil
+	s.mu.Unlock()
+	if !seen {
+		w.tail += noSpace(ansi.ReplaceAllString(out, ""))
+		if len(w.tail) > 8192 {
+			w.tail = w.tail[len(w.tail)-8192:]
+		}
+		if !strings.Contains(w.tail, noSpace(q.marker)) || !strings.Contains(w.tail, noSpace(q.detail)) {
+			return
+		}
 		s.mu.Lock()
 		if s.q == q {
 			q.seen = true
 		}
 		s.mu.Unlock()
+	}
+	if held { // shown: read the dialog as it is drawn now
+		if d, ok := readDialog(vt.Lines(), q.marker); ok {
+			s.sendHeld(q, &d)
+		}
 	}
 }
 

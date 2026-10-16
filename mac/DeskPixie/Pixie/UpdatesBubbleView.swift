@@ -69,7 +69,7 @@ struct UpdatesBubbleView: View {
                             ForEach(Array(options.enumerated()), id: \.offset) { i, option in
                                 Button(option) { onChoose(token, i + 1) }
                                     .buttonStyle(.bordered)
-                                    .lineLimit(1)
+                                    .lineLimit(2)
                             }
                         }
                         .controlSize(.small)
@@ -109,6 +109,13 @@ struct UpdatesBubbleView: View {
                     .font(.callout)
                     .lineLimit(2)
                     .truncationMode(.tail)
+                if let note = line.note, !note.isEmpty {
+                    Text(note)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                        .truncationMode(.tail)
+                }
                 (Text(Date(timeIntervalSince1970: Double(line.at) / 1000), style: .relative) + Text(" ago"))
                     .font(.caption)
                     .foregroundStyle(.secondary)

@@ -47,6 +47,16 @@ func (c *AgentController) onSessionQuestion(session string, q SessionQuestion, n
 			return what() + " Answer it in its terminal."
 		case q.Kind == "notice":
 			return fmt.Sprintf("%s %s. Answer it in its terminal.", label, mask(q.Text))
+		case len(q.Options) > 0 && q.Prompt != "":
+			// Its dialog as shown: Claude's summary of a command, else the question says it.
+			said := label + ": " + mask(q.Prompt)
+			if q.Tool == "Bash" && q.Text != "" {
+				said = fmt.Sprintf("%s: %s. %s", label, strings.TrimSuffix(mask(q.Text), "."), mask(q.Prompt))
+			}
+			if q.Tool != "" && VoiceConfirmableWith(q.Tool, input, c.settings.SpokenPaths) {
+				return fmt.Sprintf("%s Say confirm %s, or choose in the bubble.", said, token)
+			}
+			return said + " Choose in the bubble."
 		case q.Tool != "" && VoiceConfirmableWith(q.Tool, input, c.settings.SpokenPaths):
 			return ConfirmQuestionLine(what(), token)
 		case q.Tool != "":
@@ -62,8 +72,9 @@ func (c *AgentController) onSessionQuestion(session string, q SessionQuestion, n
 	}
 	c.sessionSeq++
 	pending.ID = sessionRequestBase + RequestID(c.sessionSeq)
+	pending.Options = q.Options
 	if q.Kind == "menu" {
-		pending.Options = q.Options
+		pending.Menu = true
 	} else {
 		pending.NoVoice = q.Tool == "" || !VoiceConfirmableWith(q.Tool, input, c.settings.SpokenPaths)
 	}
@@ -74,6 +85,9 @@ func (c *AgentController) onSessionQuestion(session string, q SessionQuestion, n
 		return
 	}
 	line.Text, line.Token = describe(token), &token
+	if q.Kind == "permission" && len(q.Options) > 0 {
+		line.Note = mask(q.Body)
+	}
 	before := c.outbox.Len()
 	c.deliverOpening(line, now, fx)
 	// Said in a conversation, it never reached the outbox: keep it there as heard, so the bubble

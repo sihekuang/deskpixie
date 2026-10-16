@@ -9,6 +9,14 @@ final class UpdatesBubbleModelTests: XCTestCase {
     }
 
     /// #105: a session's menu offers its options instead of Allow and Deny.
+    /// #105: a session's dialog carries its command, shown small under the line.
+    func testADialogLineCarriesItsCommand() throws {
+        let line = try JSONDecoder().decode(UpdateLine.self, from: Data(
+            #"{"id":8,"text":"api: Run the tests. Do you want to proceed? Choose in the bubble.","kind":"question","at":8,"token":"owl","options":["Yes","No"],"note":"npm test"}"#.utf8))
+        XCTAssertEqual(line.note, "npm test")
+        XCTAssertTrue(line.offersOptions)
+    }
+
     func testASessionMenuOffersItsOptions() throws {
         let menu = try JSONDecoder().decode(UpdateLine.self, from: Data(
             #"{"id":6,"text":"deskpixie is asking: Push main?","kind":"question","at":6,"token":"hawk","options":["Push","Don't push"]}"#.utf8))

@@ -38,12 +38,14 @@ type Pending struct {
 	Job      JobID
 	Deadline Millis
 	// Session and Question (#105): a prompt of one of your pix sessions (Agent is "" then);
-	// Label names the session. Options: a menu's choices, picked with Choose, never by a
-	// confirm word or Allow. NoVoice: only a tap answers it (you couldn't hear what it does).
+	// Label names the session. Options: its choices, picked with Choose; a menu's (Menu) never
+	// by a confirm word or Allow, a permission dialog's still (meaning its first, Yes).
+	// NoVoice: only a tap answers it (you couldn't hear what it does).
 	Session  string
 	Question string
 	Label    string
 	Options  []string
+	Menu     bool
 	NoVoice  bool
 }
 
@@ -219,7 +221,7 @@ func (c *Confirmations) Remove(id RequestID) (Pending, bool) {
 // DecideToken settles the request with token from a tap on Pixie's bubble (#97): the same
 // outcome as the confirm word (allow) or a refusal (deny). Unknown or used tokens do nothing.
 func (c *Confirmations) DecideToken(token string, allow bool) (Decided, bool) {
-	if at := slices.IndexFunc(c.pending, func(p Pending) bool { return p.Token == token }); at >= 0 && c.pending[at].Options != nil {
+	if at := slices.IndexFunc(c.pending, func(p Pending) bool { return p.Token == token }); at >= 0 && c.pending[at].Menu {
 		return Decided{}, false // a menu is picked from, not allowed
 	}
 	p, ok := c.take(token)
@@ -231,7 +233,7 @@ func (c *Confirmations) DecideToken(token string, allow bool) (Decided, bool) {
 
 // voiceToken: token is pending and a confirm word may answer it (not a menu, not tap-only).
 func (c *Confirmations) voiceToken(token string) bool {
-	return slices.ContainsFunc(c.pending, func(p Pending) bool { return p.Token == token && p.Options == nil && !p.NoVoice })
+	return slices.ContainsFunc(c.pending, func(p Pending) bool { return p.Token == token && !p.Menu && !p.NoVoice })
 }
 
 // OptionsOf is the menu choices of the prompt with this token (nil: not a menu).

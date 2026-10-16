@@ -132,6 +132,7 @@ func newSession(o sessionOpts) *Session {
 	// Only the PTY reader goroutine touches these.
 	var watch screenWatch
 	var shown questionWatch
+	var vt *screen
 	var notes osc9Watch
 	switch o.tool {
 	case "codex":
@@ -159,7 +160,11 @@ func newSession(o sessionOpts) *Session {
 					s.flushSoon()
 				}
 			}
-			shown.watch(s, out)
+			if rows, cols := s.runner.Size(); vt == nil || vt.rows != rows || vt.cols != cols {
+				vt = newScreen(rows, cols) // resized: Claude draws it all again
+			}
+			vt.Write(b)
+			shown.watch(s, out, vt)
 		}
 	}
 	return s
