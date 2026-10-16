@@ -164,6 +164,53 @@ func TestSessionPromptIsPastedWhenIdle(t *testing.T) {
 	waitEvent(t, h.d.events, "exited", func(m wire.Msg) bool { return m.Event == "exited" })
 }
 
+// TestSessionTypesPromptAfterWindowSwitch (#138): you switch away from an idle session (the
+// terminal sends a focus-out report), then a message arrives. pix must type it, not hold it.
+func TestSessionTypesPromptAfterWindowSwitch(t *testing.T) {
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "read x; echo seen:$x"}})
+	h.stdinW.WriteString("\x1b[I\x1b[O")
+	time.Sleep(100 * time.Millisecond)
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "while you were away"})
+	waitEvent(t, h.d.events, "prompt result", func(m wire.Msg) bool { return m.ID == "1" && m.Err == "" })
+	done := make(chan int, 1)
+	go func() { done <- h.s.finish() }()
+	select {
+	case code := <-done:
+		var buf bytes.Buffer
+		h.s.o.stdout.Close()
+		buf.ReadFrom(h.out)
+		if code != 0 || !strings.Contains(buf.String(), "seen:") || !strings.Contains(buf.String(), "while you were away") {
+			t.Fatalf("code %d out %q", code, buf.String())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("the message was never typed: %d still queued", h.s.queue.Len())
+	}
+}
+
+// TestSessionTypesPromptWhileMouseMoves (#138): fullscreen Claude Code has the terminal report
+// every mouse move, so your mouse over the window must not hold a message back.
+func TestSessionTypesPromptWhileMouseMoves(t *testing.T) {
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "read x; echo seen:$x"}})
+	h.stdinW.WriteString(mouseReports)
+	time.Sleep(100 * time.Millisecond)
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "while the mouse moves"})
+	waitEvent(t, h.d.events, "prompt result", func(m wire.Msg) bool { return m.ID == "1" && m.Err == "" })
+	h.stdinW.WriteString(mouseReports)
+	done := make(chan int, 1)
+	go func() { done <- h.s.finish() }()
+	select {
+	case code := <-done:
+		var buf bytes.Buffer
+		h.s.o.stdout.Close()
+		buf.ReadFrom(h.out)
+		if code != 0 || !strings.Contains(buf.String(), "while the mouse moves") {
+			t.Fatalf("code %d out %q", code, buf.String())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("the message was never typed: %d still queued", h.s.queue.Len())
+	}
+}
+
 func TestSessionHoldsPromptWhileYouType(t *testing.T) {
 	h := newHarness(t, "codex", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}})
 	h.stdinW.WriteString("half a sent") // no Enter

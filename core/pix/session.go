@@ -132,7 +132,7 @@ func newSession(o sessionOpts) *Session {
 	s.runner = &Runner{Launch: o.agent, Stdin: o.stdin, Stdout: o.stdout,
 		OnInput: func(b []byte) {
 			s.gate.Keys(b, time.Now())
-			if !onlyFocusReports(b) {
+			if !onlyReports(b) {
 				s.clearQuestion() // you are answering it yourself
 			}
 		}}

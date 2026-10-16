@@ -1,6 +1,7 @@
 package pix
 
 import (
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -34,8 +35,11 @@ func (g *Gate) Started() {
 	g.mu.Unlock()
 }
 
-// Keys takes every byte you type.
+// Keys takes every byte you type. The terminal's own reports (focus, mouse) aren't keys (#138).
 func (g *Gate) Keys(b []byte, now time.Time) {
+	if b = withoutReports(b); len(b) == 0 {
+		return
+	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.last = now
@@ -69,6 +73,13 @@ func (g *Gate) Keys(b []byte, now time.Time) {
 		}
 	}
 }
+
+// terminalReports is what a terminal sends that you didn't type (#138): its window gaining or
+// losing focus (ESC[I, ESC[O), and SGR mouse reports (ESC[<b;x;yM or m), which fullscreen
+// Claude Code asks for on every mouse move.
+var terminalReports = regexp.MustCompile(`\x1b\[[IO]|\x1b\[<\d+;\d+;\d+[Mm]`)
+
+func withoutReports(b []byte) []byte { return terminalReports.ReplaceAll(b, nil) }
 
 // Clear reports whether typing into the agent now can't mix with your text.
 func (g *Gate) Clear(now time.Time) bool {
