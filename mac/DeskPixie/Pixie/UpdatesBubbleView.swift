@@ -14,6 +14,8 @@ struct UpdatesBubbleView: View {
     /// Allow or Deny on a permission question (token, allow). The controller ignores a tap that
     /// comes too soon after the buttons appear (`UpdatesBubbleModel.acceptsDecision`).
     let onDecide: (String, Bool) -> Void
+    /// A session menu's option (token, option from 1), under the same stray-click guard (#105).
+    let onChoose: (String, Int) -> Void
     /// A click on the badge (opens the bubble, like hovering).
     let onBadge: () -> Void
 
@@ -57,6 +59,18 @@ struct UpdatesBubbleView: View {
                                 .buttonStyle(.borderedProminent)
                             Button("Deny") { onDecide(token, false) }
                                 .buttonStyle(.bordered)
+                        }
+                        .controlSize(.small)
+                        .padding(.horizontal, 8)
+                        .padding(.bottom, 4)
+                    }
+                    if line.offersOptions, let token = line.token, let options = line.options {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(Array(options.enumerated()), id: \.offset) { i, option in
+                                Button(option) { onChoose(token, i + 1) }
+                                    .buttonStyle(.bordered)
+                                    .lineLimit(1)
+                            }
                         }
                         .controlSize(.small)
                         .padding(.horizontal, 8)

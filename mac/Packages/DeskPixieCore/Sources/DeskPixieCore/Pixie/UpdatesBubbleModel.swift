@@ -18,12 +18,17 @@ public struct UpdateLine: Decodable, Sendable, Equatable, Identifiable {
     public let token: String?
     /// A session line's app (bundle id): a click activates it instead of focusing a pane (#114).
     public let app: String?
+    /// A session menu's choices (#105): one button each, answered with `agent.choose`.
+    public let options: [String]?
 
     /// Whether the row shows Allow and Deny buttons.
-    public var offersDecision: Bool { kind == "question" && token != nil }
+    public var offersDecision: Bool { kind == "question" && token != nil && (options ?? []).isEmpty }
+
+    /// Whether the row shows one button per option (a session's menu, #105).
+    public var offersOptions: Bool { kind == "question" && token != nil && !(options ?? []).isEmpty }
 
     public init(id: UInt64, text: String, kind: String, at: Int64, job: String?, worker: String?,
-                token: String? = nil, app: String? = nil) {
+                token: String? = nil, app: String? = nil, options: [String]? = nil) {
         self.id = id
         self.text = text
         self.kind = kind
@@ -32,6 +37,7 @@ public struct UpdateLine: Decodable, Sendable, Equatable, Identifiable {
         self.worker = worker
         self.token = token
         self.app = app
+        self.options = options
     }
 }
 

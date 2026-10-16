@@ -8,6 +8,19 @@ final class UpdatesBubbleModelTests: XCTestCase {
         UpdateLine(id: id, text: "line \(id)", kind: "reply", at: Int64(id), job: nil, worker: nil)
     }
 
+    /// #105: a session's menu offers its options instead of Allow and Deny.
+    func testASessionMenuOffersItsOptions() throws {
+        let menu = try JSONDecoder().decode(UpdateLine.self, from: Data(
+            #"{"id":6,"text":"deskpixie is asking: Push main?","kind":"question","at":6,"token":"hawk","options":["Push","Don't push"]}"#.utf8))
+        XCTAssertEqual(menu.options, ["Push", "Don't push"])
+        XCTAssertTrue(menu.offersOptions)
+        XCTAssertFalse(menu.offersDecision)
+        let permission = try JSONDecoder().decode(UpdateLine.self, from: Data(
+            #"{"id":7,"text":"Run npm test in api? Say confirm owl.","kind":"question","at":7,"token":"owl"}"#.utf8))
+        XCTAssertTrue(permission.offersDecision)
+        XCTAssertFalse(permission.offersOptions)
+    }
+
     func testASessionLineCarriesItsApp() throws {
         let line = try JSONDecoder().decode(UpdateLine.self, from: Data(
             #"{"id":4,"text":"api is done: tests pass.","kind":"session","at":4,"app":"com.jetbrains.WebStorm"}"#.utf8))
