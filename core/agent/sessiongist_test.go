@@ -23,6 +23,10 @@ func TestSessionGist(t *testing.T) {
 		{"table then words", "| a | b |\n|---|---|\n| 1 | 2 |\n\nAll green now.", "All green now.", false},
 		{"snake_case kept", "Renamed load_config to read_config everywhere.", "Renamed load_config to read_config everywhere.", false},
 		{"empty", "  \n\n ", "", false},
+		{"question as a list", "I've fixed it.\n\nWould you like me to:\n- commit\n- push", "Would you like me to commit or push?", true},
+		{"question as a list of three", "Which should I do next?\n1. tests\n2. docs\n3. release", "Which should I do next: tests, docs or release?", true},
+		{"question, blank line, list", "Done with the fix.\n\nShould I:\n\n- **commit** it\n- open a PR", "Should I commit it or open a PR?", true},
+		{"list that is not a question", "Changes:\n- fixed the loop\n- added a test", "Changes: fixed the loop.", false},
 	} {
 		got, asking := SessionGist(tc.reply)
 		if got != tc.want || asking != tc.asking {

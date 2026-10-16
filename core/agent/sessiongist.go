@@ -30,6 +30,9 @@ func SessionGist(reply string) (string, bool) {
 	text := gistFence.ReplaceAllString(reply, "")
 	text = gistTable.ReplaceAllString(text, "")
 	text = gistHeading.ReplaceAllString(text, "")
+	if q, ok := listQuestion(text); ok {
+		return capGist(q), true
+	}
 	text = gistListItem.ReplaceAllStringFunc(text, func(item string) string {
 		item = strings.TrimSpace(gistMarker.ReplaceAllString(item, ""))
 		if r, _ := utf8.DecodeLastRuneInString(item); item != "" && !strings.ContainsRune(".!?:;", r) {
@@ -61,6 +64,53 @@ func SessionGist(reply string) (string, bool) {
 		}
 	}
 	return capGist(gist), false
+}
+
+// questionWords open a lead-in that asks, when it ends in ":" ("Would you like me to:").
+var questionWords = map[string]bool{"would": true, "should": true, "shall": true, "do": true, "does": true,
+	"want": true, "which": true, "what": true, "can": true, "could": true, "may": true, "how": true}
+
+// listQuestion: a reply that ends asking you to pick from a list ("Would you like me to:" then
+// "- commit", "- push") is one question: "Would you like me to commit or push?".
+func listQuestion(text string) (string, bool) {
+	paras := gistParagraph.Split(strings.TrimSpace(text), -1)
+	var lead, items []string
+	for _, line := range strings.Split(paras[len(paras)-1], "\n") {
+		switch {
+		case gistListItem.MatchString(line):
+			item := gistEmphasis.ReplaceAllString(gistMarker.ReplaceAllString(line, ""), "")
+			items = append(items, strings.TrimRight(strings.Join(strings.Fields(item), " "), ".;,:?!"))
+		case len(items) > 0 && strings.TrimSpace(line) != "":
+			return "", false // words after the list: not a list question
+		default:
+			lead = append(lead, line)
+		}
+	}
+	if len(items) == 0 {
+		return "", false
+	}
+	if strings.TrimSpace(strings.Join(lead, "")) == "" && len(paras) > 1 {
+		lead = []string{paras[len(paras)-2]}
+	}
+	in := strings.Join(strings.Fields(gistEmphasis.ReplaceAllString(strings.Join(lead, " "), "")), " ")
+	first := strings.ToLower(strings.Trim(strings.SplitN(in, " ", 2)[0], ".,:;"))
+	var q string
+	switch {
+	case strings.HasSuffix(in, "?"):
+		q = strings.TrimSuffix(in, "?") + ": "
+	case strings.HasSuffix(in, ":") && questionWords[first]:
+		q = strings.TrimSuffix(in, ":") + " "
+	default:
+		return "", false
+	}
+	if ss := sentences(q); len(ss) > 1 { // only the question's own sentence leads in
+		q = ss[len(ss)-1] + " "
+	}
+	last := len(items) - 1
+	if last == 0 {
+		return q + items[0] + "?", true
+	}
+	return q + strings.Join(items[:last], ", ") + " or " + items[last] + "?", true
 }
 
 // sentences splits a non-empty paragraph after each . ! or ? that ends a sentence (never empty).
