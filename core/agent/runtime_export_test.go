@@ -12,3 +12,13 @@ func CloseStartedForTest(session SessionHost, agent, pane string) {
 }
 
 func UnknownAgentsForTest(listed, known []string) []string { return unknownAgents(listed, known) }
+
+// ExistingUserSessionsForTest and ExistingSessionMessageForTest are issue #126's matching and
+// messaging logic, for package agent_test.
+func ExistingUserSessionsForTest(ctx context.Context, host SessionHost, repoFolder string) []AgentInfo {
+	return existingUserSessions(ctx, host, repoFolder)
+}
+
+func ExistingSessionMessageForTest(matches []AgentInfo, repoFolder string) string {
+	return existingSessionMessage(matches, repoFolder)
+}

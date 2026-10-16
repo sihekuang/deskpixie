@@ -614,6 +614,10 @@ type WorkerRequest struct {
 	JobID string
 	// Name is a name hint (`<repo>-` is added); "" when none was given.
 	Name string
+	// OverrideExistingSession (#126): proceed even though a pix session already matches this
+	// repo. True only when the person explicitly asked for a worker, or to run this separately
+	// or in the background; never set as a default.
+	OverrideExistingSession bool
 }
 
 // McpCallKind tells McpCall variants apart.
