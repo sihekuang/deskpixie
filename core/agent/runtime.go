@@ -504,6 +504,37 @@ func (h *AgentHandle) UpdatesSeen(ids []uint64) { h.Input(UpdatesSeenInput(ids))
 // Decide is a tap on Allow or Deny in the bubble for the question with this confirm word.
 func (h *AgentHandle) Decide(token string, allow bool) { h.Input(DecideInput(token, allow)) }
 
+// Choose is a tap on option (from 1) of a session menu in the updates bubble (#105).
+func (h *AgentHandle) Choose(token string, option int) { h.Input(ChooseInput(token, option)) }
+
+// answerSession types your answer into a pix session's prompt (#105); a failure is told.
+func (h *AgentHandle) answerSession(name, id, answer string) {
+	err := errors.New("your sessions can't be answered from Pixie.")
+	if c, ok := h.deps.Host.Session().(*CompositeHost); ok {
+		if a, ok := c.Secondary().(SessionAnswerer); ok {
+			ctx, cancel := context.WithTimeout(h.ctx, OpLimit)
+			err = a.AnswerQuestion(ctx, name, id, answer)
+			cancel()
+		}
+	}
+	if err != nil {
+		log.Printf("agent: answering %s: %v", name, err)
+		why := err.Error()
+		var he HostError
+		if errors.As(err, &he) {
+			switch {
+			case he.Kind == HostOther && he.Detail != "":
+				why = he.Detail // pix's own reason ("The question is no longer on screen.")
+			case he.Kind == HostTimeout:
+				why = "the session didn't answer in time."
+			case he.Kind == HostNoAgent:
+				why = "the session is gone."
+			}
+		}
+		h.Input(SessionAnswerFailedInput(name, why))
+	}
+}
+
 // SetAway: the shell's presence (screen locked, displays asleep or idle).
 func (h *AgentHandle) SetAway(away bool) { h.Input(PresenceInput(away)) }
 
@@ -1416,6 +1447,8 @@ func (h *AgentHandle) apply(e Effect) {
 		h.queueOp(hostOp{kind: opPrompt, text: e.Text})
 	case EfInterrupt:
 		h.queueOp(hostOp{kind: opInterrupt})
+	case EfAnswerSession:
+		go h.answerSession(e.Name, e.Text, e.Answer)
 	case EfInject:
 		if d.Voice.IsOpen() {
 			d.Voice.Inject(e.Notice)

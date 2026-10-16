@@ -127,6 +127,16 @@ func (r *Runner) WriteToAgent(b []byte) error {
 // Pid is the agent's process id.
 func (r *Runner) Pid() int { return r.cmd.Process.Pid }
 
+// Size is the agent's terminal size (rows, cols); 24x80 when it has none.
+func (r *Runner) Size() (int, int) {
+	if r.ptmx != nil {
+		if ws, err := pty.GetsizeFull(r.ptmx); err == nil && ws.Rows > 0 && ws.Cols > 0 {
+			return int(ws.Rows), int(ws.Cols)
+		}
+	}
+	return 24, 80
+}
+
 // Hangup sends SIGHUP to the agent's process group, then SIGKILL after HangupGrace.
 func (r *Runner) Hangup() {
 	pgid := r.cmd.Process.Pid // the PTY start makes the agent a session and group leader

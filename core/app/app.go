@@ -1152,6 +1152,19 @@ func (a *App) Register(r Registrar) {
 		}
 		return struct{}{}, nil
 	})
+	r.Register("agent.choose", func(args json.RawMessage) (any, error) {
+		var in struct {
+			Token  string `json:"token"`
+			Option int    `json:"option"`
+		}
+		if err := decodeArgs("agent.choose", args, &in); err != nil {
+			return nil, err
+		}
+		if a.agent != nil {
+			a.agent.Choose(in.Token, in.Option)
+		}
+		return struct{}{}, nil
+	})
 	r.Register("agent.focusJob", func(args json.RawMessage) (any, error) {
 		var in struct {
 			Job    string `json:"job"`

@@ -260,6 +260,14 @@ func (h *Host) onMsg(s *session, m wire.Msg) bool {
 				h.remove(s)
 				return true
 			}
+		case "question":
+			h.mu.Lock()
+			q := agent.SessionQuestion{ID: m.ID, Label: s.label(), App: s.hello.App, Kind: m.Source,
+				Tool: m.ToolName, Input: m.Input, Text: m.Text, Options: m.Keys, Body: m.Body, Prompt: m.Prompt}
+			h.mu.Unlock()
+			h.broadcast(agent.PaneEvent{Kind: agent.PaneEventQuestion, Agent: s.addr, Question: &q})
+		case "question-gone":
+			h.broadcast(agent.PaneEvent{Kind: agent.PaneEventQuestionGone, Agent: s.addr, Question: &agent.SessionQuestion{ID: m.ID}})
 		case "exited":
 			h.remove(s)
 			return true
@@ -401,6 +409,12 @@ func (h *Host) Prompt(ctx context.Context, name, text string) error {
 func (h *Host) SendKeys(ctx context.Context, name string, keys []string) error {
 	return h.command(ctx, name, wire.Msg{Command: "keys", Keys: keys})
 }
+
+// AnswerQuestion types your answer to session name's prompt id ("yes", "no" or a menu
+// option's number, #105); pix refuses when that prompt is no longer waiting on screen.
+func (h *Host) AnswerQuestion(ctx context.Context, name, id, answer string) error {
+	return h.command(ctx, name, wire.Msg{Command: "answer", Text: id, Source: answer})
+}
 func (h *Host) Read(context.Context, string, uint16) (string, error) { return "", errUnsupported }
 func (h *Host) Close(ctx context.Context, name string) error {
 	return h.command(ctx, name, wire.Msg{Command: "close"})
@@ -436,6 +450,20 @@ func (h *Host) List(context.Context) ([]agent.AgentInfo, error) {
 		})
 	}
 	return out, nil
+}
+
+// label names s in what Pixie says (h.mu held): its description, else its repo's or folder's
+// name, else its tool.
+func (s *session) label() string {
+	if d := s.desc.Current(); d != "" {
+		return d
+	}
+	for _, p := range []string{s.hello.GitRoot, s.hello.Cwd} {
+		if p != "" {
+			return filepath.Base(p)
+		}
+	}
+	return s.hello.Tool
 }
 
 // noTaskYet describes a session before it has a description: what it is and where, so it is

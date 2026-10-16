@@ -37,6 +37,16 @@ type Pending struct {
 	// in-flight job); "" when it can't.
 	Job      JobID
 	Deadline Millis
+	// Session and Question (#105): a prompt of one of your pix sessions (Agent is "" then);
+	// Label names the session. Options: its choices, picked with Choose; a menu's (Menu) never
+	// by a confirm word or Allow, a permission dialog's still (meaning its first, Yes).
+	// NoVoice: only a tap answers it (you couldn't hear what it does).
+	Session  string
+	Question string
+	Label    string
+	Options  []string
+	Menu     bool
+	NoVoice  bool
 }
 
 // Decided is one request settled by a transcript.
@@ -76,6 +86,36 @@ func (c *Confirmations) Request(id RequestID, agent string, job JobID, now Milli
 	return "", false
 }
 
+// RequestSession registers a prompt of session's (#105): it waits until answered or gone (no
+// deadline: it is still in the terminal). id is a request id the caller keeps unique.
+func (c *Confirmations) RequestSession(p Pending) (string, bool) {
+	token, ok := c.Request(p.ID, "", "", 0)
+	if !ok {
+		return "", false
+	}
+	p.Token, p.Deadline = token, ^Millis(0)
+	c.pending[len(c.pending)-1] = p
+	return token, true
+}
+
+// TakeSession removes session's prompt with this id ("" any of its prompts); true if there was one.
+func (c *Confirmations) TakeSession(session, id string) bool {
+	before := len(c.pending)
+	c.pending = slices.DeleteFunc(c.pending, func(p Pending) bool {
+		return p.Session == session && session != "" && (id == "" || p.Question == id)
+	})
+	return len(c.pending) != before
+}
+
+// Choose takes the menu with this token if option (from 1) is one of its choices.
+func (c *Confirmations) Choose(token string, option int) (Pending, bool) {
+	at := slices.IndexFunc(c.pending, func(p Pending) bool { return p.Token == token })
+	if at < 0 || option < 1 || option > len(c.pending[at].Options) {
+		return Pending{}, false
+	}
+	return c.take(token)
+}
+
 // Pending returns the requests still waiting (do not modify).
 func (c *Confirmations) Pending() []Pending { return c.pending }
 
@@ -99,7 +139,7 @@ func (c *Confirmations) OnTranscript(text string) []Decided {
 	words := strings.FieldsFunc(lowered, func(r rune) bool { return !(unicode.IsLetter(r) || unicode.IsNumber(r)) })
 	var mentioned []string
 	for _, t := range Tokens {
-		if slices.Contains(words, t) && c.IsPendingToken(t) {
+		if slices.Contains(words, t) && c.voiceToken(t) {
 			mentioned = append(mentioned, t)
 		}
 	}
@@ -181,11 +221,27 @@ func (c *Confirmations) Remove(id RequestID) (Pending, bool) {
 // DecideToken settles the request with token from a tap on Pixie's bubble (#97): the same
 // outcome as the confirm word (allow) or a refusal (deny). Unknown or used tokens do nothing.
 func (c *Confirmations) DecideToken(token string, allow bool) (Decided, bool) {
+	if at := slices.IndexFunc(c.pending, func(p Pending) bool { return p.Token == token }); at >= 0 && c.pending[at].Menu {
+		return Decided{}, false // a menu is picked from, not allowed
+	}
 	p, ok := c.take(token)
 	if !ok {
 		return Decided{}, false
 	}
 	return Decided{p, allow}, true
+}
+
+// voiceToken: token is pending and a confirm word may answer it (not a menu, not tap-only).
+func (c *Confirmations) voiceToken(token string) bool {
+	return slices.ContainsFunc(c.pending, func(p Pending) bool { return p.Token == token && !p.Menu && !p.NoVoice })
+}
+
+// OptionsOf is the menu choices of the prompt with this token (nil: not a menu).
+func (c *Confirmations) OptionsOf(token string) []string {
+	if at := slices.IndexFunc(c.pending, func(p Pending) bool { return p.Token == token }); at >= 0 {
+		return c.pending[at].Options
+	}
+	return nil
 }
 
 func (c *Confirmations) take(token string) (Pending, bool) {

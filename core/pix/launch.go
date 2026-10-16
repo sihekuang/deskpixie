@@ -20,8 +20,12 @@ type Launch struct {
 	Files []string // per-run files, removed at exit
 }
 
-// hookEvents are the Claude hook events pix listens to.
-var hookEvents = []string{"SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "Notification"}
+// hookEvents are the Claude hook events pix listens to; PreToolUse only for the question menu
+// and PermissionRequest for the permission dialogs (#105: the prompts a session waits on).
+var hookEvents = []string{"SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "Notification", "PreToolUse", "PermissionRequest"}
+
+// hookMatchers narrows an event to these tools.
+var hookMatchers = map[string]string{"PreToolUse": "AskUserQuestion"}
 
 // PlanLaunch builds the per-run additions for tool (nothing global is edited); userArgs
 // follow them unchanged. self is this pix's path, sock its local socket, dir a private
@@ -36,9 +40,13 @@ func PlanLaunch(tool string, userArgs []string, self, sock, dir string) (Launch,
 	case "claude":
 		hooks := map[string]any{}
 		for _, ev := range hookEvents {
-			hooks[ev] = []any{map[string]any{"hooks": []any{map[string]any{
+			entry := map[string]any{"hooks": []any{map[string]any{
 				"type": "command", "command": strconv.Quote(self) + " hook " + ev, "timeout": 5,
-			}}}}
+			}}}
+			if m := hookMatchers[ev]; m != "" {
+				entry["matcher"] = m
+			}
+			hooks[ev] = []any{entry}
 		}
 		settings, err := writePrivate(dir, "settings.json", map[string]any{
 			"hooks": hooks,
@@ -61,9 +69,15 @@ func PlanLaunch(tool string, userArgs []string, self, sock, dir string) (Launch,
 		args := []string{
 			"-c", "mcp_servers.pixie.command=" + strconv.Quote(self),
 			"-c", `mcp_servers.pixie.args=["mcp"]`,
+			// Its own tool never asks for approval (Claude's settings allow it the same way).
+			"-c", `mcp_servers.pixie.tools.set_description.approval_mode="approve"`,
 			"-c", "developer_instructions=" + strconv.Quote(Instruction),
 			// Codex runs notify with the turn's JSON as its last argument when a turn ends.
 			"-c", "notify=" + string(notify),
+			// Its approval prompts arrive as its own OSC 9 notification (#105), which pix reads;
+			// text on screen can't fake one. Always: also while you look at the terminal.
+			"-c", `tui.notification_method="osc9"`,
+			"-c", `tui.notification_condition="always"`,
 		}
 		return Launch{Path: path, Args: append(args, userArgs...), Env: env}, nil
 	}

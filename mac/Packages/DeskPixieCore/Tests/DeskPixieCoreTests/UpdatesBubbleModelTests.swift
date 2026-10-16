@@ -8,6 +8,55 @@ final class UpdatesBubbleModelTests: XCTestCase {
         UpdateLine(id: id, text: "line \(id)", kind: "reply", at: Int64(id), job: nil, worker: nil)
     }
 
+    /// #105: a session's menu offers its options instead of Allow and Deny.
+    /// #105: a session's dialog carries its command, shown small under the line.
+    /// #105: a question waiting on your answer keeps the bubble open; it collapses once answered.
+    func testAQuestionKeepsTheBubbleOpenUntilAnswered() {
+        var m = UpdatesBubbleModel(popSecs: 6); m.apply([], now: 0, pop: .allowed)
+        let ask = UpdateLine(id: 1, text: "api: Do you want to proceed?", kind: "question", at: 1, job: nil, worker: nil,
+                             token: "hawk", options: ["Yes", "No"])
+        m.apply([ask], now: 10, pop: .allowed)
+        _ = m.tick(now: 60)
+        XCTAssertEqual(m.phase, .popped(until: 16), "still open a minute later")
+        m.apply([], now: 61, pop: .allowed)
+        XCTAssertEqual(m.phase, .hidden)
+    }
+
+    func testAnUpdateWithoutButtonsStillCollapses() {
+        var m = UpdatesBubbleModel(popSecs: 6); m.apply([], now: 0, pop: .allowed)
+        m.apply([UpdateLine(id: 1, text: "done", kind: "reply", at: 1, job: nil, worker: nil)], now: 10, pop: .allowed)
+        _ = m.tick(now: 17)
+        XCTAssertEqual(m.phase, .badge)
+    }
+
+    func testADialogLineCarriesItsCommand() throws {
+        let line = try JSONDecoder().decode(UpdateLine.self, from: Data(
+            #"{"id":8,"text":"api: Run the tests. Do you want to proceed? Choose in the bubble.","kind":"question","at":8,"token":"owl","options":["Yes","No"],"note":"npm test"}"#.utf8))
+        XCTAssertEqual(line.note, "npm test")
+        XCTAssertTrue(line.offersOptions)
+    }
+
+    func testASessionMenuOffersItsOptions() throws {
+        let menu = try JSONDecoder().decode(UpdateLine.self, from: Data(
+            #"{"id":6,"text":"deskpixie is asking: Push main?","kind":"question","at":6,"token":"hawk","options":["Push","Don't push"]}"#.utf8))
+        XCTAssertEqual(menu.options, ["Push", "Don't push"])
+        XCTAssertTrue(menu.offersOptions)
+        XCTAssertFalse(menu.offersDecision)
+        let permission = try JSONDecoder().decode(UpdateLine.self, from: Data(
+            #"{"id":7,"text":"Run npm test in api? Say confirm owl.","kind":"question","at":7,"token":"owl"}"#.utf8))
+        XCTAssertTrue(permission.offersDecision)
+        XCTAssertFalse(permission.offersOptions)
+    }
+
+    func testASessionLineCarriesItsApp() throws {
+        let line = try JSONDecoder().decode(UpdateLine.self, from: Data(
+            #"{"id":4,"text":"api is done: tests pass.","kind":"session","at":4,"app":"com.jetbrains.WebStorm"}"#.utf8))
+        XCTAssertEqual(line.app, "com.jetbrains.WebStorm")
+        XCTAssertFalse(line.offersDecision)
+        let reply = try JSONDecoder().decode(UpdateLine.self, from: Data(#"{"id":5,"text":"Done.","kind":"reply","at":5}"#.utf8))
+        XCTAssertNil(reply.app)
+    }
+
     func testAPendingQuestionOffersAllowAndDeny() throws {
         let decode = { (json: String) throws -> UpdateLine in
             try JSONDecoder().decode(UpdateLine.self, from: Data(json.utf8))
@@ -35,6 +84,16 @@ final class UpdatesBubbleModelTests: XCTestCase {
         XCTAssertTrue(m.acceptsDecision(token: "hawk", now: 10.8))
     }
 
+    /// Review of #105: a session menu's option buttons are guarded the same way, then count.
+    func testMenuOptionsAcceptTapsOnceShownLongEnough() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        let menu = UpdateLine(id: 1, text: "Push main?", kind: "question", at: 1, job: nil, worker: nil,
+                              token: "hawk", options: ["Push", "Don't push"])
+        m.apply([menu], now: 10, pop: .allowed)
+        XCTAssertFalse(m.acceptsDecision(token: "hawk", now: 10.2))
+        XCTAssertTrue(m.acceptsDecision(token: "hawk", now: 10.8))
+    }
+
     func testTheGuardIsPerQuestion() {
         var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
         m.apply([question(1, "hawk")], now: 10, pop: .allowed)
@@ -47,7 +106,8 @@ final class UpdatesBubbleModelTests: XCTestCase {
     func testButtonsThatReappearAreGuardedAgain() {
         var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
         m.apply([question(1, "hawk")], now: 10, pop: .allowed)
-        _ = m.tick(now: 17)                                         // collapsed to the badge
+        m.pointerEntered(now: 12); m.pointerLeft()                 // hovered and left: the badge
+        _ = m.tick(now: 17)
         XCTAssertEqual(m.phase, .badge)
         XCTAssertFalse(m.acceptsDecision(token: "hawk", now: 17.5)) // no buttons on a badge
         m.pointerEntered(now: 20)

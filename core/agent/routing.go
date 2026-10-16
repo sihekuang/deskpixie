@@ -69,6 +69,10 @@ type Line struct {
 	// pane); zero when it is about no one job or worker.
 	Job    JobID
 	Worker string
+	// App: the bundle id of the app a session's line is about (a click activates it, #105).
+	App string
+	// Note: shown small under the line in the bubble, never said (a dialog's command, #105).
+	Note string
 }
 
 func NewLine(kind LineKind, text string) Line { return Line{Text: text, Kind: kind} }

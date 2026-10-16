@@ -30,30 +30,35 @@ const (
 
 // Msg is one message. Only the fields of its Kind are set: register → Tool…Description;
 // registered → Address; refused → Reason; event → Event (status, description, session,
-// exited, hook) and its fields; command → Command, Text, Keys; result → Text, Err.
+// exited, hook, question, question-gone) and its fields; command → Command, Text, Keys; result → Text, Err.
 type Msg struct {
-	V           int      `json:"v"`
-	Kind        Kind     `json:"kind"`
-	ID          string   `json:"id,omitempty"`
-	Tool        string   `json:"tool,omitempty"`
-	Pid         int      `json:"pid,omitempty"`
-	ProcStart   string   `json:"procStart,omitempty"`
-	Cwd         string   `json:"cwd,omitempty"`
-	GitRoot     string   `json:"gitRoot,omitempty"`
-	Where       string   `json:"where,omitempty"`
-	App         string   `json:"app,omitempty"`
-	SessionID   string   `json:"sessionId,omitempty"`
-	Description string   `json:"description,omitempty"`
-	Address     string   `json:"address,omitempty"`
-	Reason      string   `json:"reason,omitempty"`
-	Event       string   `json:"event,omitempty"`
-	Status      string   `json:"status,omitempty"`
-	Source      string   `json:"source,omitempty"`
-	ExitCode    int      `json:"exitCode,omitempty"`
-	Command     string   `json:"command,omitempty"`
-	Text        string   `json:"text,omitempty"`
-	Keys        []string `json:"keys,omitempty"`
-	Err         string   `json:"err,omitempty"`
+	V           int    `json:"v"`
+	Kind        Kind   `json:"kind"`
+	ID          string `json:"id,omitempty"`
+	Tool        string `json:"tool,omitempty"`
+	Pid         int    `json:"pid,omitempty"`
+	ProcStart   string `json:"procStart,omitempty"`
+	Cwd         string `json:"cwd,omitempty"`
+	GitRoot     string `json:"gitRoot,omitempty"`
+	Where       string `json:"where,omitempty"`
+	App         string `json:"app,omitempty"`
+	SessionID   string `json:"sessionId,omitempty"`
+	Description string `json:"description,omitempty"`
+	Address     string `json:"address,omitempty"`
+	Reason      string `json:"reason,omitempty"`
+	Event       string `json:"event,omitempty"`
+	Status      string `json:"status,omitempty"`
+	Source      string `json:"source,omitempty"`
+	ExitCode    int    `json:"exitCode,omitempty"`
+	ToolName    string `json:"toolName,omitempty"`
+	Input       string `json:"input,omitempty"`
+	// Prompt and Body (question, #105): a dialog's own question and what its box shows.
+	Prompt  string   `json:"prompt,omitempty"`
+	Body    string   `json:"body,omitempty"`
+	Command string   `json:"command,omitempty"`
+	Text    string   `json:"text,omitempty"`
+	Keys    []string `json:"keys,omitempty"`
+	Err     string   `json:"err,omitempty"`
 }
 
 // Encode writes m as one line, with V set.
