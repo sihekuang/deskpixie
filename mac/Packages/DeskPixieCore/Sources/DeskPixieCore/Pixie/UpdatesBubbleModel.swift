@@ -125,6 +125,9 @@ public struct UpdatesBubbleModel: Sendable {
 
     private var display: [UpdateLine] { frozen ?? lines.reversed() }
 
+    /// A question with buttons is waiting on your answer: a popped bubble stays open (#105).
+    private var waitsOnYou: Bool { lines.contains { $0.offersDecision || $0.offersOptions } }
+
     private var isExpanded: Bool {
         if case .expanded = phase { return true }
         return false
@@ -197,7 +200,7 @@ public struct UpdatesBubbleModel: Sendable {
     public mutating func tick(now: TimeInterval) -> [UInt64] {
         defer { noteDecisions(now) }
         switch phase {
-        case .popped(let until) where now >= until:
+        case .popped(let until) where now >= until && !waitsOnYou:
             phase = .badge
         case .expanded:
             noteShown(now)

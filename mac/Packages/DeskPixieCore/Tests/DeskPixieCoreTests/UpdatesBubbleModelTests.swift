@@ -10,6 +10,25 @@ final class UpdatesBubbleModelTests: XCTestCase {
 
     /// #105: a session's menu offers its options instead of Allow and Deny.
     /// #105: a session's dialog carries its command, shown small under the line.
+    /// #105: a question waiting on your answer keeps the bubble open; it collapses once answered.
+    func testAQuestionKeepsTheBubbleOpenUntilAnswered() {
+        var m = UpdatesBubbleModel(popSecs: 6); m.apply([], now: 0, pop: .allowed)
+        let ask = UpdateLine(id: 1, text: "api: Do you want to proceed?", kind: "question", at: 1, job: nil, worker: nil,
+                             token: "hawk", options: ["Yes", "No"])
+        m.apply([ask], now: 10, pop: .allowed)
+        _ = m.tick(now: 60)
+        XCTAssertEqual(m.phase, .popped(until: 16), "still open a minute later")
+        m.apply([], now: 61, pop: .allowed)
+        XCTAssertEqual(m.phase, .hidden)
+    }
+
+    func testAnUpdateWithoutButtonsStillCollapses() {
+        var m = UpdatesBubbleModel(popSecs: 6); m.apply([], now: 0, pop: .allowed)
+        m.apply([UpdateLine(id: 1, text: "done", kind: "reply", at: 1, job: nil, worker: nil)], now: 10, pop: .allowed)
+        _ = m.tick(now: 17)
+        XCTAssertEqual(m.phase, .badge)
+    }
+
     func testADialogLineCarriesItsCommand() throws {
         let line = try JSONDecoder().decode(UpdateLine.self, from: Data(
             #"{"id":8,"text":"api: Run the tests. Do you want to proceed? Choose in the bubble.","kind":"question","at":8,"token":"owl","options":["Yes","No"],"note":"npm test"}"#.utf8))
@@ -87,7 +106,8 @@ final class UpdatesBubbleModelTests: XCTestCase {
     func testButtonsThatReappearAreGuardedAgain() {
         var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
         m.apply([question(1, "hawk")], now: 10, pop: .allowed)
-        _ = m.tick(now: 17)                                         // collapsed to the badge
+        m.pointerEntered(now: 12); m.pointerLeft()                 // hovered and left: the badge
+        _ = m.tick(now: 17)
         XCTAssertEqual(m.phase, .badge)
         XCTAssertFalse(m.acceptsDecision(token: "hawk", now: 17.5)) // no buttons on a badge
         m.pointerEntered(now: 20)
