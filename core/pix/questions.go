@@ -113,9 +113,12 @@ type question struct {
 	marker  string // shown while it waits ("" when it was seen on screen to begin with)
 	detail  string // shown with it: this request's own text, so another dialog doesn't count
 	seen    bool   // its marker and detail showed since it was asked
-	// held: its event, not sent yet: a Claude permission waits for its dialog to be read off
-	// the screen (or dialogWait), so DeskPixie gets the dialog as shown.
-	held *wire.Msg
+	// read reads its dialog off the screen; held: its event, not sent yet: it waits for its
+	// dialog to be read (or dialogWait), so DeskPixie gets the dialog as shown. optKeys: what
+	// answers each of the dialog's options (nil: its number).
+	read    func([]string) (dialog, bool)
+	held    *wire.Msg
+	optKeys []string
 }
 
 // dialogWait: how long a Claude permission waits for its dialog before it is asked without it.
@@ -133,7 +136,7 @@ func (s *Session) ask(q *question, ev wire.Msg) {
 	q.id = "q" + strconv.Itoa(s.qseq)
 	s.q = q
 	ev.Kind, ev.Event, ev.ID = wire.KindEvent, "question", q.id
-	if q.kind == "permission" && q.marker != "" {
+	if q.read != nil {
 		q.held = &ev
 		s.mu.Unlock()
 		time.AfterFunc(dialogWait, func() { s.sendHeld(q, nil) })
@@ -155,7 +158,7 @@ func (s *Session) sendHeld(q *question, d *dialog) {
 	q.held = nil
 	if d != nil {
 		ev.Text, ev.Body, ev.Prompt, ev.Keys = d.Summary, d.Body, d.Question, d.Options
-		q.options = len(d.Options)
+		q.options, q.optKeys = len(d.Options), d.Keys
 	}
 	s.mu.Unlock()
 	s.client.Send(ev)
@@ -212,12 +215,17 @@ func (q *question) keys(tool, choice string) ([]byte, bool) {
 	switch {
 	case q.kind == "permission" && choice == "no":
 		return []byte{0x1b}, true
+	case q.kind == "permission" && choice == "yes" && len(q.optKeys) > 0:
+		return []byte(q.optKeys[0]), true
 	case q.kind == "permission" && choice == "yes" && tool == "codex":
 		return []byte("y"), true
 	case q.kind == "permission" && choice == "yes":
 		return []byte("1"), true
 	case q.kind == "menu" || q.kind == "permission":
 		if n, err := strconv.Atoi(choice); err == nil && n >= 1 && n <= q.options {
+			if n <= len(q.optKeys) {
+				return []byte(q.optKeys[n-1]), true
+			}
 			return []byte(strconv.Itoa(n)), true
 		}
 	}
@@ -256,8 +264,8 @@ func (w *questionWatch) watch(s *Session, out string, vt *screen) {
 		}
 		s.mu.Unlock()
 	}
-	if held { // shown: read the dialog as it is drawn now
-		if d, ok := readDialog(vt.Lines(), q.marker); ok {
+	if held && q.read != nil { // shown: read the dialog as it is drawn now
+		if d, ok := q.read(vt.Lines()); ok {
 			s.sendHeld(q, &d)
 		}
 	}
@@ -300,4 +308,13 @@ func menuOf(input any) (string, []string) {
 func onlyFocusReports(b []byte) bool {
 	b = bytes.ReplaceAll(bytes.ReplaceAll(b, []byte("\x1b[I"), nil), []byte("\x1b[O"), nil)
 	return len(b) == 0
+}
+
+// screenFor is vt, or a fresh screen when there is none or the terminal was resized (the agent
+// then draws it all again). PTY reader goroutine only.
+func (s *Session) screenFor(vt *screen) *screen {
+	if rows, cols := s.runner.Size(); vt == nil || vt.rows != rows || vt.cols != cols {
+		return newScreen(rows, cols)
+	}
+	return vt
 }

@@ -282,6 +282,8 @@ var optionLine = regexp.MustCompile(`^\s*(?:❯\s*)?(\d)\.\s+(.*\S)\s*$`)
 type dialog struct {
 	Title, Summary, Body, Question string
 	Options                        []string
+	// Keys: what answers each option ("y", "p", Escape: Codex shows them); nil: its number.
+	Keys []string
 }
 
 // readDialog reads the dialog whose question is the last line showing marker ("Do you want
@@ -296,10 +298,17 @@ func readDialog(lines []string, marker string) (dialog, bool) {
 	if at < 0 {
 		return dialog{}, false
 	}
+	width := 0 // the screen's: its widest line (the dialog's rules span it)
+	for _, l := range lines {
+		width = max(width, utf8.RuneCountInString(l))
+	}
 	d := dialog{Question: strings.TrimSpace(lines[at])}
+	footer := false
+	labelCol, prev := 0, ""
 	for _, l := range lines[at+1:] {
 		t := strings.TrimSpace(l)
 		if strings.HasPrefix(t, "Esc to cancel") {
+			footer = true
 			break
 		}
 		if m := optionLine.FindStringSubmatch(l); m != nil {
@@ -308,13 +317,24 @@ func readDialog(lines []string, marker string) (dialog, bool) {
 			}
 			label, _, _ := strings.Cut(m[2], " · ") // a dim hint after it
 			d.Options = append(d.Options, label)
+			labelCol, prev = utf8.RuneCountInString(l[:strings.Index(l, m[2])]), l
 			continue
 		}
-		if t != "" && len(d.Options) > 0 { // a wrapped label goes on
-			d.Options[len(d.Options)-1] += " " + t
+		// A wrapped label goes on, indented to the label; broken at the screen's edge, it is
+		// joined without a space.
+		if t != "" && len(d.Options) > 0 && labelCol > 0 && len(l)-len(strings.TrimLeft(l, " ")) >= labelCol {
+			sep := " "
+			if utf8.RuneCountInString(prev) >= width-1 {
+				sep = ""
+			}
+			d.Options[len(d.Options)-1] += sep + t
+			prev = l
+			continue
 		}
+		labelCol = 0 // anything else ends the options' labels
 	}
-	if len(d.Options) < 2 {
+	// Only a dialog drawn to its footer: half drawn, its last options may be missing.
+	if !footer || len(d.Options) < 2 {
 		return dialog{}, false
 	}
 	// Above the question, up to the dialog's top rule: title, summary, the dashed box.
@@ -349,5 +369,67 @@ func readDialog(lines []string, marker string) (dialog, bool) {
 		d.Title, d.Summary = head[0], strings.Join(head[1:], " ")
 	}
 	d.Body = strings.Join(body, "\n")
+	return d, true
+}
+
+// codexFooter ends a Codex approval prompt; codexQuestion starts it.
+const codexFooter = "Press enter to confirm or esc to cancel"
+
+var (
+	codexQuestion = regexp.MustCompile(`^(Would you like to |Allow )`)
+	codexOption   = regexp.MustCompile(`^(?:›\s*)?(\d)\.\s+(.*\S)\s+\((\w+)\)$`)
+)
+
+// readCodexDialog reads Codex's approval prompt, the last one above its footer: its question
+// ("Would you like to run the following command?"), its reason, the command, and its numbered
+// options with the key each shows ("(y)", "(esc)"). false when there is none, or an option has
+// no key.
+func readCodexDialog(lines []string) (dialog, bool) {
+	foot := -1
+	for i, l := range lines {
+		if strings.Contains(l, codexFooter) {
+			foot = i
+		}
+	}
+	if foot < 0 {
+		return dialog{}, false
+	}
+	var d dialog
+	ask := -1
+	for i := foot - 1; i >= 0 && ask < 0; i-- {
+		if codexQuestion.MatchString(strings.TrimSpace(lines[i])) {
+			ask = i
+		}
+	}
+	if ask < 0 {
+		return dialog{}, false
+	}
+	d.Question = strings.TrimSpace(lines[ask])
+	for _, l := range lines[ask+1 : foot] {
+		t := strings.TrimSpace(l)
+		if m := codexOption.FindStringSubmatch(t); m != nil {
+			if m[1] != strconv.Itoa(len(d.Options)+1) {
+				return dialog{}, false
+			}
+			key := m[3]
+			if key == "esc" {
+				key = "\x1b"
+			}
+			d.Options, d.Keys = append(d.Options, m[2]), append(d.Keys, key)
+			continue
+		}
+		switch {
+		case optionLine.MatchString(t):
+			return dialog{}, false // an option without its key
+		case len(d.Options) > 0:
+		case strings.HasPrefix(t, "Reason: "):
+			d.Summary = strings.TrimPrefix(t, "Reason: ")
+		case strings.HasPrefix(t, "$ "):
+			d.Body = strings.TrimPrefix(t, "$ ")
+		}
+	}
+	if len(d.Options) < 2 {
+		return dialog{}, false
+	}
 	return d, true
 }

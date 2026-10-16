@@ -226,3 +226,15 @@ func TestADialogNotAboutACommandIsToldByItsQuestion(t *testing.T) {
 		t.Fatalf("%s", fmtEffects(fx))
 	}
 }
+
+func TestACodexApprovalIsToldByItsReasonWithItsOptions(t *testing.T) {
+	c := ctl()
+	q := SessionQuestion{ID: "q10", Label: "web", Kind: "permission", Text: "Do you want to allow it to create hi.txt?",
+		Body: "touch hi.txt", Prompt: "Would you like to run the following command?",
+		Options: []string{"Yes, proceed", "Yes, and don't ask again for this", "No, and tell Codex what to do differently"}}
+	fx := askSession(c, q, T0)
+	wantContains(t, fx, eNotify("web: Do you want to allow it to create hi.txt? Choose in the bubble."))
+	if b := bubbleOf(fx); len(b) != 1 || b[0].Note != "touch hi.txt" || len(b[0].Options) != 3 {
+		t.Fatalf("%+v", b)
+	}
+}

@@ -48,10 +48,13 @@ func (c *AgentController) onSessionQuestion(session string, q SessionQuestion, n
 		case q.Kind == "notice":
 			return fmt.Sprintf("%s %s. Answer it in its terminal.", label, mask(q.Text))
 		case len(q.Options) > 0 && q.Prompt != "":
-			// Its dialog as shown: Claude's summary of a command, else the question says it.
+			// Its dialog as shown: Claude's summary of a command, Codex's reason, else its question.
 			said := label + ": " + mask(q.Prompt)
-			if q.Tool == "Bash" && q.Text != "" {
+			switch {
+			case q.Tool == "Bash" && q.Text != "":
 				said = fmt.Sprintf("%s: %s. %s", label, strings.TrimSuffix(mask(q.Text), "."), mask(q.Prompt))
+			case q.Tool == "" && q.Text != "": // Codex: its reason asks it in full
+				said = label + ": " + mask(q.Text)
 			}
 			if q.Tool != "" && VoiceConfirmableWith(q.Tool, input, c.settings.SpokenPaths) {
 				return fmt.Sprintf("%s Say confirm %s, or choose in the bubble.", said, token)

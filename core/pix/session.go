@@ -143,9 +143,13 @@ func newSession(o sessionOpts) *Session {
 			}
 			for _, msg := range notes.messages(out) {
 				if asks := codexApproval(msg); asks != "" {
-					s.ask(&question{kind: "permission", seen: true}, wire.Msg{Source: "permission", Text: asks})
+					s.ask(&question{kind: "permission", marker: codexFooter, read: readCodexDialog},
+						wire.Msg{Source: "permission", Text: asks})
 				}
 			}
+			vt = s.screenFor(vt)
+			vt.Write(b)
+			shown.watch(s, out, vt)
 		}
 	case "claude":
 		s.runner.OnOutput = func(b []byte) {
@@ -160,9 +164,7 @@ func newSession(o sessionOpts) *Session {
 					s.flushSoon()
 				}
 			}
-			if rows, cols := s.runner.Size(); vt == nil || vt.rows != rows || vt.cols != cols {
-				vt = newScreen(rows, cols) // resized: Claude draws it all again
-			}
+			vt = s.screenFor(vt)
 			vt.Write(b)
 			shown.watch(s, out, vt)
 		}
@@ -188,7 +190,8 @@ func (s *Session) Hook(event string, p map[string]any) string {
 		if name, _ := p["tool_name"].(string); name != "AskUserQuestion" {
 			input, _ := json.Marshal(p["tool_input"])
 			ev := wire.Msg{Source: "permission", ToolName: name, Input: string(input)}
-			q := &question{kind: "permission", marker: claudePermission, detail: claudeDetail(name, p["tool_input"])}
+			q := &question{kind: "permission", marker: claudePermission, detail: claudeDetail(name, p["tool_input"]),
+				read: func(lines []string) (dialog, bool) { return readDialog(lines, claudePermission) }}
 			if !claudeAnswerable(name) || q.detail == "" {
 				q, ev.Source = &question{kind: "notice"}, "notice" // answered in its terminal only
 			}

@@ -505,20 +505,19 @@ func TestAPermissionRequestForTheMenuIsNotASecondQuestion(t *testing.T) {
 	}
 }
 
-// Review #3: a Codex approval is its own notification (OSC 9), which text on screen can't fake.
-func TestACodexApprovalNotificationIsAskedAndAnsweredWithY(t *testing.T) {
+// Review #3: a Codex approval is its own notification (OSC 9), which text on screen can't fake;
+// with its prompt not drawn (yet), it is asked plainly and nothing is typed.
+func TestACodexApprovalNotificationAloneIsAskedButNotAnswered(t *testing.T) {
 	h := keyHarness(t, "codex")
 	h.s.runner.OnOutput([]byte("\x1b]9;Approval requ"))
 	h.s.runner.OnOutput([]byte("ested: npm test\x07"))
 	q := askedQuestion(t, h)
-	if q.Source != "permission" || q.Text != "wants to run npm test" || q.ToolName != "" {
+	if q.Source != "permission" || q.Text != "wants to run npm test" || len(q.Keys) != 0 {
 		t.Fatalf("%+v", q)
 	}
-	h.s.runner.OnOutput([]byte("\x1b]9;Codex wants to edit a.go\x07")) // a second one asks nothing while the first waits
-	if err := answer(t, h, q.ID, "yes"); err != "" {
-		t.Fatal(err)
+	if err := answer(t, h, q.ID, "yes"); !strings.Contains(err, "isn't on screen") {
+		t.Fatalf("%q", err)
 	}
-	typed(t, h, 'y')
 }
 
 func TestCodexApprovalTextOnScreenAsksNothing(t *testing.T) {
@@ -637,4 +636,34 @@ func TestADialogThatIsntReadIsAskedWithoutOptionsSoon(t *testing.T) {
 		t.Fatal(err)
 	}
 	typed(t, h, '1')
+}
+
+// #105: a Codex approval is relayed as shown; each option is answered with the key Codex shows.
+const codexPrompt = "\x1b]9;Approval requested: touch hi.txt\x07" +
+	"\r\n  Would you like to run the following command?\r\n\r\n  Reason: Create hi.txt?\r\n\r\n  $ touch hi.txt\r\n\r\n" +
+	"› 1. Yes, proceed (y)\r\n  2. Yes, and don't ask again for this (p)\r\n  3. No, and tell Codex what to do differently (esc)\r\n\r\n" +
+	"  Press enter to confirm or esc to cancel"
+
+func TestACodexApprovalIsRelayedAsShownAndAnsweredByItsKey(t *testing.T) {
+	h := keyHarness(t, "codex")
+	h.s.runner.OnOutput([]byte(codexPrompt))
+	q := askedQuestion(t, h)
+	if q.Prompt != "Would you like to run the following command?" || q.Text != "Create hi.txt?" || q.Body != "touch hi.txt" ||
+		strings.Join(q.Keys, "|") != "Yes, proceed|Yes, and don't ask again for this|No, and tell Codex what to do differently" {
+		t.Fatalf("%+v", q)
+	}
+	if err := answer(t, h, q.ID, "2"); err != "" {
+		t.Fatal(err)
+	}
+	typed(t, h, 'p')
+}
+
+func TestACodexApprovalsLastOptionIsEscape(t *testing.T) {
+	h := keyHarness(t, "codex")
+	h.s.runner.OnOutput([]byte(codexPrompt))
+	q := askedQuestion(t, h)
+	if err := answer(t, h, q.ID, "3"); err != "" {
+		t.Fatal(err)
+	}
+	typed(t, h, 0x1b)
 }

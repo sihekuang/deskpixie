@@ -105,10 +105,61 @@ func TestADialogWithABorderedBoxIsRead(t *testing.T) {
 	}
 	d, ok := readDialog(lines, claudePermission)
 	want := dialog{Title: "Bash command", Summary: "Fetch hourly forecast for tonight",
-		Body: "curl -s --max-time 15 \"https://api.open-meteo.com/v1/forecast?latitude=47.7918&lon\ngitude=-122.2243\" | python3 -c \"\nimport json,sys\n\"",
+		Body:     "curl -s --max-time 15 \"https://api.open-meteo.com/v1/forecast?latitude=47.7918&lon\ngitude=-122.2243\" | python3 -c \"\nimport json,sys\n\"",
 		Question: "Do you want to proceed?",
 		Options:  []string{"Yes", "Yes, and don’t ask again for: python3 -c ' *", "Yes, and switch to auto mode", "No"}}
 	if !ok || !reflect.DeepEqual(d, want) {
 		t.Fatalf("%v %+v", ok, d)
+	}
+}
+
+// A real Codex 0.162.1 approval (120x50): every option with the key Codex shows for it.
+func TestTheCodexApprovalIsReadOffTheScreen(t *testing.T) {
+	d, ok := readCodexDialog(realScreen(t, "codex-approval.raw").Lines())
+	want := dialog{Question: "Would you like to run the following command?",
+		Summary: "Do you want to allow the exact requested command to create hi.txt in the workspace?",
+		Body:    "touch hi.txt",
+		Options: []string{"Yes, proceed", "Yes, and don't ask again for commands that start with `touch hi.txt`", "No, and tell Codex what to do differently"},
+		Keys:    []string{"y", "p", "\x1b"}}
+	if !ok || !reflect.DeepEqual(d, want) {
+		t.Fatalf("%v %+v", ok, d)
+	}
+}
+
+func TestNoCodexApprovalIsRead(t *testing.T) {
+	for _, lines := range [][]string{
+		{"Would you like to run the following command?", "› 1. Yes, proceed (y)"},                                                         // no footer
+		{"› 1. Yes, proceed (y)", "  2. No (esc)", "Press enter to confirm or esc to cancel"},                                             // no question
+		{"Would you like to run the following command?", "› 1. Yes, proceed", "  2. No (esc)", "Press enter to confirm or esc to cancel"}, // a key missing
+	} {
+		if d, ok := readCodexDialog(lines); ok {
+			t.Errorf("%q: %+v", lines, d)
+		}
+	}
+}
+
+// A real dialog whose second option wraps mid-path at the screen's edge (e2e run of #105).
+func TestAWrappedOptionIsJoinedAsShown(t *testing.T) {
+	d, ok := readDialog(realScreen(t, "claude-wrapped-dialog.raw").Lines(), claudePermission)
+	want := []string{"Yes",
+		"Yes, and always allow access to /private/tmp/claude-501/-Users-daniel-Documents-Projects-deskpixie/da090dd0-caf7-46cb-b134-83c8ca08a17e/scratchpad/tui-probe/work from this project",
+		"Yes, and switch to auto mode", "No"}
+	if !ok || !reflect.DeepEqual(d.Options, want) {
+		t.Fatalf("%v %q", ok, d.Options)
+	}
+}
+
+// Half drawn: no footer yet, and what is below the options is the status bar, not a label.
+func TestADialogStillBeingDrawnIsNotRead(t *testing.T) {
+	lines := []string{
+		" Do you want to proceed?",
+		" ❯ 1. Yes",
+		"   2. Yes, and switch to auto mode",
+		"",
+		"  Clauding… (4s · ↓ 50 tokens)",
+		"────────────────────────────────────────",
+	}
+	if d, ok := readDialog(lines, claudePermission); ok {
+		t.Fatalf("%+v", d)
 	}
 }
