@@ -519,7 +519,8 @@ func TestRestoreFailsOpenJobsAndOutboxesALine(t *testing.T) {
 	}
 	wantJobStatus(t, c, 1, JobFailed)
 	fx = visible(c.Step(voiceOpened(), T0+20))
-	wantEffects(t, fx, eInject("Coordinator replies while you were away:\n- Coordinator: a job stopped when the app restarted: summarise the issues"))
+	// Opening the conversation also starts the coordinator (#118).
+	wantEffects(t, fx, eInject("Coordinator replies while you were away:\n- Coordinator: a job stopped when the app restarted: summarise the issues"), eStart)
 }
 
 // ---------- hardening rulings ----------

@@ -33,6 +33,13 @@ const (
 	MaxPromptFailures uint32 = 3
 	// PromptRetryMs: a failed prompt is retried this long after the first failure, doubling.
 	PromptRetryMs Millis = 2_000
+	// CoordinatorRestartMs: a coordinator that exits is started again this long after (#118).
+	// Repeated crashes are bounded by the host (MaxRecreations in RecreationWindowMs).
+	CoordinatorRestartMs Millis = 3_000
+	// CoordinatorRetryMs: a start that failed is tried again this long after, doubling up to
+	// CoordinatorRetryMaxMs (#118).
+	CoordinatorRetryMs    Millis = 5_000
+	CoordinatorRetryMaxMs Millis = 5 * 60_000
 	// StopSettleMs: after a Stop, the next prompt goes out on Idle/Done or after this settle,
 	// whichever is first.
 	StopSettleMs Millis = 1_500
@@ -388,7 +395,11 @@ type AgentController struct {
 	shutDown bool
 	// sessionSeq numbers session prompts' request ids (#105).
 	sessionSeq uint64
-	workers    *Workers
+	// restartAt: when the coordinator is started again after an exit or a failed start (#118);
+	// startFailures: failed starts in a row, for the backoff.
+	restartAt     optMs
+	startFailures uint32
+	workers       *Workers
 	// coordStatus: the coordinator pane's latest status.
 	coordStatus PaneStatus
 	// watch: liveness of the open working jobs (liveness.go).
@@ -491,12 +502,11 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 	case InAnswer:
 		c.answer(in.Job, in.Text, now, &fx)
 	case InEnsureCoordinator:
-		if !c.isDisabled() && c.coordinator == coordAbsent {
-			c.coordinator = coordStarting
-			fx = append(fx, Effect{Kind: EfStartCoordinator})
-		}
+		c.ensureCoordinator(&fx)
 	case InCoordinatorUp:
 		c.coordinator = coordUp
+		c.restartAt = optMs{}
+		c.startFailures = 0
 		c.onCoordinatorStatus(in.Status, now, &fx)
 		if c.status == "Coordinator: claude did not start" {
 			c.setStatus(c.notice, &fx)
@@ -521,6 +531,10 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 			c.blocked = optMs{}
 			c.hinted = false
 			c.flush(now, &fx)
+			// #118: kept running while the app is (flush already restarted it if work was queued).
+			if c.coordinator == coordAbsent && !c.shutDown && !c.isDisabled() {
+				c.restartAt = someMs(now + CoordinatorRestartMs)
+			}
 		case ev.Kind == PaneEventQuestion && ev.Question != nil:
 			c.onSessionQuestion(ev.Agent, *ev.Question, now, &fx)
 		case ev.Kind == PaneEventQuestionGone && ev.Question != nil:
@@ -555,6 +569,8 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 		case voice.SigOpened:
 			c.openerSaw(voice.SigOpened)
 			c.voiceOpened(&fx)
+			// #118: a request made in this conversation never waits on a cold start.
+			c.ensureCoordinator(&fx)
 		case voice.SigClosed:
 			c.openerSaw(voice.SigClosed)
 			c.conversationClosed(now, &fx)
@@ -876,7 +892,26 @@ func (c *AgentController) coordinatorFailed(err HostError, now Millis, fx *[]Eff
 			c.failJob(id, "the coordinator could not start", now, fx)
 		}
 		c.syncHold(fx)
+		// #118: tried again, waiting longer each time it fails.
+		if !c.shutDown {
+			wait := CoordinatorRetryMaxMs
+			if c.startFailures < 16 {
+				wait = min(CoordinatorRetryMs<<c.startFailures, CoordinatorRetryMaxMs)
+			}
+			c.startFailures++
+			c.restartAt = someMs(now + wait)
+		}
 	}
+}
+
+// ensureCoordinator starts the coordinator if it isn't running (or starting) and may run.
+func (c *AgentController) ensureCoordinator(fx *[]Effect) {
+	if c.shutDown || c.isDisabled() || c.coordinator != coordAbsent {
+		return
+	}
+	c.restartAt = optMs{}
+	c.coordinator = coordStarting
+	*fx = append(*fx, Effect{Kind: EfStartCoordinator})
 }
 
 // promptFailed: a prompt never reached the coordinator: what it carried goes back to the front
@@ -1455,6 +1490,10 @@ func (c *AgentController) narrate(phrase string, fx *[]Effect) {
 }
 
 func (c *AgentController) tick(now Millis, fx *[]Effect) {
+	if c.restartAt.due(now) {
+		c.restartAt = optMs{}
+		c.ensureCoordinator(fx)
+	}
 	c.tickInbox(now, fx)
 	c.tickWorkers(now, fx)
 	c.tickLiveness(now, fx)
