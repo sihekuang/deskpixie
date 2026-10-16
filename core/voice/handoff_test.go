@@ -70,6 +70,7 @@ func TestIsRequest(t *testing.T) {
 		{"Hey Bit, can you check on the deskpixie repo?", true},
 		{"Pixie, hand this to the coordinator: why is the build red?", true},
 		{"Could you find me a good ramen place nearby", true},
+		{"I- I I actually want to have a, I actually want to have a sub session Herder agent", true}, // #133
 		{"Tell me the latest news about the election.", true},
 		{"Look up the weather in Lisbon next week", true},
 		{"I need a summary of yesterday's meeting", true},
