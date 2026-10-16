@@ -8,6 +8,15 @@ final class UpdatesBubbleModelTests: XCTestCase {
         UpdateLine(id: id, text: "line \(id)", kind: "reply", at: Int64(id), job: nil, worker: nil)
     }
 
+    func testASessionLineCarriesItsApp() throws {
+        let line = try JSONDecoder().decode(UpdateLine.self, from: Data(
+            #"{"id":4,"text":"api is done: tests pass.","kind":"session","at":4,"app":"com.jetbrains.WebStorm"}"#.utf8))
+        XCTAssertEqual(line.app, "com.jetbrains.WebStorm")
+        XCTAssertFalse(line.offersDecision)
+        let reply = try JSONDecoder().decode(UpdateLine.self, from: Data(#"{"id":5,"text":"Done.","kind":"reply","at":5}"#.utf8))
+        XCTAssertNil(reply.app)
+    }
+
     func testAPendingQuestionOffersAllowAndDeny() throws {
         let decode = { (json: String) throws -> UpdateLine in
             try JSONDecoder().decode(UpdateLine.self, from: Data(json.utf8))

@@ -6,7 +6,7 @@ public struct UpdateLine: Decodable, Sendable, Equatable, Identifiable {
     /// The outbox id `agent.updatesSeen` takes back.
     public let id: UInt64
     public let text: String
-    /// "reply" | "question" | "unsolicited" | "info".
+    /// "reply" | "question" | "unsolicited" | "info" | "session".
     public let kind: String
     /// Milliseconds since the epoch.
     public let at: Int64
@@ -16,12 +16,14 @@ public struct UpdateLine: Decodable, Sendable, Equatable, Identifiable {
     public let worker: String?
     /// The confirm word of a permission question still waiting; `agent.decide` takes it back.
     public let token: String?
+    /// A session line's app (bundle id): a click activates it instead of focusing a pane (#114).
+    public let app: String?
 
     /// Whether the row shows Allow and Deny buttons.
     public var offersDecision: Bool { kind == "question" && token != nil }
 
     public init(id: UInt64, text: String, kind: String, at: Int64, job: String?, worker: String?,
-                token: String? = nil) {
+                token: String? = nil, app: String? = nil) {
         self.id = id
         self.text = text
         self.kind = kind
@@ -29,6 +31,7 @@ public struct UpdateLine: Decodable, Sendable, Equatable, Identifiable {
         self.job = job
         self.worker = worker
         self.token = token
+        self.app = app
     }
 }
 

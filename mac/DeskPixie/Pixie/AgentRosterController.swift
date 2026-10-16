@@ -73,16 +73,8 @@ final class AgentRosterController {
     private func clicked(_ r: RosterRow) {
         guard AgentRosterModel.clickable(r) else { return }
         if r.kind == "session" {
-            guard let id = r.app,
-                  let app = NSRunningApplication.runningApplications(withBundleIdentifier: id).first,
-                  let url = app.bundleURL else { return }
-            // Launch Services activates like a Dock click; NSRunningApplication.activate() can be
-            // ignored from an inactive accessory app.
-            let cfg = NSWorkspace.OpenConfiguration()
-            cfg.activates = true
-            NSWorkspace.shared.openApplication(at: url, configuration: cfg) { _, error in
-                if let error { Self.log.error("activate \(id, privacy: .public): \(String(describing: error), privacy: .public)") }
-            }
+            guard let id = r.app else { return }
+            AppActivation.activate(bundleID: id)
         } else {
             let engine = engine, name = r.name
             worker.async {
