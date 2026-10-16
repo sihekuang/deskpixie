@@ -1,6 +1,6 @@
 package agent
 
-import "slices"
+import "reflect"
 
 // The updates bubble (spec docs/specs/2026-10-14-updates-bubble-design.md): the outbox's
 // undelivered lines, shown beside Pixie while Pixie isn't opening conversations for them, and
@@ -18,6 +18,11 @@ type UpdateItem struct {
 	// Token is the confirm word of a permission question still waiting; the bubble's Allow and
 	// Deny buttons answer with it (#97). Empty for every other line.
 	Token string `json:"token,omitempty"`
+	// App: a session's app (bundle id); a click activates it instead of a pane (#105).
+	App string `json:"app,omitempty"`
+	// Options: a session menu's choices (#105): the bubble shows one button each instead of
+	// Allow and Deny, answered with agent.choose.
+	Options []string `json:"options,omitempty"`
 }
 
 // bubbleItems: the undelivered lines, minus permission questions no longer pending, while Pixie
@@ -33,9 +38,10 @@ func (c *AgentController) bubbleItems() []UpdateItem {
 		if !pending && (l.Token != nil || l.Delivered || c.settings.OpenConversation) {
 			continue
 		}
-		item := UpdateItem{ID: l.ID, Text: l.Text, Kind: l.Kind, At: l.At, Job: l.Job, Worker: l.Worker}
+		item := UpdateItem{ID: l.ID, Text: l.Text, Kind: l.Kind, At: l.At, Job: l.Job, Worker: l.Worker, App: l.App}
 		if l.Token != nil {
 			item.Token = *l.Token
+			item.Options = c.confirms.OptionsOf(*l.Token)
 		}
 		items = append(items, item)
 	}
@@ -53,7 +59,7 @@ func (c *AgentController) syncUpdates(fx *[]Effect) {
 		return
 	}
 	items := c.bubbleItems()
-	if c.bubbleSent && slices.Equal(items, c.bubbleLast) {
+	if c.bubbleSent && reflect.DeepEqual(items, c.bubbleLast) {
 		return
 	}
 	c.bubbleSent, c.bubbleLast = true, items

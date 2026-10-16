@@ -1,0 +1,161 @@
+package agent
+
+import (
+	"strings"
+	"testing"
+)
+
+// #105: a prompt one of your pix sessions is waiting on, shown in Pixie too and answered there
+// by a click (or a confirm word) and typed into the session by pix.
+
+const sessionName = "api-claude"
+
+func askSession(c *AgentController, q SessionQuestion, now Millis) []Effect {
+	return c.Step(PaneInput(PaneEvent{Kind: PaneEventQuestion, Agent: sessionName, Question: &q}), now)
+}
+
+func sessionGone(c *AgentController, id string, now Millis) []Effect {
+	return c.Step(PaneInput(PaneEvent{Kind: PaneEventQuestionGone, Agent: sessionName, Question: &SessionQuestion{ID: id}}), now)
+}
+
+var bashAsk = SessionQuestion{ID: "q1", Label: "api", App: "com.googlecode.iterm2", Kind: "permission",
+	Tool: "Bash", Input: `{"command":"npm test"}`}
+
+var pushMenu = SessionQuestion{ID: "q2", Label: "deskpixie", App: "dev.warp.Warp-Stable", Kind: "menu",
+	Text: "Push main to origin?", Options: []string{"Push", "Don't push"}}
+
+func answers(fx []Effect) []Effect { return effectsOfKind(fx, EfAnswerSession) }
+
+func bubbleOf(fx []Effect) []UpdateItem {
+	var items []UpdateItem
+	for _, e := range effectsOfKind(fx, EfUpdates) {
+		items = e.Value.([]UpdateItem)
+	}
+	return items
+}
+
+func TestASessionPermissionIsAskedWithAConfirmWord(t *testing.T) {
+	c := ctl()
+	fx := askSession(c, bashAsk, T0)
+	wantContains(t, fx, eNotify("Run npm test in api? Say confirm hawk."))
+	b := bubbleOf(fx)
+	if len(b) != 1 || b[0].Token != "hawk" || b[0].App != "com.googlecode.iterm2" || b[0].Kind != LineQuestion || len(b[0].Options) != 0 {
+		t.Fatalf("Allow and Deny in the bubble: %+v", b)
+	}
+	if len(answers(fx)) != 0 {
+		t.Fatal("nothing is typed before you answer")
+	}
+}
+
+func TestAConfirmWordAllowsItInTheSession(t *testing.T) {
+	c := ctl()
+	askSession(c, bashAsk, T0)
+	fx := c.Step(userSaid("confirm hawk"), T0+1)
+	a := answers(fx)
+	if len(a) != 1 || a[0].Name != sessionName || a[0].Text != "q1" || a[0].Answer != "yes" {
+		t.Fatalf("%s", fmtEffects(fx))
+	}
+	b := bubbleOf(fx)
+	if len(b) != 1 || b[0].Token != "" || b[0].Text != "api: allowed" {
+		t.Fatalf("answered: the question leaves the bubble, the answer is said: %+v", b)
+	}
+}
+
+func TestDenyInTheBubbleTypesNo(t *testing.T) {
+	c := ctl()
+	askSession(c, bashAsk, T0)
+	a := answers(c.Step(DecideInput("hawk", false), T0+1))
+	if len(a) != 1 || a[0].Answer != "no" {
+		t.Fatalf("%+v", a)
+	}
+}
+
+func TestAMenuOffersItsOptionsInTheBubble(t *testing.T) {
+	c := ctl()
+	fx := askSession(c, pushMenu, T0)
+	wantContains(t, fx, eNotify("deskpixie is asking: Push main to origin? Pick Push or Don't push in the bubble."))
+	b := bubbleOf(fx)
+	if len(b) != 1 || b[0].Token == "" || strings.Join(b[0].Options, "|") != "Push|Don't push" {
+		t.Fatalf("%+v", b)
+	}
+	a := answers(c.Step(ChooseInput(b[0].Token, 2), T0+1))
+	if len(a) != 1 || a[0].Text != "q2" || a[0].Answer != "2" {
+		t.Fatalf("%+v", a)
+	}
+}
+
+func TestAMenuIsNeverAnsweredByAConfirmWordOrAllow(t *testing.T) {
+	c := ctl()
+	token := bubbleOf(askSession(c, pushMenu, T0))[0].Token
+	if a := answers(c.Step(userSaid("confirm "+token), T0+1)); len(a) != 0 {
+		t.Fatalf("a confirm word can't pick an option: %+v", a)
+	}
+	if a := answers(c.Step(DecideInput(token, true), T0+2)); len(a) != 0 {
+		t.Fatalf("Allow can't pick an option: %+v", a)
+	}
+	if a := answers(c.Step(ChooseInput(token, 3), T0+3)); len(a) != 0 {
+		t.Fatalf("no option 3: %+v", a)
+	}
+}
+
+func TestAPermissionCodexOnlyShowsIsAnsweredInTheBubbleOnly(t *testing.T) {
+	c := ctl()
+	q := SessionQuestion{ID: "q3", Label: "web", Kind: "permission", Text: "wants to run a command"}
+	fx := askSession(c, q, T0)
+	wantContains(t, fx, eNotify("web wants to run a command. Allow or deny it in the bubble."))
+	token := bubbleOf(fx)[0].Token
+	if a := answers(c.Step(userSaid("confirm "+token), T0+1)); len(a) != 0 {
+		t.Fatal("you can't hear what it runs: no voice confirm")
+	}
+	if a := answers(c.Step(DecideInput(token, true), T0+2)); len(a) != 1 || a[0].Answer != "yes" {
+		t.Fatalf("%+v", a)
+	}
+}
+
+func TestAMenuPixCantAnswerIsAnnouncedOnly(t *testing.T) {
+	c := ctl()
+	q := SessionQuestion{ID: "q4", Label: "api", Kind: "menu", Text: "Which files?"}
+	fx := askSession(c, q, T0)
+	wantContains(t, fx, eNotify("api is asking: Which files? Answer it in its terminal."))
+	if b := bubbleOf(fx); len(b) != 1 || b[0].Token != "" {
+		t.Fatalf("%+v", b)
+	}
+}
+
+func TestAQuestionAnsweredInTheTerminalLeavesPixie(t *testing.T) {
+	c := ctl()
+	askSession(c, bashAsk, T0)
+	fx := sessionGone(c, "q1", T0+1)
+	if b := bubbleOf(fx); len(b) != 0 {
+		t.Fatalf("%+v", b)
+	}
+	if a := answers(c.Step(DecideInput("hawk", true), T0+2)); len(a) != 0 {
+		t.Fatal("a question already answered types nothing")
+	}
+}
+
+func TestANewQuestionReplacesTheSessionsLastOne(t *testing.T) {
+	c := ctl()
+	askSession(c, bashAsk, T0)
+	next := bashAsk
+	next.ID, next.Input = "q5", `{"command":"npm run build"}`
+	fx := askSession(c, next, T0+1)
+	if b := bubbleOf(fx); len(b) != 1 || !strings.Contains(b[0].Text, "npm run build") {
+		t.Fatalf("%+v", b)
+	}
+}
+
+func TestAClosedSessionsQuestionLeavesPixie(t *testing.T) {
+	c := ctl()
+	askSession(c, bashAsk, T0)
+	fx := c.Step(PaneInput(PaneEvent{Kind: PaneEventExited, Agent: sessionName}), T0+1)
+	if b := bubbleOf(fx); len(b) != 0 {
+		t.Fatalf("%+v", b)
+	}
+}
+
+func TestAFailedAnswerSaysToUseTheTerminal(t *testing.T) {
+	c := ctl()
+	fx := c.Step(SessionAnswerFailedInput(sessionName, "The question is no longer on screen."), T0)
+	wantContains(t, fx, eNotify("Couldn't answer in api-claude: The question is no longer on screen. Answer it in its terminal."))
+}

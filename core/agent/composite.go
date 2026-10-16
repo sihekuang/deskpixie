@@ -9,6 +9,12 @@ type SecondaryHost interface {
 	Owns(name string) bool
 }
 
+// SessionAnswerer types your answer to a session's prompt (#105): answer is "yes", "no" or a
+// menu option's number. It fails when the prompt is no longer waiting on screen.
+type SessionAnswerer interface {
+	AnswerQuestion(ctx context.Context, name, id, answer string) error
+}
+
 // ChangeNotifier is a host whose list can change without a pane event (a pix session
 // connected, dropped or was described): Changes gets a signal then (coalesced, never blocks).
 type ChangeNotifier interface {

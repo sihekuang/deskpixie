@@ -305,13 +305,36 @@ type PaneEventKind int
 const (
 	PaneEventStatus PaneEventKind = iota
 	PaneEventExited
+	// PaneEventQuestion: one of your pix sessions waits on you at a prompt (Question set, #105).
+	PaneEventQuestion
+	// PaneEventQuestionGone: that prompt was answered or went away (Question.ID set).
+	PaneEventQuestionGone
 )
 
-// PaneEvent is a status change (Status set) or an exit of a named agent.
+// PaneEvent is a status change (Status set), an exit of a named agent, or a prompt one of your
+// pix sessions waits on (Question set).
 type PaneEvent struct {
-	Kind   PaneEventKind
-	Agent  string
-	Status PaneStatus // PaneEventStatus only
+	Kind     PaneEventKind
+	Agent    string
+	Status   PaneStatus       // PaneEventStatus only
+	Question *SessionQuestion // PaneEventQuestion(Gone) only (a pointer: PaneEvent stays comparable)
+}
+
+// SessionQuestion is a prompt one of your pix sessions waits on in its terminal (#105).
+type SessionQuestion struct {
+	ID    string
+	Label string // its description, else its repo's or folder's name, else its tool
+	App   string // bundle id of the app it runs in ("" unknown)
+	// Kind is "permission" (allow or deny) or "menu" (pick one of Options).
+	Kind string
+	// Tool and Input (Claude's permission prompts): the tool asked for and its input as JSON.
+	Tool  string
+	Input string
+	// Text: a menu's question; for a permission without Tool (Codex), what it asks to do.
+	Text string
+	// Options: what a menu's pick chooses from; none when pix can't answer it (several
+	// questions, or several picks): it is then only announced.
+	Options []string
 }
 
 // Origin says who started an agent: Pixie (in Herdr or tmux) or you (with pix, #89).
