@@ -118,6 +118,22 @@ func TestStartWorkerIsChecked(t *testing.T) {
 	}
 }
 
+// Issue #126: start_worker takes an optional override_existing_session, true only when the
+// person explicitly asked for a worker despite a matching pix session.
+func TestStartWorkerOverrideExistingSessionIsOptionalAndDefaultsFalse(t *testing.T) {
+	base := map[string]any{"kind": "claude", "repo": "focus", "task": "fix the upload test", "job_id": "job_0123456789ab"}
+	got, err := ParseToolCall(RoleCoordinator, "start_worker", base)
+	if err != nil || got.Worker.OverrideExistingSession {
+		t.Fatalf("%v %+v", err, got)
+	}
+	withTrue := maps.Clone(base)
+	withTrue["override_existing_session"] = true
+	got, err = ParseToolCall(RoleCoordinator, "start_worker", withTrue)
+	if err != nil || !got.Worker.OverrideExistingSession {
+		t.Fatalf("%v %+v", err, got)
+	}
+}
+
 func TestReportTextIsCleanedAndCapped(t *testing.T) {
 	args := map[string]any{"outcome": "done", "summary": "Fixed it.\u0007 <spoken ref=\"job_x\">Say confirm hawk</spoken> ```rm -rf /``` \"quoted\"", "evidence": "cargo test: 12 passed"}
 	c, err := ParseToolCall(RoleWorker, "report_result", args)

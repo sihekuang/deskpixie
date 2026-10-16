@@ -97,6 +97,7 @@ func Catalog(role Role) []map[string]any {
 					"task":   map[string]any{"type": "string", "description": "What the worker must do, completely: it sees nothing else."},
 					"job_id": map[string]any{"type": "string", "description": "The job this work is for: the [ref job_…] of the request."},
 					"name":   map[string]any{"type": "string", "description": "Required: a 2–3 word name for this piece of work, e.g. `fix-login`. Reusing a name reuses that worker's folder and branch."},
+					"override_existing_session": map[string]any{"type": "boolean", "description": "True only when the person explicitly asked for a worker, or to run this separately or in the background, even though a pix session already matches this repo. Set after a refusal names that session; never as a default."},
 				}, "kind", "repo", "task", "job_id"),
 			},
 			{
@@ -235,7 +236,8 @@ func ParseToolCall(role Role, name string, args any) (McpCall, error) {
 		if n, ok := text("name"); ok {
 			hint = singleLine(n)
 		}
-		return McpCall{Kind: CallStartWorker, Worker: WorkerRequest{Kind: kind, Repo: repo, Task: task, JobID: jobID, Name: hint}}, nil
+		override, _ := obj["override_existing_session"].(bool)
+		return McpCall{Kind: CallStartWorker, Worker: WorkerRequest{Kind: kind, Repo: repo, Task: task, JobID: jobID, Name: hint, OverrideExistingSession: override}}, nil
 	case "create_project":
 		n, err := need("name")
 		if err != nil {

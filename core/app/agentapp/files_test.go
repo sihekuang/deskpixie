@@ -204,6 +204,17 @@ func TestClaudeMdSaysHowRepositoryWorkIsDone(t *testing.T) {
 	}
 }
 
+// Issue #126: repository work checks for a pix session already open on the repo before
+// start_worker, and only overrides that when the person explicitly asked for a worker.
+func TestClaudeMdPrefersAnExistingPixSessionOverAWorker(t *testing.T) {
+	with := RenderClaudeMd("/data/canvas", "/Users/x/Documents/Projects")
+	for _, want := range []string{"list_sessions", "message_session", "override_existing_session", "explicitly"} {
+		if !strings.Contains(with, want) {
+			t.Error(want)
+		}
+	}
+}
+
 func TestWorkerSettingsAreStrictAndCarryNoCoordinatorExtras(t *testing.T) {
 	v := decodeJSON(t, RenderWorkerSettings(1))
 	if _, ok := at(v, "hooks").(map[string]any)["PostToolUse"]; ok {

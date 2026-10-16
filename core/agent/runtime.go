@@ -1025,6 +1025,55 @@ func (h *AgentHandle) createProject(agent, name string) McpReply {
 	return McpReply{Value: map[string]any{"name": name, "path": path}}
 }
 
+// existingUserSessions is the pix sessions you started yourself (#89) already open on
+// repoFolder (the git root's folder name): issue #126, so start_worker can prefer one of these
+// over duplicating the work. A host that isn't a CompositeHost, or a listing that fails, has
+// none: a worker is still better than refusing one over an unrelated failure.
+func existingUserSessions(ctx context.Context, host SessionHost, repoFolder string) []AgentInfo {
+	c, ok := host.(*CompositeHost)
+	if !ok {
+		return nil
+	}
+	list, err := within(ctx, ListLimit, c.Secondary().List)
+	if err != nil {
+		return nil
+	}
+	var out []AgentInfo
+	for _, a := range list {
+		if a.Origin == OriginUser && a.User != nil && a.User.Repo == repoFolder {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// sessionRef names a pix session for the coordinator (never for the person: that's the prompt's
+// job), including its name so a follow-up message_session can use it.
+func sessionRef(a AgentInfo) string {
+	d := a.User.Description
+	if d == "" {
+		d = "no description"
+	}
+	where := a.User.Where
+	if where == "" {
+		where = "unknown"
+	}
+	return fmt.Sprintf("%q in %s (name %s, status %s)", d, where, a.Name, a.Status.String())
+}
+
+// existingSessionMessage tells the coordinator about matches so it can message one (or ask the
+// person which, per the existing disambiguation rule) instead of starting a worker.
+func existingSessionMessage(matches []AgentInfo, repoFolder string) string {
+	refs := make([]string, len(matches))
+	for i, a := range matches {
+		refs[i] = sessionRef(a)
+	}
+	if len(refs) == 1 {
+		return fmt.Sprintf("You already have a session open on %s: %s. Message it with message_session instead, or call start_worker again with override_existing_session: true if the person explicitly asked for a separate worker.", repoFolder, refs[0])
+	}
+	return fmt.Sprintf("You already have sessions open on %s: %s. Ask the person which one, then message it, or call start_worker again with override_existing_session: true if they explicitly asked for a separate worker.", repoFolder, strings.Join(refs, "; "))
+}
+
 // startWorker is start_worker (spec §5.5): resolve the repo, admit, make the worktree and
 // launch files, start the pane, then hand it to the controller. A refusal is logged with its
 // stage and the job id only (never free text).
@@ -1069,6 +1118,13 @@ func (h *AgentHandle) startWorker(agent string, req WorkerRequest) McpReply {
 		return refuse("repo", err.Error())
 	}
 	session := h.deps.Host.Session()
+	// #126: a pix session already open on this repo beats duplicating the work in a worker,
+	// unless the request explicitly overrides that (the person asked for a worker anyway).
+	if repoFolder := dirName(found.repo); !req.OverrideExistingSession {
+		if matches := existingUserSessions(h.ctx, session, repoFolder); len(matches) > 0 {
+			return refuse("existing_session", existingSessionMessage(matches, repoFolder))
+		}
+	}
 	// The taken names keep a start from ever closing a pane it did not create: without them the
 	// start is refused. A failed start's name stays taken until its pane is closed.
 	listed, err := within(h.ctx, ListLimit, session.List)
