@@ -327,7 +327,8 @@ func Build(c Config) *Agent {
 		Notifier:    NewNotifier(c.Runner, c.Hooks.Notify),
 		Pixie:       pixieCue{c.Hooks},
 		Status:      statusSink{a},
-		Launcher:    termFactory(c.Runner, c.Home),
+		Planner:     termFactory(c.Runner, c.Home),
+		Focus:       focusSink{c.Hooks},
 		TerminalDir: TerminalDir(s.ProjectsRoot, c.Home),
 		Store:       NewJsonlStore(paths.Root),
 		Clock:       c.Clock,
@@ -640,6 +641,14 @@ func (a *Agent) FocusAgent(name string) {
 			a.setStatus(TerminalFailureStatus(err.Error()))
 		}
 	})
+}
+
+// ReportFocusOutcome: the shell finished executing a FocusPlan (#116). A failure becomes the
+// tray status line through the same path as an OpenTerminal failure, so wording never diverges.
+func (a *Agent) ReportFocusOutcome(success bool, detail string) {
+	if !success {
+		a.setStatus(TerminalFailureStatus(detail))
+	}
 }
 
 // AttachVoice connects the voice loop once it exists: injections go to it, and its signals

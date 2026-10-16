@@ -232,6 +232,7 @@ func New(d Deps) (*App, error) {
 			Updates:    func(items any) { a.emit("updates", map[string]any{"lines": items}) },
 			Roster:     func(view any) { a.emit("agents", map[string]any{"roster": view}) },
 			ShowPane:   func(job, worker string) { a.emit("showPane", map[string]any{"job": job, "worker": worker}) },
+			Focus:      func(plan any) { a.emit("focusPlan", map[string]any{"plan": plan}) },
 		})
 	}
 	a.buildVoice(cfg)
@@ -1200,6 +1201,19 @@ func (a *App) Register(r Registrar) {
 		}
 		if a.agent != nil && in.Name != "" {
 			a.agent.FocusAgent(in.Name)
+		}
+		return struct{}{}, nil
+	})
+	r.Register("agent.reportFocusOutcome", func(args json.RawMessage) (any, error) {
+		var in struct {
+			Success bool   `json:"success"`
+			Detail  string `json:"detail"`
+		}
+		if err := decodeArgs("agent.reportFocusOutcome", args, &in); err != nil {
+			return nil, err
+		}
+		if a.agent != nil {
+			a.agent.ReportFocusOutcome(in.Success, in.Detail)
 		}
 		return struct{}{}, nil
 	})

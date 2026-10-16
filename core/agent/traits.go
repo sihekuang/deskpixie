@@ -88,7 +88,7 @@ type Attach struct {
 // every field; the app only executes, trying each present rung in order and stopping at the
 // first that shows something. The rung groups are NOT uniform: ItermSelect alone and
 // ActivateApp alone have no fallback (a failure there is final, matching today's
-// ReusingLauncher.Open exactly); only the Warp group (FocusURLs/RaiseScript) falls back to
+// ReusingPlanner.Plan exactly); only the Warp group (FocusURLs/RaiseScript) falls back to
 // KillPIDs+NewTerminal. Nothing attached: only NewTerminal is set.
 type FocusPlan struct {
 	FocusURLs   []string           `json:"focus_urls,omitempty"`

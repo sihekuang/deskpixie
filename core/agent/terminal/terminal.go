@@ -61,7 +61,7 @@ func AttachLine(a agent.Attach) string {
 
 // quoted is a double-quoted literal for TOML and AppleScript. \n \t \r are valid in both;
 // other control characters (and U+007F) become \u00XX, which only TOML accepts, so
-// ItermLauncher.Open rejects them before they get here.
+// ItermPlanner.Plan rejects them before they get here.
 func quoted(s string) string {
 	var b strings.Builder
 	b.WriteByte('"')

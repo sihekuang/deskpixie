@@ -35,6 +35,7 @@ type fakeAgent struct {
 	updates       any
 	roster        any
 	focusedAgents []string
+	focusOutcomes []string
 }
 
 func (f *fakeAgent) Tools() []voice.Tool { return []voice.Tool{namedTool("delegate")} }
@@ -82,6 +83,11 @@ func (f *fakeAgent) Roster() any  { f.mu.Lock(); defer f.mu.Unlock(); return f.r
 func (f *fakeAgent) FocusAgent(name string) {
 	f.mu.Lock()
 	f.focusedAgents = append(f.focusedAgents, name)
+	f.mu.Unlock()
+}
+func (f *fakeAgent) ReportFocusOutcome(success bool, detail string) {
+	f.mu.Lock()
+	f.focusOutcomes = append(f.focusOutcomes, fmt.Sprintf("%v:%s", success, detail))
 	f.mu.Unlock()
 }
 func (f *fakeAgent) SetAway(away bool) { f.mu.Lock(); f.away = append(f.away, away); f.mu.Unlock() }

@@ -109,7 +109,7 @@ func (v *fakeVoice) Injected() []string {
 type fixture struct {
 	agent    *Agent
 	host     *stoppableHost
-	launcher *agenttest.FakeLauncher
+	launcher *agenttest.FakePlanner
 	rec      *recorder
 	data     string
 	home     string
@@ -119,7 +119,7 @@ func newFixture(t *testing.T, change func(*Config)) *fixture {
 	t.Helper()
 	f := &fixture{
 		host:     &stoppableHost{FakeSessionHost: agenttest.NewFakeSessionHost()},
-		launcher: &agenttest.FakeLauncher{},
+		launcher: &agenttest.FakePlanner{},
 		rec:      &recorder{},
 		data:     t.TempDir(),
 		home:     t.TempDir(),
@@ -134,7 +134,7 @@ func newFixture(t *testing.T, change func(*Config)) *fixture {
 		Hosts: map[string]HostFactory{"herdr": func(HostDeps) (agent.SessionHost, error) {
 			return f.host, nil
 		}},
-		Terminals: map[string]TerminalFactory{"warp": func(agent.CommandRunner, string) agent.TerminalLauncher {
+		Terminals: map[string]TerminalFactory{"warp": func(agent.CommandRunner, string) agent.TerminalPlanner {
 			return f.launcher
 		}},
 		IDs:       &agenttest.SeqIds{},
@@ -309,6 +309,14 @@ func TestOpenTerminalAttachesAndAFailureNamesTheTerminal(t *testing.T) {
 	f.launcher.SetFail("no app")
 	f.agent.OpenTerminal()
 	waitFor(t, "the failure line", func() bool { return strings.HasPrefix(f.agent.Tray().Status, "Coordinator: ") })
+}
+
+// #116: the shell's FocusPlan outcome reaches the tray through the same TerminalFailureStatus
+// parsing as an OpenTerminal failure, so wording never diverges.
+func TestReportFocusOutcomeFailureNamesTheTerminal(t *testing.T) {
+	f := newFixture(t, nil)
+	f.agent.ReportFocusOutcome(false, "could not open Warp: no app")
+	waitFor(t, "the failure line", func() bool { return f.agent.Tray().Status == "Coordinator: could not open Warp" })
 }
 
 func TestUserWordsHeardWhileBitSpeaksNeverReachTheAgent(t *testing.T) {
