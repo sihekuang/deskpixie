@@ -19,18 +19,28 @@ type psRunner struct {
 	// raise answers osascript (the Warp window raise): its stdout, or raiseErr.
 	raise    string
 	raiseErr error
-	ran      [][]string
+	// env answers `ps -E` for a pid: its command line followed by its environment.
+	env map[string]string
+	// openStatus is the exit status of `open` with a warp://session URL.
+	openStatus int32
+	ran        [][]string
 }
 
 func (p *psRunner) Run(argv []string, _ []agent.EnvVar) (agent.CommandOutput, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if argv[0] == psBin {
+		if argv[1] == "-E" {
+			return agent.CommandOutput{Stdout: p.env[argv[len(argv)-1]]}, nil
+		}
 		return agent.CommandOutput{Stdout: p.ps}, p.psErr
 	}
 	p.ran = append(p.ran, argv)
 	if argv[0] == "/usr/bin/osascript" {
 		return agent.CommandOutput{Stdout: p.raise}, p.raiseErr
+	}
+	if argv[0] == "/usr/bin/open" && strings.HasPrefix(argv[len(argv)-1], "warp://") {
+		return agent.CommandOutput{Status: p.openStatus}, nil
 	}
 	return agent.CommandOutput{}, nil
 }
@@ -60,6 +70,55 @@ var warpTable = table(
 	"  620 500 ttys014  /bin/zsh -l",
 	"  621 620 ttys014  /Users/x/.local/bin/herdr session attach deskpixie",
 )
+
+// warpEnv is what `ps -E` shows for the attach clients in warpTable: Warp gives every session
+// its own focus URL.
+var warpEnv = map[string]string{
+	"611": "/Users/x/.local/bin/herdr session attach deskpixie TERM=xterm-256color WARP_FOCUS_URL=warp://session/1af8eb188540461cb7150e6a371d0e63 HOME=/Users/x\n",
+	"621": "/Users/x/.local/bin/herdr session attach deskpixie WARP_FOCUS_URL=warp://session/0d845f78c7214b4aa4fe0c2df7ec636c\n",
+}
+
+// #115: the attached session's own focus URL shows its exact tab, whatever window titles say
+// (Warp restores a dead tab with the old title) and with no Accessibility permission. The newest
+// client is shown.
+func TestAnAttachedWarpSessionIsShownByItsFocusURL(t *testing.T) {
+	r := &psRunner{ps: warpTable, env: warpEnv, raise: "ok\n"}
+	inner := &titledLauncher{}
+	if err := Reuse(inner, r).Open(attach()); err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{{"/usr/bin/open", "warp://session/0d845f78c7214b4aa4fe0c2df7ec636c"}}
+	if inner.opened != 0 || !reflect.DeepEqual(r.ran, want) {
+		t.Fatalf("opened %d, ran %q", inner.opened, r.ran)
+	}
+}
+
+// #115: a focus URL that won't open (or none, as with an older Warp) falls back to the window
+// raise, then to a new terminal.
+func TestAWarpFocusURLThatFailsFallsBackToTheWindowRaise(t *testing.T) {
+	r := &psRunner{ps: warpTable, env: warpEnv, openStatus: 1, raise: "ok\n"}
+	inner := &titledLauncher{}
+	if err := Reuse(inner, r).Open(attach()); err != nil {
+		t.Fatal(err)
+	}
+	if inner.opened != 0 || len(r.ran) != 3 || r.ran[2][0] != "/usr/bin/osascript" {
+		t.Fatalf("opened %d, ran %q", inner.opened, r.ran)
+	}
+}
+
+// Only a Warp session URL is opened, never another value of the variable.
+func TestAFocusURLThatIsNotAWarpSessionIsIgnored(t *testing.T) {
+	r := &psRunner{ps: warpTable, raise: "ok\n", env: map[string]string{
+		"621": "herdr session attach deskpixie WARP_FOCUS_URL=https://evil.example/x\n",
+		"611": "herdr session attach deskpixie WARP_FOCUS_URL=warp://session/../x\n",
+	}}
+	if err := Reuse(&titledLauncher{}, r).Open(attach()); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.ran) != 1 || r.ran[0][0] != "/usr/bin/osascript" {
+		t.Fatalf("ran %q", r.ran)
+	}
+}
 
 // C (#110): Warp can't be told which tab to show, but the window whose active tab is the attach
 // has that tab's title: it is raised and Warp brought to the front.

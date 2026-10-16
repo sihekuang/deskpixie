@@ -1,6 +1,7 @@
 package terminal
 
 import (
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -12,8 +13,10 @@ const psBin = "/bin/ps"
 
 // ReusingLauncher brings forward a terminal already attached to the session instead of opening
 // another one (#98): every click on Pixie, an update line or a roster row ends in Open, and the
-// pane is focused before it. With nothing attached (or an attach it can't bring forward, e.g.
-// over ssh), it opens a new terminal through the inner launcher.
+// pane is focused before it. In Warp it tries, in turn, the session's focus URL (#115), the
+// window titled for the attach tab (needs Accessibility), then a new terminal replacing the
+// attached ones. With nothing attached (or an attach it can't bring forward, e.g. over ssh), it
+// opens a new terminal through the inner launcher.
 type ReusingLauncher struct {
 	inner  agent.TerminalLauncher
 	runner agent.CommandRunner
@@ -39,6 +42,11 @@ func (l *ReusingLauncher) Open(a agent.Attach) error {
 	if strings.HasSuffix(app, "/iTerm.app") || !isTitled {
 		return l.bringForward(app, tty)
 	}
+	// #115: the attached session's own focus URL shows its exact tab: no window title to trust
+	// (Warp restores a dead tab with the old title) and no Accessibility permission needed.
+	if l.openFocusURL(clients) {
+		return nil
+	}
 	// #110: raise the window showing the attach tab; with none (the tab sits behind another, or
 	// macOS refused the window list), end the attached terminals and open one in front, so the
 	// one that shows is the only one (a tab we opened closes when its attach ends).
@@ -51,6 +59,29 @@ func (l *ReusingLauncher) Open(a agent.Attach) error {
 	}
 	_, _ = l.runner.Run(kill, baseEnv())
 	return l.inner.Open(a)
+}
+
+// warpFocusURL is the WARP_FOCUS_URL Warp sets in each session's environment.
+var warpFocusURL = regexp.MustCompile(`(?:^|\s)WARP_FOCUS_URL=(warp://session/[0-9A-Za-z-]+)(?:\s|$)`)
+
+// openFocusURL shows the newest client's Warp session by its WARP_FOCUS_URL (read from its
+// environment, as `ps -E` shows it), else the next one's; false if none has one or opens.
+func (l *ReusingLauncher) openFocusURL(clients []int) bool {
+	for i := len(clients) - 1; i >= 0; i-- {
+		pid := strconv.Itoa(clients[i])
+		out, err := l.runner.Run([]string{psBin, "-E", "-ww", "-o", "command=", "-p", pid}, baseEnv())
+		if err != nil || out.Status != 0 {
+			continue
+		}
+		m := warpFocusURL.FindStringSubmatch(out.Stdout)
+		if m == nil {
+			continue
+		}
+		if r, err := l.runner.Run([]string{"/usr/bin/open", m[1]}, baseEnv()); err == nil && r.Status == 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // raiseWindow brings app's window titled title to the front, if it has one (System Events:
