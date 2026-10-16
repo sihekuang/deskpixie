@@ -101,6 +101,15 @@ func (d *Descriptions) Current() string {
 	return ""
 }
 
+// Named is yours, else the agent's: a description someone wrote, not one pix guessed from a
+// prompt; "" when there is none.
+func (d *Descriptions) Named() string {
+	if d.by[SourceUser] != "" {
+		return d.by[SourceUser]
+	}
+	return d.by[SourceAgent]
+}
+
 // Past is the earlier descriptions, newest first.
 func (d *Descriptions) Past() []string { return slices.Clone(d.past) }
 

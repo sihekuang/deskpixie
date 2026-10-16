@@ -458,10 +458,12 @@ func (h *Host) List(context.Context) ([]agent.AgentInfo, error) {
 	return out, nil
 }
 
-// label names s in what Pixie says (h.mu held): its description, else its repo's or folder's
-// name, else its tool.
+// label names s in what Pixie says (h.mu held): the description you or the agent wrote, else
+// its repo's or folder's name, else its tool.
 func (s *session) label() string {
-	if d := s.desc.Current(); d != "" {
+	// A guess from your prompt reads as nonsense said aloud ("What is 17 times 23? Reply in
+	// one … is done"): only a description you or the agent wrote names it.
+	if d := s.desc.Named(); d != "" {
 		return d
 	}
 	for _, p := range []string{s.hello.GitRoot, s.hello.Cwd} {
