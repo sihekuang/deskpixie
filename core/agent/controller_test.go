@@ -334,7 +334,8 @@ func TestQuittingDeniesEveryPendingPermissionAndStopsTheCoordinator(t *testing.T
 	askPush(c, 7, T0)
 	askPush(c, 8, T0)
 	fx := visible(c.Step(ShutdownInput(), T0))
-	wantEffects(t, fx, eDecide(7, Deny("The app quit.")), eDecide(8, Deny("The app quit.")), eStopCoord)
+	// The job's still working, but nothing waits on a confirm any more (#119).
+	wantEffects(t, fx, eDecide(7, Deny("The app quit.")), eDecide(8, Deny("The app quit.")), eStopCoord, eHold(false))
 }
 
 func TestKeepPanesOnQuitLeavesTheCoordinator(t *testing.T) {
@@ -627,6 +628,7 @@ func TestAnsweringTheOnlyWaitingJobForwardsTheAnswer(t *testing.T) {
 	wantEffects(t, fx,
 		Effect{Kind: EfAnswerResult, Job: job(1)},
 		ePrompt("The user answered: the app repo\n[ref job_000000000001]"),
+		eHold(true), // back to work (#119)
 	)
 	wantJobStatus(t, c, 1, JobWorking)
 }

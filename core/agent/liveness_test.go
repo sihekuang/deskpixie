@@ -137,7 +137,8 @@ func TestAnUnansweredQuestionExpiresAfterThirtyMinutes(t *testing.T) {
 	if !promptWith(fx, questionExpiredNote) {
 		t.Fatalf("coordinator not told: %+v", fx)
 	}
-	wantContains(t, fx, eHold(false))
+	// The hold went when the question was asked (#119).
+	wantNotContains(t, fx, eHold(true))
 }
 
 func TestAnAnsweredQuestionDoesNotExpire(t *testing.T) {
@@ -150,4 +151,24 @@ func TestAnAnsweredQuestionDoesNotExpire(t *testing.T) {
 	if s := c.Snapshot(T0)[0].Status; s == JobFailed {
 		t.Fatal("expired after an answer")
 	}
+}
+
+// #119: a job that only waits on the user's answer doesn't hold Pixie in delegating; answering
+// it puts the job back to work, and the hold with it.
+func TestAQuestionReleasesTheHoldAndAnAnswerTakesItBack(t *testing.T) {
+	c := workingOnJob1()
+	fx := stop(c, `<spoken ref="job_000000000001" status="question">Which repo?</spoken>`, T0)
+	wantJobStatus(t, c, 1, JobQuestion)
+	wantContains(t, fx, eHold(false))
+	fx = c.Step(AnswerInput(job(1), "deskpixie"), T0+60_000)
+	wantJobStatus(t, c, 1, JobWorking)
+	wantContains(t, fx, eHold(true))
+}
+
+// Another job still running keeps the hold while one waits on a question.
+func TestARunningJobKeepsTheHoldBesideAQuestion(t *testing.T) {
+	c := workingOnJob1()
+	delegate(c, 2, "b")
+	fx := stop(c, `<spoken ref="job_000000000001" status="question">Which repo?</spoken>`, T0)
+	wantNotContains(t, fx, eHold(false))
 }
