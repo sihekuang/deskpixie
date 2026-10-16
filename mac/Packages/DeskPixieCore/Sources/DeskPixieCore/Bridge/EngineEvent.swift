@@ -84,6 +84,8 @@ public enum EngineEvent: Sendable, Equatable {
     case agents(RosterView)
     /// Bring up the pane of an agent waiting at a prompt in its terminal (#110).
     case showPane(PaneRequest)
+    /// Show a terminal by walking a core-built fallback plan (#116).
+    case focusPlan(FocusPlan)
 
     private struct Kind: Decodable { var kind: String }
 
@@ -101,6 +103,7 @@ public enum EngineEvent: Sendable, Equatable {
     private struct CanvasOpen: Decodable { var url: String, title: String }
     private struct Updates: Decodable { var lines: [UpdateLine] }
     private struct Agents: Decodable { var roster: RosterView }
+    private struct FocusPlanEvent: Decodable { var plan: FocusPlan }
 
     /// Decodes one event JSON object; unknown kinds, malformed JSON and events missing a
     /// required field yield nil.
@@ -132,6 +135,7 @@ public enum EngineEvent: Sendable, Equatable {
         case "updates": return get(Updates.self).map { .updates($0.lines) }
         case "agents": return get(Agents.self).map { .agents($0.roster) }
         case "showPane": return get(PaneRequest.self).map { .showPane($0) }
+        case "focusPlan": return get(FocusPlanEvent.self).map { .focusPlan($0.plan) }
         default: return nil
         }
     }
