@@ -79,3 +79,36 @@ func TestNoDialogIsRead(t *testing.T) {
 		}
 	}
 }
+
+// The dialog as drawn in the screenshot of #105: the command in a box with only a left border.
+func TestADialogWithABorderedBoxIsRead(t *testing.T) {
+	lines := []string{
+		"────────────────────────────────────────",
+		" Bash command",
+		" Tip: auto mode handles these prompts for you",
+		" Fetch hourly forecast for tonight",
+		"",
+		" │ curl -s --max-time 15 \"https://api.open-meteo.com/v1/forecast?latitude=47.7918&lon",
+		" │ gitude=-122.2243\" | python3 -c \"",
+		" │ import json,sys",
+		" │ \"",
+		"",
+		" This command requires approval",
+		"",
+		" Do you want to proceed?",
+		" ❯ 1. Yes",
+		"   2. Yes, and don’t ask again for: python3 -c ' *",
+		"   3. Yes, and switch to auto mode · auto mode handles these prompts for you",
+		"   4. No",
+		"",
+		" Esc to cancel · Tab to amend",
+	}
+	d, ok := readDialog(lines, claudePermission)
+	want := dialog{Title: "Bash command", Summary: "Fetch hourly forecast for tonight",
+		Body: "curl -s --max-time 15 \"https://api.open-meteo.com/v1/forecast?latitude=47.7918&lon\ngitude=-122.2243\" | python3 -c \"\nimport json,sys\n\"",
+		Question: "Do you want to proceed?",
+		Options:  []string{"Yes", "Yes, and don’t ask again for: python3 -c ' *", "Yes, and switch to auto mode", "No"}}
+	if !ok || !reflect.DeepEqual(d, want) {
+		t.Fatalf("%v %+v", ok, d)
+	}
+}

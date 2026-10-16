@@ -325,15 +325,21 @@ func readDialog(lines []string, marker string) (dialog, bool) {
 			break
 		}
 	}
+	// The box is drawn between dashed rules, or with a left border (│) on each line; what
+	// follows it ("This command requires approval") is neither head nor body.
 	var head, body []string
 	box := 0 // dashed rules seen
+	bordered := false
 	for _, l := range lines[top:at] {
 		t := strings.TrimSpace(l)
 		switch {
 		case len(t) > 10 && strings.Trim(t, "╌") == "":
 			box++
+		case strings.HasPrefix(t, "│"):
+			bordered = true
+			body = append(body, strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(t, "│"), "│")))
 		case t == "" || strings.HasPrefix(t, "Tip:"):
-		case box == 0:
+		case box == 0 && !bordered:
 			head = append(head, t)
 		case box == 1:
 			body = append(body, t)
