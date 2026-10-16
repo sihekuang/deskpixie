@@ -23,10 +23,11 @@ import (
 
 // Screen markers. Codex shows codexBusy while it works (the marker DeskPixie's workers use).
 // Claude fires no Stop hook when a turn is interrupted (Esc, yours or Pixie's); it shows
-// claudeInterrupted instead.
+// claudeInterrupted instead. An aborted Codex turn sends no notify; it shows codexInterrupted.
 const (
 	codexBusy         = "esc to interrupt"
 	claudeInterrupted = "What should Claude do instead?"
+	codexInterrupted  = "Conversation interrupted"
 )
 
 // ansi matches the escape sequences between the words on screen.
@@ -126,17 +127,22 @@ func newSession(o sessionOpts) *Session {
 	s := &Session{o: o, status: "idle", afterStop: true, userDesc: o.description, now: time.Now}
 	s.runner = &Runner{Launch: o.agent, Stdin: o.stdin, Stdout: o.stdout,
 		OnInput: func(b []byte) { s.gate.Keys(b, time.Now()) }}
-	var watch screenWatch // only the PTY reader goroutine touches it
+	var watch, stopped screenWatch // only the PTY reader goroutine touches them
 	switch o.tool {
 	case "codex":
 		s.runner.OnOutput = func(b []byte) {
-			if watch.saw(string(b), codexBusy) && s.currentStatus() != "working" {
+			out := string(b)
+			if stopped.saw(out, codexInterrupted) && s.currentStatus() != "idle" {
+				s.interrupted()
+			}
+			if watch.saw(out, codexBusy) && s.currentStatus() != "working" {
 				s.setStatus("working")
 			}
 		}
 	case "claude":
 		s.runner.OnOutput = func(b []byte) {
-			if watch.saw(string(b), claudeInterrupted) && s.currentStatus() == "working" {
+			// Working, or blocked: Esc at a permission prompt fires no Stop either.
+			if watch.saw(string(b), claudeInterrupted) && s.currentStatus() != "idle" {
 				s.interrupted()
 			}
 		}
@@ -151,6 +157,13 @@ func (s *Session) Hook(event string, p map[string]any) string {
 	}
 	switch event {
 	case "UserPromptSubmit":
+		// A prompt while not working starts a new turn, even if the last one never ended with
+		// a Stop (an API error, an interrupt pix didn't see): its start doesn't carry over.
+		s.mu.Lock()
+		if s.status != "working" {
+			s.turnStart, s.turnFromPixie = time.Time{}, false
+		}
+		s.mu.Unlock()
 		s.setStatus("working")
 		prompt, _ := p["prompt"].(string)
 		pixie := s.fromPixie(prompt)
