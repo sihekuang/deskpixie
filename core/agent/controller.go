@@ -66,6 +66,11 @@ type Settings struct {
 	// SpeakWorkerReports (`agent.workers.speakResults`, a feature flag, off by default): a
 	// worker's report_result and report_blocked are also said to the user at once.
 	SpeakWorkerReports bool
+	// SessionTurns (`notifications.sessionTurns`, off by default): a session you started with
+	// pix that finishes a turn is announced (#114). SessionTurnsMinMs: a turn of yours shorter
+	// than this stays quiet; one Pixie started is always announced.
+	SessionTurns      bool
+	SessionTurnsMinMs Millis
 	// OpenConversation (`agent.openConversationForUpdates`, a feature flag, off by default): a job's done
 	// or failed line, an agent question or a spoken worker report that comes while no
 	// conversation is open makes Pixie open one and say it (opener.go).
@@ -79,7 +84,7 @@ type Settings struct {
 
 // DefaultSettings: 4 notifications a minute, 2-minute permission timeout, narration on.
 func DefaultSettings() Settings {
-	return Settings{NotifyPerMinute: 4, PermissionTimeoutMs: 120_000, Narration: true, UpdateQuietMs: UpdateQuietMs, Workers: DefaultWorkerPolicy()}
+	return Settings{NotifyPerMinute: 4, PermissionTimeoutMs: 120_000, Narration: true, UpdateQuietMs: UpdateQuietMs, Workers: DefaultWorkerPolicy(), SessionTurnsMinMs: 30_000}
 }
 
 // WorkerPolicy is `agent.workers` (spec §12): whether the coordinator may start workers, how

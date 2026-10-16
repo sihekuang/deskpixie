@@ -569,3 +569,20 @@ func TestVisibleWhenSerializesOnlyWhenSet(t *testing.T) {
 		}
 	}
 }
+
+// #114: announcing finished pix sessions is off by default and read at startup.
+func TestSessionTurnSettings(t *testing.T) {
+	on := FieldByPath("notifications.sessionTurns")
+	if on == nil || on.Section != SectionNotifications || on.Kind.Type != KindBool || on.Apply != ApplyRestart ||
+		on.Label != "Announce finished sessions" {
+		t.Fatalf("%+v", on)
+	}
+	min := FieldByPath("notifications.sessionTurnsMinSeconds")
+	if min == nil || min.Section != SectionNotifications || min.Apply != ApplyRestart ||
+		min.Label != "Only turns longer than (seconds)" {
+		t.Fatalf("%+v", min)
+	}
+	if d := Default().Notifications; d.SessionTurns || d.SessionTurnsMinSeconds != 30 {
+		t.Fatalf("%+v", d)
+	}
+}
