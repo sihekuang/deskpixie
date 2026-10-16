@@ -305,17 +305,22 @@ type PaneEventKind int
 const (
 	PaneEventStatus PaneEventKind = iota
 	PaneEventExited
+	// PaneEventQuestion: one of your pix sessions waits on you at a prompt (Question set, #105).
+	PaneEventQuestion
+	// PaneEventQuestionGone: that prompt was answered or went away (Question.ID set).
+	PaneEventQuestionGone
 	// PaneEventTurn: a session you started with pix finished a turn (Turn set, #114).
 	PaneEventTurn
 )
 
-// PaneEvent is a status change (Status set), an exit of a named agent, or a finished turn of
-// one of your pix sessions (Turn set).
+// PaneEvent is a status change (Status set), an exit of a named agent, a prompt one of your
+// pix sessions waits on (Question set), or a finished turn of one (Turn set).
 type PaneEvent struct {
-	Kind   PaneEventKind
-	Agent  string
-	Status PaneStatus   // PaneEventStatus only
-	Turn   *SessionTurn // PaneEventTurn only (a pointer, so PaneEvent stays comparable)
+	Kind     PaneEventKind
+	Agent    string
+	Status   PaneStatus       // PaneEventStatus only
+	Question *SessionQuestion // PaneEventQuestion(Gone) only (a pointer: PaneEvent stays comparable)
+	Turn     *SessionTurn     // PaneEventTurn only
 }
 
 // SessionTurn is a finished turn of a session you started with pix (#114).
@@ -325,6 +330,26 @@ type SessionTurn struct {
 	App       string // bundle id of the app it runs in ("" unknown)
 	Duration  Millis // from working to its Stop; 0 when no working was seen
 	FromPixie bool   // Pixie typed the turn's prompt (message_session)
+}
+
+// SessionQuestion is a prompt one of your pix sessions waits on in its terminal (#105).
+type SessionQuestion struct {
+	ID    string
+	Label string // its description, else its repo's or folder's name, else its tool
+	App   string // bundle id of the app it runs in ("" unknown)
+	// Kind is "permission" (allow or deny) or "menu" (pick one of Options).
+	Kind string
+	// Tool and Input (Claude's permission prompts): the tool asked for and its input as JSON.
+	Tool  string
+	Input string
+	// Text: a menu's question; for a permission without Tool (Codex), what it asks to do.
+	Text string
+	// Options: what a menu's pick chooses from; none when pix can't answer it (several
+	// questions, or several picks): it is then only announced. A permission's: its dialog's
+	// options as shown (then Text is Claude's summary, Body its box, Prompt its question).
+	Options []string
+	Body    string
+	Prompt  string
 }
 
 // Origin says who started an agent: Pixie (in Herdr or tmux) or you (with pix, #89).

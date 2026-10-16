@@ -18,12 +18,20 @@ public struct UpdateLine: Decodable, Sendable, Equatable, Identifiable {
     public let token: String?
     /// A session line's app (bundle id): a click activates it instead of focusing a pane (#114).
     public let app: String?
+    /// A session menu's choices (#105): one button each, answered with `agent.choose`.
+    public let options: [String]?
+    /// Shown small under the line, never said: a session dialog's command (#105).
+    public let note: String?
 
     /// Whether the row shows Allow and Deny buttons.
-    public var offersDecision: Bool { kind == "question" && token != nil }
+    public var offersDecision: Bool { kind == "question" && token != nil && (options ?? []).isEmpty }
+
+    /// Whether the row shows one button per option (a session's menu, #105).
+    public var offersOptions: Bool { kind == "question" && token != nil && !(options ?? []).isEmpty }
 
     public init(id: UInt64, text: String, kind: String, at: Int64, job: String?, worker: String?,
-                token: String? = nil, app: String? = nil) {
+                token: String? = nil, app: String? = nil, options: [String]? = nil,
+                note: String? = nil) {
         self.id = id
         self.text = text
         self.kind = kind
@@ -32,6 +40,8 @@ public struct UpdateLine: Decodable, Sendable, Equatable, Identifiable {
         self.worker = worker
         self.token = token
         self.app = app
+        self.options = options
+        self.note = note
     }
 }
 
@@ -115,6 +125,9 @@ public struct UpdatesBubbleModel: Sendable {
 
     private var display: [UpdateLine] { frozen ?? lines.reversed() }
 
+    /// A question with buttons is waiting on your answer: a popped bubble stays open (#105).
+    private var waitsOnYou: Bool { lines.contains { $0.offersDecision || $0.offersOptions } }
+
     private var isExpanded: Bool {
         if case .expanded = phase { return true }
         return false
@@ -187,7 +200,7 @@ public struct UpdatesBubbleModel: Sendable {
     public mutating func tick(now: TimeInterval) -> [UInt64] {
         defer { noteDecisions(now) }
         switch phase {
-        case .popped(let until) where now >= until:
+        case .popped(let until) where now >= until && !waitsOnYou:
             phase = .badge
         case .expanded:
             noteShown(now)
@@ -233,7 +246,7 @@ public struct UpdatesBubbleModel: Sendable {
             decisionsSince = [:]
             return
         }
-        let showing = Set(shown.filter(\.offersDecision).compactMap(\.token))
+        let showing = Set(shown.filter { $0.offersDecision || $0.offersOptions }.compactMap(\.token))
         decisionsSince = decisionsSince.filter { showing.contains($0.key) }
         for token in showing where decisionsSince[token] == nil {
             decisionsSince[token] = now

@@ -104,39 +104,41 @@ func DefaultWorkerPolicy() WorkerPolicy {
 type InputKind int
 
 const (
-	InRestored           InputKind = iota // Jobs, Outbox, Keep: the stored jobs.jsonl and outbox.jsonl lines, at start
-	InDelegate                            // Job, Task, Context ("" = none)
-	InCancel                              // Job
-	InAnswer                              // Job ("" = the only job waiting on an answer), Text; answered with EfAnswerResult
-	InEnsureCoordinator                   // start the coordinator now if it isn't running
-	InCoordinatorUp                       // Status: SessionHost ensure_coordinator succeeded
-	InCoordinatorFailed                   // HostErr
-	InPane                                // Pane
-	InStop                                // Agent, Message
-	InPermission                          // RequestID, Agent, ToolName, ToolInput
-	InPostTool                            // Agent, ToolName, ToolInput
-	InVoice                               // Voice
-	InInjectBounced                       // Notice: the executor found the conversation closed when it tried to inject it
-	InDisable                             // StatusLine: delegation off for a setup reason (sticky: Restart keeps it)
-	InNotice                              // StatusLine: a setup note that disables nothing
-	InPromptFailed                        // EfPrompt could not be delivered
-	InPromptTimedOut                      // the EfPrompt host call timed out: it may or may not have been typed
-	InTick                                // about once a second
-	InRestart                             // tray ▸ Restart coordinator
-	InShutdown                            // app quit
-	InMcp                                 // Agent, Call: a pixie MCP tool call other than start_worker; answered with EfToolResult
-	InAdmitWorker                         // Worker, Repo (canonical), Taken: start_worker; answered with EfAdmitted
-	InWorkerUp                            // Name, Worktree, Status: an admitted worker's pane is up
-	InWorkerFailed                        // Name, Reason: an admitted worker never started
-	InWorkerClosed                        // Name: EfStopWorker finished (the pane is closed or was already gone)
-	InWorkerScreen                        // Name, Text: EfReadWorker's screen
-	InWorkerPromptFailed                  // Name, Text: EfPromptWorker could not be typed
-	InAdoptWorker                         // Plan, Worktree, Status: a worker kept over the quit, its pane still there; answered with EfAdmitted
-	InOpenRefused                         // the voice loop was busy and did not start the conversation EfOpenConversation asked for
-	InUpdatesSeen                         // IDs: the updates bubble showed these lines long enough to count as heard
-	InPresence                            // Away: the user is away (screen locked, displays asleep or idle) or back
-	InMode                                // Agent, Mode: the permission_mode a Claude agent's hook reported
-	InDecide                              // Token, Allow: a tap on Allow or Deny in the updates bubble
+	InRestored            InputKind = iota // Jobs, Outbox, Keep: the stored jobs.jsonl and outbox.jsonl lines, at start
+	InDelegate                             // Job, Task, Context ("" = none)
+	InCancel                               // Job
+	InAnswer                               // Job ("" = the only job waiting on an answer), Text; answered with EfAnswerResult
+	InEnsureCoordinator                    // start the coordinator now if it isn't running
+	InCoordinatorUp                        // Status: SessionHost ensure_coordinator succeeded
+	InCoordinatorFailed                    // HostErr
+	InPane                                 // Pane
+	InStop                                 // Agent, Message
+	InPermission                           // RequestID, Agent, ToolName, ToolInput
+	InPostTool                             // Agent, ToolName, ToolInput
+	InVoice                                // Voice
+	InInjectBounced                        // Notice: the executor found the conversation closed when it tried to inject it
+	InDisable                              // StatusLine: delegation off for a setup reason (sticky: Restart keeps it)
+	InNotice                               // StatusLine: a setup note that disables nothing
+	InPromptFailed                         // EfPrompt could not be delivered
+	InPromptTimedOut                       // the EfPrompt host call timed out: it may or may not have been typed
+	InTick                                 // about once a second
+	InRestart                              // tray ▸ Restart coordinator
+	InShutdown                             // app quit
+	InMcp                                  // Agent, Call: a pixie MCP tool call other than start_worker; answered with EfToolResult
+	InAdmitWorker                          // Worker, Repo (canonical), Taken: start_worker; answered with EfAdmitted
+	InWorkerUp                             // Name, Worktree, Status: an admitted worker's pane is up
+	InWorkerFailed                         // Name, Reason: an admitted worker never started
+	InWorkerClosed                         // Name: EfStopWorker finished (the pane is closed or was already gone)
+	InWorkerScreen                         // Name, Text: EfReadWorker's screen
+	InWorkerPromptFailed                   // Name, Text: EfPromptWorker could not be typed
+	InAdoptWorker                          // Plan, Worktree, Status: a worker kept over the quit, its pane still there; answered with EfAdmitted
+	InOpenRefused                          // the voice loop was busy and did not start the conversation EfOpenConversation asked for
+	InUpdatesSeen                          // IDs: the updates bubble showed these lines long enough to count as heard
+	InPresence                             // Away: the user is away (screen locked, displays asleep or idle) or back
+	InMode                                 // Agent, Mode: the permission_mode a Claude agent's hook reported
+	InDecide                               // Token, Allow: a tap on Allow or Deny in the updates bubble
+	InChoose                               // Token, Option: a tap on a session menu's option in the updates bubble (#105)
+	InSessionAnswerFailed                  // Name, Text: EfAnswerSession could not be typed (#105)
 )
 
 // Input is one stimulus for AgentController.Step. Build it with the *Input constructors.
@@ -179,6 +181,8 @@ type Input struct {
 	// Token and Allow (InDecide): the confirm word tapped on, and the answer.
 	Token string
 	Allow bool
+	// Option (InChoose): the menu option tapped on, from 1.
+	Option int
 }
 
 // RestoredInput: keep says the coordinator was kept running over the quit: its open jobs stay
@@ -239,6 +243,16 @@ func OpenRefusedInput() Input             { return Input{Kind: InOpenRefused} }
 func DecideInput(token string, allow bool) Input {
 	return Input{Kind: InDecide, Token: token, Allow: allow}
 }
+
+// ChooseInput is a tap on option (from 1) of the session menu with this token (#105).
+func ChooseInput(token string, option int) Input {
+	return Input{Kind: InChoose, Token: token, Option: option}
+}
+
+// SessionAnswerFailedInput: typing an answer into session name failed (why).
+func SessionAnswerFailedInput(name, why string) Input {
+	return Input{Kind: InSessionAnswerFailed, Name: name, Text: why}
+}
 func UpdatesSeenInput(ids []uint64) Input { return Input{Kind: InUpdatesSeen, IDs: ids} }
 func PresenceInput(away bool) Input       { return Input{Kind: InPresence, Away: away} }
 func ModeInput(agent, mode string) Input  { return Input{Kind: InMode, Agent: agent, Mode: mode} }
@@ -281,6 +295,7 @@ const (
 	EfUpdates          // Value: []UpdateItem: the updates bubble's list (sent when it changes)
 	EfManual           // Agent, Manual: a Claude agent is (or no longer is) in Manual mode
 	EfShowPane         // Job, Name: bring up this agent's pane (Name "": the coordinator) — it waits at a prompt in its terminal (#110)
+	EfAnswerSession    // Name, Text, Answer: type your answer to session Name's prompt Text (#105); a failure comes back as InSessionAnswerFailed
 )
 
 // Effect is one thing the caller must do, in order. Err set (non-empty) is the Err branch of
@@ -304,6 +319,8 @@ type Effect struct {
 	Tab      TabLabel
 	Agent    string
 	Manual   bool
+	// Answer (EfAnswerSession): "yes", "no" or a menu option's number.
+	Answer string
 }
 
 type coordinatorState int
@@ -369,7 +386,9 @@ type AgentController struct {
 	// which is dropped rather than notified if it bounces).
 	injected []injectedNotice
 	shutDown bool
-	workers  *Workers
+	// sessionSeq numbers session prompts' request ids (#105).
+	sessionSeq uint64
+	workers    *Workers
 	// coordStatus: the coordinator pane's latest status.
 	coordStatus PaneStatus
 	// watch: liveness of the open working jobs (liveness.go).
@@ -502,13 +521,19 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 			c.blocked = optMs{}
 			c.hinted = false
 			c.flush(now, &fx)
+		case ev.Kind == PaneEventQuestion && ev.Question != nil:
+			c.onSessionQuestion(ev.Agent, *ev.Question, now, &fx)
+		case ev.Kind == PaneEventQuestionGone && ev.Question != nil:
+			c.confirms.TakeSession(ev.Agent, ev.Question.ID)
 		case ev.Kind == PaneEventTurn:
 			if ev.Turn != nil {
 				c.onSessionTurn(*ev.Turn, now, &fx)
 			}
+		case ev.Kind == PaneEventQuestion || ev.Kind == PaneEventQuestionGone:
 		case ev.Kind == PaneEventStatus:
 			c.onWorkerStatus(ev.Agent, ev.Status, now, &fx)
 		default:
+			c.confirms.TakeSession(ev.Agent, "") // a session that closed asks nothing any more
 			c.workerGone(ev.Agent, now, &fx)
 		}
 	case InMode:
@@ -611,6 +636,10 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 		if d, ok := c.confirms.DecideToken(in.Token, in.Allow); ok {
 			c.applyDecided(d, now, &fx)
 		}
+	case InChoose:
+		c.onChoose(in.Token, in.Option, now, &fx)
+	case InSessionAnswerFailed:
+		c.deliver(NewLine(LineInfo, fmt.Sprintf("Couldn't answer in %s: %s Answer it in its terminal.", in.Name, in.Text)), now, &fx)
 	case InPresence:
 		c.setAway(in.Away, now, &fx)
 	}
@@ -1288,6 +1317,10 @@ func (c *AgentController) onUserSaid(text string, now Millis, fx *[]Effect) {
 // applyDecided turns one settled request into its effects: the decision, the job resuming, and
 // the line saying so. A spoken answer and a tap on the bubble both end here.
 func (c *AgentController) applyDecided(d Decided, now Millis, fx *[]Effect) {
+	if d.Pending.Session != "" {
+		c.answerSession(d.Pending, map[bool]string{true: "yes", false: "no"}[d.Allow], now, fx)
+		return
+	}
 	decision := Deny("The user said no.")
 	said := "Coordinator: denied"
 	if d.Allow {

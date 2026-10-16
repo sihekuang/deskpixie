@@ -2,6 +2,7 @@ package pix
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -81,7 +82,9 @@ type Session struct {
 	agentDesc string // set_description
 	autoDesc  string // first prompt of the current work
 	flushing  bool
-	posted    []string // Pixie's messages not yet seen as prompts (normalized)
+	posted    []string  // Pixie's messages not yet seen as prompts (normalized)
+	q         *question // the prompt waiting on you that Pixie may answer (#105)
+	qseq      int
 
 	turnStart     time.Time        // when this turn went working (zero: none seen)
 	turnFromPixie bool             // a prompt of this turn was Pixie's
@@ -126,25 +129,51 @@ func (s *Session) newWork(prompt string) {
 func newSession(o sessionOpts) *Session {
 	s := &Session{o: o, status: "idle", afterStop: true, userDesc: o.description, now: time.Now}
 	s.runner = &Runner{Launch: o.agent, Stdin: o.stdin, Stdout: o.stdout,
-		OnInput: func(b []byte) { s.gate.Keys(b, time.Now()) }}
-	var watch, stopped screenWatch // only the PTY reader goroutine touches them
+		OnInput: func(b []byte) {
+			s.gate.Keys(b, time.Now())
+			if !onlyFocusReports(b) {
+				s.clearQuestion() // you are answering it yourself
+			}
+		}}
+	// Only the PTY reader goroutine touches these.
+	var watch, stopped screenWatch
+	var shown questionWatch
+	var vt *screen
+	var notes osc9Watch
 	switch o.tool {
 	case "codex":
 		s.runner.OnOutput = func(b []byte) {
 			out := string(b)
 			if stopped.saw(out, codexInterrupted) && s.currentStatus() != "idle" {
+				s.clearQuestion()
 				s.interrupted()
 			}
 			if watch.saw(out, codexBusy) && s.currentStatus() != "working" {
 				s.setStatus("working")
 			}
+			for _, msg := range notes.messages(out) {
+				if asks := codexApproval(msg); asks != "" {
+					s.ask(&question{kind: "permission", marker: codexFooter, read: readCodexDialog},
+						wire.Msg{Source: "permission", Text: asks})
+				}
+			}
+			vt = s.screenFor(vt)
+			vt.Write(b)
+			shown.watch(s, out, vt)
 		}
 	case "claude":
 		s.runner.OnOutput = func(b []byte) {
+			out := string(b)
 			// Working, or blocked: Esc at a permission prompt fires no Stop either.
-			if watch.saw(string(b), claudeInterrupted) && s.currentStatus() != "idle" {
-				s.interrupted()
+			if watch.saw(out, claudeInterrupted) {
+				s.clearQuestion() // at a prompt too: it was dismissed
+				if s.currentStatus() != "idle" {
+					s.interrupted()
+				}
 			}
+			vt = s.screenFor(vt)
+			vt.Write(b)
+			shown.watch(s, out, vt)
 		}
 	}
 	return s
@@ -156,7 +185,28 @@ func (s *Session) Hook(event string, p map[string]any) string {
 		s.setSessionID(id)
 	}
 	switch event {
+	case "PreToolUse":
+		if name, _ := p["tool_name"].(string); name == "AskUserQuestion" {
+			text, options := menuOf(p["tool_input"])
+			s.ask(&question{kind: "menu", options: len(options), marker: claudeMenu, detail: firstRunes(text, 24)},
+				wire.Msg{Source: "menu", Text: text, Keys: options})
+		}
+		return ""
+	case "PermissionRequest":
+		// The menu asks through its own PreToolUse; anything else is a permission dialog.
+		if name, _ := p["tool_name"].(string); name != "AskUserQuestion" {
+			input, _ := json.Marshal(p["tool_input"])
+			ev := wire.Msg{Source: "permission", ToolName: name, Input: string(input)}
+			q := &question{kind: "permission", marker: claudePermission, detail: claudeDetail(name, p["tool_input"]),
+				read: func(lines []string) (dialog, bool) { return readDialog(lines, claudePermission) }}
+			if !claudeAnswerable(name) || q.detail == "" {
+				q, ev.Source = &question{kind: "notice"}, "notice" // answered in its terminal only
+			}
+			s.ask(q, ev)
+		}
+		return ""
 	case "UserPromptSubmit":
+		s.clearQuestion()
 		// A prompt while not working starts a new turn, even if the last one never ended with
 		// a Stop (an API error, an interrupt pix didn't see): its start doesn't carry over.
 		s.mu.Lock()
@@ -182,6 +232,7 @@ func (s *Session) Hook(event string, p map[string]any) string {
 		}
 		return fmt.Sprintf(`{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":%q}}`, askDescription)
 	case "Stop":
+		s.clearQuestion()
 		pixie := false
 		if s.o.tool == "codex" { // its notify carries the turn's prompts; there is no prompt hook
 			if in, _ := p["input-messages"].([]any); len(in) > 0 {
@@ -202,6 +253,7 @@ func (s *Session) Hook(event string, p map[string]any) string {
 		s.setStatus("idle")
 		s.flushSoon()
 	case "SessionStart":
+		s.clearQuestion()
 		// A resumed conversation has no prompt until you type one: describe it from its transcript.
 		if src, _ := p["source"].(string); src == "resume" && s.currentDesc() == "" {
 			if path, _ := p["transcript_path"].(string); path != "" {
@@ -211,6 +263,7 @@ func (s *Session) Hook(event string, p map[string]any) string {
 	case "Notification":
 		s.setStatus("blocked")
 	case "PostToolUse":
+		s.clearQuestion()
 		if msgs := s.queue.Drain(); len(msgs) > 0 {
 			s.title()
 			ctx := "Messages from Pixie:\n- " + strings.Join(msgs, "\n- ")
@@ -257,6 +310,7 @@ func (s *Session) command(m wire.Msg) wire.Msg {
 		s.flushSoon()
 		return wire.Msg{}
 	case "keys":
+		s.clearQuestion() // an Escape from Pixie dismisses the prompt
 		for _, k := range m.Keys {
 			var b []byte
 			switch k {
@@ -275,6 +329,8 @@ func (s *Session) command(m wire.Msg) wire.Msg {
 	case "close":
 		go s.runner.Hangup()
 		return wire.Msg{}
+	case "answer":
+		return s.answer(m.Text, m.Source)
 	}
 	return wire.Msg{Err: "unknown command " + m.Command}
 }

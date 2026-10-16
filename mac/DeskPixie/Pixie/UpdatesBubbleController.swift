@@ -205,6 +205,10 @@ final class UpdatesBubbleController {
                 guard let self, self.model.acceptsDecision(token: token, now: Self.now) else { return }
                 self.call("agent.decide", DecideArgs(token: token, allow: allow))
             },
+            onChoose: { [weak self] token, option in
+                guard let self, self.model.acceptsDecision(token: token, now: Self.now) else { return }
+                self.call("agent.choose", ChooseArgs(token: token, option: option))
+            },
             onBadge: { [weak self] in
                 guard let self, self.panel.alphaValue >= UpdatesBubbleModel.hoverMinAlpha else { return }
                 self.model.pointerEntered(now: Self.now)
@@ -234,7 +238,7 @@ final class UpdatesBubbleController {
         // that opens from it stay on the same side, next to Pixie (no flip under the pointer).
         let (rect, _) = BubblePlacement.frame(pixie: DesktopSpace.desktopRect(bit, primaryMaxY: top),
                                               bubble: size, screen: area,
-                                              sideWidth: UpdatesBubbleView.width)
+                                              sideWidth: UpdatesBubbleView.maxWidth)
         panel.setFrame(ScreenDisplays.appKitFrame(topLeft: rect.origin, size: rect.size), display: true)
         if panel.parent == nil {
             pixie.panel.addChildWindow(panel, ordered: .above)
@@ -265,6 +269,7 @@ final class UpdatesBubbleController {
     private struct UpdatesReply: Decodable { var lines: [UpdateLine] }
     private struct SeenArgs: Encodable, Sendable { let ids: [UInt64] }
     private struct DecideArgs: Encodable, Sendable { let token: String; let allow: Bool }
+    private struct ChooseArgs: Encodable, Sendable { let token: String; let option: Int }
     private struct FocusJobArgs: Encodable, Sendable { let job: String; let worker: String }
 }
 

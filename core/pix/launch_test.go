@@ -67,6 +67,14 @@ func TestPlanLaunchClaude(t *testing.T) {
 			t.Errorf("no %s hook", ev)
 		}
 	}
+	// #105: the prompts a session waits on. PreToolUse only for its question menu.
+	pre, _ := hooks["PreToolUse"].([]any)
+	if len(pre) != 1 || pre[0].(map[string]any)["matcher"] != "AskUserQuestion" {
+		t.Fatalf("PreToolUse: %v", hooks["PreToolUse"])
+	}
+	if hooks["PermissionRequest"] == nil {
+		t.Error("no PermissionRequest hook")
+	}
 	perms, _ := settings["permissions"].(map[string]any)
 	if allow, _ := perms["allow"].([]any); len(allow) != 1 || allow[0] != "mcp__pixie__set_description" {
 		t.Fatalf("set_description must not ask for permission (and nothing else is allowed): %v", settings["permissions"])
@@ -87,6 +95,14 @@ func TestPlanLaunchCodex(t *testing.T) {
 	joined := strings.Join(l.Args, " ")
 	if !strings.Contains(joined, `mcp_servers.pixie.command="/app/pix"`) {
 		t.Fatalf("args %q", joined)
+	}
+	// #105: Codex tells pix of an approval prompt with its own OSC 9 notification.
+	// set_description never asks for approval (as for Claude): a session can't stop on it.
+	for _, want := range []string{`tui.notification_method="osc9"`, `tui.notification_condition="always"`,
+		`mcp_servers.pixie.tools.set_description.approval_mode="approve"`} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("no %s: %q", want, joined)
+		}
 	}
 }
 

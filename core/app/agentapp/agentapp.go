@@ -599,6 +599,9 @@ func (a *Agent) OpenTerminal() {
 // Decide: a tap on Allow or Deny in the bubble for the question with this confirm word.
 func (a *Agent) Decide(token string, allow bool) { a.handle.Decide(token, allow) }
 
+// Choose: a tap on option (from 1) of a session menu in the bubble (#105).
+func (a *Agent) Choose(token string, option int) { a.handle.Choose(token, option) }
+
 // UpdatesSeen: the updates bubble showed these lines long enough to count as heard.
 func (a *Agent) UpdatesSeen(ids []uint64) { a.handle.UpdatesSeen(ids) }
 

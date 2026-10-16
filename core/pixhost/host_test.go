@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -419,6 +420,46 @@ func TestJunkDescriptionsFromPixAreIgnored(t *testing.T) {
 	eventually(t, "status", func() bool { return listed(t, h)[0].Status == agent.PaneWorking })
 	if d := listed(t, h)[0].User.Description; d != "fix the upload test" {
 		t.Fatalf("%q", d)
+	}
+}
+
+// #105: a prompt a session waits on reaches the controller, and your answer goes back to pix.
+func TestAQuestionBecomesAPaneEventAndItsAnswerAPixCommand(t *testing.T) {
+	h, sock := newHost(t)
+	events := h.Subscribe()
+	p, r := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api", App: "com.googlecode.iterm2"})
+	wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "question", ID: "q1", Source: "permission",
+		ToolName: "Bash", Input: `{"command":"npm test"}`})
+	ev := <-events
+	if ev.Kind != agent.PaneEventQuestion || ev.Agent != r.Address || ev.Question == nil {
+		t.Fatalf("%+v", ev)
+	}
+	q := *ev.Question
+	if q.ID != "q1" || q.Label != "api" || q.App != "com.googlecode.iterm2" || q.Kind != "permission" ||
+		q.Tool != "Bash" || q.Input != `{"command":"npm test"}` {
+		t.Fatalf("%+v", q)
+	}
+	wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "question", ID: "q2", Source: "menu",
+		Text: "Push main?", Keys: []string{"Push", "Don't push"}})
+	if ev := <-events; ev.Question == nil || ev.Question.Text != "Push main?" || len(ev.Question.Options) != 2 {
+		t.Fatalf("%+v", ev.Question)
+	}
+	done := make(chan error, 1)
+	go func() { done <- h.AnswerQuestion(context.Background(), r.Address, "q2", "2") }()
+	if m := p.answer(""); m.Command != "answer" || m.Text != "q2" || m.Source != "2" {
+		t.Fatalf("%+v", m)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	go func() { done <- h.AnswerQuestion(context.Background(), r.Address, "q2", "1") }()
+	p.answer("The question is no longer on screen.")
+	if err := <-done; err == nil || !strings.Contains(err.Error(), "no longer on screen") {
+		t.Fatal(err)
+	}
+	wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "question-gone", ID: "q2"})
+	if ev := <-events; ev.Kind != agent.PaneEventQuestionGone || ev.Question == nil || ev.Question.ID != "q2" {
+		t.Fatalf("%+v", ev)
 	}
 }
 

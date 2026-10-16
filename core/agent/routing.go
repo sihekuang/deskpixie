@@ -79,6 +79,8 @@ type Line struct {
 	Detail string
 	// App: the bundle id of the app a session line's session runs in (a click activates it).
 	App string
+	// Note: shown small under the line in the bubble, never said (a dialog's command, #105).
+	Note string
 }
 
 func NewLine(kind LineKind, text string) Line { return Line{Text: text, Kind: kind} }
