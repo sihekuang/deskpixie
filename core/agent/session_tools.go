@@ -27,8 +27,12 @@ func SessionCatalog() []map[string]any {
 		},
 		{
 			"name":        "message_session",
-			"description": "Send a message to a session the user started. It arrives as if the user typed it, when the session can take it. Only a reply with status \"sent\" means it was delivered.",
-			"inputSchema": objectSchema(stringProps(name, [2]string{"text", "The message."}), "name", "text"),
+			"description": "Send a message to a session the user started, once the session can take it. By default it arrives labeled as coming from you (a teammate's request) — quote the user's own words rather than claiming they approved something; Claude Code sessions will refuse a message that claims the user already approved a pending prompt, however it's worded. To answer something a session is waiting to hear back on, set verbatim: true with the user's own words, exactly as they said them — it then arrives exactly as if the user had typed it themselves, with no framing added. Only a reply with status \"sent\" means it was delivered.",
+			"inputSchema": objectSchema(map[string]any{
+				"name":     map[string]any{"type": "string", "description": name[1]},
+				"text":     map[string]any{"type": "string", "description": "The message. Quote the user's own words when relaying what they said; never paraphrase as approval."},
+				"verbatim": map[string]any{"type": "boolean", "description": "True when text is the user's own words, to deliver exactly as if they typed it themselves — use this to answer something the session is waiting on. False or omitted for your own instruction, delivered labeled as a teammate's request."},
+			}, "name", "text"),
 		},
 		{
 			"name":        "interrupt_session",
@@ -130,6 +134,12 @@ func sessionTool(ctx context.Context, host SessionHost, call McpCall) McpReply {
 	status := ""
 	switch call.Kind {
 	case CallMessageSession:
+		if call.Verbatim {
+			if v, ok := sec.(VerbatimPrompter); ok {
+				err, status = v.PromptVerbatim(ctx, call.Name, call.Text), "sent"
+				break
+			}
+		}
 		err, status = sec.Prompt(ctx, call.Name, call.Text), "sent"
 	case CallInterruptSession:
 		err, status = sec.SendKeys(ctx, call.Name, []string{"Escape"}), "interrupted"

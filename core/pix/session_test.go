@@ -1,12 +1,15 @@
 package pix
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -186,6 +189,107 @@ func TestPostToolUseDeliversQueued(t *testing.T) {
 	}
 	h.s.runner.Hangup()
 	h.s.finish()
+}
+
+// claudeInbox fakes the ~/.claude/sessions/<pid>.json record and inbox socket Claude Code
+// itself would leave for s's wrapped process, so a prompt command's choice to use it (or not)
+// is actually exercised rather than failing open because no record exists. got receives every
+// {"type":"user",…} message posted to it.
+func claudeInbox(t *testing.T, s *Session) (got chan map[string]any) {
+	t.Helper()
+	pid := s.runner.Pid()
+	start, err := ProcStart(pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessDir := filepath.Join(s.o.home, ".claude", "sessions")
+	if err := os.MkdirAll(sessDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	sock := filepath.Join(sockDir(t), "inbox.sock")
+	l, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { l.Close() })
+	b, _ := json.Marshal(map[string]any{
+		"pid": pid, "sessionId": "s-1", "procStart": start, "peerProtocol": 1, "messagingSocketPath": sock,
+	})
+	if err := os.WriteFile(filepath.Join(sessDir, strconv.Itoa(pid)+".json"), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got = make(chan map[string]any, 4)
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				sc := bufio.NewScanner(c)
+				for sc.Scan() {
+					var m map[string]any
+					if json.Unmarshal(sc.Bytes(), &m) == nil && m["type"] == "user" {
+						got <- m
+					}
+				}
+			}(c)
+		}
+	}()
+	return got
+}
+
+// TestSessionPromptWithoutVerbatimUsesClaudeInbox: unchanged behavior (#129) — a labeled
+// relay still prefers Claude's own inbox socket when a record for the session exists.
+func TestSessionPromptWithoutVerbatimUsesClaudeInbox(t *testing.T) {
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}})
+	got := claudeInbox(t, h.s)
+
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "hi"})
+	waitEvent(t, h.d.events, "prompt result", func(m wire.Msg) bool { return m.Kind == wire.KindResult && m.ID == "1" && m.Err == "" })
+
+	select {
+	case m := <-got:
+		msg, _ := m["message"].(map[string]any)
+		if msg["content"] != "hi" {
+			t.Fatalf("inbox message: %v", m)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the labeled relay must still use Claude's inbox socket when a record exists")
+	}
+	if h.s.queue.Len() != 0 {
+		t.Fatalf("a message delivered over the socket must never also be queued for typing: %d", h.s.queue.Len())
+	}
+	h.s.runner.Hangup()
+	h.s.finish()
+}
+
+// TestSessionPromptVerbatimSkipsClaudeInbox (#129): verbatim:true must type the text, like
+// Codex already does, never relay it over Claude's inbox socket — even when a usable record for
+// the session is sitting right there. Claude Code labels anything arriving over that socket as
+// coming from a peer session and refuses to treat it as the user's own approval, however it's
+// worded, so this is the only delivery that can unblock something the session is waiting on.
+func TestSessionPromptVerbatimSkipsClaudeInbox(t *testing.T) {
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "read x; echo seen:$x"}})
+	got := claudeInbox(t, h.s)
+
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "go ahead", Verbatim: true})
+	waitEvent(t, h.d.events, "prompt result", func(m wire.Msg) bool { return m.Kind == wire.KindResult && m.ID == "1" && m.Err == "" })
+
+	select {
+	case m := <-got:
+		t.Fatalf("a verbatim message must never reach Claude's inbox socket: %v", m)
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	code := h.s.finish()
+	var buf bytes.Buffer
+	h.s.o.stdout.Close()
+	buf.ReadFrom(h.out)
+	if code != 0 || !strings.Contains(buf.String(), "seen:") || !strings.Contains(buf.String(), "go ahead") {
+		t.Fatalf("verbatim text must be typed, same as Codex: code %d out %q", code, buf.String())
+	}
 }
 
 func TestHooksReportStatusAndAutoDescription(t *testing.T) {

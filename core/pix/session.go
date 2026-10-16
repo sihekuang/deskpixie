@@ -296,7 +296,10 @@ func (s *Session) command(m wire.Msg) wire.Msg {
 			s.posted = s.posted[len(s.posted)-8:]
 		}
 		s.mu.Unlock()
-		if s.o.tool == "claude" {
+		// A verbatim message is the user's own words: type it, same as Codex, never relay it
+		// over Claude's inbox socket (#129) — Claude Code labels anything arriving that way as
+		// a peer session and refuses to treat it as the user's own approval, however it's worded.
+		if s.o.tool == "claude" && !m.Verbatim {
 			if rec, err := FindClaudeRecord(s.o.home, s.runner.Pid()); err == nil {
 				if err := PostClaude(rec, text); err == nil {
 					return wire.Msg{}

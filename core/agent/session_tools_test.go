@@ -68,6 +68,39 @@ func TestMessageAndInterruptSession(t *testing.T) {
 	}
 }
 
+// TestMessageSessionVerbatimUsesVerbatimPrompter (#129): verbatim:true must reach
+// PromptVerbatim, not Prompt, when the host supports it — otherwise a relayed user answer
+// would arrive labeled as a peer message and Claude Code would refuse to act on it.
+func TestMessageSessionVerbatimUsesVerbatimPrompter(t *testing.T) {
+	c, user, _ := newSessionHarness(t)
+	ctx := context.Background()
+	if r := agent.SessionToolForTest(ctx, c, agent.McpCall{Kind: agent.CallMessageSession, Name: "focus-claude", Text: "go ahead", Verbatim: true}); r.Err != nil {
+		t.Fatal(r.Err)
+	}
+	if got := user.VerbatimPrompts(); len(got) != 1 || got[0].Agent != "focus-claude" || got[0].Text != "go ahead" {
+		t.Fatalf("verbatim prompts: %v", got)
+	}
+	if len(user.Prompts()) != 0 {
+		t.Fatalf("a verbatim message must not also go through the labeled relay: %v", user.Prompts())
+	}
+}
+
+// TestMessageSessionWithoutVerbatimUsesLabeledRelay: the default (verbatim omitted or false)
+// keeps using the existing labeled relay, unchanged.
+func TestMessageSessionWithoutVerbatimUsesLabeledRelay(t *testing.T) {
+	c, user, _ := newSessionHarness(t)
+	ctx := context.Background()
+	if r := agent.SessionToolForTest(ctx, c, agent.McpCall{Kind: agent.CallMessageSession, Name: "focus-claude", Text: "hi"}); r.Err != nil {
+		t.Fatal(r.Err)
+	}
+	if got := user.Prompts(); len(got) != 1 || got[0].Text != "hi" {
+		t.Fatalf("prompts: %v", got)
+	}
+	if len(user.VerbatimPrompts()) != 0 {
+		t.Fatalf("a non-verbatim message must not use the verbatim path: %v", user.VerbatimPrompts())
+	}
+}
+
 func TestCloseSession(t *testing.T) {
 	c, user, _ := newSessionHarness(t)
 	if r := agent.SessionToolForTest(context.Background(), c, agent.McpCall{Kind: agent.CallCloseSession, Name: "focus-claude"}); r.Err != nil {
@@ -122,6 +155,7 @@ func TestParseSessionTools(t *testing.T) {
 	}{
 		{"list_sessions", map[string]any{}, agent.McpCall{Kind: agent.CallListSessions}},
 		{"message_session", map[string]any{"name": "focus-claude", "text": "hi"}, agent.McpCall{Kind: agent.CallMessageSession, Name: "focus-claude", Text: "hi"}},
+		{"message_session", map[string]any{"name": "focus-claude", "text": "go ahead", "verbatim": true}, agent.McpCall{Kind: agent.CallMessageSession, Name: "focus-claude", Text: "go ahead", Verbatim: true}},
 		{"interrupt_session", map[string]any{"name": "focus-claude"}, agent.McpCall{Kind: agent.CallInterruptSession, Name: "focus-claude"}},
 		{"close_session", map[string]any{"name": "focus-claude"}, agent.McpCall{Kind: agent.CallCloseSession, Name: "focus-claude"}},
 		{"describe_session", map[string]any{"name": "focus-claude", "text": " login\nbug "}, agent.McpCall{Kind: agent.CallDescribeSession, Name: "focus-claude", Text: "login bug"}},
@@ -129,7 +163,7 @@ func TestParseSessionTools(t *testing.T) {
 	}
 	for _, c := range cases {
 		got, err := agent.ParseToolCall(agent.RoleCoordinator, c.name, c.args)
-		if err != nil || got.Kind != c.want.Kind || got.Name != c.want.Name || got.Text != c.want.Text {
+		if err != nil || got.Kind != c.want.Kind || got.Name != c.want.Name || got.Text != c.want.Text || got.Verbatim != c.want.Verbatim {
 			t.Errorf("%s: %+v %v", c.name, got, err)
 		}
 	}
