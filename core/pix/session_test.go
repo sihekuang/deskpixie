@@ -1,12 +1,15 @@
 package pix
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -186,6 +189,85 @@ func TestPostToolUseDeliversQueued(t *testing.T) {
 	}
 	h.s.runner.Hangup()
 	h.s.finish()
+}
+
+// claudeInbox fakes the ~/.claude/sessions/<pid>.json record and inbox socket Claude Code
+// itself would leave for s's wrapped process, so a prompt command's choice to use it (or not)
+// is actually exercised rather than failing open because no record exists. got receives every
+// {"type":"user",…} message posted to it.
+func claudeInbox(t *testing.T, s *Session) (got chan map[string]any) {
+	t.Helper()
+	pid := s.runner.Pid()
+	start, err := ProcStart(pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessDir := filepath.Join(s.o.home, ".claude", "sessions")
+	if err := os.MkdirAll(sessDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	sock := filepath.Join(sockDir(t), "inbox.sock")
+	l, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { l.Close() })
+	b, _ := json.Marshal(map[string]any{
+		"pid": pid, "sessionId": "s-1", "procStart": start, "peerProtocol": 1, "messagingSocketPath": sock,
+	})
+	if err := os.WriteFile(filepath.Join(sessDir, strconv.Itoa(pid)+".json"), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got = make(chan map[string]any, 4)
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				sc := bufio.NewScanner(c)
+				for sc.Scan() {
+					var m map[string]any
+					if json.Unmarshal(sc.Bytes(), &m) == nil && m["type"] == "user" {
+						got <- m
+					}
+				}
+			}(c)
+		}
+	}()
+	return got
+}
+
+// TestSessionPromptNeverUsesClaudeInbox (#129, extended): a "prompt" command is always typed,
+// same as Codex, never relayed over Claude's inbox socket — even when a usable record for the
+// session is sitting right there. Claude Code labels anything arriving over that socket as
+// coming from a peer session, refuses to treat it as the user's own approval however it's
+// worded, and wraps even a routine coordinator instruction in a generic "another Claude
+// session" notice; typing it directly avoids both. (The "Coordinator says: " label for a
+// non-verbatim message is added a layer up, in core/agent — this package only ever sees the
+// final text to type.)
+func TestSessionPromptNeverUsesClaudeInbox(t *testing.T) {
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "read x; echo seen:$x"}})
+	got := claudeInbox(t, h.s)
+
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "Coordinator says: go ahead"})
+	waitEvent(t, h.d.events, "prompt result", func(m wire.Msg) bool { return m.Kind == wire.KindResult && m.ID == "1" && m.Err == "" })
+
+	select {
+	case m := <-got:
+		t.Fatalf("a prompt must never reach Claude's inbox socket: %v", m)
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	code := h.s.finish()
+	var buf bytes.Buffer
+	h.s.o.stdout.Close()
+	buf.ReadFrom(h.out)
+	if code != 0 || !strings.Contains(buf.String(), "seen:") || !strings.Contains(buf.String(), "go ahead") {
+		t.Fatalf("text must be typed, same as Codex: code %d out %q", code, buf.String())
+	}
 }
 
 func TestHooksReportStatusAndAutoDescription(t *testing.T) {

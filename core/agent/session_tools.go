@@ -27,8 +27,12 @@ func SessionCatalog() []map[string]any {
 		},
 		{
 			"name":        "message_session",
-			"description": "Send a message to a session the user started. It arrives as if the user typed it, when the session can take it. Only a reply with status \"sent\" means it was delivered.",
-			"inputSchema": objectSchema(stringProps(name, [2]string{"text", "The message."}), "name", "text"),
+			"description": "Send a message to a session the user started, once the session can take it. It's typed in directly, never relayed through Claude Code's own cross-session messaging (which would label it as coming from another Claude session and refuse to treat it as the user's approval). By default it arrives prefixed \"Coordinator says: …\" — quote the user's own words rather than claiming they approved something; never say the user already approved a pending prompt unless you are relaying their own words with verbatim: true. To answer something a session is waiting to hear back on, set verbatim: true with the user's own words, exactly as they said them — it then arrives exactly as if the user had typed it themselves, with no prefix added. Only a reply with status \"sent\" means it was delivered.",
+			"inputSchema": objectSchema(map[string]any{
+				"name":     map[string]any{"type": "string", "description": name[1]},
+				"text":     map[string]any{"type": "string", "description": "The message. Quote the user's own words when relaying what they said; never claim they approved something unless verbatim is true."},
+				"verbatim": map[string]any{"type": "boolean", "description": "True when text is the user's own words, to deliver exactly as if they typed it themselves, with no \"Coordinator says:\" prefix — use this to answer something the session is waiting on. False or omitted for your own instruction, delivered prefixed \"Coordinator says: …\"."},
+			}, "name", "text"),
 		},
 		{
 			"name":        "interrupt_session",
@@ -130,7 +134,14 @@ func sessionTool(ctx context.Context, host SessionHost, call McpCall) McpReply {
 	status := ""
 	switch call.Kind {
 	case CallMessageSession:
-		err, status = sec.Prompt(ctx, call.Name, call.Text), "sent"
+		// Verbatim (#129) is the user's own words, delivered raw, so a session can tell it's
+		// really their answer, not an instruction. Anything else is the coordinator's own
+		// text, labeled "Coordinator says: " instead, so it's never mistaken for the user's.
+		text := call.Text
+		if !call.Verbatim {
+			text = CoordinatorSays(call.Text)
+		}
+		err, status = sec.Prompt(ctx, call.Name, text), "sent"
 	case CallInterruptSession:
 		err, status = sec.SendKeys(ctx, call.Name, []string{"Escape"}), "interrupted"
 	case CallCloseSession:

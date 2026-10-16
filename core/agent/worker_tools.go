@@ -324,7 +324,8 @@ func ParseToolCall(role Role, name string, args any) (McpCall, error) {
 		if err != nil {
 			return McpCall{}, err
 		}
-		return McpCall{Kind: CallMessageSession, Name: n, Text: t}, nil
+		verbatim, _ := obj["verbatim"].(bool)
+		return McpCall{Kind: CallMessageSession, Name: n, Text: t, Verbatim: verbatim}, nil
 	case "interrupt_session", "close_session":
 		n, err := needName("name")
 		if err != nil {

@@ -643,12 +643,13 @@ const (
 // McpCall is one pixie MCP tool call, arguments checked and cleaned. Only the fields of its
 // Kind are set: StartWorker → Worker; MessageWorker → Name, Text; StopWorker → Name; CreateProject → Name;
 // ReportProgress → Summary; ReportResult → Outcome, Summary, Evidence; AskCoordinator →
-// Question, Options; ReportBlocked → Reason.
+// Question, Options; ReportBlocked → Reason; MessageSession → Name, Text, Verbatim.
 type McpCall struct {
 	Kind     McpCallKind
 	Worker   WorkerRequest
 	Name     string
 	Text     string
+	Verbatim bool // MessageSession only (#129): Text is the user's own words, not the coordinator's.
 	Summary  string
 	Outcome  Outcome
 	Evidence string
