@@ -15,6 +15,8 @@ type UpdateItem struct {
 	// Job and Worker: what the line is about (a click focuses that pane).
 	Job    JobID  `json:"job,omitempty"`
 	Worker string `json:"worker,omitempty"`
+	// App: a session line's app (bundle id); a click activates it instead of a pane.
+	App string `json:"app,omitempty"`
 	// Token is the confirm word of a permission question still waiting; the bubble's Allow and
 	// Deny buttons answer with it (#97). Empty for every other line.
 	Token string `json:"token,omitempty"`
@@ -33,7 +35,7 @@ func (c *AgentController) bubbleItems() []UpdateItem {
 		if !pending && (l.Token != nil || l.Delivered || c.settings.OpenConversation) {
 			continue
 		}
-		item := UpdateItem{ID: l.ID, Text: l.Text, Kind: l.Kind, At: l.At, Job: l.Job, Worker: l.Worker}
+		item := UpdateItem{ID: l.ID, Text: l.Text, Kind: l.Kind, At: l.At, Job: l.Job, Worker: l.Worker, App: l.App}
 		if l.Token != nil {
 			item.Token = *l.Token
 		}

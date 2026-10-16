@@ -24,9 +24,11 @@ const (
 	LineUnsolicited
 	// LineInfo is the app's own line, already complete (e.g. "Coordinator: allowed").
 	LineInfo
+	// LineSession is a session you started with pix finishing a turn (#114).
+	LineSession
 )
 
-var lineKindNames = []string{"reply", "question", "unsolicited", "info"}
+var lineKindNames = []string{"reply", "question", "unsolicited", "info", "session"}
 
 func (k LineKind) String() string {
 	if k < 0 || int(k) >= len(lineKindNames) {
@@ -54,6 +56,8 @@ func (k LineKind) Prefix() string {
 		return "Coordinator question: "
 	case LineUnsolicited:
 		return "Coordinator says: "
+	case LineSession:
+		return "Session update: "
 	}
 	return ""
 }
@@ -69,6 +73,12 @@ type Line struct {
 	// pane); zero when it is about no one job or worker.
 	Job    JobID
 	Worker string
+	// Asking: the line asks you something; like a question, never held by the cap.
+	Asking bool
+	// Detail: more for the voice model to sum up (a session's reply); never shown.
+	Detail string
+	// App: the bundle id of the app a session line's session runs in (a click activates it).
+	App string
 }
 
 func NewLine(kind LineKind, text string) Line { return Line{Text: text, Kind: kind} }
@@ -78,7 +88,15 @@ func NewJobLine(kind LineKind, text string, job JobID) Line {
 }
 
 // Spoken is the text as the voice model hears it.
-func (l Line) Spoken() string { return l.Kind.Prefix() + l.Text }
+func (l Line) Spoken() string {
+	if l.Detail != "" {
+		return l.Kind.Prefix() + l.Text + " Its reply, to sum up in one sentence: " + l.Detail
+	}
+	return l.Kind.Prefix() + l.Text
+}
+
+// urgent: a question, or a line that asks you something: never held by the cap.
+func (l Line) urgent() bool { return l.Kind == LineQuestion || l.Asking }
 
 // DeliveryKind tells RouteDelivery variants apart.
 type DeliveryKind int
@@ -139,8 +157,8 @@ func (r *Router) Route(conversationOpen bool, line Line, now Millis) []RouteDeli
 		return []RouteDelivery{OutboxDelivery(line)}
 	}
 	var out []RouteDelivery
-	if line.Kind == LineQuestion || r.Take(now) {
-		if line.Kind == LineQuestion {
+	if line.urgent() || r.Take(now) {
+		if line.urgent() {
 			r.sent = append(r.sent, now)
 		}
 		out = append(out, ChimeDelivery(), NotifyDelivery(line.Text))
@@ -153,7 +171,7 @@ func (r *Router) Route(conversationOpen bool, line Line, now Millis) []RouteDeli
 // RouteUpdate routes an update (a worker's report): like Route, but held back by the cap with
 // the conversation open too.
 func (r *Router) RouteUpdate(conversationOpen bool, line Line, now Millis) []RouteDelivery {
-	if !conversationOpen || line.Kind == LineQuestion {
+	if !conversationOpen || line.urgent() {
 		return r.Route(conversationOpen, line, now)
 	}
 	if r.Take(now) {

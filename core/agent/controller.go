@@ -502,6 +502,10 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 			c.blocked = optMs{}
 			c.hinted = false
 			c.flush(now, &fx)
+		case ev.Kind == PaneEventTurn:
+			if ev.Turn != nil {
+				c.onSessionTurn(*ev.Turn, now, &fx)
+			}
 		case ev.Kind == PaneEventStatus:
 			c.onWorkerStatus(ev.Agent, ev.Status, now, &fx)
 		default:
@@ -1361,6 +1365,32 @@ func (c *AgentController) flushUpdates(now Millis, fx *[]Effect) {
 // deliverUpdate routes an update line under the cap in both conversation states. It is the
 // coalesced line Updates let out, so with no conversation open it is also what opens one
 // (agent.openConversationForUpdates).
+// MaxSessionDetailBytes caps the reply the voice model is given to sum up (#114).
+const MaxSessionDetailBytes = 2 << 10
+
+// onSessionTurn: a session you started with pix finished a turn (#114). With the setting on,
+// a turn of yours that ran long enough, or any turn Pixie started, is told like an update:
+// its gist, or its question (never held by the cap). Pending confirm words are masked in all
+// of it: the label is agent-settable too.
+func (c *AgentController) onSessionTurn(t SessionTurn, now Millis, fx *[]Effect) {
+	if !c.settings.SessionTurns || c.shutDown {
+		return
+	}
+	if !t.FromPixie && t.Duration < c.settings.SessionTurnsMinMs {
+		return
+	}
+	tokens := c.pendingTokens()
+	reply := maskPendingTokens(t.Reply, tokens)
+	gist, asking := SessionGist(reply)
+	c.deliverUpdate(Line{
+		Kind:   LineSession,
+		Text:   SessionTurnLine(maskPendingTokens(t.Label, tokens), gist, asking),
+		Asking: asking,
+		App:    t.App,
+		Detail: truncateBytes(strings.Join(strings.Fields(reply), " "), MaxSessionDetailBytes),
+	}, now, fx)
+}
+
 func (c *AgentController) deliverUpdate(line Line, now Millis, fx *[]Effect) {
 	for _, d := range c.router.RouteUpdate(c.voiceOpen, line, now) {
 		if d.Kind == DeliverInject {

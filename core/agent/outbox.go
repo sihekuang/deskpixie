@@ -24,6 +24,8 @@ type OutboxLine struct {
 	// Job and Worker: what the line is about (absent in older records).
 	Job    JobID  `json:"job,omitempty"`
 	Worker string `json:"worker,omitempty"`
+	// App: a session line's app (bundle id, #114).
+	App string `json:"app,omitempty"`
 }
 
 // UnmarshalJSON requires id, text, kind and at; token and delivered default (as serde does).
@@ -37,6 +39,7 @@ func (l *OutboxLine) UnmarshalJSON(b []byte) error {
 		Delivered bool      `json:"delivered"`
 		Job       JobID     `json:"job"`
 		Worker    string    `json:"worker"`
+		App       string    `json:"app"`
 	}
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
@@ -44,7 +47,7 @@ func (l *OutboxLine) UnmarshalJSON(b []byte) error {
 	if raw.ID == nil || raw.Text == nil || raw.Kind == nil || raw.At == nil {
 		return errors.New("outbox line: missing field")
 	}
-	*l = OutboxLine{ID: *raw.ID, Text: *raw.Text, Kind: *raw.Kind, Token: raw.Token, At: *raw.At, Delivered: raw.Delivered, Job: raw.Job, Worker: raw.Worker}
+	*l = OutboxLine{ID: *raw.ID, Text: *raw.Text, Kind: *raw.Kind, Token: raw.Token, At: *raw.At, Delivered: raw.Delivered, Job: raw.Job, Worker: raw.Worker, App: raw.App}
 	return nil
 }
 
@@ -67,7 +70,7 @@ func NewOutbox() *Outbox { return &Outbox{} }
 // Push adds a line; returns its jsonl record to append.
 func (o *Outbox) Push(line Line, now Millis) string {
 	o.nextID++
-	entry := OutboxLine{ID: o.nextID, Text: line.Text, Kind: line.Kind, Token: line.Token, At: now, Job: line.Job, Worker: line.Worker}
+	entry := OutboxLine{ID: o.nextID, Text: line.Text, Kind: line.Kind, Token: line.Token, At: now, Job: line.Job, Worker: line.Worker, App: line.App}
 	o.lines = append(o.lines, entry)
 	return entry.record()
 }
