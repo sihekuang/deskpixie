@@ -660,6 +660,8 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 		c.setAway(in.Away, now, &fx)
 	}
 	c.dropDecidedQuestions(&fx)
+	// A question answered or decided puts its job back to work: the hold follows (#119).
+	c.syncHold(&fx)
 	c.syncCoordTab(&fx)
 	c.syncUpdates(&fx)
 	return fx
@@ -1654,10 +1656,15 @@ func (c *AgentController) saveJob(id JobID, fx *[]Effect) {
 	}
 }
 
+// syncHold holds Pixie in delegating (and the conversation open) while a job is running or a
+// permission of an agent's waits on a spoken confirm (it expires in two minutes); a job that
+// only waits on the user's answer to a question doesn't, nor does a pix session's prompt, which
+// waits until answered (#119).
 func (c *AgentController) syncHold(fx *[]Effect) {
-	if open := c.jobs.AnyOpen(); open != c.held {
-		c.held = open
-		*fx = append(*fx, Effect{Kind: EfHoldOpen, Hold: open})
+	asking := slices.ContainsFunc(c.confirms.Pending(), func(p Pending) bool { return p.Session == "" })
+	if running := c.jobs.AnyRunning() || asking; running != c.held {
+		c.held = running
+		*fx = append(*fx, Effect{Kind: EfHoldOpen, Hold: running})
 	}
 }
 

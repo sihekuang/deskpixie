@@ -94,6 +94,11 @@ func (t *JobTable) AnyOpen() bool {
 	return slices.ContainsFunc(t.jobs, func(j Job) bool { return j.Status.IsOpen() })
 }
 
+// AnyRunning: a job is delegated or working (not only waiting on the user's answer, #119).
+func (t *JobTable) AnyRunning() bool {
+	return slices.ContainsFunc(t.jobs, func(j Job) bool { return j.Status == JobDelegated || j.Status == JobWorking })
+}
+
 func (t *JobTable) IsOpen(id JobID) bool {
 	j := t.find(id)
 	return j != nil && j.Status.IsOpen()
