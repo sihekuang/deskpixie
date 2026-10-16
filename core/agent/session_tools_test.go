@@ -169,3 +169,84 @@ func TestParseSessionTools(t *testing.T) {
 		t.Fatal("message_session needs text")
 	}
 }
+
+// TestVerbatimFlagEndToEnd (#137): each form a model may send for verbatim, from the raw tool
+// arguments to the text the session is sent.
+func TestVerbatimFlagEndToEnd(t *testing.T) {
+	const raw, labeled = "go ahead", "Coordinator says: go ahead"
+	args := func(v any, set bool) map[string]any {
+		a := map[string]any{"name": "focus-claude", "text": raw}
+		if set {
+			a["verbatim"] = v
+		}
+		return a
+	}
+	for _, c := range []struct {
+		name string
+		args map[string]any
+		want string // "" means refused, nothing sent
+	}{
+		{"bool true is delivered raw", args(true, true), raw},
+		{"string true is delivered raw", args("true", true), raw},
+		{"mixed case with spaces is delivered raw", args(" True ", true), raw},
+		{"string false gets the coordinator prefix", args("false", true), labeled},
+		{"omitted gets the coordinator prefix", args(nil, false), labeled},
+		{"an unknown word is refused and nothing is sent", args("yes", true), ""},
+		{"a number is refused and nothing is sent", args(1, true), ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h, user, _ := newSessionHarness(t)
+			call, err := agent.ParseToolCall(agent.RoleCoordinator, "message_session", c.args)
+			if c.want == "" {
+				if err == nil || !strings.Contains(err.Error(), "verbatim must be true or false") {
+					t.Fatalf("want refusal naming verbatim, got %v", err)
+				}
+				if len(user.Prompts()) != 0 {
+					t.Fatalf("a refused call must send nothing: %v", user.Prompts())
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r := agent.SessionToolForTest(context.Background(), h, call); r.Err != nil {
+				t.Fatal(r.Err)
+			}
+			if got := user.Prompts(); len(got) != 1 || got[0].Text != c.want {
+				t.Fatalf("sent %v, want %q", got, c.want)
+			}
+		})
+	}
+	t.Run("start_worker reads override_existing_session as a string", func(t *testing.T) {
+		base := map[string]any{"kind": "claude", "repo": "focus", "task": "fix it", "job_id": "job_0123456789ab"}
+		base["override_existing_session"] = "true"
+		got, err := agent.ParseToolCall(agent.RoleCoordinator, "start_worker", base)
+		if err != nil || !got.Worker.OverrideExistingSession {
+			t.Fatalf("got %+v, %v", got.Worker, err)
+		}
+		base["override_existing_session"] = "maybe"
+		if _, err := agent.ParseToolCall(agent.RoleCoordinator, "start_worker", base); err == nil {
+			t.Fatal(`override_existing_session "maybe" must be refused`)
+		}
+	})
+}
+
+// TestParseVerbatimString (#137): a model sometimes sends verbatim as the string "true". It
+// must still be verbatim, never silently delivered as the coordinator's own prefixed text;
+// anything that isn't a yes or no is an error the model can correct.
+func TestParseVerbatimString(t *testing.T) {
+	for _, c := range []struct {
+		v    any
+		want bool
+	}{{"true", true}, {"TRUE", true}, {"false", false}, {false, false}} {
+		got, err := agent.ParseToolCall(agent.RoleCoordinator, "message_session", map[string]any{"name": "x", "text": "go ahead", "verbatim": c.v})
+		if err != nil || got.Verbatim != c.want {
+			t.Errorf("verbatim %#v: got %v, %v", c.v, got.Verbatim, err)
+		}
+	}
+	for _, v := range []any{"yes", 1} {
+		if _, err := agent.ParseToolCall(agent.RoleCoordinator, "message_session", map[string]any{"name": "x", "text": "go ahead", "verbatim": v}); err == nil {
+			t.Errorf("verbatim %#v must be refused, not treated as false", v)
+		}
+	}
+}

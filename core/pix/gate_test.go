@@ -13,6 +13,72 @@ func TestGateClearWhenNothingTyped(t *testing.T) {
 	}
 }
 
+// TestGateIgnoresFocusReports (#138): switching windows sends ESC[I / ESC[O. That isn't
+// typing, so it must neither shut the gate nor restart its quiet time.
+func TestGateIgnoresFocusReports(t *testing.T) {
+	var g Gate
+	t0 := time.Unix(100, 0)
+	g.Keys([]byte("\x1b[O"), t0)
+	g.Keys([]byte("\x1b[I\x1b[O"), t0.Add(time.Second))
+	if !g.Clear(t0.Add(time.Second)) {
+		t.Fatal("focus reports alone must leave the gate clear")
+	}
+	g.Keys([]byte("\x1b[Ihi"), t0.Add(2*time.Second))
+	if g.Clear(t0.Add(10 * time.Second)) {
+		t.Fatal("text typed after a focus report is still pending")
+	}
+	g.Keys([]byte("\x7f\x7f"), t0.Add(11*time.Second))
+	if !g.Clear(t0.Add(13 * time.Second)) {
+		t.Fatal("a focus report must not count as a key: deleting the text leaves the gate clear")
+	}
+}
+
+// Mouse reports as fullscreen Claude Code asks the terminal for them (SGR, every move: ?1003
+// and ?1006): a move, a scroll and a click with its release.
+const mouseReports = "\x1b[<35;40;12M\x1b[<64;40;12M\x1b[<0;40;12M\x1b[<0;40;12m"
+
+// TestGateIgnoresMouseReports (#138): moving, scrolling or clicking in the terminal isn't
+// typing, so it must not shut the gate.
+func TestGateIgnoresMouseReports(t *testing.T) {
+	var g Gate
+	t0 := time.Unix(100, 0)
+	g.Keys([]byte(mouseReports), t0)
+	if !g.Clear(t0) {
+		t.Fatal("mouse reports alone must leave the gate clear")
+	}
+	g.Keys([]byte(mouseReports+"hi"), t0.Add(time.Second))
+	if g.Clear(t0.Add(10 * time.Second)) {
+		t.Fatal("text typed among mouse reports is still pending")
+	}
+}
+
+// TestOnlyReportsIsNotYou (#138): a pending question Pixie may answer is dropped when you
+// start answering it yourself; moving the mouse over the terminal isn't that.
+func TestOnlyReportsIsNotYou(t *testing.T) {
+	for _, in := range []string{"\x1b[I", "\x1b[O", mouseReports, "\x1b[O" + mouseReports} {
+		if !onlyReports([]byte(in)) {
+			t.Errorf("%q is the terminal, not you", in)
+		}
+	}
+	for _, in := range []string{"y", "\r", "\x1b", "\x1b[A", mouseReports + "1"} {
+		if onlyReports([]byte(in)) {
+			t.Errorf("%q is you", in)
+		}
+	}
+}
+
+// TestGateFocusReportKeepsQuietTime (#138): a focus change after you stop typing must not
+// restart the quiet time, or a window switch would delay every message by TypingQuiet.
+func TestGateFocusReportKeepsQuietTime(t *testing.T) {
+	var g Gate
+	t0 := time.Unix(100, 0)
+	g.Keys([]byte("a\x7f"), t0)
+	g.Keys([]byte("\x1b[O"), t0.Add(time.Second))
+	if !g.Clear(t0.Add(TypingQuiet + 100*time.Millisecond)) {
+		t.Fatal("quiet time counts from your last key, not from the focus change")
+	}
+}
+
 func TestGateHoldsWhileTyping(t *testing.T) {
 	var g Gate
 	t0 := time.Unix(100, 0)
