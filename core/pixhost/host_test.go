@@ -462,3 +462,74 @@ func TestAQuestionBecomesAPaneEventAndItsAnswerAPixCommand(t *testing.T) {
 		t.Fatalf("%+v", ev)
 	}
 }
+
+// #114: a finished turn reaches the controller with what to call the session and where it runs.
+func TestATurnBecomesAPaneEventWithTheSessionsLabel(t *testing.T) {
+	h, sock := newHost(t)
+	events := h.Subscribe()
+	p, r := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api", Cwd: "/x/api/web", App: "com.jetbrains.WebStorm"})
+	wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "turn", Text: "All tests pass.", DurationMs: 42_000, Source: "you"})
+	ev := <-events
+	if ev.Kind != agent.PaneEventTurn || ev.Agent != r.Address || ev.Turn == nil {
+		t.Fatalf("%+v", ev)
+	}
+	if want := (agent.SessionTurn{Label: "api", Reply: "All tests pass.", App: "com.jetbrains.WebStorm", Duration: 42_000}); *ev.Turn != want {
+		t.Fatalf("%+v", *ev.Turn)
+	}
+	wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "description", Source: "agent", Description: "fix the flaky upload test"})
+	wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "turn", Source: "pixie"})
+	ev = <-events
+	if ev.Turn == nil || ev.Turn.Label != "fix the flaky upload test" || !ev.Turn.FromPixie {
+		t.Fatalf("%+v", ev.Turn)
+	}
+	if len(listed(t, h)) != 1 {
+		t.Fatal("a turn is not an exit")
+	}
+}
+
+func TestATurnLabelFallsBackToTheFolder(t *testing.T) {
+	h, sock := newHost(t)
+	events := h.Subscribe()
+	p, _ := dialPix(t, sock, wire.Msg{Tool: "codex", Cwd: "/x/scratch"})
+	wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "turn"})
+	if ev := <-events; ev.Turn == nil || ev.Turn.Label != "scratch" {
+		t.Fatalf("%+v", ev)
+	}
+	p2, _ := dialPix(t, sock, wire.Msg{Tool: "codex"})
+	wire.Encode(p2.c, wire.Msg{Kind: wire.KindEvent, Event: "turn"})
+	if ev := <-events; ev.Turn == nil || ev.Turn.Label != "codex" {
+		t.Fatalf("%+v", ev)
+	}
+}
+
+// e2e of #114: a description pix guessed from your prompt is no name to say ("What is 17 times
+// 23? Reply in one short sentence with the is done: …"); the folder is. The agent's is.
+func TestASpokenLabelIsNeverAGuessFromThePrompt(t *testing.T) {
+	h, sock := newHost(t)
+	events := h.Subscribe()
+	p, _ := dialPix(t, sock, wire.Msg{Tool: "claude", Cwd: "/x/scratch"})
+	wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "description", Source: "auto", Description: "What is 17 times 23? Reply in one"})
+	wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "turn"})
+	if ev := nextTurn(t, events); ev.Turn.Label != "scratch" {
+		t.Fatalf("%+v", ev.Turn)
+	}
+	wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "description", Source: "agent", Description: "scratch: multiply numbers"})
+	wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "turn"})
+	if ev := nextTurn(t, events); ev.Turn.Label != "scratch: multiply numbers" {
+		t.Fatalf("%+v", ev.Turn)
+	}
+}
+
+func nextTurn(t *testing.T, events <-chan agent.PaneEvent) agent.PaneEvent {
+	t.Helper()
+	for {
+		select {
+		case ev := <-events:
+			if ev.Turn != nil {
+				return ev
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("no turn")
+		}
+	}
+}

@@ -48,6 +48,7 @@ final class UpdatesBubbleModelTests: XCTestCase {
         XCTAssertFalse(permission.offersOptions)
     }
 
+
     func testASessionLineCarriesItsApp() throws {
         let line = try JSONDecoder().decode(UpdateLine.self, from: Data(
             #"{"id":4,"text":"api is done: tests pass.","kind":"session","at":4,"app":"com.jetbrains.WebStorm"}"#.utf8))

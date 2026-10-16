@@ -309,15 +309,27 @@ const (
 	PaneEventQuestion
 	// PaneEventQuestionGone: that prompt was answered or went away (Question.ID set).
 	PaneEventQuestionGone
+	// PaneEventTurn: a session you started with pix finished a turn (Turn set, #114).
+	PaneEventTurn
 )
 
-// PaneEvent is a status change (Status set), an exit of a named agent, or a prompt one of your
-// pix sessions waits on (Question set).
+// PaneEvent is a status change (Status set), an exit of a named agent, a prompt one of your
+// pix sessions waits on (Question set), or a finished turn of one (Turn set).
 type PaneEvent struct {
 	Kind     PaneEventKind
 	Agent    string
 	Status   PaneStatus       // PaneEventStatus only
 	Question *SessionQuestion // PaneEventQuestion(Gone) only (a pointer: PaneEvent stays comparable)
+	Turn     *SessionTurn     // PaneEventTurn only
+}
+
+// SessionTurn is a finished turn of a session you started with pix (#114).
+type SessionTurn struct {
+	Label     string // its description, else its repo's or folder's name, else its tool
+	Reply     string // the turn's final reply (capped by pix)
+	App       string // bundle id of the app it runs in ("" unknown)
+	Duration  Millis // from working to its Stop; 0 when no working was seen
+	FromPixie bool   // Pixie typed the turn's prompt (message_session)
 }
 
 // SessionQuestion is a prompt one of your pix sessions waits on in its terminal (#105).

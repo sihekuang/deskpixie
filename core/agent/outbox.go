@@ -24,7 +24,7 @@ type OutboxLine struct {
 	// Job and Worker: what the line is about (absent in older records).
 	Job    JobID  `json:"job,omitempty"`
 	Worker string `json:"worker,omitempty"`
-	// App: a session line's app (bundle id, #105).
+	// App: a session line's app (bundle id, #105, #114).
 	App string `json:"app,omitempty"`
 	// Note: shown small under a line, never said (a session dialog's command, #105).
 	Note string `json:"note,omitempty"`

@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/sihekuang/deskpixie/core/pix/describe"
 	"github.com/sihekuang/deskpixie/core/pix/wire"
@@ -23,10 +24,11 @@ import (
 
 // Screen markers. Codex shows codexBusy while it works (the marker DeskPixie's workers use).
 // Claude fires no Stop hook when a turn is interrupted (Esc, yours or Pixie's); it shows
-// claudeInterrupted instead.
+// claudeInterrupted instead. An aborted Codex turn sends no notify; it shows codexInterrupted.
 const (
 	codexBusy         = "esc to interrupt"
 	claudeInterrupted = "What should Claude do instead?"
+	codexInterrupted  = "Conversation interrupted"
 )
 
 // ansi matches the escape sequences between the words on screen.
@@ -83,6 +85,10 @@ type Session struct {
 	posted    []string  // Pixie's messages not yet seen as prompts (normalized)
 	q         *question // the prompt waiting on you that Pixie may answer (#105)
 	qseq      int
+
+	turnStart     time.Time        // when this turn went working (zero: none seen)
+	turnFromPixie bool             // a prompt of this turn was Pixie's
+	now           func() time.Time // the clock (tests replace it, under mu)
 }
 
 // askDescription is added to a turn that starts new work, so the agent describes it: its
@@ -121,7 +127,7 @@ func (s *Session) newWork(prompt string) {
 }
 
 func newSession(o sessionOpts) *Session {
-	s := &Session{o: o, status: "idle", afterStop: true, userDesc: o.description}
+	s := &Session{o: o, status: "idle", afterStop: true, userDesc: o.description, now: time.Now}
 	s.runner = &Runner{Launch: o.agent, Stdin: o.stdin, Stdout: o.stdout,
 		OnInput: func(b []byte) {
 			s.gate.Keys(b, time.Now())
@@ -130,7 +136,7 @@ func newSession(o sessionOpts) *Session {
 			}
 		}}
 	// Only the PTY reader goroutine touches these.
-	var watch screenWatch
+	var watch, stopped screenWatch
 	var shown questionWatch
 	var vt *screen
 	var notes osc9Watch
@@ -138,6 +144,10 @@ func newSession(o sessionOpts) *Session {
 	case "codex":
 		s.runner.OnOutput = func(b []byte) {
 			out := string(b)
+			if stopped.saw(out, codexInterrupted) && s.currentStatus() != "idle" {
+				s.clearQuestion()
+				s.interrupted()
+			}
 			if watch.saw(out, codexBusy) && s.currentStatus() != "working" {
 				s.setStatus("working")
 			}
@@ -154,14 +164,11 @@ func newSession(o sessionOpts) *Session {
 	case "claude":
 		s.runner.OnOutput = func(b []byte) {
 			out := string(b)
+			// Working, or blocked: Esc at a permission prompt fires no Stop either.
 			if watch.saw(out, claudeInterrupted) {
-				s.clearQuestion() // at a prompt too (status blocked there): it was dismissed
-				if s.currentStatus() == "working" {
-					s.mu.Lock()
-					s.afterStop = true
-					s.mu.Unlock()
-					s.setStatus("idle")
-					s.flushSoon()
+				s.clearQuestion() // at a prompt too: it was dismissed
+				if s.currentStatus() != "idle" {
+					s.interrupted()
 				}
 			}
 			vt = s.screenFor(vt)
@@ -200,10 +207,18 @@ func (s *Session) Hook(event string, p map[string]any) string {
 		return ""
 	case "UserPromptSubmit":
 		s.clearQuestion()
+		// A prompt while not working starts a new turn, even if the last one never ended with
+		// a Stop (an API error, an interrupt pix didn't see): its start doesn't carry over.
+		s.mu.Lock()
+		if s.status != "working" {
+			s.turnStart, s.turnFromPixie = time.Time{}, false
+		}
+		s.mu.Unlock()
 		s.setStatus("working")
 		prompt, _ := p["prompt"].(string)
 		pixie := s.fromPixie(prompt)
 		s.mu.Lock()
+		s.turnFromPixie = s.turnFromPixie || pixie
 		first := s.afterStop && prompt != ""
 		if first {
 			s.afterStop = false
@@ -218,13 +233,19 @@ func (s *Session) Hook(event string, p map[string]any) string {
 		return fmt.Sprintf(`{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":%q}}`, askDescription)
 	case "Stop":
 		s.clearQuestion()
+		pixie := false
 		if s.o.tool == "codex" { // its notify carries the turn's prompts; there is no prompt hook
 			if in, _ := p["input-messages"].([]any); len(in) > 0 {
-				if first, _ := in[0].(string); first != "" && !s.fromPixie(first) {
-					s.newWork(first)
+				if first, _ := in[0].(string); first != "" {
+					if s.fromPixie(first) {
+						pixie = true
+					} else {
+						s.newWork(first)
+					}
 				}
 			}
 		}
+		s.endTurn(p, pixie)
 		s.gate.Started() // a turn ran, so your line was sent (a fast Codex turn shows no busy marker)
 		s.mu.Lock()
 		s.afterStop = true
@@ -341,11 +362,62 @@ func (s *Session) flushSoon() {
 	}()
 }
 
+// interrupted: Claude shows an interrupt (Esc) and fires no Stop: the turn is over, unannounced.
+func (s *Session) interrupted() {
+	s.mu.Lock()
+	s.afterStop = true
+	s.turnStart, s.turnFromPixie = time.Time{}, false
+	s.mu.Unlock()
+	s.setStatus("idle")
+	s.flushSoon()
+}
+
+// MaxTurnReplyBytes caps the reply a turn event carries (#114).
+const MaxTurnReplyBytes = 4 << 10
+
+// endTurn tells DeskPixie a turn finished (#114): its final reply (Claude's Stop has
+// last_assistant_message, Codex's notify last-assistant-message), how long it ran and whether
+// Pixie typed its prompt. The app decides whether to announce it.
+func (s *Session) endTurn(p map[string]any, pixie bool) {
+	reply, _ := p["last_assistant_message"].(string)
+	if reply == "" {
+		reply, _ = p["last-assistant-message"].(string)
+	}
+	s.mu.Lock()
+	var d time.Duration
+	if !s.turnStart.IsZero() {
+		d = s.now().Sub(s.turnStart)
+	}
+	pixie = pixie || s.turnFromPixie
+	s.turnStart, s.turnFromPixie = time.Time{}, false
+	s.mu.Unlock()
+	source := "you"
+	if pixie {
+		source = "pixie"
+	}
+	s.client.Send(wire.Msg{Kind: wire.KindEvent, Event: "turn", Text: capUTF8(reply, MaxTurnReplyBytes),
+		DurationMs: max(d.Milliseconds(), 0), Source: source})
+}
+
+// capUTF8 cuts s to at most n bytes without splitting a character.
+func capUTF8(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
+}
+
 func (s *Session) setStatus(st string) {
 	if st == "working" {
 		s.gate.Started()
 	}
 	s.mu.Lock()
+	if st == "working" && s.turnStart.IsZero() {
+		s.turnStart = s.now()
+	}
 	s.status = st
 	s.mu.Unlock()
 	s.client.Send(wire.Msg{Kind: wire.KindEvent, Event: "status", Status: st})

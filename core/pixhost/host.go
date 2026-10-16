@@ -268,6 +268,12 @@ func (h *Host) onMsg(s *session, m wire.Msg) bool {
 			h.broadcast(agent.PaneEvent{Kind: agent.PaneEventQuestion, Agent: s.addr, Question: &q})
 		case "question-gone":
 			h.broadcast(agent.PaneEvent{Kind: agent.PaneEventQuestionGone, Agent: s.addr, Question: &agent.SessionQuestion{ID: m.ID}})
+		case "turn":
+			h.mu.Lock()
+			t := agent.SessionTurn{Label: s.label(), Reply: m.Text, App: s.hello.App,
+				Duration: agent.Millis(max(m.DurationMs, 0)), FromPixie: m.Source == "pixie"}
+			h.mu.Unlock()
+			h.broadcast(agent.PaneEvent{Kind: agent.PaneEventTurn, Agent: s.addr, Turn: &t})
 		case "exited":
 			h.remove(s)
 			return true
@@ -452,10 +458,12 @@ func (h *Host) List(context.Context) ([]agent.AgentInfo, error) {
 	return out, nil
 }
 
-// label names s in what Pixie says (h.mu held): its description, else its repo's or folder's
-// name, else its tool.
+// label names s in what Pixie says (h.mu held): the description you or the agent wrote, else
+// its repo's or folder's name, else its tool.
 func (s *session) label() string {
-	if d := s.desc.Current(); d != "" {
+	// A guess from your prompt reads as nonsense said aloud ("What is 17 times 23? Reply in
+	// one … is done"): only a description you or the agent wrote names it.
+	if d := s.desc.Named(); d != "" {
 		return d
 	}
 	for _, p := range []string{s.hello.GitRoot, s.hello.Cwd} {

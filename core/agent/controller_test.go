@@ -1207,3 +1207,9 @@ func TestManualNoticeIsAgentNeutral(t *testing.T) {
 		t.Fatal(ManualNotice)
 	}
 }
+
+func TestSessionTurnsAreOffByDefaultWithAThirtySecondMinimum(t *testing.T) {
+	if s := DefaultSettings(); s.SessionTurns || s.SessionTurnsMinMs != 30_000 {
+		t.Fatalf("%+v", s)
+	}
+}

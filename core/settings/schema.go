@@ -400,6 +400,8 @@ var Fields = []FieldSpec{
 	spec("notifications.bubble.popSecs", SectionNotifications, "Pop for (seconds)", "How long the bubble shows a new update before it shrinks to a badge.", intKind(1, 60, false), ApplyLive),
 	spec("notifications.bubble.lines", SectionNotifications, "Updates shown", "The most updates the bubble lists.", intKind(1, 10, false), ApplyLive),
 	spec("notifications.awayAfterMins", SectionNotifications, "Away after (minutes idle)", "With no keyboard or mouse input for this long, nothing pops and Pixie doesn't start a conversation until you're back.", intKind(1, 60, false), ApplyLive),
+	spec("notifications.sessionTurns", SectionNotifications, "Announce finished sessions", "Pixie tells you when a session you started with pix finishes a turn, even one Pixie didn't start.", boolKind, ApplyRestart),
+	spec("notifications.sessionTurnsMinSeconds", SectionNotifications, "Only turns longer than (seconds)", "Shorter turns stay quiet; you were probably watching. Turns Pixie started are always announced.", intKind(0, 3600, false), ApplyRestart),
 }
 
 // FieldByPath is the field at path, or nil.

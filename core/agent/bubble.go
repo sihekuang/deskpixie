@@ -18,7 +18,7 @@ type UpdateItem struct {
 	// Token is the confirm word of a permission question still waiting; the bubble's Allow and
 	// Deny buttons answer with it (#97). Empty for every other line.
 	Token string `json:"token,omitempty"`
-	// App: a session's app (bundle id); a click activates it instead of a pane (#105).
+	// App: a session line's app (bundle id); a click activates it instead of a pane.
 	App string `json:"app,omitempty"`
 	// Options: a session menu's choices (#105): the bubble shows one button each instead of
 	// Allow and Deny, answered with agent.choose.

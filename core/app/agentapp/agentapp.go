@@ -359,6 +359,8 @@ func Build(c Config) *Agent {
 			KeepPanesOnQuit:     s.KeepPanesOnQuit,
 			Workers:             ws.Policy,
 			SpeakWorkerReports:  s.Workers.SpeakResults,
+			SessionTurns:        c.Notifications.SessionTurns,
+			SessionTurnsMinMs:   agent.Millis(c.Notifications.SessionTurnsMinSeconds) * 1000,
 			OpenConversation:    s.OpenConversationForUpdates,
 			CoordinatorKind:     kind,
 			SpokenPaths:         spoken,

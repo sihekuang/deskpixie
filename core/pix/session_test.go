@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/sihekuang/deskpixie/core/pix/wire"
 )
@@ -597,6 +598,154 @@ func TestAPlanApprovalIsOnlyAnnounced(t *testing.T) {
 	if err := answer(t, h, q.ID, "yes"); err == "" {
 		t.Fatal("a plan approval must not be answered from Pixie")
 	}
+}
+
+// turnHarness is newHarness once pix is connected (it re-sends its status on registering):
+// an event sent before that would be dropped.
+func turnHarness(t *testing.T, tool string, agent Launch) *harness {
+	t.Helper()
+	h := newHarness(t, tool, agent)
+	waitEvent(t, h.d.events, "connected", func(m wire.Msg) bool { return m.Event == "status" })
+	return h
+}
+
+// setClock makes s read the time from *at (under s.mu: the PTY goroutines read it too).
+func setClock(s *Session, at *time.Time) {
+	s.mu.Lock()
+	s.now = func() time.Time { return *at }
+	s.mu.Unlock()
+}
+
+func turnEvent(t *testing.T, h *harness) wire.Msg {
+	t.Helper()
+	return waitEvent(t, h.d.events, "turn", func(m wire.Msg) bool { return m.Event == "turn" })
+}
+
+// #114: a finished turn goes to DeskPixie with its reply, how long it ran and who started it.
+func TestAClaudeTurnReportsItsReplyAndDuration(t *testing.T) {
+	h := turnHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}})
+	at := time.Unix(1_000, 0)
+	setClock(h.s, &at)
+	h.s.Hook("UserPromptSubmit", map[string]any{"prompt": "fix the flaky upload test"})
+	at = at.Add(42 * time.Second)
+	h.s.Hook("Stop", map[string]any{"last_assistant_message": "Fixed: the upload test is stable now."})
+	m := turnEvent(t, h)
+	if m.Text != "Fixed: the upload test is stable now." || m.DurationMs != 42_000 || m.Source != "you" {
+		t.Fatalf("%+v", m)
+	}
+	h.s.runner.Hangup()
+	h.s.finish()
+}
+
+func TestATurnPixieStartedSaysSo(t *testing.T) {
+	h := turnHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}})
+	task := "Task from the coordinator: run the upload tests again."
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "p", Command: "prompt", Text: task})
+	waitEvent(t, h.d.events, "prompt result", func(m wire.Msg) bool { return m.ID == "p" })
+	h.s.Hook("UserPromptSubmit", map[string]any{"prompt": task + "\n"})
+	h.s.Hook("Stop", map[string]any{"last_assistant_message": "They pass."})
+	if m := turnEvent(t, h); m.Source != "pixie" {
+		t.Fatalf("%+v", m)
+	}
+	h.s.runner.Hangup()
+	h.s.finish()
+}
+
+func TestACodexTurnReportsItsLastMessage(t *testing.T) {
+	h := turnHarness(t, "codex", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}})
+	h.s.Hook("Stop", map[string]any{"type": "agent-turn-complete", "input-messages": []any{"rename foo to bar"},
+		"last-assistant-message": "Rename complete and verified."})
+	m := turnEvent(t, h)
+	if m.Text != "Rename complete and verified." || m.DurationMs != 0 || m.Source != "you" {
+		t.Fatalf("no working seen: duration 0; %+v", m)
+	}
+	h.s.runner.Hangup()
+	h.s.finish()
+}
+
+func TestAnInterruptedTurnDoesNotCountTowardTheNext(t *testing.T) {
+	h := turnHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}})
+	at := time.Unix(1_000, 0)
+	setClock(h.s, &at)
+	h.s.Hook("UserPromptSubmit", map[string]any{"prompt": "a long job"})
+	at = at.Add(10 * time.Minute)
+	h.s.interrupted() // what the screen marker does
+	h.s.Hook("UserPromptSubmit", map[string]any{"prompt": "something quick"})
+	at = at.Add(3 * time.Second)
+	h.s.Hook("Stop", map[string]any{"last_assistant_message": "Done."})
+	if m := turnEvent(t, h); m.DurationMs != 3_000 {
+		t.Fatalf("%+v", m)
+	}
+	h.s.runner.Hangup()
+	h.s.finish()
+}
+
+func TestTheReplyIsCutOnACharacterBoundary(t *testing.T) {
+	got := capUTF8(strings.Repeat("é", 3_000), MaxTurnReplyBytes)
+	if len(got) > MaxTurnReplyBytes || !utf8.ValidString(got) || len(got) < MaxTurnReplyBytes-1 {
+		t.Fatalf("len %d valid %v", len(got), utf8.ValidString(got))
+	}
+	if capUTF8("short", MaxTurnReplyBytes) != "short" {
+		t.Fatal("short replies are kept")
+	}
+}
+
+// Review #1: Esc at a permission prompt (status blocked, no Stop) ends that turn too.
+func TestAnInterruptAtAPromptDoesNotCountTowardTheNextTurn(t *testing.T) {
+	h := turnHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}})
+	at := time.Unix(1_000, 0)
+	setClock(h.s, &at)
+	h.s.Hook("UserPromptSubmit", map[string]any{"prompt": "a long job"})
+	h.s.Hook("Notification", map[string]any{})
+	at = at.Add(10 * time.Minute)
+	h.s.runner.OnOutput([]byte(claudeInterrupted))
+	h.s.Hook("UserPromptSubmit", map[string]any{"prompt": "something quick"})
+	at = at.Add(3 * time.Second)
+	h.s.Hook("Stop", map[string]any{"last_assistant_message": "Done."})
+	if m := turnEvent(t, h); m.DurationMs != 3_000 {
+		t.Fatalf("%+v", m)
+	}
+	h.s.runner.Hangup()
+	h.s.finish()
+}
+
+// Review #1: a new prompt after a turn that ended without a Stop (an API error) starts afresh.
+func TestAPromptAfterAnUnfinishedTurnStartsANewOne(t *testing.T) {
+	h := turnHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}})
+	at := time.Unix(1_000, 0)
+	setClock(h.s, &at)
+	h.s.Hook("UserPromptSubmit", map[string]any{"prompt": "a long job"})
+	h.s.Hook("Notification", map[string]any{}) // waiting on you; you answer by typing anew
+	at = at.Add(10 * time.Minute)
+	h.s.Hook("UserPromptSubmit", map[string]any{"prompt": "never mind, something quick"})
+	at = at.Add(3 * time.Second)
+	h.s.Hook("Stop", map[string]any{"last_assistant_message": "Done."})
+	if m := turnEvent(t, h); m.DurationMs != 3_000 {
+		t.Fatalf("%+v", m)
+	}
+	h.s.runner.Hangup()
+	h.s.finish()
+}
+
+// Review #1: an aborted Codex turn sends no notify; its banner ends the turn.
+func TestAnInterruptedCodexTurnDoesNotCountTowardTheNext(t *testing.T) {
+	h := turnHarness(t, "codex", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}})
+	at := time.Unix(1_000, 0)
+	setClock(h.s, &at)
+	h.s.runner.OnOutput([]byte(codexBusy))
+	at = at.Add(10 * time.Minute)
+	h.s.runner.OnOutput([]byte("■ Conversation interrupted - use /feedback if something went wrong"))
+	if st := h.s.currentStatus(); st != "idle" {
+		t.Fatalf("an interrupted Codex is idle: %s", st)
+	}
+	h.s.runner.OnOutput([]byte(codexBusy))
+	at = at.Add(3 * time.Second)
+	h.s.Hook("Stop", map[string]any{"last-assistant-message": "Done."})
+	if m := turnEvent(t, h); m.DurationMs != 3_000 {
+		t.Fatalf("%+v", m)
+	}
+	h.s.runner.Hangup()
+	h.s.finish()
 }
 
 // #105: a Claude dialog is relayed as drawn: Claude's summary, the command, its question and
