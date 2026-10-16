@@ -238,7 +238,7 @@ final class UpdatesBubbleController {
         // that opens from it stay on the same side, next to Pixie (no flip under the pointer).
         let (rect, _) = BubblePlacement.frame(pixie: DesktopSpace.desktopRect(bit, primaryMaxY: top),
                                               bubble: size, screen: area,
-                                              sideWidth: UpdatesBubbleView.width)
+                                              sideWidth: UpdatesBubbleView.maxWidth)
         panel.setFrame(ScreenDisplays.appKitFrame(topLeft: rect.origin, size: rect.size), display: true)
         if panel.parent == nil {
             pixie.panel.addChildWindow(panel, ordered: .above)
