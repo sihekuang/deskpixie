@@ -1618,10 +1618,12 @@ func (c *AgentController) saveJob(id JobID, fx *[]Effect) {
 }
 
 // syncHold holds Pixie in delegating (and the conversation open) while a job is running or a
-// permission waits on a spoken confirm (it expires in two minutes); a job that only waits on
-// the user's answer to a question doesn't (#119).
+// permission of an agent's waits on a spoken confirm (it expires in two minutes); a job that
+// only waits on the user's answer to a question doesn't, nor does a pix session's prompt, which
+// waits until answered (#119).
 func (c *AgentController) syncHold(fx *[]Effect) {
-	if running := c.jobs.AnyRunning() || len(c.confirms.Pending()) > 0; running != c.held {
+	asking := slices.ContainsFunc(c.confirms.Pending(), func(p Pending) bool { return p.Session == "" })
+	if running := c.jobs.AnyRunning() || asking; running != c.held {
 		c.held = running
 		*fx = append(*fx, Effect{Kind: EfHoldOpen, Hold: running})
 	}

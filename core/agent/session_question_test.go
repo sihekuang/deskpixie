@@ -238,3 +238,10 @@ func TestACodexApprovalIsToldByItsReasonWithItsOptions(t *testing.T) {
 		t.Fatalf("%+v", b)
 	}
 }
+
+// #119: a session waiting on your answer is not delegated work: Pixie isn't held in delegating.
+func TestASessionPromptDoesNotHoldPixie(t *testing.T) {
+	c := ctl()
+	wantNotContains(t, askSession(c, bashAsk, T0), eHold(true))
+	wantNotContains(t, askSession(c, pushMenu, T0), eHold(true))
+}
