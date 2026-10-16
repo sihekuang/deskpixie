@@ -3,6 +3,7 @@ package pix
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"net"
 	"os"
 	"path/filepath"
@@ -364,4 +365,156 @@ func TestCodexDescriptionFromItsTurn(t *testing.T) {
 	})
 	h.s.runner.Hangup()
 	h.s.finish()
+}
+
+// #105: prompts a session waits on, answered from Pixie.
+
+// keyHarness runs an agent that prints, in hex, the first byte typed into it.
+func keyHarness(t *testing.T, tool string) *harness {
+	t.Helper()
+	h := newHarness(t, tool, Launch{Path: "/bin/sh", Args: []string{"-c", "stty raw -echo; head -c 1 | od -An -tx1; sleep 30"}})
+	waitEvent(t, h.d.events, "connected", func(m wire.Msg) bool { return m.Event == "status" })
+	t.Cleanup(func() { h.s.runner.Hangup(); h.s.finish() })
+	return h
+}
+
+// typed waits for the agent to print the byte it got.
+func typed(t *testing.T, h *harness, want byte) {
+	t.Helper()
+	got := make(chan string, 1)
+	go func() {
+		var all []byte
+		buf := make([]byte, 256)
+		for {
+			n, err := h.out.Read(buf)
+			all = append(all, buf[:n]...)
+			if strings.Contains(string(all), hex.EncodeToString([]byte{want})) || err != nil {
+				got <- string(all)
+				return
+			}
+		}
+	}()
+	select {
+	case s := <-got:
+		if !strings.Contains(s, hex.EncodeToString([]byte{want})) {
+			t.Fatalf("typed %q, want %x", s, want)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("nothing typed (want %x)", want)
+	}
+}
+
+func askedQuestion(t *testing.T, h *harness) wire.Msg {
+	t.Helper()
+	return waitEvent(t, h.d.events, "question", func(m wire.Msg) bool { return m.Event == "question" })
+}
+
+func answer(t *testing.T, h *harness, id, choice string) string {
+	t.Helper()
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "a-" + id + choice, Command: "answer", Text: id, Source: choice})
+	return waitEvent(t, h.d.events, "answer result", func(m wire.Msg) bool { return m.ID == "a-"+id+choice }).Err
+}
+
+func TestAClaudePermissionIsAskedAndAnsweredOnceOnScreen(t *testing.T) {
+	h := keyHarness(t, "claude")
+	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "npm test"}})
+	q := askedQuestion(t, h)
+	if q.Source != "permission" || q.ToolName != "Bash" || q.Input != `{"command":"npm test"}` || q.ID == "" {
+		t.Fatalf("%+v", q)
+	}
+	if err := answer(t, h, q.ID, "yes"); !strings.Contains(err, "isn't on screen") {
+		t.Fatalf("not typed before the dialog shows: %q", err)
+	}
+	h.s.runner.OnOutput([]byte("Do you want to proceed?\r\n❯ 1. Yes"))
+	if err := answer(t, h, q.ID, "yes"); err != "" {
+		t.Fatal(err)
+	}
+	typed(t, h, '1')
+	if err := answer(t, h, q.ID, "yes"); !strings.Contains(err, "no longer waiting") {
+		t.Fatalf("answered once: %q", err)
+	}
+}
+
+func TestNoAtAClaudePermissionIsEscape(t *testing.T) {
+	h := keyHarness(t, "claude")
+	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Edit", "tool_input": map[string]any{"file_path": "/x/a.go"}})
+	q := askedQuestion(t, h)
+	h.s.runner.OnOutput([]byte("Do you want to make this edit to a.go?"))
+	if err := answer(t, h, q.ID, "no"); err != "" {
+		t.Fatal(err)
+	}
+	typed(t, h, 0x1b)
+}
+
+func TestAClaudeMenuIsAnsweredWithItsDigit(t *testing.T) {
+	h := keyHarness(t, "claude")
+	h.s.Hook("PreToolUse", map[string]any{"tool_name": "AskUserQuestion", "tool_input": map[string]any{"questions": []any{
+		map[string]any{"question": "Push main?", "header": "Push", "multiSelect": false,
+			"options": []any{map[string]any{"label": "Push"}, map[string]any{"label": "Don't push"}}}}}})
+	q := askedQuestion(t, h)
+	if q.Source != "menu" || q.Text != "Push main?" || strings.Join(q.Keys, "|") != "Push|Don't push" {
+		t.Fatalf("%+v", q)
+	}
+	h.s.runner.OnOutput([]byte("❯ 1. Push\r\n  2. Don't push\r\nEnter to select · ↑/↓ to navigate"))
+	if err := answer(t, h, q.ID, "3"); !strings.Contains(err, "isn't one of its answers") {
+		t.Fatalf("%q", err)
+	}
+	if err := answer(t, h, q.ID, "2"); err != "" {
+		t.Fatal(err)
+	}
+	typed(t, h, '2')
+}
+
+func TestAMenuOfSeveralQuestionsIsOnlyAnnounced(t *testing.T) {
+	h := keyHarness(t, "claude")
+	one := map[string]any{"question": "Which?", "options": []any{map[string]any{"label": "A"}}}
+	h.s.Hook("PreToolUse", map[string]any{"tool_name": "AskUserQuestion", "tool_input": map[string]any{"questions": []any{one, one}}})
+	if q := askedQuestion(t, h); q.Text != "Which? (and 1 more)" || len(q.Keys) != 0 {
+		t.Fatalf("%+v", q)
+	}
+}
+
+func TestAKeyYouPressWithdrawsTheQuestion(t *testing.T) {
+	h := keyHarness(t, "claude")
+	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "ls"}})
+	q := askedQuestion(t, h)
+	h.s.runner.OnOutput([]byte("Do you want to proceed?"))
+	h.stdinW.Write([]byte("\x1b[I")) // the terminal saying it got focus is not you answering
+	time.Sleep(200 * time.Millisecond)
+	h.stdinW.Write([]byte("1"))
+	waitEvent(t, h.d.events, "question gone", func(m wire.Msg) bool { return m.Event == "question-gone" && m.ID == q.ID })
+	if err := answer(t, h, q.ID, "yes"); !strings.Contains(err, "no longer waiting") {
+		t.Fatalf("%q", err)
+	}
+}
+
+func TestTheSessionMovingOnWithdrawsTheQuestion(t *testing.T) {
+	h := keyHarness(t, "claude")
+	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "ls"}})
+	q := askedQuestion(t, h)
+	h.s.Hook("PostToolUse", map[string]any{"tool_name": "Bash"})
+	waitEvent(t, h.d.events, "question gone", func(m wire.Msg) bool { return m.Event == "question-gone" && m.ID == q.ID })
+}
+
+func TestAPermissionRequestForTheMenuIsNotASecondQuestion(t *testing.T) {
+	h := keyHarness(t, "claude")
+	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "AskUserQuestion", "tool_input": map[string]any{}})
+	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "ls"}})
+	if q := askedQuestion(t, h); q.ToolName != "Bash" {
+		t.Fatalf("%+v", q)
+	}
+}
+
+func TestACodexApprovalOnScreenIsAskedAndAnsweredWithY(t *testing.T) {
+	h := keyHarness(t, "codex")
+	h.s.runner.OnOutput([]byte("Would you like to run the following command?\r\n$ npm test"))
+	q := askedQuestion(t, h)
+	if q.Source != "permission" || q.Text != "wants to run a command" || q.ToolName != "" {
+		t.Fatalf("%+v", q)
+	}
+	h.s.runner.OnOutput([]byte("Would you like to run the following command?")) // a redraw asks nothing new
+	if err := answer(t, h, q.ID, "yes"); err != "" {
+		t.Fatal(err)
+	}
+	typed(t, h, 'y')
 }

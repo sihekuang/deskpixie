@@ -67,6 +67,14 @@ func TestPlanLaunchClaude(t *testing.T) {
 			t.Errorf("no %s hook", ev)
 		}
 	}
+	// #105: the prompts a session waits on. PreToolUse only for its question menu.
+	pre, _ := hooks["PreToolUse"].([]any)
+	if len(pre) != 1 || pre[0].(map[string]any)["matcher"] != "AskUserQuestion" {
+		t.Fatalf("PreToolUse: %v", hooks["PreToolUse"])
+	}
+	if hooks["PermissionRequest"] == nil {
+		t.Error("no PermissionRequest hook")
+	}
 	perms, _ := settings["permissions"].(map[string]any)
 	if allow, _ := perms["allow"].([]any); len(allow) != 1 || allow[0] != "mcp__pixie__set_description" {
 		t.Fatalf("set_description must not ask for permission (and nothing else is allowed): %v", settings["permissions"])
