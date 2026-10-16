@@ -132,7 +132,7 @@ func newSession(o sessionOpts) *Session {
 	// Only the PTY reader goroutine touches these.
 	var watch screenWatch
 	var shown questionWatch
-	approvals := make([]screenWatch, len(codexApprovals))
+	var notes osc9Watch
 	switch o.tool {
 	case "codex":
 		s.runner.OnOutput = func(b []byte) {
@@ -140,22 +140,24 @@ func newSession(o sessionOpts) *Session {
 			if watch.saw(out, codexBusy) && s.currentStatus() != "working" {
 				s.setStatus("working")
 			}
-			for i, a := range codexApprovals {
-				if approvals[i].saw(out, a.marker) && s.currentQuestion() == nil {
-					s.ask(&question{kind: "permission", seen: true}, wire.Msg{Source: "permission", Text: a.asks})
+			for _, msg := range notes.messages(out) {
+				if asks := codexApproval(msg); asks != "" {
+					s.ask(&question{kind: "permission", seen: true}, wire.Msg{Source: "permission", Text: asks})
 				}
 			}
 		}
 	case "claude":
 		s.runner.OnOutput = func(b []byte) {
 			out := string(b)
-			if watch.saw(out, claudeInterrupted) && s.currentStatus() == "working" {
-				s.mu.Lock()
-				s.afterStop = true
-				s.mu.Unlock()
-				s.clearQuestion()
-				s.setStatus("idle")
-				s.flushSoon()
+			if watch.saw(out, claudeInterrupted) {
+				s.clearQuestion() // at a prompt too (status blocked there): it was dismissed
+				if s.currentStatus() == "working" {
+					s.mu.Lock()
+					s.afterStop = true
+					s.mu.Unlock()
+					s.setStatus("idle")
+					s.flushSoon()
+				}
 			}
 			shown.watch(s, out)
 		}
@@ -172,14 +174,20 @@ func (s *Session) Hook(event string, p map[string]any) string {
 	case "PreToolUse":
 		if name, _ := p["tool_name"].(string); name == "AskUserQuestion" {
 			text, options := menuOf(p["tool_input"])
-			s.ask(&question{kind: "menu", options: len(options), marker: claudeMenu}, wire.Msg{Source: "menu", Text: text, Keys: options})
+			s.ask(&question{kind: "menu", options: len(options), marker: claudeMenu, detail: firstRunes(text, 24)},
+				wire.Msg{Source: "menu", Text: text, Keys: options})
 		}
 		return ""
 	case "PermissionRequest":
 		// The menu asks through its own PreToolUse; anything else is a permission dialog.
 		if name, _ := p["tool_name"].(string); name != "AskUserQuestion" {
 			input, _ := json.Marshal(p["tool_input"])
-			s.ask(&question{kind: "permission", marker: claudePermission}, wire.Msg{Source: "permission", ToolName: name, Input: string(input)})
+			ev := wire.Msg{Source: "permission", ToolName: name, Input: string(input)}
+			q := &question{kind: "permission", marker: claudePermission, detail: claudeDetail(name, p["tool_input"])}
+			if !claudeAnswerable(name) || q.detail == "" {
+				q, ev.Source = &question{kind: "notice"}, "notice" // answered in its terminal only
+			}
+			s.ask(q, ev)
 		}
 		return ""
 	case "UserPromptSubmit":
@@ -273,6 +281,7 @@ func (s *Session) command(m wire.Msg) wire.Msg {
 		s.flushSoon()
 		return wire.Msg{}
 	case "keys":
+		s.clearQuestion() // an Escape from Pixie dismisses the prompt
 		for _, k := range m.Keys {
 			var b []byte
 			switch k {

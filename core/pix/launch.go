@@ -72,6 +72,10 @@ func PlanLaunch(tool string, userArgs []string, self, sock, dir string) (Launch,
 			"-c", "developer_instructions=" + strconv.Quote(Instruction),
 			// Codex runs notify with the turn's JSON as its last argument when a turn ends.
 			"-c", "notify=" + string(notify),
+			// Its approval prompts arrive as its own OSC 9 notification (#105), which pix reads;
+			// text on screen can't fake one. Always: also while you look at the terminal.
+			"-c", `tui.notification_method="osc9"`,
+			"-c", `tui.notification_condition="always"`,
 		}
 		return Launch{Path: path, Args: append(args, userArgs...), Env: env}, nil
 	}

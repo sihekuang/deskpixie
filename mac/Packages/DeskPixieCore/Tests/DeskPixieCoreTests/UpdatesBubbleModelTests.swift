@@ -57,6 +57,16 @@ final class UpdatesBubbleModelTests: XCTestCase {
         XCTAssertTrue(m.acceptsDecision(token: "hawk", now: 10.8))
     }
 
+    /// Review of #105: a session menu's option buttons are guarded the same way, then count.
+    func testMenuOptionsAcceptTapsOnceShownLongEnough() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        let menu = UpdateLine(id: 1, text: "Push main?", kind: "question", at: 1, job: nil, worker: nil,
+                              token: "hawk", options: ["Push", "Don't push"])
+        m.apply([menu], now: 10, pop: .allowed)
+        XCTAssertFalse(m.acceptsDecision(token: "hawk", now: 10.2))
+        XCTAssertTrue(m.acceptsDecision(token: "hawk", now: 10.8))
+    }
+
     func testTheGuardIsPerQuestion() {
         var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
         m.apply([question(1, "hawk")], now: 10, pop: .allowed)

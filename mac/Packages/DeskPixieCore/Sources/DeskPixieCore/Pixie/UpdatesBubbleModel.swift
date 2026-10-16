@@ -239,7 +239,7 @@ public struct UpdatesBubbleModel: Sendable {
             decisionsSince = [:]
             return
         }
-        let showing = Set(shown.filter(\.offersDecision).compactMap(\.token))
+        let showing = Set(shown.filter { $0.offersDecision || $0.offersOptions }.compactMap(\.token))
         decisionsSince = decisionsSince.filter { showing.contains($0.key) }
         for token in showing where decisionsSince[token] == nil {
             decisionsSince[token] = now

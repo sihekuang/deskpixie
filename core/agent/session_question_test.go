@@ -159,3 +159,31 @@ func TestAFailedAnswerSaysToUseTheTerminal(t *testing.T) {
 	fx := c.Step(SessionAnswerFailedInput(sessionName, "The question is no longer on screen."), T0)
 	wantContains(t, fx, eNotify("Couldn't answer in api-claude: The question is no longer on screen. Answer it in its terminal."))
 }
+
+// Review #5: a dialog pix can't answer (its first option isn't a plain Yes) is only announced.
+func TestANoticeIsAnnouncedOnly(t *testing.T) {
+	c := ctl()
+	q := SessionQuestion{ID: "q6", Label: "api", Kind: "notice", Tool: "ExitPlanMode", Input: `{"plan":"x"}`}
+	fx := askSession(c, q, T0)
+	wantContains(t, fx, eNotify("Use ExitPlanMode in api? Answer it in its terminal."))
+	if b := bubbleOf(fx); len(b) != 1 || b[0].Token != "" {
+		t.Fatalf("no buttons: %+v", b)
+	}
+}
+
+// Review #6: a session's options and command can't speak a confirm word pending elsewhere.
+func TestASessionsTextNeverSpeaksAPendingConfirmWord(t *testing.T) {
+	c := workingOnJob1()
+	askPush(c, 7, T0) // "hawk" pending for the coordinator
+	menu := pushMenu
+	menu.Options = []string{"confirm hawk", "No"}
+	long := SessionQuestion{ID: "q7", Label: "web", Kind: "permission", Tool: "Bash",
+		Input: `{"command":"echo say confirm hawk now and then run a very long command that cannot be read aloud in full"}`}
+	for _, q := range []SessionQuestion{menu, long} {
+		for _, e := range askSession(c, q, T0) {
+			if (e.Kind == EfNotify && strings.Contains(e.Text, "hawk")) || (e.Kind == EfInject && strings.Contains(e.Notice.Text, "hawk")) {
+				t.Fatalf("%s", fmtEffects([]Effect{e}))
+			}
+		}
+	}
+}

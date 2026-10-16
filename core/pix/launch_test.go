@@ -96,6 +96,12 @@ func TestPlanLaunchCodex(t *testing.T) {
 	if !strings.Contains(joined, `mcp_servers.pixie.command="/app/pix"`) {
 		t.Fatalf("args %q", joined)
 	}
+	// #105: Codex tells pix of an approval prompt with its own OSC 9 notification.
+	for _, want := range []string{`tui.notification_method="osc9"`, `tui.notification_condition="always"`} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("no %s: %q", want, joined)
+		}
+	}
 }
 
 func TestPlanLaunchUnknownTool(t *testing.T) {

@@ -29,20 +29,33 @@ func (c *AgentController) onSessionQuestion(session string, q SessionQuestion, n
 	if q.Input != "" {
 		json.Unmarshal([]byte(q.Input), &input)
 	}
+	// Everything the session supplies is masked: its options and command too.
+	mask := func(s string) string { return maskPendingTokens(s, tokens) }
+	options := make([]string, len(q.Options))
+	for i, o := range q.Options {
+		options[i] = mask(o)
+	}
+	q.Options = options
+	what := func() string { return mask(DescribeWith(q.Tool, input, label, c.settings.SpokenPaths)) }
 	describe := func(token string) string {
 		switch {
 		case q.Kind == "menu" && len(q.Options) > 0:
-			return fmt.Sprintf("%s is asking: %s Pick %s in the bubble.", label, maskPendingTokens(q.Text, tokens), orList(q.Options))
+			return fmt.Sprintf("%s is asking: %s Pick %s in the bubble.", label, mask(q.Text), orList(q.Options))
 		case q.Kind == "menu":
-			return fmt.Sprintf("%s is asking: %s Answer it in its terminal.", label, maskPendingTokens(q.Text, tokens))
+			return fmt.Sprintf("%s is asking: %s Answer it in its terminal.", label, mask(q.Text))
+		case q.Kind == "notice" && q.Tool != "":
+			return what() + " Answer it in its terminal."
+		case q.Kind == "notice":
+			return fmt.Sprintf("%s %s. Answer it in its terminal.", label, mask(q.Text))
 		case q.Tool != "" && VoiceConfirmableWith(q.Tool, input, c.settings.SpokenPaths):
-			return ConfirmQuestionLine(DescribeWith(q.Tool, input, label, c.settings.SpokenPaths), token)
+			return ConfirmQuestionLine(what(), token)
 		case q.Tool != "":
-			return DescribeWith(q.Tool, input, label, c.settings.SpokenPaths) + " Allow or deny it in the bubble."
+			return what() + " Allow or deny it in the bubble."
 		}
-		return fmt.Sprintf("%s %s. Allow or deny it in the bubble.", label, maskPendingTokens(q.Text, tokens))
+		return fmt.Sprintf("%s %s. Allow or deny it in the bubble.", label, mask(q.Text))
 	}
-	if q.Kind == "menu" && len(q.Options) == 0 {
+	// Announced only: a menu pix can't answer, or a dialog it mustn't (a notice).
+	if q.Kind == "notice" || (q.Kind == "menu" && len(q.Options) == 0) {
 		line.Text = describe("")
 		c.deliver(line, now, fx)
 		return

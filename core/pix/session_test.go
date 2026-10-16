@@ -425,7 +425,7 @@ func TestAClaudePermissionIsAskedAndAnsweredOnceOnScreen(t *testing.T) {
 	if err := answer(t, h, q.ID, "yes"); !strings.Contains(err, "isn't on screen") {
 		t.Fatalf("not typed before the dialog shows: %q", err)
 	}
-	h.s.runner.OnOutput([]byte("Do you want to proceed?\r\n❯ 1. Yes"))
+	h.s.runner.OnOutput([]byte("Bash command\r\n npm test\r\nDo you want to proceed?\r\n❯ 1. Yes"))
 	if err := answer(t, h, q.ID, "yes"); err != "" {
 		t.Fatal(err)
 	}
@@ -439,7 +439,7 @@ func TestNoAtAClaudePermissionIsEscape(t *testing.T) {
 	h := keyHarness(t, "claude")
 	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Edit", "tool_input": map[string]any{"file_path": "/x/a.go"}})
 	q := askedQuestion(t, h)
-	h.s.runner.OnOutput([]byte("Do you want to make this edit to a.go?"))
+	h.s.runner.OnOutput([]byte("Edit file a.go\r\nDo you want to make this edit to a.go?"))
 	if err := answer(t, h, q.ID, "no"); err != "" {
 		t.Fatal(err)
 	}
@@ -455,7 +455,7 @@ func TestAClaudeMenuIsAnsweredWithItsDigit(t *testing.T) {
 	if q.Source != "menu" || q.Text != "Push main?" || strings.Join(q.Keys, "|") != "Push|Don't push" {
 		t.Fatalf("%+v", q)
 	}
-	h.s.runner.OnOutput([]byte("❯ 1. Push\r\n  2. Don't push\r\nEnter to select · ↑/↓ to navigate"))
+	h.s.runner.OnOutput([]byte("Push main?\r\n❯ 1. Push\r\n  2. Don't push\r\nEnter to select · ↑/↓ to navigate"))
 	if err := answer(t, h, q.ID, "3"); !strings.Contains(err, "isn't one of its answers") {
 		t.Fatalf("%q", err)
 	}
@@ -478,7 +478,7 @@ func TestAKeyYouPressWithdrawsTheQuestion(t *testing.T) {
 	h := keyHarness(t, "claude")
 	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "ls"}})
 	q := askedQuestion(t, h)
-	h.s.runner.OnOutput([]byte("Do you want to proceed?"))
+	h.s.runner.OnOutput([]byte("$ ls\r\nDo you want to proceed?"))
 	h.stdinW.Write([]byte("\x1b[I")) // the terminal saying it got focus is not you answering
 	time.Sleep(200 * time.Millisecond)
 	h.stdinW.Write([]byte("1"))
@@ -505,16 +505,97 @@ func TestAPermissionRequestForTheMenuIsNotASecondQuestion(t *testing.T) {
 	}
 }
 
-func TestACodexApprovalOnScreenIsAskedAndAnsweredWithY(t *testing.T) {
+// Review #3: a Codex approval is its own notification (OSC 9), which text on screen can't fake.
+func TestACodexApprovalNotificationIsAskedAndAnsweredWithY(t *testing.T) {
 	h := keyHarness(t, "codex")
-	h.s.runner.OnOutput([]byte("Would you like to run the following command?\r\n$ npm test"))
+	h.s.runner.OnOutput([]byte("\x1b]9;Approval requ"))
+	h.s.runner.OnOutput([]byte("ested: npm test\x07"))
 	q := askedQuestion(t, h)
-	if q.Source != "permission" || q.Text != "wants to run a command" || q.ToolName != "" {
+	if q.Source != "permission" || q.Text != "wants to run npm test" || q.ToolName != "" {
 		t.Fatalf("%+v", q)
 	}
-	h.s.runner.OnOutput([]byte("Would you like to run the following command?")) // a redraw asks nothing new
+	h.s.runner.OnOutput([]byte("\x1b]9;Codex wants to edit a.go\x07")) // a second one asks nothing while the first waits
 	if err := answer(t, h, q.ID, "yes"); err != "" {
 		t.Fatal(err)
 	}
 	typed(t, h, 'y')
+}
+
+func TestCodexApprovalTextOnScreenAsksNothing(t *testing.T) {
+	h := keyHarness(t, "codex")
+	h.s.runner.OnOutput([]byte("Would you like to run the following command?\r\nYes, proceed (y)"))
+	h.s.runner.OnOutput([]byte("\x1b]9;Agent turn complete\x07"))
+	if q := h.s.currentQuestion(); q != nil {
+		t.Fatalf("asked from screen text: %+v", q)
+	}
+}
+
+func TestCodexApprovalMessages(t *testing.T) {
+	for msg, want := range map[string]string{
+		"Approval requested: npm test":   "wants to run npm test",
+		"Codex wants to edit 3 files":    "wants to edit 3 files",
+		"Approval requested by github":   "asks for approval for github",
+		"Agent turn complete":            "",
+		"Plan mode prompt: Implement it": "",
+	} {
+		if got := codexApproval(msg); got != want {
+			t.Errorf("%q: got %q, want %q", msg, got, want)
+		}
+	}
+}
+
+// Review #2: an Escape sent through Pixie (interrupt_session) dismisses the prompt.
+func TestAnEscapeFromPixieWithdrawsTheQuestion(t *testing.T) {
+	h := keyHarness(t, "claude")
+	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "ls"}})
+	q := askedQuestion(t, h)
+	h.s.runner.OnOutput([]byte("$ ls\r\nDo you want to proceed?"))
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "k", Command: "keys", Keys: []string{"Escape"}})
+	waitEvent(t, h.d.events, "question gone", func(m wire.Msg) bool { return m.Event == "question-gone" && m.ID == q.ID })
+}
+
+// Review #2: Claude's interrupt shows at a permission prompt too (status blocked there).
+func TestClaudesInterruptAtAPromptWithdrawsTheQuestion(t *testing.T) {
+	h := keyHarness(t, "claude")
+	h.s.Hook("Notification", map[string]any{})
+	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "ls"}})
+	q := askedQuestion(t, h)
+	h.s.runner.OnOutput([]byte(claudeInterrupted))
+	waitEvent(t, h.d.events, "question gone", func(m wire.Msg) bool { return m.Event == "question-gone" && m.ID == q.ID })
+}
+
+// Review #4: a second prompt never takes the place of one still waiting.
+func TestAQuestionIsNotReplacedWhileItWaits(t *testing.T) {
+	h := keyHarness(t, "claude")
+	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "npm test"}})
+	q := askedQuestion(t, h)
+	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "rm -rf build"}})
+	if cur := h.s.currentQuestion(); cur == nil || cur.id != q.ID {
+		t.Fatalf("replaced: %+v", cur)
+	}
+}
+
+// Review #4: another tool's dialog on screen doesn't count as this one shown.
+func TestAnotherToolsDialogDoesNotCountAsShown(t *testing.T) {
+	h := keyHarness(t, "claude")
+	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "npm test"}})
+	q := askedQuestion(t, h)
+	h.s.runner.OnOutput([]byte("$ rm -rf build\r\nDo you want to proceed?"))
+	if err := answer(t, h, q.ID, "yes"); !strings.Contains(err, "isn't on screen") {
+		t.Fatalf("%q", err)
+	}
+}
+
+// Review #5: only dialogs whose first option is a plain Yes are answered from Pixie.
+func TestAPlanApprovalIsOnlyAnnounced(t *testing.T) {
+	h := keyHarness(t, "claude")
+	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "ExitPlanMode", "tool_input": map[string]any{"plan": "Do you want to ship it?"}})
+	q := askedQuestion(t, h)
+	if q.Source != "notice" || q.ToolName != "ExitPlanMode" {
+		t.Fatalf("%+v", q)
+	}
+	h.s.runner.OnOutput([]byte("ExitPlanMode Do you want to ship it?"))
+	if err := answer(t, h, q.ID, "yes"); err == "" {
+		t.Fatal("a plan approval must not be answered from Pixie")
+	}
 }
