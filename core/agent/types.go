@@ -688,6 +688,8 @@ const (
 	HookState
 	// HookMode is the first prompt's report of the agent's permission mode (PermissionMode).
 	HookMode
+	// HookSubmit: the agent took a prompt (Claude Code's UserPromptSubmit); Message is the prompt.
+	HookSubmit
 )
 
 // HookEvent is what the hook server reports, with the calling agent resolved from its bearer.
