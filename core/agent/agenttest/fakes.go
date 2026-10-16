@@ -444,27 +444,27 @@ func (f *FakeSessionHost) AttachCommand() []string {
 
 // ---------- launcher, voice, notifier, pixie ----------
 
-// FakeLauncher records every Attach it opens; SetFail makes Open fail.
-type FakeLauncher struct {
+// FakePlanner records every Attach it plans for; SetFail makes Plan fail.
+type FakePlanner struct {
 	mu     sync.Mutex
 	opened []agent.Attach
 	fail   string
 }
 
-func (l *FakeLauncher) Name() string { return "fake" }
+func (l *FakePlanner) Name() string { return "fake" }
 
-func (l *FakeLauncher) Open(a agent.Attach) error {
+func (l *FakePlanner) Plan(a agent.Attach) (agent.FocusPlan, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.fail != "" {
-		return agent.LaunchError(l.fail)
+		return agent.FocusPlan{}, agent.LaunchError(l.fail)
 	}
 	l.opened = append(l.opened, agent.Attach{Argv: slices.Clone(a.Argv), Dir: a.Dir})
-	return nil
+	return agent.FocusPlan{NewTerminal: &agent.NewTerminalAction{Kind: "url", URL: "fake://opened"}}, nil
 }
 
-// Opened is the argv of every Attach opened.
-func (l *FakeLauncher) Opened() [][]string {
+// Opened is the argv of every Attach planned for.
+func (l *FakePlanner) Opened() [][]string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	out := make([][]string, len(l.opened))
@@ -474,17 +474,36 @@ func (l *FakeLauncher) Opened() [][]string {
 	return out
 }
 
-// Attaches is every Attach opened.
-func (l *FakeLauncher) Attaches() []agent.Attach {
+// Attaches is every Attach planned for.
+func (l *FakePlanner) Attaches() []agent.Attach {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return slices.Clone(l.opened)
 }
 
-func (l *FakeLauncher) SetFail(why string) {
+func (l *FakePlanner) SetFail(why string) {
 	l.mu.Lock()
 	l.fail = why
 	l.mu.Unlock()
+}
+
+// FakeFocusSink records every FocusPlan handed to it.
+type FakeFocusSink struct {
+	mu   sync.Mutex
+	sent []agent.FocusPlan
+}
+
+func (f *FakeFocusSink) Focus(plan agent.FocusPlan) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.sent = append(f.sent, plan)
+}
+
+// Sent is every FocusPlan handed to Focus.
+func (f *FakeFocusSink) Sent() []agent.FocusPlan {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.sent)
 }
 
 // VoiceCallKind tells VoiceCall variants apart.
@@ -1142,18 +1161,18 @@ func (r *FakeRunner) SpawnDetached(argv []string, env []agent.EnvVar) error {
 
 // Interface checks.
 var (
-	_ agent.SessionHost      = (*FakeSessionHost)(nil)
-	_ agent.TerminalLauncher = (*FakeLauncher)(nil)
-	_ agent.VoiceLink        = (*RecordingVoiceLink)(nil)
-	_ agent.Notifier         = (*RecordingNotifier)(nil)
-	_ agent.PixieCue         = (*RecordingNotifier)(nil)
-	_ agent.StatusSink       = (*RecordingStatus)(nil)
-	_ agent.Store            = (*MemStore)(nil)
-	_ agent.Clock            = (*ManualClock)(nil)
-	_ agent.IdSource         = (*SeqIds)(nil)
-	_ agent.TrustStore       = (*RecordingTrust)(nil)
-	_ agent.WorktreeFs       = (*FakeWorktrees)(nil)
-	_ agent.TokenIssuer      = (*FakeTokens)(nil)
-	_ agent.WorkerRecipes    = (*FakeRecipes)(nil)
-	_ agent.CommandRunner    = (*FakeRunner)(nil)
+	_ agent.SessionHost     = (*FakeSessionHost)(nil)
+	_ agent.TerminalPlanner = (*FakePlanner)(nil)
+	_ agent.VoiceLink       = (*RecordingVoiceLink)(nil)
+	_ agent.Notifier        = (*RecordingNotifier)(nil)
+	_ agent.PixieCue        = (*RecordingNotifier)(nil)
+	_ agent.StatusSink      = (*RecordingStatus)(nil)
+	_ agent.Store           = (*MemStore)(nil)
+	_ agent.Clock           = (*ManualClock)(nil)
+	_ agent.IdSource        = (*SeqIds)(nil)
+	_ agent.TrustStore      = (*RecordingTrust)(nil)
+	_ agent.WorktreeFs      = (*FakeWorktrees)(nil)
+	_ agent.TokenIssuer     = (*FakeTokens)(nil)
+	_ agent.WorkerRecipes   = (*FakeRecipes)(nil)
+	_ agent.CommandRunner   = (*FakeRunner)(nil)
 )

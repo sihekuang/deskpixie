@@ -84,10 +84,34 @@ type Attach struct {
 	Dir  string // absolute starting folder; "" = the terminal's default
 }
 
-// TerminalLauncher opens a terminal tab or window running an Attach (Warp, iTerm).
-type TerminalLauncher interface {
+// FocusPlan: how to show a terminal already attached, or open a new one (#116). The core builds
+// every field; the app only executes, trying each present rung in order and stopping at the
+// first that shows something. The rung groups are NOT uniform: ItermSelect alone and
+// ActivateApp alone have no fallback (a failure there is final, matching today's
+// ReusingLauncher.Open exactly); only the Warp group (FocusURLs/RaiseScript) falls back to
+// KillPIDs+NewTerminal. Nothing attached: only NewTerminal is set.
+type FocusPlan struct {
+	FocusURLs   []string           `json:"focus_urls,omitempty"`
+	RaiseScript []string           `json:"raise_script,omitempty"`
+	ItermSelect []string           `json:"iterm_select,omitempty"`
+	ActivateApp string             `json:"activate_app,omitempty"`
+	KillPIDs    []int              `json:"kill_pids,omitempty"`
+	NewTerminal *NewTerminalAction `json:"new_terminal,omitempty"`
+}
+
+// NewTerminalAction is tagged by Kind: "url" (open a URL, e.g. a Warp tab-config URL already
+// written to disk) or "applescript" (run this AppleScript to create a window).
+type NewTerminalAction struct {
+	Kind   string   `json:"kind"`
+	URL    string   `json:"url,omitempty"`
+	Script []string `json:"script,omitempty"`
+}
+
+// TerminalPlanner decides how to show a terminal attached to Attach (#116: the core decides,
+// the app shows).
+type TerminalPlanner interface {
 	Name() string
-	Open(a Attach) error // LaunchError
+	Plan(a Attach) (FocusPlan, error)
 }
 
 // VoiceLink is the delegation side's only view of the voice loop.
@@ -124,6 +148,11 @@ type UpdatesSink interface {
 // waits until the user stops typing, then focuses it as a click would (agent.focusJob).
 type PaneSink interface {
 	ShowPane(job JobID, worker string)
+}
+
+// FocusSink hands a FocusPlan to the shell to execute (#116: the core decides, the app shows).
+type FocusSink interface {
+	Focus(plan FocusPlan)
 }
 
 // StatusSink is the tray's one-line agent status, e.g. "Coordinator: herdr not found"; "" clears it.

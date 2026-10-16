@@ -74,8 +74,10 @@ type Deps struct {
 	Pixie    PixieCue
 	Status   StatusSink
 	// Modes hears each Claude agent's Manual-mode changes (nil: ignored).
-	Modes    ModeSink
-	Launcher TerminalLauncher
+	Modes   ModeSink
+	Planner TerminalPlanner
+	// Focus hands a built FocusPlan to the shell to execute (#116).
+	Focus FocusSink
 	// TerminalDir is the folder the agent terminal starts in (the projects folder, else home).
 	TerminalDir string
 	Store       Store
@@ -495,7 +497,12 @@ func (h *AgentHandle) OpenTerminal(ctx context.Context) error {
 	target := h.ctl.OpenTarget()
 	h.ctlMu.Unlock()
 	focusQuietly(ctx, h.deps.Host.Session(), target)
-	return h.deps.Launcher.Open(Attach{Argv: h.deps.Host.AttachCommand(), Dir: h.deps.TerminalDir})
+	plan, err := h.deps.Planner.Plan(Attach{Argv: h.deps.Host.AttachCommand(), Dir: h.deps.TerminalDir})
+	if err != nil {
+		return err
+	}
+	h.deps.Focus.Focus(plan)
+	return nil
 }
 
 // UpdatesSeen: the bubble showed these lines long enough to count as heard.
@@ -557,7 +564,12 @@ func (h *AgentHandle) FocusJob(ctx context.Context, job JobID, worker string) er
 	target := h.ctl.FocusTarget(job, worker)
 	h.ctlMu.Unlock()
 	focusQuietly(ctx, h.deps.Host.Session(), target)
-	return h.deps.Launcher.Open(Attach{Argv: h.deps.Host.AttachCommand(), Dir: h.deps.TerminalDir})
+	plan, err := h.deps.Planner.Plan(Attach{Argv: h.deps.Host.AttachCommand(), Dir: h.deps.TerminalDir})
+	if err != nil {
+		return err
+	}
+	h.deps.Focus.Focus(plan)
+	return nil
 }
 
 // RosterDebounce coalesces a burst of changes into one rebuild; RosterBackstop rebuilds anyway,
@@ -585,7 +597,12 @@ func (h *AgentHandle) FocusAgent(ctx context.Context, name string) error {
 	}
 	h.Input(EnsureCoordinatorInput())
 	focusQuietly(ctx, h.deps.Host.Session(), name)
-	return h.deps.Launcher.Open(Attach{Argv: h.deps.Host.AttachCommand(), Dir: h.deps.TerminalDir})
+	plan, err := h.deps.Planner.Plan(Attach{Argv: h.deps.Host.AttachCommand(), Dir: h.deps.TerminalDir})
+	if err != nil {
+		return err
+	}
+	h.deps.Focus.Focus(plan)
+	return nil
 }
 
 func (h *AgentHandle) pokeRoster() {
