@@ -533,3 +533,35 @@ func nextTurn(t *testing.T, events <-chan agent.PaneEvent) agent.PaneEvent {
 		}
 	}
 }
+
+// TestVerbatimPerSession (#143): each session is verbatim until it's turned off, and the
+// setting is its own: another session keeps the default.
+func TestVerbatimPerSession(t *testing.T) {
+	h, sock := newHost(t)
+	_, a := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api"})
+	_, b := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/web"})
+	var _ agent.VerbatimSetter = h
+	if on, err := h.Verbatim(a.Address); err != nil || !on {
+		t.Fatalf("on by default: %v %v", on, err)
+	}
+	if err := h.SetVerbatim(a.Address, false); err != nil {
+		t.Fatal(err)
+	}
+	if on, _ := h.Verbatim(a.Address); on {
+		t.Fatal("turned off")
+	}
+	if on, _ := h.Verbatim(b.Address); !on {
+		t.Fatal("another session keeps its own setting")
+	}
+	for _, s := range listed(t, h) {
+		if want := s.Name != a.Address; s.User.Verbatim != want {
+			t.Errorf("%s listed verbatim %v, want %v", s.Name, s.User.Verbatim, want)
+		}
+	}
+	if _, err := h.Verbatim("nobody"); err == nil {
+		t.Fatal("an unknown session is an error")
+	}
+	if err := h.SetVerbatim("nobody", true); err == nil {
+		t.Fatal("an unknown session is an error")
+	}
+}

@@ -345,11 +345,7 @@ func ParseToolCall(role Role, name string, args any) (McpCall, error) {
 		if err != nil {
 			return McpCall{}, err
 		}
-		verbatim, err := flag("verbatim")
-		if err != nil {
-			return McpCall{}, err
-		}
-		return McpCall{Kind: CallMessageSession, Name: n, Text: t, Verbatim: verbatim}, nil
+		return McpCall{Kind: CallMessageSession, Name: n, Text: t}, nil
 	case "interrupt_session", "close_session":
 		n, err := needName("name")
 		if err != nil {
@@ -366,6 +362,19 @@ func ParseToolCall(role Role, name string, args any) (McpCall, error) {
 		}
 		t, _ := text("text")
 		return McpCall{Kind: CallDescribeSession, Name: n, Text: singleLine(t)}, nil
+	case "set_session_verbatim":
+		n, err := needName("name")
+		if err != nil {
+			return McpCall{}, err
+		}
+		if obj["verbatim"] == nil {
+			return McpCall{}, badArgs("verbatim must be true or false")
+		}
+		on, err := flag("verbatim")
+		if err != nil {
+			return McpCall{}, err
+		}
+		return McpCall{Kind: CallSetSessionVerbatim, Name: n, Verbatim: on}, nil
 	case "report_blocked":
 		r, err := needQuote("reason", MaxReportWords)
 		if err != nil {

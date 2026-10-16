@@ -11,7 +11,7 @@ import (
 
 // SessionTools are the coordinator's tools for the sessions you start yourself with pix
 // (#89). They are available whether or not workers are on.
-var SessionTools = [5]string{"list_sessions", "message_session", "interrupt_session", "close_session", "describe_session"}
+var SessionTools = [6]string{"list_sessions", "message_session", "interrupt_session", "close_session", "describe_session", "set_session_verbatim"}
 
 // IsSessionTool reports whether name is one of SessionTools.
 func IsSessionTool(name string) bool { return slices.Contains(SessionTools[:], name) }
@@ -27,11 +27,10 @@ func SessionCatalog() []map[string]any {
 		},
 		{
 			"name":        "message_session",
-			"description": "Send a message to a session the user started, once the session can take it. It's typed in directly, never relayed through Claude Code's own cross-session messaging (which would label it as coming from another Claude session and refuse to treat it as the user's approval). By default it arrives prefixed \"Coordinator says: …\" — quote the user's own words rather than claiming they approved something; never say the user already approved a pending prompt unless you are relaying their own words with verbatim: true. To answer something a session is waiting to hear back on, set verbatim: true with the user's own words, exactly as they said them — it then arrives exactly as if the user had typed it themselves, with no prefix added. Only a reply with status \"sent\" means it was delivered.",
+			"description": "Send a message to a session the user started, once the session can take it. It's typed in directly, never relayed through Claude Code's own cross-session messaging. A session with verbatim on (the default; list_sessions shows it) gets the text exactly as given, as if the user typed it, so send the user's own words when relaying what they said and never claim they approved something they didn't. With verbatim off it arrives prefixed \"Coordinator says: …\". Only a reply with status \"sent\" means it was delivered.",
 			"inputSchema": objectSchema(map[string]any{
-				"name":     map[string]any{"type": "string", "description": name[1]},
-				"text":     map[string]any{"type": "string", "description": "The message. Quote the user's own words when relaying what they said; never claim they approved something unless verbatim is true."},
-				"verbatim": map[string]any{"type": "boolean", "description": "True when text is the user's own words, to deliver exactly as if they typed it themselves, with no \"Coordinator says:\" prefix — use this to answer something the session is waiting on. False or omitted for your own instruction, delivered prefixed \"Coordinator says: …\"."},
+				"name": map[string]any{"type": "string", "description": name[1]},
+				"text": map[string]any{"type": "string", "description": "The message. Quote the user's own words when relaying what they said."},
 			}, "name", "text"),
 		},
 		{
@@ -49,6 +48,14 @@ func SessionCatalog() []map[string]any {
 			"description": "Set the user's own description of a session they started (\"call the WebStorm one login bug\"). Empty text clears it.",
 			"inputSchema": objectSchema(stringProps(name, [2]string{"text", "A few words, or empty to clear."}), "name"),
 		},
+		{
+			"name":        "set_session_verbatim",
+			"description": "Turn verbatim on or off for a session the user started, when the user asks. On (the default): messages are typed exactly as given. Off: they arrive prefixed \"Coordinator says: …\".",
+			"inputSchema": objectSchema(map[string]any{
+				"name":     map[string]any{"type": "string", "description": name[1]},
+				"verbatim": map[string]any{"type": "boolean", "description": "True to send messages as given, false to prefix them."},
+			}, "name", "verbatim"),
+		},
 	}
 }
 
@@ -63,6 +70,7 @@ type SessionRow struct {
 	Where            string   `json:"where"`
 	Status           string   `json:"status"`
 	Reachable        bool     `json:"reachable"`
+	Verbatim         bool     `json:"verbatim"`              // messages are typed as given, not prefixed (#143)
 	Started          string   `json:"started,omitempty"`     // "1h30m ago"
 	LastActive       string   `json:"last_active,omitempty"` // "3m ago"
 }
@@ -84,9 +92,16 @@ type Describer interface {
 	SetDescription(name, text string) error
 }
 
+// VerbatimSetter keeps each session's verbatim setting (#143): on, the default, a message is
+// typed exactly as given; off, it is prefixed "Coordinator says: ".
+type VerbatimSetter interface {
+	Verbatim(name string) (bool, error)
+	SetVerbatim(name string, on bool) error
+}
+
 func isSessionCall(k McpCallKind) bool {
 	switch k {
-	case CallListSessions, CallMessageSession, CallInterruptSession, CallCloseSession, CallDescribeSession:
+	case CallListSessions, CallMessageSession, CallInterruptSession, CallCloseSession, CallDescribeSession, CallSetSessionVerbatim:
 		return true
 	}
 	return false
@@ -119,7 +134,7 @@ func sessionTool(ctx context.Context, host SessionHost, call McpCall) McpReply {
 		for _, a := range list {
 			u := a.User
 			rows = append(rows, SessionRow{Name: a.Name, Description: u.Description, PastDescriptions: u.PastDescriptions,
-				Tool: u.Tool, Repo: u.Repo, Cwd: a.Cwd, Where: u.Where, Status: a.Status.String(), Reachable: u.Reachable,
+				Tool: u.Tool, Repo: u.Repo, Cwd: a.Cwd, Where: u.Where, Status: a.Status.String(), Reachable: u.Reachable, Verbatim: u.Verbatim,
 				Started: ago(u.Started, now), LastActive: ago(u.LastActive, now)})
 		}
 		return McpReply{Value: map[string]any{"sessions": rows}}
@@ -134,12 +149,17 @@ func sessionTool(ctx context.Context, host SessionHost, call McpCall) McpReply {
 	status := ""
 	switch call.Kind {
 	case CallMessageSession:
-		// Verbatim (#129) is the user's own words, delivered raw, so a session can tell it's
-		// really their answer, not an instruction. Anything else is the coordinator's own
-		// text, labeled "Coordinator says: " instead, so it's never mistaken for the user's.
+		// Each session's own setting (#143) decides: verbatim, the default, types the text as
+		// given; off, it is labeled "Coordinator says: ".
 		text := call.Text
-		if !call.Verbatim {
-			text = CoordinatorSays(call.Text)
+		if v, ok := sec.(VerbatimSetter); ok {
+			on, verr := v.Verbatim(call.Name)
+			if verr != nil {
+				return McpReply{Err: verr}
+			}
+			if !on {
+				text = CoordinatorSays(call.Text)
+			}
 		}
 		err, status = sec.Prompt(ctx, call.Name, text), "sent"
 	case CallInterruptSession:
@@ -153,6 +173,14 @@ func sessionTool(ctx context.Context, host SessionHost, call McpCall) McpReply {
 		}
 		if err = d.SetDescription(call.Name, call.Text); err == nil {
 			return McpReply{Value: map[string]any{"name": call.Name, "description": call.Text}}
+		}
+	case CallSetSessionVerbatim:
+		v, ok := sec.(VerbatimSetter)
+		if !ok {
+			return McpReply{Err: errors.New("Verbatim settings are not available.")}
+		}
+		if err = v.SetVerbatim(call.Name, call.Verbatim); err == nil {
+			return McpReply{Value: map[string]any{"name": call.Name, "verbatim": call.Verbatim}}
 		}
 	}
 	if err != nil {
