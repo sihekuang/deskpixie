@@ -34,6 +34,7 @@ type session struct {
 	sessionID string
 	status    agent.PaneStatus
 	desc      Descriptions
+	labeled   bool // verbatim turned off: messages are prefixed (#143)
 	started   time.Time
 	active    time.Time // its last message
 	conn      net.Conn  // nil while unreachable
@@ -401,6 +402,31 @@ func (h *Host) SetDescription(name, text string) error {
 	return nil
 }
 
+// Verbatim reports whether a session's messages are typed as given (#143; on by default).
+func (h *Host) Verbatim(name string) (bool, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	s := h.sessions[name]
+	if s == nil {
+		return false, agent.ErrNoAgent(name)
+	}
+	return !s.labeled, nil
+}
+
+// SetVerbatim turns a session's verbatim setting on or off.
+func (h *Host) SetVerbatim(name string, on bool) error {
+	h.mu.Lock()
+	s := h.sessions[name]
+	if s == nil {
+		h.mu.Unlock()
+		return agent.ErrNoAgent(name)
+	}
+	s.labeled = !on
+	h.mu.Unlock()
+	h.changed()
+	return nil
+}
+
 func (h *Host) Name() string                        { return Name }
 func (h *Host) EnsureSession(context.Context) error { return nil }
 func (h *Host) StartAgent(context.Context, agent.AgentSpec) (agent.AgentInfo, error) {
@@ -451,7 +477,7 @@ func (h *Host) List(context.Context) ([]agent.AgentInfo, error) {
 		out = append(out, agent.AgentInfo{
 			Name: s.addr, Pane: "pix:" + s.addr, Cwd: s.hello.Cwd, Status: s.status, Origin: agent.OriginUser,
 			User: &agent.UserSession{Tool: s.hello.Tool, Repo: repo, Where: s.hello.Where, App: s.hello.App,
-				Description: desc, PastDescriptions: s.desc.Past(), Reachable: s.conn != nil,
+				Description: desc, PastDescriptions: s.desc.Past(), Reachable: s.conn != nil, Verbatim: !s.labeled,
 				Started: s.started, LastActive: s.active},
 		})
 	}

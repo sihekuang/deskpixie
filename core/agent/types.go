@@ -381,6 +381,7 @@ type UserSession struct {
 	Description      string
 	PastDescriptions []string
 	Reachable        bool      // pix is connected (false for a few seconds after it dropped)
+	Verbatim         bool      // messages are typed as given, not prefixed (#143; on by default)
 	Started          time.Time // when it first registered with this app
 	LastActive       time.Time // its last hook, status or description
 }
@@ -637,19 +638,21 @@ const (
 	CallInterruptSession
 	CallCloseSession
 	CallDescribeSession
+	CallSetSessionVerbatim
 	CallCreateProject
 )
 
 // McpCall is one pixie MCP tool call, arguments checked and cleaned. Only the fields of its
 // Kind are set: StartWorker → Worker; MessageWorker → Name, Text; StopWorker → Name; CreateProject → Name;
 // ReportProgress → Summary; ReportResult → Outcome, Summary, Evidence; AskCoordinator →
-// Question, Options; ReportBlocked → Reason; MessageSession → Name, Text, Verbatim.
+// Question, Options; ReportBlocked → Reason; MessageSession → Name, Text;
+// SetSessionVerbatim → Name, Verbatim.
 type McpCall struct {
 	Kind     McpCallKind
 	Worker   WorkerRequest
 	Name     string
 	Text     string
-	Verbatim bool // MessageSession only (#129): Text is the user's own words, not the coordinator's.
+	Verbatim bool // SetSessionVerbatim only (#143): the session's new setting.
 	Summary  string
 	Outcome  Outcome
 	Evidence string

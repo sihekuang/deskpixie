@@ -24,8 +24,9 @@ type Launch struct {
 // and PermissionRequest for the permission dialogs (#105: the prompts a session waits on).
 var hookEvents = []string{"SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "Notification", "PreToolUse", "PermissionRequest"}
 
-// hookMatchers narrows an event to these tools.
-var hookMatchers = map[string]string{"PreToolUse": "AskUserQuestion"}
+// hookMatchers narrows an event to these tools, or a Notification to the prompts that wait on
+// you: not idle_prompt, which comes after a minute idle and would hold every message (#144).
+var hookMatchers = map[string]string{"PreToolUse": "AskUserQuestion", "Notification": "permission_prompt|elicitation_dialog"}
 
 // PlanLaunch builds the per-run additions for tool (nothing global is edited); userArgs
 // follow them unchanged. self is this pix's path, sock its local socket, dir a private
