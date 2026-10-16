@@ -945,3 +945,40 @@ func TestACodexApprovalsLastOptionIsEscape(t *testing.T) {
 	}
 	typed(t, h, 0x1b)
 }
+
+// TestSessionTypesPromptAfterIdleNotice (#144): Claude Code notifies "waiting for your input"
+// (idle_prompt) after a minute idle. That isn't a prompt waiting on you: the session is still
+// idle, and a message sent then must be typed, not held until your next turn.
+func TestSessionTypesPromptAfterIdleNotice(t *testing.T) {
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "read x; echo seen:$x"}})
+	h.s.Hook("Notification", map[string]any{"notification_type": "idle_prompt", "message": "Claude is waiting for your input"})
+	if st := h.s.currentStatus(); st != "idle" {
+		t.Fatalf("an idle notice must leave the session idle, got %q", st)
+	}
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "after a minute idle"})
+	waitEvent(t, h.d.events, "prompt result", func(m wire.Msg) bool { return m.ID == "1" && m.Err == "" })
+	done := make(chan int, 1)
+	go func() { done <- h.s.finish() }()
+	select {
+	case code := <-done:
+		var buf bytes.Buffer
+		h.s.o.stdout.Close()
+		buf.ReadFrom(h.out)
+		if code != 0 || !strings.Contains(buf.String(), "after a minute idle") {
+			t.Fatalf("code %d out %q", code, buf.String())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("the message was never typed: %d still queued", h.s.queue.Len())
+	}
+}
+
+// TestPermissionNoticeStillBlocks (#144): a prompt that does wait on you still marks it blocked.
+func TestPermissionNoticeStillBlocks(t *testing.T) {
+	for _, p := range []map[string]any{{"notification_type": "permission_prompt"}, {"notification_type": "elicitation_dialog"}, {}} {
+		h := keyHarness(t, "claude")
+		h.s.Hook("Notification", p)
+		if st := h.s.currentStatus(); st != "blocked" {
+			t.Errorf("%v: got %q, want blocked", p, st)
+		}
+	}
+}

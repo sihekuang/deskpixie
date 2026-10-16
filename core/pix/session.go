@@ -262,6 +262,12 @@ func (s *Session) Hook(event string, p map[string]any) string {
 			}
 		}
 	case "Notification":
+		// Only a prompt waiting on you blocks; "waiting for your input" after a minute idle, or
+		// a login, leaves it idle (#144). The hook's matcher already leaves those out.
+		switch p["notification_type"] {
+		case "idle_prompt", "auth_success":
+			return ""
+		}
 		s.setStatus("blocked")
 	case "PostToolUse":
 		s.clearQuestion()
