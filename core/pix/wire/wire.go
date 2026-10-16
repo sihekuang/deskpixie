@@ -30,8 +30,8 @@ const (
 
 // Msg is one message. Only the fields of its Kind are set: register → Tool…Description;
 // registered → Address; refused → Reason; event → Event (status, description, session,
-// exited, hook, turn, question, question-gone) and its fields; command → Command, Text, Keys,
-// Verbatim; result → Text, Err.
+// exited, hook, turn, question, question-gone) and its fields; command → Command, Text, Keys;
+// result → Text, Err.
 type Msg struct {
 	V           int    `json:"v"`
 	Kind        Kind   `json:"kind"`
@@ -60,11 +60,7 @@ type Msg struct {
 	Command string   `json:"command,omitempty"`
 	Text    string   `json:"text,omitempty"`
 	Keys    []string `json:"keys,omitempty"`
-	// Verbatim (command "prompt", #129): Text is the user's own words, to be typed exactly as
-	// they'd type it themselves, never relayed through Claude's inbox socket (which Claude Code
-	// labels as a peer session and refuses to treat as the user's own approval).
-	Verbatim bool   `json:"verbatim,omitempty"`
-	Err      string `json:"err,omitempty"`
+	Err     string   `json:"err,omitempty"`
 }
 
 // Encode writes m as one line, with V set.

@@ -68,36 +68,31 @@ func TestMessageAndInterruptSession(t *testing.T) {
 	}
 }
 
-// TestMessageSessionVerbatimUsesVerbatimPrompter (#129): verbatim:true must reach
-// PromptVerbatim, not Prompt, when the host supports it — otherwise a relayed user answer
-// would arrive labeled as a peer message and Claude Code would refuse to act on it.
-func TestMessageSessionVerbatimUsesVerbatimPrompter(t *testing.T) {
+// TestMessageSessionVerbatimIsUnlabeled (#129): verbatim:true must deliver the text raw, with
+// no "Coordinator says:" prefix, so a session can tell it's really the user's own answer, not
+// an instruction.
+func TestMessageSessionVerbatimIsUnlabeled(t *testing.T) {
 	c, user, _ := newSessionHarness(t)
 	ctx := context.Background()
 	if r := agent.SessionToolForTest(ctx, c, agent.McpCall{Kind: agent.CallMessageSession, Name: "focus-claude", Text: "go ahead", Verbatim: true}); r.Err != nil {
 		t.Fatal(r.Err)
 	}
-	if got := user.VerbatimPrompts(); len(got) != 1 || got[0].Agent != "focus-claude" || got[0].Text != "go ahead" {
-		t.Fatalf("verbatim prompts: %v", got)
-	}
-	if len(user.Prompts()) != 0 {
-		t.Fatalf("a verbatim message must not also go through the labeled relay: %v", user.Prompts())
+	if got := user.Prompts(); len(got) != 1 || got[0].Agent != "focus-claude" || got[0].Text != "go ahead" {
+		t.Fatalf("prompts: %v", got)
 	}
 }
 
-// TestMessageSessionWithoutVerbatimUsesLabeledRelay: the default (verbatim omitted or false)
-// keeps using the existing labeled relay, unchanged.
-func TestMessageSessionWithoutVerbatimUsesLabeledRelay(t *testing.T) {
+// TestMessageSessionWithoutVerbatimIsLabeled (#129, extended): the default (verbatim omitted
+// or false) is prefixed "Coordinator says: " instead of relying on Claude Code's own
+// cross-session wrapper, which labels it as coming from another Claude session.
+func TestMessageSessionWithoutVerbatimIsLabeled(t *testing.T) {
 	c, user, _ := newSessionHarness(t)
 	ctx := context.Background()
 	if r := agent.SessionToolForTest(ctx, c, agent.McpCall{Kind: agent.CallMessageSession, Name: "focus-claude", Text: "hi"}); r.Err != nil {
 		t.Fatal(r.Err)
 	}
-	if got := user.Prompts(); len(got) != 1 || got[0].Text != "hi" {
+	if got := user.Prompts(); len(got) != 1 || got[0].Text != "Coordinator says: hi" {
 		t.Fatalf("prompts: %v", got)
-	}
-	if len(user.VerbatimPrompts()) != 0 {
-		t.Fatalf("a non-verbatim message must not use the verbatim path: %v", user.VerbatimPrompts())
 	}
 }
 

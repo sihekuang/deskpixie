@@ -15,14 +15,6 @@ type SessionAnswerer interface {
 	AnswerQuestion(ctx context.Context, name, id, answer string) error
 }
 
-// VerbatimPrompter delivers text as the user's own words, exactly as they said them (#129): it
-// never arrives labeled as coming from another session, so it can unblock something a session
-// is waiting to hear back on, which a normal Prompt cannot (Claude Code refuses to treat a
-// peer-labeled message as the user's own approval for a pending prompt, however it's worded).
-type VerbatimPrompter interface {
-	PromptVerbatim(ctx context.Context, name, text string) error
-}
-
 // ChangeNotifier is a host whose list can change without a pane event (a pix session
 // connected, dropped or was described): Changes gets a signal then (coalesced, never blocks).
 type ChangeNotifier interface {

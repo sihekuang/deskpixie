@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -296,16 +297,12 @@ func (s *Session) command(m wire.Msg) wire.Msg {
 			s.posted = s.posted[len(s.posted)-8:]
 		}
 		s.mu.Unlock()
-		// A verbatim message is the user's own words: type it, same as Codex, never relay it
-		// over Claude's inbox socket (#129) — Claude Code labels anything arriving that way as
-		// a peer session and refuses to treat it as the user's own approval, however it's worded.
-		if s.o.tool == "claude" && !m.Verbatim {
-			if rec, err := FindClaudeRecord(s.o.home, s.runner.Pid()); err == nil {
-				if err := PostClaude(rec, text); err == nil {
-					return wire.Msg{}
-				}
-			}
-		}
+		// Every prompt is typed, same as Codex, never relayed over Claude's inbox socket
+		// (#129, extended): Claude Code labels anything arriving that way as coming from a
+		// peer session, refuses to treat it as the user's own approval however it's worded,
+		// and wraps even a routine coordinator instruction in a generic "another Claude
+		// session" notice. The caller labels its own text ("Coordinator says: ") before it
+		// reaches here; this package only ever sees the final text to type.
 		if err := s.queue.Push(text); err != nil {
 			return wire.Msg{Err: err.Error()}
 		}
@@ -587,6 +584,17 @@ func Run(args []string, env func(string) string, home string) int {
 		}
 	}()
 	return s.finish()
+}
+
+// ProcStart is pid's process start time, for telling a live process from a reused pid.
+func ProcStart(pid int) (string, error) {
+	cmd := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(pid))
+	cmd.Env = append(os.Environ(), "LC_ALL=C", "TZ=UTC")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 // gitRoot is the nearest folder from dir up that holds .git, or "".

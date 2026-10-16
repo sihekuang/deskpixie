@@ -412,13 +412,6 @@ func (h *Host) ReplaceAgent(context.Context, agent.AgentSpec) (agent.AgentInfo, 
 func (h *Host) Prompt(ctx context.Context, name, text string) error {
 	return h.command(ctx, name, wire.Msg{Command: "prompt", Text: text})
 }
-
-// PromptVerbatim sends text as the user's own words (#129): pix types it, the same way it
-// delivers to Codex, instead of relaying it over Claude's inbox socket as a peer message that
-// Claude Code would refuse to treat as the user's own approval.
-func (h *Host) PromptVerbatim(ctx context.Context, name, text string) error {
-	return h.command(ctx, name, wire.Msg{Command: "prompt", Text: text, Verbatim: true})
-}
 func (h *Host) SendKeys(ctx context.Context, name string, keys []string) error {
 	return h.command(ctx, name, wire.Msg{Command: "keys", Keys: keys})
 }

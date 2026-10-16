@@ -50,30 +50,29 @@ type Keys struct {
 }
 
 type hostState struct {
-	ensures         int
-	nextPane        uint64
-	agents          map[string]agent.AgentInfo
-	starts          []agent.AgentSpec
-	prompts         []Prompt
-	verbatimPrompts []Prompt
-	keys            []Keys
-	focused         []string
-	labels          []string
-	closed          []string
-	subscribers     []chan agent.PaneEvent
-	failEnsure      error
-	failStart       error
-	failContinue    bool
-	startAttempts   int
-	faults          []Fault
-	screens         map[string]string
-	afterKeys       map[string]string // screen to show once keys are sent to the agent
-	hangStart       bool
-	panicStart      bool
-	dieOnStart      bool
-	failList        bool
-	hangClose       bool
-	swallow         bool
+	ensures       int
+	nextPane      uint64
+	agents        map[string]agent.AgentInfo
+	starts        []agent.AgentSpec
+	prompts       []Prompt
+	keys          []Keys
+	focused       []string
+	labels        []string
+	closed        []string
+	subscribers   []chan agent.PaneEvent
+	failEnsure    error
+	failStart     error
+	failContinue  bool
+	startAttempts int
+	faults        []Fault
+	screens       map[string]string
+	afterKeys     map[string]string // screen to show once keys are sent to the agent
+	hangStart     bool
+	panicStart    bool
+	dieOnStart    bool
+	failList      bool
+	hangClose     bool
+	swallow       bool
 }
 
 // FakeSessionHost is an in-memory multiplexer. By default a prompt makes the agent Working and,
@@ -160,12 +159,6 @@ func (f *FakeSessionHost) Starts() (out []agent.AgentSpec) {
 
 func (f *FakeSessionHost) Prompts() (out []Prompt) {
 	f.with(func(s *hostState) { out = slices.Clone(s.prompts) })
-	return
-}
-
-// VerbatimPrompts is every PromptVerbatim call recorded so far (#129).
-func (f *FakeSessionHost) VerbatimPrompts() (out []Prompt) {
-	f.with(func(s *hostState) { out = slices.Clone(s.verbatimPrompts) })
 	return
 }
 
@@ -339,28 +332,6 @@ func (f *FakeSessionHost) Prompt(_ context.Context, name, text string) error {
 			return
 		}
 		s.prompts = append(s.prompts, Prompt{name, text})
-		swallow = s.swallow
-	})
-	if err != nil || swallow {
-		return err
-	}
-	f.SetStatus(name, agent.PaneWorking)
-	if !f.manual && !(f.hold && strings.HasPrefix(text, "Count")) {
-		f.SetStatus(name, agent.PaneIdle)
-	}
-	return nil
-}
-
-// PromptVerbatim is Prompt, recorded separately (#129), so a test can tell a labeled relay
-// from one delivered as the user's own words.
-func (f *FakeSessionHost) PromptVerbatim(_ context.Context, name, text string) error {
-	var err error
-	swallow := false
-	f.with(func(s *hostState) {
-		if err = known(s, name); err != nil {
-			return
-		}
-		s.verbatimPrompts = append(s.verbatimPrompts, Prompt{name, text})
 		swallow = s.swallow
 	})
 	if err != nil || swallow {

@@ -240,46 +240,24 @@ func claudeInbox(t *testing.T, s *Session) (got chan map[string]any) {
 	return got
 }
 
-// TestSessionPromptWithoutVerbatimUsesClaudeInbox: unchanged behavior (#129) — a labeled
-// relay still prefers Claude's own inbox socket when a record for the session exists.
-func TestSessionPromptWithoutVerbatimUsesClaudeInbox(t *testing.T) {
-	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}})
-	got := claudeInbox(t, h.s)
-
-	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "hi"})
-	waitEvent(t, h.d.events, "prompt result", func(m wire.Msg) bool { return m.Kind == wire.KindResult && m.ID == "1" && m.Err == "" })
-
-	select {
-	case m := <-got:
-		msg, _ := m["message"].(map[string]any)
-		if msg["content"] != "hi" {
-			t.Fatalf("inbox message: %v", m)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("the labeled relay must still use Claude's inbox socket when a record exists")
-	}
-	if h.s.queue.Len() != 0 {
-		t.Fatalf("a message delivered over the socket must never also be queued for typing: %d", h.s.queue.Len())
-	}
-	h.s.runner.Hangup()
-	h.s.finish()
-}
-
-// TestSessionPromptVerbatimSkipsClaudeInbox (#129): verbatim:true must type the text, like
-// Codex already does, never relay it over Claude's inbox socket — even when a usable record for
-// the session is sitting right there. Claude Code labels anything arriving over that socket as
-// coming from a peer session and refuses to treat it as the user's own approval, however it's
-// worded, so this is the only delivery that can unblock something the session is waiting on.
-func TestSessionPromptVerbatimSkipsClaudeInbox(t *testing.T) {
+// TestSessionPromptNeverUsesClaudeInbox (#129, extended): a "prompt" command is always typed,
+// same as Codex, never relayed over Claude's inbox socket — even when a usable record for the
+// session is sitting right there. Claude Code labels anything arriving over that socket as
+// coming from a peer session, refuses to treat it as the user's own approval however it's
+// worded, and wraps even a routine coordinator instruction in a generic "another Claude
+// session" notice; typing it directly avoids both. (The "Coordinator says: " label for a
+// non-verbatim message is added a layer up, in core/agent — this package only ever sees the
+// final text to type.)
+func TestSessionPromptNeverUsesClaudeInbox(t *testing.T) {
 	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "read x; echo seen:$x"}})
 	got := claudeInbox(t, h.s)
 
-	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "go ahead", Verbatim: true})
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "Coordinator says: go ahead"})
 	waitEvent(t, h.d.events, "prompt result", func(m wire.Msg) bool { return m.Kind == wire.KindResult && m.ID == "1" && m.Err == "" })
 
 	select {
 	case m := <-got:
-		t.Fatalf("a verbatim message must never reach Claude's inbox socket: %v", m)
+		t.Fatalf("a prompt must never reach Claude's inbox socket: %v", m)
 	case <-time.After(300 * time.Millisecond):
 	}
 
@@ -288,7 +266,7 @@ func TestSessionPromptVerbatimSkipsClaudeInbox(t *testing.T) {
 	h.s.o.stdout.Close()
 	buf.ReadFrom(h.out)
 	if code != 0 || !strings.Contains(buf.String(), "seen:") || !strings.Contains(buf.String(), "go ahead") {
-		t.Fatalf("verbatim text must be typed, same as Codex: code %d out %q", code, buf.String())
+		t.Fatalf("text must be typed, same as Codex: code %d out %q", code, buf.String())
 	}
 }
 
