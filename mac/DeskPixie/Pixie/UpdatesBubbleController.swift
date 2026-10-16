@@ -133,6 +133,10 @@ final class UpdatesBubbleController {
     }
 
     private func clicked(_ line: UpdateLine) {
+        if let app = line.app {
+            AppActivation.activate(bundleID: app)
+            return
+        }
         call("agent.focusJob", FocusJobArgs(job: line.job ?? "", worker: line.worker ?? ""))
     }
 
