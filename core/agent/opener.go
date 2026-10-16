@@ -5,9 +5,11 @@ import "github.com/sihekuang/deskpixie/core/voice"
 // Opening a conversation for an update (`agent.openConversationForUpdates`, a feature flag, off by
 // default). With it on, a job's done or failed line, an agent question or a spoken worker
 // report that arrives while no conversation is open still gets today's chime, notification
-// and outbox line, and Pixie also opens a conversation the way the hotkey does. Its Opened
-// replays the outbox (each line once, marked delivered), so Pixie says the update and then
-// listens; the conversation ends on the usual silence timeout.
+// and outbox line, and Pixie also opens a conversation the way the hotkey does. A coordinator
+// progress reply (status working) opens none, so it gets no chime or notification either (#113):
+// it waits in the outbox and the next conversation says it. An opened conversation replays
+// the outbox (each line once, marked delivered), so Pixie says the update and then listens;
+// it ends on the usual silence timeout.
 //
 // Worker reports are debounced first (debounce.go): held per job until quiet, deduped and
 // coalesced, so a burst of reports is one line and that one line is what opens a

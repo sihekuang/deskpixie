@@ -1135,7 +1135,14 @@ func (c *AgentController) onReply(id JobID, status SpokenStatus, text string, no
 		_, _ = c.jobs.Transition(id, JobWorking, now)
 		c.jobs.SetProgress(id, text, now)
 		c.saveJob(id, fx)
-		c.deliver(NewJobLine(LineReply, text, id), now, fx)
+		line := NewJobLine(LineReply, text, id)
+		if c.settings.OpenConversation && !c.voiceOpen {
+			// #113: progress opens no conversation, so it doesn't chime or notify either (a
+			// chime means one follows); it waits in the outbox for the next conversation.
+			c.applyDelivery(OutboxDelivery(line), now, fx)
+			break
+		}
+		c.deliver(line, now, fx)
 	case SpokenQuestion:
 		_, _ = c.jobs.Transition(id, JobQuestion, now)
 		c.jobs.SetReply(id, text, now)
