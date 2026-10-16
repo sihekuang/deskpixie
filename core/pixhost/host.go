@@ -260,6 +260,12 @@ func (h *Host) onMsg(s *session, m wire.Msg) bool {
 				h.remove(s)
 				return true
 			}
+		case "turn":
+			h.mu.Lock()
+			t := agent.SessionTurn{Label: s.label(), Reply: m.Text, App: s.hello.App,
+				Duration: agent.Millis(max(m.DurationMs, 0)), FromPixie: m.Source == "pixie"}
+			h.mu.Unlock()
+			h.broadcast(agent.PaneEvent{Kind: agent.PaneEventTurn, Agent: s.addr, Turn: &t})
 		case "exited":
 			h.remove(s)
 			return true
@@ -436,6 +442,20 @@ func (h *Host) List(context.Context) ([]agent.AgentInfo, error) {
 		})
 	}
 	return out, nil
+}
+
+// label names s in what Pixie says (h.mu held): its description, else its repo's or folder's
+// name, else its tool.
+func (s *session) label() string {
+	if d := s.desc.Current(); d != "" {
+		return d
+	}
+	for _, p := range []string{s.hello.GitRoot, s.hello.Cwd} {
+		if p != "" {
+			return filepath.Base(p)
+		}
+	}
+	return s.hello.Tool
 }
 
 // noTaskYet describes a session before it has a description: what it is and where, so it is

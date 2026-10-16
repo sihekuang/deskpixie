@@ -305,13 +305,26 @@ type PaneEventKind int
 const (
 	PaneEventStatus PaneEventKind = iota
 	PaneEventExited
+	// PaneEventTurn: a session you started with pix finished a turn (Turn set, #114).
+	PaneEventTurn
 )
 
-// PaneEvent is a status change (Status set) or an exit of a named agent.
+// PaneEvent is a status change (Status set), an exit of a named agent, or a finished turn of
+// one of your pix sessions (Turn set).
 type PaneEvent struct {
 	Kind   PaneEventKind
 	Agent  string
-	Status PaneStatus // PaneEventStatus only
+	Status PaneStatus   // PaneEventStatus only
+	Turn   *SessionTurn // PaneEventTurn only (a pointer, so PaneEvent stays comparable)
+}
+
+// SessionTurn is a finished turn of a session you started with pix (#114).
+type SessionTurn struct {
+	Label     string // its description, else its repo's or folder's name, else its tool
+	Reply     string // the turn's final reply (capped by pix)
+	App       string // bundle id of the app it runs in ("" unknown)
+	Duration  Millis // from working to its Stop; 0 when no working was seen
+	FromPixie bool   // Pixie typed the turn's prompt (message_session)
 }
 
 // Origin says who started an agent: Pixie (in Herdr or tmux) or you (with pix, #89).

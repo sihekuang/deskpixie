@@ -42,3 +42,12 @@ func TestSocketPathFallsBackWhenLong(t *testing.T) {
 		t.Fatalf("long: %s", long)
 	}
 }
+
+func TestTurnDurationRoundTrips(t *testing.T) {
+	var buf bytes.Buffer
+	Encode(&buf, Msg{Kind: KindEvent, Event: "turn", Text: "done", DurationMs: 42_000, Source: "you"})
+	got, err := NewDecoder(&buf).Next()
+	if err != nil || got.DurationMs != 42_000 || got.Text != "done" || got.Source != "you" {
+		t.Fatalf("%+v %v", got, err)
+	}
+}
