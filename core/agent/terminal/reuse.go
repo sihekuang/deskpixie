@@ -55,11 +55,12 @@ func (l *ReusingPlanner) Plan(a agent.Attach) (agent.FocusPlan, error) {
 		RaiseScript: raiseWindowScript(app, titled.WindowTitle()),
 		KillPIDs:    clients,
 	}
-	newTerminal, err := l.inner.Plan(a)
-	if err != nil {
-		return agent.FocusPlan{}, err
+	// A failure here (e.g. an unwritable tab-configs directory) must not discard the rungs ps
+	// already found above — the focus URL or the raise may still work live, whether or not a
+	// fallback could ever be built. Only actually reaching the fallback can fail the whole plan.
+	if newTerminal, err := l.inner.Plan(a); err == nil {
+		plan.NewTerminal = newTerminal.NewTerminal
 	}
-	plan.NewTerminal = newTerminal.NewTerminal
 	return plan, nil
 }
 

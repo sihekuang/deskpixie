@@ -48,15 +48,23 @@ final class TerminalFocusExecutorTests: XCTestCase {
         }
     }
 
-    /// Runs plan against a fresh executor (unless `reuse` is given, for the accessibility-nag
-    /// test) and returns the fake plus the reported outcome.
-    private func run(_ plan: FocusPlan, reuse executor: TerminalFocusExecutor? = nil,
-                      fake: FakeTerminalFocusPrimitives = FakeTerminalFocusPrimitives())
+    /// A lock-protected capture cell: `TerminalFocusExecutor.reportOutcome` is `@Sendable`
+    /// (`execute` can run off the main actor — see its doc comment), so a test's closure can no
+    /// longer just assign a captured local `var` directly.
+    final class OutcomeBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var _value: (success: Bool, detail: String)?
+        var value: (success: Bool, detail: String)? { lock.withLock { _value } }
+        func set(_ success: Bool, _ detail: String) { lock.withLock { _value = (success, detail) } }
+    }
+
+    /// Runs plan against a fresh executor and returns the fake plus the reported outcome.
+    private func run(_ plan: FocusPlan, fake: FakeTerminalFocusPrimitives = FakeTerminalFocusPrimitives())
         -> (fake: FakeTerminalFocusPrimitives, outcome: (success: Bool, detail: String)?) {
-        var outcome: (success: Bool, detail: String)?
-        let exec = executor ?? TerminalFocusExecutor(primitives: fake) { outcome = ($0, $1) }
+        let box = OutcomeBox()
+        let exec = TerminalFocusExecutor(primitives: fake) { box.set($0, $1) }
         exec.execute(plan)
-        return (fake, outcome)
+        return (fake, box.value)
     }
 
     func testItermSelectAloneHasNoFallback() {
@@ -65,6 +73,8 @@ final class TerminalFocusExecutorTests: XCTestCase {
         let (_, outcome) = run(FocusPlan(itermSelect: ["tell application \"iTerm\""]), fake: fake)
         XCTAssertEqual(fake.log, ["script:tell application \"iTerm\""])
         XCTAssertEqual(outcome?.success, false)
+        // Must still read "could not open iTerm" for the tray, exactly as before this rung moved to Swift.
+        XCTAssertEqual(outcome?.detail, "could not open iTerm: could not show the terminal")
     }
 
     func testActivateAppAloneHasNoFallback() {
@@ -73,6 +83,7 @@ final class TerminalFocusExecutorTests: XCTestCase {
         let (_, outcome) = run(FocusPlan(activateApp: "/Applications/Warp.app"), fake: fake)
         XCTAssertEqual(fake.log, ["open:/Applications/Warp.app"])
         XCTAssertEqual(outcome?.success, false)
+        XCTAssertEqual(outcome?.detail, "could not open /Applications/Warp.app: could not show the terminal")
     }
 
     func testFocusURLsTriedInOrderUntilOneSucceeds() {
@@ -107,12 +118,12 @@ final class TerminalFocusExecutorTests: XCTestCase {
     func testAccessibilityPromptedOnceThenNotNagged() {
         let fake = FakeTerminalFocusPrimitives()
         fake.answerAppleScript("ok")
-        var outcome: (success: Bool, detail: String)?
-        let exec = TerminalFocusExecutor(primitives: fake) { outcome = ($0, $1) }
+        let box = OutcomeBox()
+        let exec = TerminalFocusExecutor(primitives: fake) { box.set($0, $1) }
         exec.execute(FocusPlan(raiseScript: ["raise"]))
         exec.execute(FocusPlan(raiseScript: ["raise"]))
         XCTAssertEqual(fake.accessibilityPrompts, [true, false])
-        XCTAssertEqual(outcome?.success, true)
+        XCTAssertEqual(box.value?.success, true)
     }
 
     func testWarpFallbackKillsThenOpensNewTerminal() {
@@ -133,10 +144,51 @@ final class TerminalFocusExecutorTests: XCTestCase {
         XCTAssertEqual(outcome?.success, true)
     }
 
+    /// The Warp new-terminal fallback failing must still read "could not open Warp" for the tray.
+    func testNewTerminalUrlKindFailureNamesWarp() {
+        let fake = FakeTerminalFocusPrimitives()
+        fake.answerOpenURL("fake://new", with: false)
+        let plan = FocusPlan(newTerminal: NewTerminalAction(kind: "url", url: "fake://new"))
+        let (_, outcome) = run(plan, fake: fake)
+        XCTAssertEqual(outcome?.success, false)
+        XCTAssertEqual(outcome?.detail, "could not open Warp: could not show the terminal")
+    }
+
+    /// The iTerm new-terminal fallback failing must still read "could not open iTerm" for the tray.
+    func testNewTerminalApplescriptKindFailureNamesIterm() {
+        let fake = FakeTerminalFocusPrimitives()
+        fake.answerAppleScript(nil)
+        let plan = FocusPlan(newTerminal: NewTerminalAction(kind: "applescript", script: ["x"]))
+        let (_, outcome) = run(plan, fake: fake)
+        XCTAssertEqual(outcome?.success, false)
+        XCTAssertEqual(outcome?.detail, "could not open iTerm: could not show the terminal")
+    }
+
     func testNothingApplicableReportsFailure() {
         let fake = FakeTerminalFocusPrimitives()
         let (_, outcome) = run(FocusPlan(), fake: fake)
         XCTAssertEqual(fake.log, [])
         XCTAssertEqual(outcome?.success, false)
+        // No app name to blame: stays the generic detail, not "could not open ...".
+        XCTAssertEqual(outcome?.detail, "could not show the terminal")
+    }
+
+    /// `execute(_:)` is deliberately not actor-isolated (it can block for seconds on real
+    /// AppleScript/NSWorkspace calls), so the app always runs it off the main actor. Proves that
+    /// is safe: the fake's lock-protected state and the executor's own promptedAccessibility lock
+    /// both survive a call from a background queue.
+    func testExecuteIsSafeOffTheMainActor() {
+        let fake = FakeTerminalFocusPrimitives()
+        fake.answerOpenURL("fake://new", with: true)
+        let box = OutcomeBox()
+        let exec = TerminalFocusExecutor(primitives: fake) { box.set($0, $1) }
+        let plan = FocusPlan(newTerminal: NewTerminalAction(kind: "url", url: "fake://new"))
+        let done = expectation(description: "executed off the main actor")
+        DispatchQueue.global().async {
+            exec.execute(plan)
+            done.fulfill()
+        }
+        wait(for: [done], timeout: 1)
+        XCTAssertEqual(box.value?.success, true)
     }
 }

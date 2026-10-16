@@ -55,6 +55,13 @@ type titledPlanner struct{ countingPlanner }
 
 func (*titledPlanner) WindowTitle() string { return "DeskPixie" }
 
+// failingTitledPlanner is Warp, but its own Plan (the new-terminal fallback) always errors.
+type failingTitledPlanner struct{ titledPlanner }
+
+func (*failingTitledPlanner) Plan(agent.Attach) (agent.FocusPlan, error) {
+	return agent.FocusPlan{}, errors.New("disk full")
+}
+
 func table(rows ...string) string { return strings.Join(rows, "\n") + "\n" }
 
 var warpTable = table(
@@ -229,6 +236,29 @@ func TestWithNothingToRaiseThePlanStillCarriesKillAndNewTerminal(t *testing.T) {
 	}
 	if inner.opened != 1 {
 		t.Fatalf("opened %d", inner.opened)
+	}
+}
+
+// A failure building the new-terminal fallback (e.g. an unwritable tab-configs directory) must
+// not discard the rungs ps already found: the focus URL or the raise may still work live, and
+// only actually reaching the fallback (which Go can't observe) should ever fail the whole plan.
+func TestAnInnerPlanFailureStillLetsTheAttachedRungsThrough(t *testing.T) {
+	r := &psRunner{ps: warpTable, env: warpEnv}
+	plan, err := Reuse(&failingTitledPlanner{}, r).Plan(attach())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.FocusURLs) == 0 {
+		t.Fatal("no focus urls")
+	}
+	if len(plan.RaiseScript) == 0 {
+		t.Fatal("no raise script")
+	}
+	if !reflect.DeepEqual(plan.KillPIDs, []int{611, 621}) {
+		t.Fatalf("%v", plan.KillPIDs)
+	}
+	if plan.NewTerminal != nil {
+		t.Fatalf("no fallback terminal when the inner planner fails: %+v", plan.NewTerminal)
 	}
 }
 

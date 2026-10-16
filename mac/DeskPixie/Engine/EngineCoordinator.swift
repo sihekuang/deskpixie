@@ -12,6 +12,9 @@ import os
 /// main thread. Launch (migration, `dp_configure`, first reads) runs in `StartupSequencer`;
 /// `app.action`, `app.state`, `settings.snapshot`/`choices`/`hotkeyFailed` go through `worker`.
 /// Only `dp_poll_event` (a non-blocking queue pop), `dp_hotkey` and `dp_pack_json` stay on main.
+/// `TerminalFocusExecutor.execute` (#116) is the same rule for a different reason: it isn't a
+/// core call, but NSAppleScript/NSWorkspace can block for seconds (launching an app, an
+/// Automation consent dialog, a hung target's Apple Event timeout), so it also runs on `worker`.
 @MainActor
 final class EngineCoordinator {
     static let pollInterval: UInt64 = 30_000_000
@@ -66,10 +69,12 @@ final class EngineCoordinator {
         self.micRing = micRing
         self.pump = pump
         hotkeys = HotkeyBinder(registrar: hotkey) { [weak self] in self?.talk() }
-        terminalFocus = TerminalFocusExecutor(primitives: SystemTerminalFocusPrimitives()) { [weak self] success, detail in
-            guard let self else { return }
-            let engine = self.engine
-            self.worker.async {
+        // No [weak self]/self.engine here: this closure is @Sendable and may run off the main
+        // actor (TerminalFocusExecutor.execute runs on worker — see the .focusPlan case below),
+        // so it captures engine/worker by value instead of reaching back through self.
+        let engine = engine, worker = worker
+        terminalFocus = TerminalFocusExecutor(primitives: SystemTerminalFocusPrimitives()) { success, detail in
+            worker.async {
                 do { _ = try engine.call("agent.reportFocusOutcome", ReportFocusOutcomeArgs(success: success, detail: detail)) }
                 catch { Self.log.error("agent.reportFocusOutcome: \(String(describing: error), privacy: .public)") }
             }
@@ -432,7 +437,10 @@ final class EngineCoordinator {
         case .showPane(let r):
             bubble?.showPane(r)
         case .focusPlan(let plan):
-            terminalFocus.execute(plan)
+            // execute(_:) can block for seconds on a real AppleScript/NSWorkspace call: off main,
+            // same rule as every other core call that can touch the disk or spawn a process.
+            let terminalFocus = terminalFocus!
+            worker.async { terminalFocus.execute(plan) }
         }
     }
 

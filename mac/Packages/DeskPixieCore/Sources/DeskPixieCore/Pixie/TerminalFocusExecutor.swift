@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import Foundation
 
 /// A terminal to open or show, and its own fallback chain (#116): the core decides every string
 /// and the order; this executor only performs the OS actions. Mirrors Go's `agent.FocusPlan`
@@ -60,28 +61,33 @@ public protocol TerminalFocusPrimitives: Sendable {
 /// other terminal failure. `itermSelect` and `activateApp` have no fallback — each is the whole
 /// plan when it is set. Otherwise: a focus URL, then (if Accessibility allows) raising the
 /// titled window, then ending the attached clients and opening a new terminal.
-@MainActor
-public final class TerminalFocusExecutor {
+///
+/// Not actor-isolated: `execute(_:)` can block for seconds (NSAppleScript launching an app, an
+/// Automation consent dialog, a hung target's Apple Event timeout), so the caller runs it off the
+/// main thread — same rule as every other core call that can touch the disk or spawn a process.
+/// `promptedAccessibility` is the only mutable state, under a lock for that reason.
+public final class TerminalFocusExecutor: @unchecked Sendable {
     private static let failureDetail = "could not show the terminal"
 
     private let primitives: TerminalFocusPrimitives
-    private let reportOutcome: (Bool, String) -> Void
+    private let reportOutcome: @Sendable (Bool, String) -> Void
+    private let lock = NSLock()
     /// Accessibility is prompted at most once per executor (per app launch): a repeat ask would
     /// nag for a permission the person already answered.
     private var promptedAccessibility = false
 
-    public init(primitives: TerminalFocusPrimitives, reportOutcome: @escaping (Bool, String) -> Void) {
+    public init(primitives: TerminalFocusPrimitives, reportOutcome: @escaping @Sendable (Bool, String) -> Void) {
         self.primitives = primitives
         self.reportOutcome = reportOutcome
     }
 
     public func execute(_ plan: FocusPlan) {
         if let script = plan.itermSelect, !script.isEmpty {
-            report(primitives.runAppleScript(script) != nil)
+            report(primitives.runAppleScript(script) != nil, app: "iTerm")
             return
         }
         if let app = plan.activateApp, !app.isEmpty {
-            report(primitives.openURL(app))
+            report(primitives.openURL(app), app: app)
             return
         }
         for url in plan.focusURLs ?? [] where primitives.openURL(url) {
@@ -96,7 +102,7 @@ public final class TerminalFocusExecutor {
             primitives.killPID(Int32(pid))
         }
         if let newTerminal = plan.newTerminal {
-            report(open(newTerminal))
+            report(open(newTerminal), app: newTerminal.kind == "applescript" ? "iTerm" : "Warp")
             return
         }
         report(false)
@@ -106,8 +112,12 @@ public final class TerminalFocusExecutor {
     /// returns "none" when it ran fine but found no such window — not a failure to report, just
     /// nothing to raise).
     private func raised(_ script: [String]) -> Bool {
-        let trusted = primitives.isAccessibilityTrusted(prompt: !promptedAccessibility)
-        promptedAccessibility = true
+        let firstPrompt = lock.withLock { () -> Bool in
+            let first = !promptedAccessibility
+            promptedAccessibility = true
+            return first
+        }
+        let trusted = primitives.isAccessibilityTrusted(prompt: firstPrompt)
         return trusted && primitives.runAppleScript(script) == "ok"
     }
 
@@ -119,8 +129,17 @@ public final class TerminalFocusExecutor {
         }
     }
 
-    private func report(_ success: Bool) {
-        reportOutcome(success, success ? "" : Self.failureDetail)
+    /// `app`, when given, names what could not be shown (e.g. "Warp", "iTerm", an app path) so
+    /// the tray line matches exactly what it said before this rung moved to Swift: Go's
+    /// `TerminalFailureStatus` keeps only the text up to the first colon of a "could not open "
+    /// detail.
+    private func report(_ success: Bool, app: String? = nil) {
+        guard !success else {
+            reportOutcome(true, "")
+            return
+        }
+        let detail = app.map { "could not open \($0): \(Self.failureDetail)" } ?? Self.failureDetail
+        reportOutcome(false, detail)
     }
 }
 
