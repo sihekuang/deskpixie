@@ -498,8 +498,7 @@ final class EngineCoordinator {
     /// makes its `pixies/` pack folder (moving a pre-#68 `mascots/` there first, so it must not
     /// exist before the core starts). Runs off main (inside the startup work).
     nonisolated static func engineConfig() -> EngineConfig {
-        let support = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/com.sihekuang.deskpixie", isDirectory: true)
+        let support = AppSupportDirectory.resolve(home: FileManager.default.homeDirectoryForCurrentUser)
         do {
             try FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
         } catch {
