@@ -519,7 +519,19 @@ func (h *AgentHandle) answerSession(name, id, answer string) {
 	}
 	if err != nil {
 		log.Printf("agent: answering %s: %v", name, err)
-		h.Input(SessionAnswerFailedInput(name, err.Error()))
+		why := err.Error()
+		var he HostError
+		if errors.As(err, &he) {
+			switch {
+			case he.Kind == HostOther && he.Detail != "":
+				why = he.Detail // pix's own reason ("The question is no longer on screen.")
+			case he.Kind == HostTimeout:
+				why = "the session didn't answer in time."
+			case he.Kind == HostNoAgent:
+				why = "the session is gone."
+			}
+		}
+		h.Input(SessionAnswerFailedInput(name, why))
 	}
 }
 

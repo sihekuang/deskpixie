@@ -30,7 +30,7 @@ const (
 
 // Msg is one message. Only the fields of its Kind are set: register → Tool…Description;
 // registered → Address; refused → Reason; event → Event (status, description, session,
-// exited, hook) and its fields; command → Command, Text, Keys; result → Text, Err.
+// exited, hook, question, question-gone) and its fields; command → Command, Text, Keys; result → Text, Err.
 type Msg struct {
 	V           int      `json:"v"`
 	Kind        Kind     `json:"kind"`
@@ -50,6 +50,8 @@ type Msg struct {
 	Status      string   `json:"status,omitempty"`
 	Source      string   `json:"source,omitempty"`
 	ExitCode    int      `json:"exitCode,omitempty"`
+	ToolName    string   `json:"toolName,omitempty"`
+	Input       string   `json:"input,omitempty"`
 	Command     string   `json:"command,omitempty"`
 	Text        string   `json:"text,omitempty"`
 	Keys        []string `json:"keys,omitempty"`
