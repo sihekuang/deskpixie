@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 	"sync"
@@ -28,6 +29,7 @@ type fakeAgent struct {
 	hooks         AgentHooks
 	cfg           settings.Config
 	seen          [][]uint64
+	decided       []string
 	away          []bool
 	focused       [][2]string
 	updates       any
@@ -63,6 +65,11 @@ func (f *fakeAgent) Shutdown() { f.mu.Lock(); f.shut++; f.mu.Unlock() }
 func (f *fakeAgent) UpdatesSeen(ids []uint64) {
 	f.mu.Lock()
 	f.seen = append(f.seen, ids)
+	f.mu.Unlock()
+}
+func (f *fakeAgent) Decide(token string, allow bool) {
+	f.mu.Lock()
+	f.decided = append(f.decided, fmt.Sprintf("%s:%v", token, allow))
 	f.mu.Unlock()
 }
 func (f *fakeAgent) Updates() any { f.mu.Lock(); defer f.mu.Unlock(); return f.updates }
@@ -290,12 +297,27 @@ func TestAgentUpdatesIsAnEmptyListWithoutAnAgent(t *testing.T) {
 	}
 }
 
+func TestTheBubbleDecideCallReachesTheAgent(t *testing.T) {
+	f := &fakeAgent{}
+	h := newHarness(t, withAgent(f))
+	h.call("agent.decide", map[string]any{"token": "hawk", "allow": true})
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !slices.Equal(f.decided, []string{"hawk:true"}) {
+		t.Fatal(f.decided)
+	}
+	if _, err := h.callErr("agent.decide", "not an object"); err == nil {
+		t.Fatal("a malformed body was accepted")
+	}
+}
+
 func TestTheUpdatesBubbleCallsAreNoOpsWithoutAnAgent(t *testing.T) {
 	h := newHarness(t, func(d *Deps, _ *harness) {
 		d.Agent = func(settings.Config, string, AgentHooks) Agent { return nil }
 	})
 	for method, args := range map[string]any{
 		"agent.updatesSeen": map[string]any{"ids": []uint64{1}},
+		"agent.decide":      map[string]any{"token": "hawk", "allow": true},
 		"agent.focusJob":    map[string]any{"job": "job_000000000001"},
 		"presence.set":      map[string]any{"away": true},
 	} {
@@ -390,5 +412,30 @@ func TestAgentRosterIsEmptyWithoutAnAgent(t *testing.T) {
 	}
 	if out := h.call("agent.focusAgent", map[string]any{"name": "x"}); string(out) != "{}" {
 		t.Fatal(string(out))
+	}
+}
+
+func TestTheManualModeLineAndFixReachAppState(t *testing.T) {
+	line := "Coordinator is in Manual mode: its model is too old for auto mode"
+	f := &fakeAgent{tray: AgentTray{Enabled: true, Mode: line, ModeFix: &TrayFix{ID: "agent:fix-model", Title: "Use a supported model"}}}
+	h := newHarness(t, withAgent(f))
+	s := h.state()
+	if !slices.Contains(s.StatusLines, line) {
+		t.Fatal(s.StatusLines)
+	}
+	b, _ := json.Marshal(s)
+	if !strings.Contains(string(b), `"agentModeFix":{"id":"agent:fix-model","title":"Use a supported model"}`) {
+		t.Fatal(string(b))
+	}
+}
+
+func TestTheClearModelHookSavesNullAgentModel(t *testing.T) {
+	f := &fakeAgent{tray: AgentTray{Enabled: true}}
+	h := newHarness(t, withAgent(f))
+	m := "claude-sonnet-4-5"
+	h.app.save(func(c *settings.Config) { c.Agent.Model = &m })
+	f.hooks.ClearModel()
+	if h.app.store.Current().Agent.Model != nil {
+		t.Fatal("model not cleared")
 	}
 }

@@ -463,10 +463,15 @@ type WorkerLaunch struct {
 
 // StartRefusal is a screen that fails a start: when the pane shows one of Screens during its
 // start (every marker of a group in its bottom ScreenBottomLines lines; e.g. a folder-trust
-// prompt the app won't answer for the user), the start fails with Reason and nothing is typed.
+// prompt the app won't answer for the user), the start fails with Reason and nothing is typed,
+// unless Answer is set.
 type StartRefusal struct {
 	Screens [][]string
 	Reason  string
+	// Answer, when set, is sent once (SendKeys) the first time the screen shows; the start then
+	// goes on, and fails with Reason if the screen is still there after AnswerGrace (#97: Codex's
+	// trust screen in a repo under the projects root). Nil: never answered, the start fails.
+	Answer []string
 }
 
 // ScreenBottomLines is how many non-empty lines at the bottom of a screen a dialog is looked for in.
@@ -590,10 +595,11 @@ const (
 	CallInterruptSession
 	CallCloseSession
 	CallDescribeSession
+	CallCreateProject
 )
 
 // McpCall is one pixie MCP tool call, arguments checked and cleaned. Only the fields of its
-// Kind are set: StartWorker → Worker; MessageWorker → Name, Text; StopWorker → Name;
+// Kind are set: StartWorker → Worker; MessageWorker → Name, Text; StopWorker → Name; CreateProject → Name;
 // ReportProgress → Summary; ReportResult → Outcome, Summary, Evidence; AskCoordinator →
 // Question, Options; ReportBlocked → Reason.
 type McpCall struct {
@@ -638,6 +644,8 @@ const (
 	// HookState is the agent's own status report (Claude Code hooks on the tmux session host,
 	// which detects no status itself): Status is Working, Idle or Blocked.
 	HookState
+	// HookMode is the first prompt's report of the agent's permission mode (PermissionMode).
+	HookMode
 )
 
 // HookEvent is what the hook server reports, with the calling agent resolved from its bearer.
@@ -645,15 +653,17 @@ const (
 // Mcp → Call, McpReply; State → Status. Reply channels are one-shot: send at most once (buffer
 // them by 1).
 type HookEvent struct {
-	Kind      HookEventKind
-	Agent     string
-	Status    PaneStatus
-	Message   string
-	ToolName  string
-	ToolInput any
-	Reply     chan<- Decision
-	Call      McpCall
-	McpReply  chan<- McpReply
+	Kind  HookEventKind
+	Agent string
+	// PermissionMode is the "permission_mode" Claude Code's hook body carried ("" if none).
+	PermissionMode string
+	Status         PaneStatus
+	Message        string
+	ToolName       string
+	ToolInput      any
+	Reply          chan<- Decision
+	Call           McpCall
+	McpReply       chan<- McpReply
 }
 
 // Cue is a one-shot pixie animation the delegation side asks for.

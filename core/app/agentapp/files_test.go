@@ -118,7 +118,7 @@ func TestHookTimeoutsAreEnforced(t *testing.T) {
 	if !found {
 		t.Fatal("PermissionRequest must outlast PermissionLimit")
 	}
-	if !reflect.DeepEqual(HookTimeouts, []HookTimeout{{"Stop", 5}, {"PermissionRequest", 125}, {"PostToolUse", 5}}) {
+	if !reflect.DeepEqual(HookTimeouts, []HookTimeout{{"Stop", 5}, {"PermissionRequest", 125}, {"PostToolUse", 5}, {"UserPromptSubmit", 5}}) {
 		t.Fatal(HookTimeouts)
 	}
 	short := strings.ReplaceAll(RenderSettings(1), `"timeout": 125`, `"timeout": 120`)
@@ -150,7 +150,7 @@ func TestInstallWritesClaudeMdAndSettingsIntoAppDataOnly(t *testing.T) {
 	if !strings.Contains(md, filepath.Join(data, "canvas")+"/pages/<slug>.html") || !strings.Contains(md, "<spoken ref=") {
 		t.Fatal(md)
 	}
-	if readFile(t, paths.Settings) != RenderSettings(48217) || readFile(t, paths.WorkerSettings) != RenderWorkerSettings(48217) {
+	if readFile(t, paths.Settings) != shippedCoordinatorSettings(t, paths, 48217) || readFile(t, paths.WorkerSettings) != RenderWorkerSettings(48217) {
 		t.Fatal("settings not written")
 	}
 	if err := Install(paths, 48217, ""); err != nil { // idempotent
@@ -162,7 +162,7 @@ func TestInstallWritesClaudeMdAndSettingsIntoAppDataOnly(t *testing.T) {
 	if err := Install(paths, 48217, ""); err != nil {
 		t.Fatal(err)
 	}
-	if readFile(t, paths.Settings) != RenderSettings(48217) {
+	if readFile(t, paths.Settings) != shippedCoordinatorSettings(t, paths, 48217) {
 		t.Fatal("not rewritten")
 	}
 	entries, _ := os.ReadDir(paths.Root)
@@ -387,7 +387,7 @@ func TestInstallForTmuxWritesTheStateHooksAndHerdrDoesNot(t *testing.T) {
 	if err := InstallFor(paths, 48217, "", false); err != nil {
 		t.Fatal(err)
 	}
-	if readFile(t, paths.Settings) != RenderSettings(48217) || readFile(t, paths.WorkerSettings) != RenderWorkerSettings(48217) {
+	if readFile(t, paths.Settings) != shippedCoordinatorSettings(t, paths, 48217) || readFile(t, paths.WorkerSettings) != RenderWorkerSettings(48217) {
 		t.Fatal("herdr: the shipped files")
 	}
 }
@@ -417,6 +417,31 @@ func TestCoordinatorPromptExplainsSessionsYouStart(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestTheCoordinatorCreatesNewProjectsWithCreateProject(t *testing.T) {
+	with := RenderClaudeMd("/data/canvas", "/Users/x/Documents/Projects")
+	solo := RenderClaudeMd("/data/canvas", "")
+	if !strings.Contains(with, "`create_project`") || strings.Contains(solo, "create_project") {
+		t.Fatal("create_project is explained exactly when workers are on")
+	}
+	if !strings.Contains(RenderAgentsMd("/data/canvas", "/Users/x/Documents/Projects"), "`create_project`") {
+		t.Fatal("AGENTS.md")
+	}
+	if strings.Contains(RenderAgentsMd("/data/canvas", ""), "create_project") {
+		t.Fatal("AGENTS.md with workers off")
+	}
+}
+
+// shippedCoordinatorSettings is what Install writes for the coordinator: the template plus its
+// allow rules (#97). Workers off, so the worker file is the bare template.
+func shippedCoordinatorSettings(t *testing.T, paths Paths, port uint16) string {
+	t.Helper()
+	out, err := WithAllowRules(RenderSettings(port), CoordinatorAllowRules(paths.Workspace, paths.Canvas))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
 }
 
 func TestCoordinatorAsksWhichSessionAndOnlyClaimsSentMessages(t *testing.T) {

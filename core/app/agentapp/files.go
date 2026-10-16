@@ -42,11 +42,11 @@ type HookTimeout struct {
 
 // HookTimeouts are the coordinator's hooks. PermissionRequest outlasts the hook server's own
 // PermissionLimit (122 s), so the app's decision always lands before Claude Code gives up.
-var HookTimeouts = []HookTimeout{{"Stop", 5}, {"PermissionRequest", 125}, {"PostToolUse", 5}}
+var HookTimeouts = []HookTimeout{{"Stop", 5}, {"PermissionRequest", 125}, {"PostToolUse", 5}, {"UserPromptSubmit", 5}}
 
 // WorkerHookTimeouts are a worker's hooks: no PostToolUse (only its report_progress is
 // narrated).
-var WorkerHookTimeouts = []HookTimeout{{"Stop", 5}, {"PermissionRequest", 125}}
+var WorkerHookTimeouts = []HookTimeout{{"Stop", 5}, {"PermissionRequest", 125}, {"UserPromptSubmit", 5}}
 
 // StateHookTimeouts are the status hooks a Claude agent also gets on a session host that
 // detects no status itself (tmux): UserPromptSubmit says working, Stop (a second hook, after
@@ -315,15 +315,26 @@ func InstallFor(paths Paths, port uint16, projectsRoot string, stateHooks bool) 
 	if err := writeIfChanged(filepath.Join(paths.Workspace, "AGENTS.md"), RenderAgentsMd(paths.Canvas, projectsRoot)); err != nil {
 		return err
 	}
+	workerRules := WorkerAllowRules(projectsRoot)
+	if projectsRoot == "" {
+		workerRules = nil // workers are off
+	}
 	for _, f := range []struct {
 		path  string
 		text  string
 		hooks []HookTimeout
+		rules []string
 	}{
-		{paths.Settings, RenderSettings(port), HookTimeouts},
-		{paths.WorkerSettings, RenderWorkerSettings(port), WorkerHookTimeouts},
+		{paths.Settings, RenderSettings(port), HookTimeouts, CoordinatorAllowRules(paths.Workspace, paths.Canvas)},
+		{paths.WorkerSettings, RenderWorkerSettings(port), WorkerHookTimeouts, workerRules},
 	} {
 		text, hooks := f.text, f.hooks
+		if len(f.rules) > 0 {
+			var err error
+			if text, err = WithAllowRules(text, f.rules); err != nil {
+				return err
+			}
+		}
 		if stateHooks {
 			var err error
 			if text, err = WithStateHooks(text); err != nil {

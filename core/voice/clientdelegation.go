@@ -31,6 +31,18 @@ func isCoordinatorQuestion(text string) bool {
 	return strings.HasPrefix(text, CoordinatorQuestionPrefix) || strings.HasPrefix(text, "Agent question: ")
 }
 
+// asksQuestion: the notice relays a "Coordinator question:" that is not a confirm prompt, on
+// its own or as a line of the "while you were away" replay.
+func asksQuestion(text string) bool {
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimPrefix(strings.TrimSpace(line), "- ")
+		if isCoordinatorQuestion(line) && !strings.Contains(line, "Say confirm") {
+			return true
+		}
+	}
+	return false
+}
+
 // ClientDelegationArgs are the arguments the conversation gives ClientDelegationTool.
 type ClientDelegationArgs struct {
 	Task    string `json:"task"`

@@ -55,9 +55,10 @@ type Ensured struct {
 
 // AgentHost owns the coordinator's lifecycle. Safe for concurrent use.
 type AgentHost struct {
-	host   SessionHost
-	clock  Clock
-	recipe CoordinatorRecipe
+	host     SessionHost
+	clock    Clock
+	recipeMu sync.Mutex // guards recipe.Args (ClearModel)
+	recipe   CoordinatorRecipe
 
 	startedBefore atomic.Bool
 	// resumeEarlierRun: a coordinator from an earlier run was found; starts resume its conversation.
@@ -174,7 +175,9 @@ func (h *AgentHost) EnsureCoordinator(ctx context.Context) (Ensured, error) {
 // if resume: Claude Code's --continue, or Codex's `resume --last` (the newest session in the
 // workspace; with none, Codex starts a new one).
 func (h *AgentHost) launch(ctx context.Context, replace, resume bool) (AgentInfo, error) {
+	h.recipeMu.Lock()
 	args := slices.Clone(h.recipe.Args)
+	h.recipeMu.Unlock()
 	if resume {
 		if h.recipe.Kind == Codex {
 			args = append([]string{"resume", "--last"}, args...)
@@ -242,4 +245,19 @@ func focusQuietly(ctx context.Context, host SessionHost, agent string) {
 			log.Printf("agent: could not focus %s: %v", agent, err)
 		}
 	}
+}
+
+// ClearModel drops --model from the next launches (the user set agent.model back to default).
+func (h *AgentHost) ClearModel() {
+	h.recipeMu.Lock()
+	defer h.recipeMu.Unlock()
+	args := make([]string, 0, len(h.recipe.Args))
+	for i := 0; i < len(h.recipe.Args); i++ {
+		if h.recipe.Args[i] == "--model" && i+1 < len(h.recipe.Args) {
+			i++
+			continue
+		}
+		args = append(args, h.recipe.Args[i])
+	}
+	h.recipe.Args = args
 }

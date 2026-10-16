@@ -25,6 +25,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -897,7 +898,7 @@ func TestLiveTmuxWorkerSmoke(t *testing.T) {
 	handle = agent.NewRuntimeWithWorkers(deps, agent.RuntimeConfig{Settings: settings}, &agent.WorkerDeps{
 		Worktrees: worktrees,
 		Tokens:    tokens,
-		Recipes:   agentfs.NewFileWorkerRecipes(paths.McpDir, paths.WorkerSettings, port, "haiku", workerTrust).WithCodexExtraArgs(extra),
+		Recipes:   agentfs.NewFileWorkerRecipes(paths.McpDir, paths.WorkerSettings, port, "haiku", workerTrust, "").WithCodexExtraArgs(extra),
 	})
 	ws.handle = handle
 	close(handleReady)
@@ -1114,4 +1115,498 @@ func (s *workerSmoke) codexPart() error {
 	}
 	ok(t, fmt.Sprintf("codex worker %s: CODEX.txt committed on pixie/%s; stopped with its job", worker, slug))
 	return nil
+}
+
+// --- the fewer-approvals smokes (#97) ---
+//
+// Each runs the real delegation runtime on SmokeSession with a temp projects root, as
+// TestLiveTmuxWorkerSmoke does, with two differences: Codex gets a temp CODEX_HOME (only
+// auth.json symlinked in, never read), so the user's ~/.codex/config.toml is never written; and
+// the smoke never writes ~/.claude.json itself (the Claude trust stores are no-ops):
+// Claude Code's folder-trust dialogs for the temp workspace and worktrees are answered on screen
+// by answerTrustDialogs, and Claude Code records them as it does for any folder.
+
+// noTrust is a TrustStore that writes nothing (see above).
+type noTrust struct{}
+
+func (noTrust) Grant(string) ([]string, error) { return nil, nil }
+
+// modeRecipes starts Claude workers with --permission-mode mode instead of the recipe's.
+type modeRecipes struct {
+	agent.WorkerRecipes
+	mode string
+}
+
+func (m modeRecipes) Prepare(l agent.WorkerLaunch) (agent.PreparedWorker, error) {
+	p, err := m.WorkerRecipes.Prepare(l)
+	if err != nil || p.Spec.Kind != agent.Claude {
+		return p, err
+	}
+	args := slices.Clone(p.Spec.Args)
+	replaced := false
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "--permission-mode" {
+			args[i+1] = m.mode
+			replaced = true
+		}
+	}
+	if !replaced {
+		// Fails the start (and so the smoke): the override would otherwise be a silent no-op.
+		return agent.PreparedWorker{}, fmt.Errorf("smoke: the worker recipe has no --permission-mode to override: %q", p.Spec.Args)
+	}
+	p.Spec.Args = args
+	return p, nil
+}
+
+// modeLog records each agent's permission_mode reports and whether it was ever flagged Manual
+// (the flag is cleared again when the agent ends, so the latest value is not kept).
+type modeLog struct {
+	mu     sync.Mutex
+	modes  map[string][]string // agent → permission_mode values its hooks carried
+	manual map[string]bool
+}
+
+func (m *modeLog) ManualMode(agent string, manual bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.manual[agent] = m.manual[agent] || manual
+}
+
+func (m *modeLog) add(agent, mode string) {
+	if mode == "" {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !slices.Contains(m.modes[agent], mode) {
+		m.modes[agent] = append(m.modes[agent], mode)
+	}
+}
+
+func (m *modeLog) of(agent string) ([]string, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return slices.Clone(m.modes[agent]), m.manual[agent]
+}
+
+type fewerSetup struct {
+	codex      bool   // a Codex worker may start (needs codex)
+	workerMode string // "" = the recipe's own permission mode
+}
+
+type fewerRun struct {
+	*workerSmoke
+	projects  string
+	worktrees *agentfs.GitWorktrees
+	codexHome string
+	modes     *modeLog
+}
+
+func codexInstalled() bool {
+	if _, err := exec.LookPath("codex"); err == nil {
+		return true
+	}
+	_, err := os.Stat("/opt/homebrew/bin/codex")
+	return err == nil
+}
+
+// fewerSmoke sets up the runtime and runs scenario, then shuts everything down; a scenario error
+// (or the overall limit) fails the test after a dump.
+func fewerSmoke(t *testing.T, cfg fewerSetup, scenario func(r *fewerRun) error) {
+	var extra []agent.EnvVar
+	codexHome := ""
+	if cfg.codex {
+		if os.Getenv("SMOKE_CODEX") != "1" {
+			t.Skip("set SMOKE_CODEX=1 to run the Codex smokes")
+		}
+		if !codexInstalled() {
+			t.Skip("SMOKE_CODEX=1 but codex not found")
+		}
+		home, err := os.UserHomeDir()
+		if err != nil {
+			t.Skip("no home dir")
+		}
+		auth := filepath.Join(home, ".codex", "auth.json")
+		if _, err := os.Lstat(auth); err != nil {
+			t.Skip("no Codex login (~/.codex/auth.json)")
+		}
+		codexHome = smoketest.CanonicalTemp(t)
+		if err := os.Symlink(auth, filepath.Join(codexHome, "auth.json")); err != nil {
+			t.Fatal(err)
+		}
+		extra = append(extra, agent.EnvVar{Key: "CODEX_HOME", Value: codexHome})
+	}
+	sm := smoketest.Smoke(t, extra...)
+	versions(t, sm)
+	ctx := context.Background()
+	tmp := smoketest.CanonicalTemp(t)
+	projects := filepath.Join(tmp, "projects")
+	if err := os.MkdirAll(projects, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	paths := agentapp.NewPaths(filepath.Join(tmp, "data"))
+	tokens := httpserver.NewTokens()
+	coordinatorToken := tokens.Issue(agent.Coordinator)
+	ws := &workerSmoke{t: t, home: sm.Home, mcpDir: paths.McpDir}
+	if codexHome != "" {
+		ws.codexConf = filepath.Join(codexHome, "config.toml")
+	}
+	modes := &modeLog{modes: map[string][]string{}, manual: map[string]bool{}}
+	var handle *agent.AgentHandle
+	handleReady := make(chan struct{})
+	port := hookServer(t, tokens, func(ev agent.HookEvent) bool {
+		<-handleReady
+		modes.add(ev.Agent, ev.PermissionMode)
+		entry := ev.Agent
+		switch ev.Kind {
+		case agent.HookMcp:
+			if ev.Call.Kind == agent.CallCreateProject {
+				entry += " create_project"
+			} else {
+				entry += " " + callNames[ev.Call.Kind]
+			}
+			if ev.Call.Kind == agent.CallStartWorker {
+				toServer := ev.McpReply
+				mine := make(chan agent.McpReply, 1)
+				ev.McpReply = mine
+				go func() {
+					r, okr := <-mine
+					if !okr {
+						return
+					}
+					rep := startReply{}
+					if r.Err != nil {
+						rep.err = r.Err.Error()
+					} else {
+						b, _ := json.Marshal(r.Value)
+						var m map[string]any
+						_ = json.Unmarshal(b, &m)
+						rep.name, _ = m["name"].(string)
+					}
+					ws.mu.Lock()
+					ws.starts = append(ws.starts, rep)
+					ws.mu.Unlock()
+					toServer <- r
+				}()
+			}
+		case agent.HookStop:
+			entry += " stop"
+		case agent.HookPermission:
+			entry += " permission " + ev.ToolName
+		case agent.HookPostTool:
+			entry += " post-tool " + ev.ToolName
+		case agent.HookState:
+			entry += " state " + ev.Status.String()
+		case agent.HookMode:
+			entry += " mode " + ev.PermissionMode
+		}
+		ws.mu.Lock()
+		ws.seen = append(ws.seen, entry)
+		ws.mu.Unlock()
+		return handle.Deliver(ev)
+	})
+	if err := agentapp.InstallFor(paths, port, projects, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(paths.McpDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := agentapp.WriteCoordinatorMcp(paths, port, coordinatorToken); err != nil {
+		t.Fatal(err)
+	}
+
+	host := sm.Host()
+	t.Cleanup(host.Shutdown)
+	ws.host = host
+	if err := host.EnsureSession(ctx); err != nil {
+		t.Fatalf("ensure_session: %v", err)
+	}
+	bctx, stopBabysitter := context.WithCancel(ctx)
+	var trustedMu sync.Mutex
+	var trusted []string
+	babysat := make(chan struct{})
+	go func() { defer close(babysat); answerTrustDialogs(bctx, host, &trusted, &trustedMu) }()
+
+	model := os.Getenv("SMOKE_MODEL")
+	if model == "" {
+		model = "sonnet"
+	}
+	recipe := agent.CoordinatorRecipe{
+		Cwd:  paths.Workspace,
+		Args: agentapp.CoordinatorArgs(paths, model, true),
+		Env:  []agent.EnvVar{{Key: "PIXIE_AGENT_TOKEN", Value: coordinatorToken}},
+	}
+	deps := agent.Deps{
+		Host:     agent.NewAgentHost(host, wallClock{}, recipe),
+		Voice:    &agenttest.RecordingVoiceLink{},
+		Notifier: &agenttest.RecordingNotifier{},
+		Pixie:    &agenttest.RecordingNotifier{},
+		Status:   &agenttest.RecordingStatus{},
+		Launcher: &agenttest.FakeLauncher{},
+		Store:    &agenttest.MemStore{},
+		Clock:    wallClock{},
+		IDs:      &agenttest.SeqIds{},
+		Modes:    modes,
+	}
+	worktrees := agentfs.NewGitWorktrees(projects, paths.Workspace, sm.Home, proc.PatientRunner(agentapp.GitTimeout)).
+		WithCleanupRunner(proc.PatientRunner(agentapp.GitCleanupTimeout))
+	var recipes agent.WorkerRecipes = agentfs.NewFileWorkerRecipes(paths.McpDir, paths.WorkerSettings, port, "haiku", noTrust{}, projects)
+	if cfg.workerMode != "" {
+		recipes = modeRecipes{recipes, cfg.workerMode}
+	}
+	kinds := []agent.AgentKind{agent.Claude}
+	if cfg.codex {
+		kinds = append(kinds, agent.Codex)
+	}
+	settings := agent.DefaultSettings()
+	settings.PermissionTimeoutMs = 10_000
+	settings.Workers = agent.WorkerPolicy{Enabled: true, Max: 2, Kinds: kinds}
+	handle = agent.NewRuntimeWithWorkers(deps, agent.RuntimeConfig{Settings: settings}, &agent.WorkerDeps{
+		Worktrees: worktrees,
+		Tokens:    tokens,
+		Recipes:   recipes,
+	})
+	ws.handle = handle
+	close(handleReady)
+	rctx, stopRuntime := context.WithCancel(ctx)
+	ran := make(chan struct{})
+	go func() { defer close(ran); handle.Run(rctx) }()
+
+	run := &fewerRun{workerSmoke: ws, projects: projects, worktrees: worktrees, codexHome: codexHome, modes: modes}
+	errc := make(chan error, 1)
+	go func() { errc <- scenario(run) }()
+	var outcome error
+	select {
+	case outcome = <-errc:
+	case <-time.After(overallLimit):
+		outcome = fmt.Errorf("the whole run did not finish within %v", overallLimit)
+	}
+	if outcome != nil {
+		ws.dump()
+	}
+	handle.Shutdown()
+	if outcome == nil {
+		if list, _ := host.List(ctx); len(list) != 0 {
+			outcome = fmt.Errorf("panes left after shutdown: %d", len(list))
+		}
+	}
+	trustedMu.Lock()
+	info(t, "Claude folder-trust dialogs answered on screen", fmt.Sprint(trusted))
+	trustedMu.Unlock()
+	stopBabysitter()
+	<-babysat
+	stopRuntime()
+	<-ran
+	if outcome != nil {
+		t.Fatal(outcome)
+	}
+}
+
+// startsSince are the start_worker replies after the first n.
+func (s *workerSmoke) startsSince(n int) []startReply {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]startReply(nil), s.starts[n:]...)
+}
+
+// seenOf is the hook/MCP traffic of agent (its entries without the name).
+func (s *workerSmoke) seenOf(name string) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []string
+	for _, e := range s.seen {
+		if rest, ok := strings.CutPrefix(e, name+" "); ok {
+			out = append(out, rest)
+		}
+	}
+	return out
+}
+
+// toolUses are the tool calls in Claude Code's transcripts for cwd ("Bash <command>" or the
+// tool's name), read from ~/.claude/projects/<cwd, non-alphanumerics as '-'>/.
+func toolUses(home, cwd string) []string {
+	dir := filepath.Join(home, ".claude", "projects", regexp.MustCompile(`[^A-Za-z0-9]`).ReplaceAllString(cwd, "-"))
+	files, _ := filepath.Glob(filepath.Join(dir, "*.jsonl"))
+	var out []string
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(b), "\n") {
+			var rec struct {
+				Message struct {
+					Content json.RawMessage `json:"content"`
+				} `json:"message"`
+			}
+			if json.Unmarshal([]byte(line), &rec) != nil {
+				continue
+			}
+			var parts []struct {
+				Type  string `json:"type"`
+				Name  string `json:"name"`
+				Input struct {
+					Command string `json:"command"`
+				} `json:"input"`
+			}
+			if json.Unmarshal(rec.Message.Content, &parts) != nil {
+				continue
+			}
+			for _, p := range parts {
+				if p.Type != "tool_use" {
+					continue
+				}
+				if p.Name == "Bash" {
+					out = append(out, "Bash "+p.Input.Command)
+				} else {
+					out = append(out, p.Name)
+				}
+			}
+		}
+	}
+	return out
+}
+
+// TestLiveCodexWorkerStartsInAnUntrustedRepo (SMOKE_CODEX=1): a repo made by
+// GitWorktrees.CreateProject is one Codex has never seen; a Codex worker's start there answers
+// Codex's trust screen once and succeeds, and the temp CODEX_HOME's config.toml now trusts it.
+func TestLiveCodexWorkerStartsInAnUntrustedRepo(t *testing.T) {
+	fewerSmoke(t, fewerSetup{codex: true}, func(r *fewerRun) error {
+		repo, err := r.worktrees.CreateProject("fresh")
+		if err != nil {
+			return fmt.Errorf("create_project: %v", err)
+		}
+		r.repo = repo
+		conf := func() string { b, _ := os.ReadFile(r.codexConf); return string(b) }
+		if strings.Contains(conf(), repo) {
+			return fmt.Errorf("the new repo is already in the temp Codex config")
+		}
+		ok(t, "create_project made "+repo+" (not trusted by Codex)")
+		before := len(r.startsSince(0))
+		id, view, err := r.job("In the repository fresh, have a codex worker (kind codex) create a file CODEX.txt containing the single word hi and commit it on its branch. If start_worker fails, do not retry and do not try another kind: end the job as failed and tell me the reason word for word. Otherwise wait for its report, then tell me what it did.")
+		if err != nil {
+			return err
+		}
+		replies := r.startsSince(before)
+		info(t, "start_worker replies", fmt.Sprintf("%+v", replies))
+		started := ""
+		for _, rep := range replies {
+			if rep.err == "" && rep.name != "" {
+				started = rep.name
+			}
+		}
+		if started == "" {
+			return fmt.Errorf("%s: the codex start did not succeed: %+v", id, replies)
+		}
+		ok(t, "codex worker "+started+" started in the untrusted repo")
+		key := "[projects." + tomlString(repo) + "]"
+		c := conf()
+		if !strings.Contains(c, key) || !strings.Contains(c, `trust_level = "trusted"`) {
+			return fmt.Errorf("the temp Codex config does not trust %s:\n%s", repo, c)
+		}
+		ok(t, "the temp CODEX_HOME/config.toml trusts "+repo)
+		info(t, "the job", fmt.Sprintf("%s ended %v", id, view.Status))
+		slug := strings.TrimPrefix(started, "fresh-")
+		info(t, "CODEX.txt committed on the worker's branch", yesNo(r.committed(slug, "CODEX.txt") == nil))
+		return nil
+	})
+}
+
+// TestLiveCreateProjectThenStartWorker: the coordinator makes a new project with create_project
+// and starts a Claude worker in it, which commits a file on its branch.
+func TestLiveCreateProjectThenStartWorker(t *testing.T) {
+	fewerSmoke(t, fewerSetup{}, func(r *fewerRun) error {
+		r.repo = filepath.Join(r.projects, "greet")
+		id, view, err := r.job("Create a new project named greet with the create_project tool. Then, in the repository greet, have a claude worker create a file HELLO.txt containing the single word hi and commit it on its branch. Wait for its report, then tell me what it did.")
+		if err != nil {
+			return err
+		}
+		if !r.saw("coordinator create_project") {
+			return fmt.Errorf("%s: the coordinator never called create_project", id)
+		}
+		if _, err := os.Stat(filepath.Join(r.repo, ".git")); err != nil {
+			return fmt.Errorf("create_project made no repo at %s: %v", r.repo, err)
+		}
+		ok(t, "the coordinator called create_project; "+r.repo+" is a git repo")
+		if len(view.Workers) == 0 {
+			return fmt.Errorf("%s closed without a worker (status %v)", id, view.Status)
+		}
+		worker := view.Workers[0].Name
+		info(t, "start_worker replies", fmt.Sprintf("%+v", r.startsSince(0)))
+		if view.Status != agent.JobDone {
+			return fmt.Errorf("%s ended %v (last progress: %v)", id, view.Status, view.LastProgress)
+		}
+		slug := strings.TrimPrefix(worker, "greet-")
+		if err := r.committed(slug, "HELLO.txt"); err != nil {
+			return err
+		}
+		ok(t, fmt.Sprintf("claude worker %s: HELLO.txt committed on pixie/%s in the new project", worker, slug))
+		info(t, "the worker asked for permission", fmt.Sprint(slices.ContainsFunc(r.seenOf(worker), func(e string) bool { return strings.HasPrefix(e, "permission ") })))
+		return nil
+	})
+}
+
+// TestLiveManualClaudeWorkerRunsRoutineWorkWithoutAsking: a Claude worker in Manual mode
+// (--permission-mode default) runs git status, writes a file in its worktree and commits it,
+// and no PermissionRequest reaches the controller: the worker settings' allow rules cover it.
+// Its hooks carried permission_mode "default".
+func TestLiveManualClaudeWorkerRunsRoutineWorkWithoutAsking(t *testing.T) {
+	fewerSmoke(t, fewerSetup{workerMode: "default"}, func(r *fewerRun) error {
+		r.repo = filepath.Join(r.projects, "demo")
+		if err := os.MkdirAll(r.repo, 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(r.repo, "README.md"), []byte("demo\n"), 0o644); err != nil {
+			return err
+		}
+		for _, args := range [][]string{{"init", "-q"}, {"add", "README.md"}, {"commit", "-q", "-m", "first"}} {
+			if _, err := gitIn(r.repo, r.home, args...); err != nil {
+				return err
+			}
+		}
+		id, view, err := r.job("In the repository demo, have a claude worker do exactly this in its worktree: run `git status`, then create the file NOTE.txt containing the single word hi with its file-writing tool (not the shell), then `git add NOTE.txt` and `git commit -m note`. Tell it to use no other shell commands. Wait for its report, then tell me what it did.")
+		if err != nil {
+			return err
+		}
+		if len(view.Workers) == 0 {
+			return fmt.Errorf("%s closed without a worker (status %v)", id, view.Status)
+		}
+		worker := view.Workers[0].Name
+		traffic := r.seenOf(worker)
+		info(t, "the worker's hook/MCP traffic", fmt.Sprintf("%q", traffic))
+		var asked []string
+		for _, e := range traffic {
+			if tool, found := strings.CutPrefix(e, "permission "); found {
+				asked = append(asked, tool)
+			}
+		}
+		if len(asked) > 0 {
+			return fmt.Errorf("%s asked for permission for %v", worker, asked)
+		}
+		modes, manual := r.modes.of(worker)
+		info(t, "the worker's permission_mode values / flagged Manual", fmt.Sprint(modes, " / ", manual))
+		if !slices.Contains(modes, "default") {
+			return fmt.Errorf("no hook of %s delivered permission_mode \"default\" (saw %v)", worker, modes)
+		}
+		if !manual {
+			return fmt.Errorf("%s was never flagged Manual through Deps.Modes", worker)
+		}
+		if view.Status != agent.JobDone {
+			return fmt.Errorf("%s ended %v (last progress: %v)", id, view.Status, view.LastProgress)
+		}
+		slug := strings.TrimPrefix(worker, "demo-")
+		if err := r.committed(slug, "NOTE.txt"); err != nil {
+			return err
+		}
+		used := toolUses(r.home, filepath.Join(r.repo, ".worktrees", slug))
+		info(t, "the worker's tool uses (its Claude transcript)", fmt.Sprintf("%q", used))
+		ranStatus := slices.ContainsFunc(used, func(u string) bool { return strings.HasPrefix(u, "Bash ") && strings.Contains(u, "git status") })
+		if !ranStatus || !slices.ContainsFunc(used, func(u string) bool {
+			return u == "Write" || u == "Edit"
+		}) {
+			return fmt.Errorf("%s's transcript shows no git status and file write: %q", worker, used)
+		}
+		ok(t, fmt.Sprintf("manual-mode worker %s: git status, NOTE.txt written and committed, no PermissionRequest; permission_mode %v", worker, modes))
+		return nil
+	})
 }

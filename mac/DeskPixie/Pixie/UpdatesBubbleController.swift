@@ -29,6 +29,8 @@ final class UpdatesBubbleController {
     private let hosting: BubbleHostingView
 
     private(set) var model = UpdatesBubbleModel()
+    /// An agent's pane waiting to be brought up once the user stops typing (#110).
+    private var paneGate = PaneShowGate()
     private(set) var settings = BubbleSettingsValues.defaults
     /// False while away (screen locked, displays asleep or idle): pops are held.
     private(set) var present = true
@@ -119,6 +121,17 @@ final class UpdatesBubbleController {
         }
     }
 
+    /// An agent waits at a prompt in its terminal (`showPane`): bring its pane up as a click on
+    /// its line would, once the user hasn't typed for a moment (the next poll at the earliest).
+    func showPane(_ r: PaneRequest) {
+        paneGate.request(r, now: Self.now)
+    }
+
+    /// Seconds since the user last pressed a key in any app (no permission needed).
+    private static func sinceLastKey() -> TimeInterval {
+        CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown)
+    }
+
     private func clicked(_ line: UpdateLine) {
         call("agent.focusJob", FocusJobArgs(job: line.job ?? "", worker: line.worker ?? ""))
     }
@@ -136,6 +149,9 @@ final class UpdatesBubbleController {
             pointerInside = inside
             if inside { model.pointerEntered(now: Self.now) } else { model.pointerLeft() }
             changed = true
+        }
+        if let r = paneGate.due(now: Self.now, sinceLastKey: Self.sinceLastKey()) {
+            call("agent.focusJob", FocusJobArgs(job: r.job, worker: r.worker))
         }
         let before = model.phase
         let seen = model.tick(now: Self.now)
@@ -180,6 +196,11 @@ final class UpdatesBubbleController {
             count: model.count, phase: model.phase, shown: model.shown, more: model.more,
             onLine: { [weak self] in self?.clicked($0) },
             onMore: { [weak self] in self?.onTalk?() },
+            onDecide: { [weak self] token, allow in
+                // A tap within decisionGuard of the buttons appearing is a stray click: ignored.
+                guard let self, self.model.acceptsDecision(token: token, now: Self.now) else { return }
+                self.call("agent.decide", DecideArgs(token: token, allow: allow))
+            },
             onBadge: { [weak self] in
                 guard let self, self.panel.alphaValue >= UpdatesBubbleModel.hoverMinAlpha else { return }
                 self.model.pointerEntered(now: Self.now)
@@ -239,6 +260,7 @@ final class UpdatesBubbleController {
 
     private struct UpdatesReply: Decodable { var lines: [UpdateLine] }
     private struct SeenArgs: Encodable, Sendable { let ids: [UInt64] }
+    private struct DecideArgs: Encodable, Sendable { let token: String; let allow: Bool }
     private struct FocusJobArgs: Encodable, Sendable { let job: String; let worker: String }
 }
 

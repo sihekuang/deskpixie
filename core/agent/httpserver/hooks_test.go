@@ -507,3 +507,34 @@ func TestTheStateRouteRefusesStrangersAndUnknownStates(t *testing.T) {
 		t.Fatal(code)
 	}
 }
+
+func TestHookBodiesCarryThePermissionMode(t *testing.T) {
+	r := rig()
+	for _, c := range []struct{ path, body string }{
+		{"/hooks/stop", `{"last_assistant_message":"done","permission_mode":"default"}`},
+		{"/hooks/post-tool", `{"tool_name":"Bash","tool_input":{},"permission_mode":"auto"}`},
+		{"/hooks/stop", `{"last_assistant_message":"done"}`},
+		{"/hooks/state", `{"hook_event_name":"UserPromptSubmit","permission_mode":"default"}`},
+	} {
+		if status, _ := send(r.app, postReq(c.path, &r.token, strings.NewReader(c.body))); status != http.StatusOK {
+			t.Fatalf("%s: %d", c.path, status)
+		}
+	}
+	for _, want := range []string{"default", "auto", "", "default"} {
+		if got := r.rt.recv(t).PermissionMode; got != want {
+			t.Fatalf("mode %q, want %q", got, want)
+		}
+	}
+}
+
+func TestTheModeRouteDeliversAModeEvent(t *testing.T) {
+	r := rig()
+	status, _ := send(r.app, postReq("/hooks/mode", &r.token, strings.NewReader(`{"permission_mode":"default"}`)))
+	ev := r.rt.recv(t)
+	if status != http.StatusOK || ev.Kind != agent.HookMode || ev.Agent != "coordinator" || ev.PermissionMode != "default" {
+		t.Fatalf("%d %+v", status, ev)
+	}
+	if status, _ := send(r.app, postReq("/hooks/mode", nil, strings.NewReader(`{}`))); status != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated: %d", status)
+	}
+}

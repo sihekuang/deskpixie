@@ -121,11 +121,15 @@ func WarpTabConfig(a agent.Attach) string {
 	if a.Dir != "" {
 		fmt.Fprintf(&b, "directory = %s\n", quoted(a.Dir))
 	}
-	fmt.Fprintf(&b, "commands = [%s]\n", quoted(AttachLine(a)))
+	// `exit`: a tab whose attach ends (replaced by a newer one, #110) closes instead of leaving a shell.
+	fmt.Fprintf(&b, "commands = [%s]\n", quoted(AttachLine(a)+"; exit"))
 	return b.String()
 }
 
 func (w *WarpLauncher) Name() string { return "warp" }
+
+// WindowTitle is the attach tab's title, which its window shows while the tab is active.
+func (w *WarpLauncher) WindowTitle() string { return "DeskPixie" }
 
 func (w *WarpLauncher) Open(a agent.Attach) error {
 	path := filepath.Join(w.dir, WarpStem+".toml")

@@ -356,7 +356,7 @@ func TestABlockedCoordinatorWithoutAPendingPermissionGetsTheTerminalHint(t *test
 	c.Step(coordStatus(PaneBlocked), T0)
 	wantNone(t, visible(c.Step(TickInput(), T0+2_999)))
 	fx := visible(c.Step(TickInput(), T0+3_000))
-	wantEffects(t, fx, eStatus("Coordinator: waiting in terminal"), eChime, eNotify(BlockedHint))
+	wantEffects(t, fx, eStatus("Coordinator: waiting in terminal"), eChime, eNotify(BlockedHint), eShowPane("", ""))
 	wantNone(t, visible(c.Step(TickInput(), T0+9_000)), "hinted once")
 	fx = visible(c.Step(coordStatus(PaneWorking), T0+9_500))
 	wantEffects(t, fx, eStatus(""))
@@ -1055,5 +1055,155 @@ func TestANoticeShowsWhenTheStatusIsOtherwiseEmptyAndDisablesNothing(t *testing.
 	fx = visible(askPush(c, 1, T0+5_000))
 	if anyKind(fx, EfDecide) {
 		t.Fatalf("delegation still works: %s", fmtEffects(fx))
+	}
+}
+
+func effectsOfKind(fx []Effect, kind EffectKind) []Effect {
+	var out []Effect
+	for _, e := range fx {
+		if e.Kind == kind {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// saidManualNotice: does any effect carry Pixie's Manual-mode line (spoken, notified or kept)?
+func saidManualNotice(fx []Effect) bool {
+	for _, e := range fx {
+		if strings.Contains(e.Text, ManualNotice) || strings.Contains(e.Notice.Text, ManualNotice) || strings.Contains(e.Line, ManualNotice) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestAnAutoLaunchedClaudeAgentReportingDefaultIsInManual(t *testing.T) {
+	c := NewAgentController(DefaultSettings())
+	fx := c.Step(ModeInput(Coordinator, "default"), 1000)
+	m := effectsOfKind(fx, EfManual)
+	if len(m) != 1 || m[0].Agent != Coordinator || !m[0].Manual {
+		t.Fatalf("%s", fmtEffects(fx))
+	}
+	if !saidManualNotice(fx) {
+		t.Fatalf("no notice: %s", fmtEffects(fx))
+	}
+	if fx := c.Step(ModeInput(Coordinator, "default"), 2000); len(effectsOfKind(fx, EfManual)) != 0 || saidManualNotice(fx) {
+		t.Fatal("repeated")
+	}
+	fx = c.Step(ModeInput(Coordinator, "auto"), 3000)
+	if m := effectsOfKind(fx, EfManual); len(m) != 1 || m[0].Manual {
+		t.Fatalf("not cleared: %s", fmtEffects(fx))
+	}
+	// Back in Manual later: flagged again, but Pixie says it only once per app run.
+	fx = c.Step(ModeInput(Coordinator, "default"), 4000)
+	if len(effectsOfKind(fx, EfManual)) != 1 || saidManualNotice(fx) {
+		t.Fatalf("%s", fmtEffects(fx))
+	}
+}
+
+func TestAFirstAutoReportIsNotAChange(t *testing.T) {
+	c := NewAgentController(DefaultSettings())
+	if fx := c.Step(ModeInput(Coordinator, "auto"), 1000); len(effectsOfKind(fx, EfManual)) != 0 {
+		t.Fatalf("%s", fmtEffects(fx))
+	}
+	if fx := c.Step(ModeInput(Coordinator, "plan"), 2000); len(effectsOfKind(fx, EfManual)) != 0 {
+		t.Fatalf("an unknown mode flagged: %s", fmtEffects(fx))
+	}
+}
+
+func TestACodexAgentIsNeverFlaggedManual(t *testing.T) {
+	s := DefaultSettings()
+	s.CoordinatorKind = Codex
+	c := NewAgentController(s)
+	for _, m := range []string{"default", "", "on-request", "never"} {
+		if fx := c.Step(ModeInput(Coordinator, m), 1000); len(effectsOfKind(fx, EfManual)) != 0 {
+			t.Fatalf("%q flagged a Codex coordinator", m)
+		}
+	}
+}
+
+func TestOnlyClaudeWorkersAreFlaggedManual(t *testing.T) {
+	cc := wctl()
+	cl := admitOK(t, cc, Claude)
+	if fx := cc.Step(ModeInput(cl.Name, "default"), 1000); len(effectsOfKind(fx, EfManual)) != 1 {
+		t.Fatalf("claude worker not flagged: %s", fmtEffects(fx))
+	}
+	cx := wctl()
+	cp := admitOK(t, cx, Codex)
+	if fx := cx.Step(ModeInput(cp.Name, "default"), 1000); len(effectsOfKind(fx, EfManual)) != 0 {
+		t.Fatalf("codex worker flagged: %s", fmtEffects(fx))
+	}
+	if fx := cx.Step(ModeInput("nobody", "default"), 1000); len(effectsOfKind(fx, EfManual)) != 0 {
+		t.Fatal("unknown agent flagged")
+	}
+}
+
+func TestAFlaggedWorkerEndingClearsItsFlag(t *testing.T) {
+	c := wctl()
+	p := admitOK(t, c, Claude)
+	up(c, p.Name, PaneIdle)
+	c.Step(ModeInput(p.Name, "default"), 1000)
+	fx := c.Step(PaneInput(PaneEvent{Kind: PaneEventExited, Agent: p.Name}), 2000)
+	if m := effectsOfKind(fx, EfManual); len(m) != 1 || m[0].Agent != p.Name || m[0].Manual {
+		t.Fatalf("%s", fmtEffects(fx))
+	}
+	p2 := admitOK(t, c, Claude)
+	up(c, p2.Name, PaneIdle)
+	if fx := c.Step(ModeInput(p2.Name, "default"), 3000); len(effectsOfKind(fx, EfManual)) != 1 {
+		t.Fatalf("not flagged again: %s", fmtEffects(fx))
+	}
+}
+
+func TestARestartedCoordinatorIsClearedAndFlaggedAgain(t *testing.T) {
+	c := NewAgentController(DefaultSettings())
+	c.Step(ModeInput(Coordinator, "default"), 1000)
+	fx := c.Step(RestartInput(), 2000)
+	if m := effectsOfKind(fx, EfManual); len(m) != 1 || m[0].Agent != Coordinator || m[0].Manual {
+		t.Fatalf("not cleared: %s", fmtEffects(fx))
+	}
+	fx = c.Step(ModeInput(Coordinator, "default"), 3000)
+	if len(effectsOfKind(fx, EfManual)) != 1 || saidManualNotice(fx) {
+		t.Fatalf("%s", fmtEffects(fx))
+	}
+}
+
+// ---------- tap to approve (#97) ----------
+
+func TestATapOnAllowDecidesLikeASpokenConfirm(t *testing.T) {
+	c := workingOnJob1()
+	items, _ := lastUpdates(t, askPush(c, 7, T0))
+	if len(items) != 1 || items[0].Token != "hawk" {
+		t.Fatalf("%+v", items)
+	}
+	fx := visible(c.Step(DecideInput(items[0].Token, true), T0))
+	wantEffects(t, fx, eDecide(7, Allow()), eChime, eNotify("Coordinator: allowed"))
+	wantJobStatus(t, c, 1, JobWorking)
+}
+
+func TestATapOnDenyDeniesAndAnotherTapOrAnExpiredTokenDoesNothing(t *testing.T) {
+	c := workingOnJob1()
+	askPush(c, 7, T0)
+	fx := visible(c.Step(DecideInput("hawk", false), T0))
+	wantEffects(t, fx[:1], eDecide(7, Deny("The user said no.")))
+	wantNone(t, visible(c.Step(DecideInput("hawk", true), T0)))
+	wantNone(t, visible(c.Step(DecideInput("expired-or-unknown", true), T0)))
+}
+
+func TestOnlyAPendingQuestionCarriesAToken(t *testing.T) {
+	c := workingOnJob1()
+	askPush(c, 7, T0)
+	c.Step(DecideInput("hawk", true), T0)
+	for _, it := range c.bubbleItems() {
+		if it.Token != "" {
+			t.Fatalf("%+v", it)
+		}
+	}
+}
+
+// #97: the Manual-mode line names no agent, since a worker can fall back on its own.
+func TestManualNoticeIsAgentNeutral(t *testing.T) {
+	if ManualNotice != "Heads up: one of my agents is asking before everything because it's running in Claude Code's Manual mode. I've put the reason in the menu." {
+		t.Fatal(ManualNotice)
 	}
 }

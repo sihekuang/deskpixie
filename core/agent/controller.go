@@ -19,7 +19,7 @@ import (
 // terminal hint.
 const BlockedGraceMs Millis = 3_000
 
-const BlockedHint = "The coordinator is waiting at a prompt in its terminal; click me to open it."
+const BlockedHint = "The coordinator is waiting at a prompt in its terminal; I'm bringing it up for you."
 
 // unreadableDenial is what the agent is told when a request cannot be read aloud plainly
 // enough to approve by voice.
@@ -73,6 +73,8 @@ type Settings struct {
 	// CoordinatorKind (`agent.coordinatorKind`, #87): the coordinator's agent, named in the
 	// tray when it can't start.
 	CoordinatorKind AgentKind
+	// SpokenPaths: folders a spoken approval names short (#97).
+	SpokenPaths SpokenPaths
 }
 
 // DefaultSettings: 4 notifications a minute, 2-minute permission timeout, narration on.
@@ -128,6 +130,8 @@ const (
 	InOpenRefused                         // the voice loop was busy and did not start the conversation EfOpenConversation asked for
 	InUpdatesSeen                         // IDs: the updates bubble showed these lines long enough to count as heard
 	InPresence                            // Away: the user is away (screen locked, displays asleep or idle) or back
+	InMode                                // Agent, Mode: the permission_mode a Claude agent's hook reported
+	InDecide                              // Token, Allow: a tap on Allow or Deny in the updates bubble
 )
 
 // Input is one stimulus for AgentController.Step. Build it with the *Input constructors.
@@ -143,6 +147,7 @@ type Input struct {
 	HostErr    HostError
 	Pane       PaneEvent
 	Agent      string
+	Mode       string
 	Message    string
 	RequestID  RequestID
 	ToolName   string
@@ -166,6 +171,9 @@ type Input struct {
 	IDs []uint64
 	// Away (InPresence).
 	Away bool
+	// Token and Allow (InDecide): the confirm word tapped on, and the answer.
+	Token string
+	Allow bool
 }
 
 // RestoredInput: keep says the coordinator was kept running over the quit: its open jobs stay
@@ -221,8 +229,14 @@ func WorkerFailedInput(name, reason string) Input {
 }
 func WorkerClosedInput(name string) Input { return Input{Kind: InWorkerClosed, Name: name} }
 func OpenRefusedInput() Input             { return Input{Kind: InOpenRefused} }
+
+// DecideInput is a tap on Allow or Deny for the permission question with this confirm word.
+func DecideInput(token string, allow bool) Input {
+	return Input{Kind: InDecide, Token: token, Allow: allow}
+}
 func UpdatesSeenInput(ids []uint64) Input { return Input{Kind: InUpdatesSeen, IDs: ids} }
 func PresenceInput(away bool) Input       { return Input{Kind: InPresence, Away: away} }
+func ModeInput(agent, mode string) Input  { return Input{Kind: InMode, Agent: agent, Mode: mode} }
 func WorkerScreenInput(name, text string) Input {
 	return Input{Kind: InWorkerScreen, Name: name, Text: text}
 }
@@ -260,6 +274,8 @@ const (
 	EfLabel            // Tab: relabel the coordinator's tab (its current request, or idle)
 	EfOpenConversation // start a conversation if the voice loop is at rest (else answered with InOpenRefused)
 	EfUpdates          // Value: []UpdateItem: the updates bubble's list (sent when it changes)
+	EfManual           // Agent, Manual: a Claude agent is (or no longer is) in Manual mode
+	EfShowPane         // Job, Name: bring up this agent's pane (Name "": the coordinator) — it waits at a prompt in its terminal (#110)
 )
 
 // Effect is one thing the caller must do, in order. Err set (non-empty) is the Err branch of
@@ -281,6 +297,8 @@ type Effect struct {
 	Err      string
 	Name     string
 	Tab      TabLabel
+	Agent    string
+	Manual   bool
 }
 
 type coordinatorState int
@@ -303,6 +321,10 @@ type watchdog struct {
 
 // AgentController holds the delegation state. Not safe for concurrent use; the runtime owns it.
 type AgentController struct {
+	// modes: agent -> in Manual mode (Claude agents only); manualSaid: Pixie told the user once (#97).
+	modes      map[string]bool
+	manualSaid bool
+
 	settings    Settings
 	jobs        *JobTable
 	inbox       *Inbox
@@ -373,6 +395,7 @@ func NewAgentController(settings Settings) *AgentController {
 		memories: NewMemoryLog(),
 		workers:  NewWorkers(),
 		opener:   newOpener(settings.NotifyPerMinute),
+		modes:    map[string]bool{},
 	}
 }
 
@@ -466,6 +489,7 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 		case ev.Kind == PaneEventExited && ev.Agent == Coordinator:
 			fx = append(fx, logEffect("coordinator pane exited"))
 			c.coordinator = coordAbsent
+			c.clearMode(Coordinator, &fx)
 			// Its replacement gets the in-flight work again (nothing was typed there).
 			c.inbox.CoordinatorLost()
 			c.clearTimers()
@@ -478,6 +502,8 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 		default:
 			c.workerGone(ev.Agent, now, &fx)
 		}
+	case InMode:
+		c.onMode(in.Agent, in.Mode, now, &fx)
 	case InStop:
 		if in.Agent == Coordinator {
 			c.onStop(in.Message, now, &fx)
@@ -526,6 +552,7 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 		running := c.coordinator != coordAbsent
 		c.disabled = ""
 		c.coordinator = coordAbsent
+		c.clearMode(Coordinator, &fx)
 		c.blocked = optMs{}
 		c.hinted = false
 		c.promptFailures = 0
@@ -570,6 +597,11 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 		c.openRefused(now, &fx)
 	case InUpdatesSeen:
 		c.updatesSeen(in.IDs, &fx)
+	case InDecide:
+		// A token already decided (by voice or an earlier tap) or expired settles nothing.
+		if d, ok := c.confirms.DecideToken(in.Token, in.Allow); ok {
+			c.applyDecided(d, now, &fx)
+		}
 	case InPresence:
 		c.setAway(in.Away, now, &fx)
 	}
@@ -779,6 +811,7 @@ func (c *AgentController) onCoordinatorStatus(status PaneStatus, now Millis, fx 
 
 func (c *AgentController) coordinatorFailed(err HostError, now Millis, fx *[]Effect) {
 	c.coordinator = coordAbsent
+	c.clearMode(Coordinator, fx)
 	*fx = append(*fx, logEffect("coordinator start failed: "+errorTag(err)))
 	switch err.Kind {
 	case HostNotFound:
@@ -1102,7 +1135,14 @@ func (c *AgentController) onReply(id JobID, status SpokenStatus, text string, no
 		_, _ = c.jobs.Transition(id, JobWorking, now)
 		c.jobs.SetProgress(id, text, now)
 		c.saveJob(id, fx)
-		c.deliver(NewJobLine(LineReply, text, id), now, fx)
+		line := NewJobLine(LineReply, text, id)
+		if c.settings.OpenConversation && !c.voiceOpen {
+			// #113: progress opens no conversation, so it doesn't chime or notify either (a
+			// chime means one follows); it waits in the outbox for the next conversation.
+			c.applyDelivery(OutboxDelivery(line), now, fx)
+			break
+		}
+		c.deliver(line, now, fx)
 	case SpokenQuestion:
 		_, _ = c.jobs.Transition(id, JobQuestion, now)
 		c.jobs.SetReply(id, text, now)
@@ -1159,7 +1199,7 @@ func (c *AgentController) onPermission(id RequestID, agent, toolName string, too
 	} else if refs := c.inbox.InFlightRefs(); len(refs) == 1 && c.jobs.IsOpen(refs[0]) {
 		job = refs[0]
 	}
-	if !VoiceConfirmable(toolName, toolInput) {
+	if !VoiceConfirmableWith(toolName, toolInput, c.settings.SpokenPaths) {
 		*fx = append(*fx, decideEffect(id, Deny(unreadableDenial)))
 		c.deliver(NewLine(LineInfo, unreadableNotice), now, fx)
 		return
@@ -1174,25 +1214,79 @@ func (c *AgentController) onPermission(id RequestID, agent, toolName string, too
 			c.saveJob(job, fx)
 		}
 	}
-	text := ConfirmQuestionLine(Describe(toolName, toolInput, label), token)
+	text := ConfirmQuestionLine(DescribeWith(toolName, toolInput, label, c.settings.SpokenPaths), token)
 	q := Line{Text: text, Kind: LineQuestion, Token: &token, Job: job}
 	if agent != Coordinator {
 		q.Worker = agent
 	}
+	before := c.outbox.Len()
 	c.deliverOpening(q, now, fx)
+	// Said in a conversation, it never reached the outbox: keep it there as heard, so the bubble
+	// lists it with Allow and Deny while it waits (#97).
+	if !c.outbox.HasTokenSince(before, token) {
+		*fx = append(*fx, Effect{Kind: EfAppend, File: OutboxFile, Line: c.outbox.PushHeard(q, now)})
+	}
+}
+
+// ManualNotice is what Pixie says, once per app run, when a Claude agent fell back to Manual.
+const ManualNotice = "Heads up: one of my agents is asking before everything because it's running in Claude Code's Manual mode. I've put the reason in the menu."
+
+// clearMode forgets an agent's mode when it ends (a worker closes, the coordinator stops or
+// restarts) and clears its tray flag if it was on, so a later "default" flags it again.
+func (c *AgentController) clearMode(agent string, fx *[]Effect) {
+	was := c.modes[agent]
+	delete(c.modes, agent)
+	if was {
+		*fx = append(*fx, Effect{Kind: EfManual, Agent: agent, Manual: false})
+	}
+}
+
+// onMode: a Claude agent launched with --permission-mode auto that reports "default" fell back
+// to Manual (#97). Codex agents never report it, and anything else is ignored.
+func (c *AgentController) onMode(agent, mode string, now Millis, fx *[]Effect) {
+	if mode != "auto" && mode != "default" {
+		return
+	}
+	kind := c.settings.CoordinatorKind
+	if agent != Coordinator {
+		w := c.workers.Get(agent)
+		if w == nil {
+			return
+		}
+		kind = w.Plan.Kind
+	}
+	if kind == Codex {
+		return
+	}
+	manual := mode == "default"
+	if c.modes[agent] == manual {
+		return
+	}
+	c.modes[agent] = manual
+	*fx = append(*fx, Effect{Kind: EfManual, Agent: agent, Manual: manual})
+	if manual && !c.manualSaid {
+		c.manualSaid = true
+		c.deliver(NewLine(LineInfo, ManualNotice), now, fx)
+	}
 }
 
 func (c *AgentController) onUserSaid(text string, now Millis, fx *[]Effect) {
 	for _, d := range c.confirms.OnTranscript(text) {
-		decision := Deny("The user said no.")
-		said := "Coordinator: denied"
-		if d.Allow {
-			decision, said = Allow(), "Coordinator: allowed"
-		}
-		*fx = append(*fx, decideEffect(d.Pending.ID, decision))
-		c.resumeJob(d.Pending.Job, now, fx)
-		c.deliver(NewLine(LineInfo, said), now, fx)
+		c.applyDecided(d, now, fx)
 	}
+}
+
+// applyDecided turns one settled request into its effects: the decision, the job resuming, and
+// the line saying so. A spoken answer and a tap on the bubble both end here.
+func (c *AgentController) applyDecided(d Decided, now Millis, fx *[]Effect) {
+	decision := Deny("The user said no.")
+	said := "Coordinator: denied"
+	if d.Allow {
+		decision, said = Allow(), "Coordinator: allowed"
+	}
+	*fx = append(*fx, decideEffect(d.Pending.ID, decision))
+	c.resumeJob(d.Pending.Job, now, fx)
+	c.deliver(NewLine(LineInfo, said), now, fx)
 }
 
 // resumeJob moves a job in Question back to Working once nothing for it is pending.
@@ -1314,6 +1408,8 @@ func (c *AgentController) tick(now Millis, fx *[]Effect) {
 		c.hinted = true
 		c.setStatus("Coordinator: waiting in terminal", fx)
 		c.deliver(NewLine(LineInfo, BlockedHint), now, fx)
+		// No job: FocusTarget would pick the job's worker; this is the coordinator's own pane.
+		*fx = append(*fx, Effect{Kind: EfShowPane})
 	}
 }
 

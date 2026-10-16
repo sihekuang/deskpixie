@@ -25,12 +25,16 @@ type AgentHooks struct {
 	Celebrate, FlashError func()
 	// RefreshTray: the agent's tray rows or status changed.
 	RefreshTray func()
+	// ClearModel sets agent.model back to null (Claude Code's default) in settings.json.
+	ClearModel func()
 	// Notify shows a macOS notification (no sound: the agent chimes on its own).
 	Notify func(title, body string)
 	// Updates is the updates bubble's list (the `updates` event's lines; never nil).
 	Updates func(items any)
 	// Roster is the roster beside Pixie (the `agents` event's roster), on every change (#91).
 	Roster func(view any)
+	// ShowPane asks the shell to bring up an agent's pane (the `showPane` event, #110).
+	ShowPane func(job, worker string)
 	// LocalTools are Pixie's local tools (NewLocalTools), the very instances the voice loop
 	// holds: the agent serves them to the coordinator over MCP. Never to workers.
 	LocalTools []tools.Tool
@@ -51,6 +55,8 @@ type Agent interface {
 	AttachVoice(v AgentVoice)
 	// OnMouth is each mouth level the voice loop reports (the echo gate).
 	OnMouth(level int)
+	// Decide: a tap on Allow or Deny in the bubble for the permission question with this token.
+	Decide(token string, allow bool)
 	// UpdatesSeen: the updates bubble showed these lines long enough to count as heard.
 	UpdatesSeen(ids []uint64)
 	// Updates is the bubble's current list (the `updates` event's lines), for the shell's first

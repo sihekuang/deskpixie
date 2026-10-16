@@ -48,7 +48,7 @@ func RoleOf(identity string) Role {
 }
 
 var (
-	CoordinatorTools = [4]string{"start_worker", "message_worker", "stop_worker", "list_workers"}
+	CoordinatorTools = [5]string{"start_worker", "create_project", "message_worker", "stop_worker", "list_workers"}
 	WorkerTools      = [4]string{"report_progress", "report_result", "ask_coordinator", "report_blocked"}
 )
 
@@ -98,6 +98,11 @@ func Catalog(role Role) []map[string]any {
 					"job_id": map[string]any{"type": "string", "description": "The job this work is for: the [ref job_…] of the request."},
 					"name":   map[string]any{"type": "string", "description": "Required: a 2–3 word name for this piece of work, e.g. `fix-login`. Reusing a name reuses that worker's folder and branch."},
 				}, "kind", "repo", "task", "job_id"),
+			},
+			{
+				"name":        "create_project",
+				"description": "Create a new, empty project under the projects root: a folder with a git repository and one empty commit, ready for start_worker. Use it instead of mkdir or git init. Refuses a name that already exists. Returns {name, path} or an error.",
+				"inputSchema": objectSchema(stringProps([2]string{"name", "The new project's folder name: letters, digits, '-', '_' or '.', e.g. spacex-dashboard."}), "name"),
 			},
 			{
 				"name":        "message_worker",
@@ -231,6 +236,12 @@ func ParseToolCall(role Role, name string, args any) (McpCall, error) {
 			hint = singleLine(n)
 		}
 		return McpCall{Kind: CallStartWorker, Worker: WorkerRequest{Kind: kind, Repo: repo, Task: task, JobID: jobID, Name: hint}}, nil
+	case "create_project":
+		n, err := need("name")
+		if err != nil {
+			return McpCall{}, err
+		}
+		return McpCall{Kind: CallCreateProject, Name: n}, nil
 	case "message_worker":
 		n, err := needName("name")
 		if err != nil {

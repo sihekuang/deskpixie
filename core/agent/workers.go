@@ -715,6 +715,18 @@ func (ws *Workers) DueRetries(now Millis) []string {
 	return out
 }
 
+// Waiting is the worker blocked at a prompt in its terminal with no permission waiting in Pixie
+// (hasPending), the latest to block; "" if none is.
+func (ws *Workers) Waiting(hasPending func(string) bool) string {
+	name, since := "", Millis(0)
+	for _, w := range ws.sorted() {
+		if w.blockedSince.set && !w.StopRequested && !hasPending(w.Plan.Name) && (name == "" || w.blockedSince.v >= since) {
+			name, since = w.Plan.Name, w.blockedSince.v
+		}
+	}
+	return name
+}
+
 // DueHints returns workers blocked for WorkerBlockedGraceMs with no pending permission, each
 // once per block.
 func (ws *Workers) DueHints(now Millis, hasPending func(string) bool) []string {

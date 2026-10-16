@@ -120,9 +120,20 @@ type UpdatesSink interface {
 	Updates(items []UpdateItem)
 }
 
+// PaneSink brings up an agent's pane for the user (#110): worker "" is the coordinator. The shell
+// waits until the user stops typing, then focuses it as a click would (agent.focusJob).
+type PaneSink interface {
+	ShowPane(job JobID, worker string)
+}
+
 // StatusSink is the tray's one-line agent status, e.g. "Coordinator: herdr not found"; "" clears it.
 type StatusSink interface {
 	SetStatus(line string)
+}
+
+// ModeSink is told when a Claude agent enters or leaves Manual mode (#97).
+type ModeSink interface {
+	ManualMode(agent string, manual bool)
 }
 
 // TrustStore pre-accepts the agent CLI's folder-trust dialog for dir; returns the paths it trusted.
@@ -143,6 +154,9 @@ type WorktreeFs interface {
 	Audit(repo, slug string) error
 	// ForeignSlugs: names in `<repo>/.worktrees/` that are not a worktree on `pixie/<name>`.
 	ForeignSlugs(repo string) []string
+	// CreateProject makes `<projects root>/<name>` a new git repository with one empty commit
+	// and returns its canonical path. It refuses a bad name or any existing path.
+	CreateProject(name string) (string, error) // WorktreeError
 }
 
 // TokenIssuer is per-agent bearer tokens for the hook/MCP server (in memory, never logged).

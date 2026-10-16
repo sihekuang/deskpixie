@@ -90,6 +90,21 @@ func TestProgressAndUnsolicitedLinesDoNotOpenAConversation(t *testing.T) {
 	}
 }
 
+// #113: with the flag on, a chime means a conversation follows. A progress reply opens none, so
+// it doesn't chime or notify either: it waits in the outbox for the next conversation.
+func TestAProgressReplyWhileClosedNeitherChimesNorNotifies(t *testing.T) {
+	c := openingCtl()
+	fx := visible(stop(c, `<spoken ref="job_000000000001" status="working">Halfway through.</spoken>`, T0))
+	if anyKind(fx, EfChime, EfNotify, EfOpenConversation) {
+		t.Fatal(fmtEffects(fx))
+	}
+	fx = visible(stop(c, doneStop, T0+5000))
+	wantContains(t, fx, eChime)
+	wantContains(t, fx, eOpen)
+	fx = visible(c.Step(voiceOpened(), T0+5800))
+	wantEffects(t, fx, eInject("Coordinator replies while you were away:\n- Coordinator reply: Halfway through.\n- Coordinator reply: There are 12 open issues."))
+}
+
 func TestAnOpenConversationGetsTheLineInjectedAsToday(t *testing.T) {
 	c := openingCtl()
 	openVoice(c)

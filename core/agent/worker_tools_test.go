@@ -267,3 +267,19 @@ func TestReportResultsDescriptionSaysTheSummaryIsSpoken(t *testing.T) {
 		}
 	}
 }
+
+func TestCreateProjectIsACoordinatorTool(t *testing.T) {
+	if !slices.Contains(toolNames(RoleCoordinator), "create_project") || slices.Contains(toolNames(RoleWorker), "create_project") {
+		t.Fatal("create_project is for the coordinator only")
+	}
+	call, err := ParseToolCall(RoleCoordinator, "create_project", map[string]any{"name": "spacex-dashboard"})
+	if err != nil || call.Kind != CallCreateProject || call.Name != "spacex-dashboard" {
+		t.Fatalf("%+v %v", call, err)
+	}
+	if _, err := ParseToolCall(RoleCoordinator, "create_project", map[string]any{}); !isBadArgs(err) {
+		t.Fatal("name is required")
+	}
+	if _, err := ParseToolCall(RoleWorker, "create_project", map[string]any{"name": "x"}); !parseErr(t, err).UnknownTool {
+		t.Fatal("workers can't create projects")
+	}
+}

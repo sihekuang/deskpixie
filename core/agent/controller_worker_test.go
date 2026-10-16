@@ -477,7 +477,9 @@ func TestABlockedCodexWorkerGetsTheApprovalHint(t *testing.T) {
 		t.Fatalf("%v", r)
 	}
 	fx := c.Step(TickInput(), T0+WorkerBlockedGraceMs)
-	wantContains(t, fx, eNotify("The Codex worker in focus is waiting for approval in its terminal; click me to open it."))
+	wantContains(t, fx, eNotify("The Codex worker in focus is waiting for approval in its terminal; I'm bringing it up for you."))
+	wantContains(t, fx, eShowPane(p.Job, p.Name))
+	wantNotContains(t, c.Step(TickInput(), T0+WorkerBlockedGraceMs+5_000), eShowPane(p.Job, p.Name))
 }
 
 func TestProgressIsRecordedAndNarratedOnlyWhileOpen(t *testing.T) {
@@ -710,5 +712,24 @@ func TestAResultAfterTheJobEndedIsNotSpoken(t *testing.T) {
 	wantToolErr(t, err, "Your job has ended; stop working.")
 	if anyKind(fx, EfInject, EfNotify) {
 		t.Fatal(fmtEffects(fx))
+	}
+}
+
+// #110: a click on Pixie opens the worker blocked at a prompt in its terminal (before its hint
+// too), else the coordinator.
+func TestAClickOnPixieOpensTheWorkerWaitingInItsTerminal(t *testing.T) {
+	c := wctl()
+	p := admitOK(t, c, Codex)
+	up(c, p.Name, PaneIdle)
+	if got := c.OpenTarget(); got != Coordinator {
+		t.Fatalf("nothing waiting: %q", got)
+	}
+	c.Step(paneStatus(p.Name, PaneBlocked), T0)
+	if got := c.OpenTarget(); got != p.Name {
+		t.Fatalf("waiting worker: %q", got)
+	}
+	c.Step(paneStatus(p.Name, PaneWorking), T0+WorkerBlockedGraceMs+1)
+	if got := c.OpenTarget(); got != Coordinator {
+		t.Fatalf("no longer waiting: %q", got)
 	}
 }

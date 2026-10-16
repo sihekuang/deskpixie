@@ -191,7 +191,7 @@ func TestToolsListDependsOnTheIdentity(t *testing.T) {
 		return out
 	}
 	list := map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": map[string]any{}}
-	if got := names(rpc(t, r.app, r.coordinator, list)); !reflect.DeepEqual(got, append([]string{"start_worker", "message_worker", "stop_worker", "list_workers"}, agent.SessionTools[:]...)) {
+	if got := names(rpc(t, r.app, r.coordinator, list)); !reflect.DeepEqual(got, append([]string{"start_worker", "create_project", "message_worker", "stop_worker", "list_workers"}, agent.SessionTools[:]...)) {
 		t.Fatal(got)
 	}
 	if got := names(rpc(t, r.app, r.worker, list)); !reflect.DeepEqual(got, []string{"report_progress", "report_result", "ask_coordinator", "report_blocked"}) {

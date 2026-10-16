@@ -130,6 +130,23 @@ type Agent struct {
 
 	mu           sync.Mutex
 	status, hint string
+	// Manual mode (#97): which agents are flagged, and why (set once per change, off the
+	// controller's goroutine, since the probes run a program).
+	manual map[string]bool
+	causes map[string]agent.ManualCause // per flagged agent, computed from the model it started with
+	gens   map[string]int               // per agent: invalidates a probe still running for an older flag
+
+	// model is the coordinator's --model ("" = Claude Code's default). The probes are seams:
+	// claudeListsAuto runs `claude --help` (unknown when it can't tell), managedOff reads the
+	// managed settings file.
+	model           string
+	kind            agent.AgentKind   // the coordinator's agent
+	coordModel      string            // the --model the Claude coordinator was started with
+	workerModel     map[string]string // the --model each Claude worker was started with
+	recipes         agent.WorkerRecipes
+	claudeListsAuto func() agent.ClaudeAuto
+	managedOff      func() bool
+	restart         func() // the coordinator restart (tests replace it)
 
 	ctx      context.Context
 	cancel   context.CancelFunc
@@ -182,7 +199,14 @@ func Build(c Config) *Agent {
 	if c.Listen == nil {
 		c.Listen = func(port uint16) (net.Listener, error) { return httpserver.Listen(int(port)) }
 	}
-	a := &Agent{paths: NewPaths(c.AppSupport), hooks: c.Hooks}
+	a := &Agent{paths: NewPaths(c.AppSupport), hooks: c.Hooks, manual: map[string]bool{}, causes: map[string]agent.ManualCause{},
+		gens: map[string]int{}, workerModel: map[string]string{},
+		managedOff: managedOff}
+	home, environ := c.Home, c.Environ
+	if environ == nil {
+		environ = os.Environ()
+	}
+	a.claudeListsAuto = func() agent.ClaudeAuto { return claudeAuto(home, environ, isFile, runHelp) }
 	a.link = &VoiceLink{refresh: c.Hooks.RefreshTray}
 	paths := a.paths
 
@@ -310,7 +334,9 @@ func Build(c Config) *Agent {
 		IDs:         c.IDs,
 		Kept:        KeptFile(paths.Kept()),
 		Updates:     updatesSink{c.Hooks},
+		Panes:       paneSink{c.Hooks},
 		Roster:      rosterSink{c.Hooks},
+		Modes:       a,
 	}
 	// Exactly 127.0.0.1 (the hook server refuses any non-loopback listener). Bound before the
 	// runtime is built, so a busy port is known before a warm start could launch anything.
@@ -319,6 +345,10 @@ func Build(c Config) *Agent {
 		log.Printf("agent: cannot listen on 127.0.0.1:%d: %v", s.Port, err)
 		setProblem("Coordinator: hook port busy")
 		ln = nil
+	}
+	spoken := agent.SpokenPaths{Home: c.Home}
+	if workersOn {
+		spoken.ProjectsRoot = ws.Root
 	}
 	cfg := agent.RuntimeConfig{
 		Settings: agent.Settings{
@@ -331,6 +361,7 @@ func Build(c Config) *Agent {
 			SpeakWorkerReports:  s.Workers.SpeakResults,
 			OpenConversation:    s.OpenConversationForUpdates,
 			CoordinatorKind:     kind,
+			SpokenPaths:         spoken,
 		},
 		Warm: s.Warm,
 		// Stepped before the warm start: a disabled app never starts the coordinator.
@@ -340,9 +371,16 @@ func Build(c Config) *Agent {
 	}
 	var workerDeps *agent.WorkerDeps
 	if workersOn {
-		workerDeps = WorkerAdapters(paths, ws.Root, c.Home, s.Port, model, tokens)
+		workerDeps = WorkerAdapters(paths, ws.Root, c.Home, s.Port, a.currentModel, tokens)
+		workerDeps.Recipes = &modelRecipes{WorkerRecipes: workerDeps.Recipes, a: a}
+		a.recipes = workerDeps.Recipes
+	}
+	a.model, a.kind = model, kind
+	if kind == agent.Claude {
+		a.coordModel = model
 	}
 	a.handle = agent.NewRuntimeWithWorkers(deps, cfg, workerDeps)
+	a.restart = a.handle.Restart
 	a.toAgent = a.handle.Voice
 	a.ctx, a.cancel = context.WithCancel(context.Background())
 	a.wg.Go(func() { a.handle.Run(a.ctx) })
@@ -375,7 +413,102 @@ func (a *Agent) Tray() app.AgentTray {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return app.AgentTray{Enabled: true, Jobs: rows, Status: a.status, Hint: a.hint}
+	t := app.AgentTray{Enabled: true, Jobs: rows, Status: a.status, Hint: a.hint}
+	subject, name := "A worker", ""
+	if a.manual[agent.Coordinator] {
+		subject, name = "Coordinator", agent.Coordinator
+	} else {
+		for w := range a.manual {
+			if _, known := a.causes[w]; known && (name == "" || w < name) {
+				name = w
+			}
+		}
+	}
+	if cause, ok := a.causes[name]; ok && a.manual[name] {
+		t.Mode = subject + " is in Manual mode: " + cause.Reason()
+		switch {
+		case cause == agent.CauseOldModel && !agent.ModelSupportsAuto(a.model):
+			// Offered only while the setting still names the old model: afterwards it is applied.
+			t.ModeFix = &app.TrayFix{ID: "agent:fix-model", Title: "Use a supported model"}
+		case cause == agent.CauseOldClaude:
+			t.ModeFix = &app.TrayFix{Title: "Copy update command", Copy: "claude update"}
+		}
+	}
+	return t
+}
+
+// ManualMode is agent.ModeSink: a Claude agent entered or left Manual mode. The flag is kept at
+// once; the cause is worked out off the caller's goroutine (the controller's effect loop must
+// not wait on `claude --help`) and the tray refreshed when it is known.
+func (a *Agent) ManualMode(name string, manual bool) {
+	a.mu.Lock()
+	if manual == a.manual[name] {
+		a.mu.Unlock()
+		return
+	}
+	a.gens[name]++
+	gen := a.gens[name]
+	if manual {
+		a.manual[name] = true
+	} else {
+		delete(a.manual, name)
+		delete(a.causes, name)
+	}
+	// The cause uses the model this agent was started with, not the setting now.
+	model := a.model
+	if name == agent.Coordinator {
+		model = a.coordModel
+	} else if m, ok := a.workerModel[name]; ok {
+		model = m
+	}
+	lists, off := a.claudeListsAuto, a.managedOff
+	a.mu.Unlock()
+	call(a.hooks.RefreshTray)
+	if !manual || a.ctx.Err() != nil {
+		return // quitting: no new goroutine beside Shutdown's wait
+	}
+	a.wg.Go(func() {
+		c := agent.ManualCauseOf(model, lists(), off())
+		a.mu.Lock()
+		if a.gens[name] != gen {
+			a.mu.Unlock()
+			return // changed since: its own probe answers
+		}
+		a.causes[name] = c
+		a.mu.Unlock()
+		call(a.hooks.RefreshTray)
+	})
+}
+
+// currentModel is agent.model now (read by each Claude worker's spawn).
+func (a *Agent) currentModel() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.model
+}
+
+// modelRecipes records the model each Claude worker was started with.
+type modelRecipes struct {
+	agent.WorkerRecipes
+	a *Agent
+}
+
+func (m *modelRecipes) Prepare(l agent.WorkerLaunch) (agent.PreparedWorker, error) {
+	model := m.a.currentModel()
+	p, err := m.WorkerRecipes.Prepare(l)
+	if err == nil && l.Kind == agent.Claude {
+		m.a.mu.Lock()
+		m.a.workerModel[l.Name] = model
+		m.a.mu.Unlock()
+	}
+	return p, err
+}
+
+func (m *modelRecipes) Discard(name string) {
+	m.a.mu.Lock()
+	delete(m.a.workerModel, name)
+	m.a.mu.Unlock()
+	m.WorkerRecipes.Discard(name)
 }
 
 // setHint shows a host hint (IntegrationHint) in the tray, logged once per line.
@@ -414,6 +547,27 @@ func (a *Agent) Menu(id string) bool {
 		a.OpenTerminal()
 	case "agent:restart":
 		a.handle.Restart()
+	case "agent:fix-model":
+		// Inside DeskPixie, so it runs directly (#80): agent.model back to Claude Code's default.
+		// New Claude workers read it at spawn; running workers are left alone (their flag clears
+		// when they end). The coordinator restarts only if it is a Claude one that is itself in
+		// Manual mode.
+		a.mu.Lock()
+		a.model = ""
+		claude := a.kind == agent.Claude
+		restart := claude && a.manual[agent.Coordinator]
+		if claude {
+			a.coordModel = ""
+		}
+		a.mu.Unlock()
+		if claude {
+			a.handle.ClearCoordinatorModel()
+		}
+		call(a.hooks.ClearModel)
+		if restart {
+			a.restart()
+		}
+		call(a.hooks.RefreshTray)
 	default:
 		job, ok := strings.CutPrefix(id, "agent:cancel:")
 		if !ok {
@@ -439,6 +593,9 @@ func (a *Agent) OpenTerminal() {
 		}
 	})
 }
+
+// Decide: a tap on Allow or Deny in the bubble for the question with this confirm word.
+func (a *Agent) Decide(token string, allow bool) { a.handle.Decide(token, allow) }
 
 // UpdatesSeen: the updates bubble showed these lines long enough to count as heard.
 func (a *Agent) UpdatesSeen(ids []uint64) { a.handle.UpdatesSeen(ids) }

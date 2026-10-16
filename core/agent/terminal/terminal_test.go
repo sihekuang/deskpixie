@@ -73,7 +73,7 @@ func TestWarpWritesExactlyThisTabConfigAndOpensTheURL(t *testing.T) {
 	// and a `cd` first (Warp bug #9130 can ignore `directory` before commands run).
 	want := "name = \"DeskPixie\"\ntitle = \"DeskPixie\"\n\n[[panes]]\nid = \"main\"\ntype = \"terminal\"\n" +
 		"directory = \"/Users/x/Documents/Projects\"\n" +
-		"commands = [\"cd '/Users/x/Documents/Projects' && /Users/x/.local/bin/herdr session attach deskpixie\"]\n"
+		"commands = [\"cd '/Users/x/Documents/Projects' && /Users/x/.local/bin/herdr session attach deskpixie; exit\"]\n"
 	if string(b) != want {
 		t.Fatalf("%q", b)
 	}
@@ -94,7 +94,7 @@ func TestWarpWritesExactlyThisTabConfigAndOpensTheURL(t *testing.T) {
 
 func TestWarpEscapesQuotesForToml(t *testing.T) {
 	toml := WarpTabConfig(bare([]string{"/a b/herdr", `say "hi"`}))
-	if !strings.Contains(toml, `commands = ["'/a b/herdr' 'say \"hi\"'"]`) {
+	if !strings.Contains(toml, `commands = ["'/a b/herdr' 'say \"hi\"'; exit"]`) {
 		t.Fatal(toml)
 	}
 }
@@ -222,7 +222,7 @@ func TestAnOddStartingFolderIsQuotedForTheShellAndEscapedForToml(t *testing.T) {
 	}
 	toml := WarpTabConfig(a)
 	if !strings.Contains(toml, "directory = \"/Users/x/it's \\\"here\\\"\"\n") ||
-		!strings.Contains(toml, `commands = ["cd '/Users/x/it'\\''s \"here\"' && /p/herdr"]`) {
+		!strings.Contains(toml, `commands = ["cd '/Users/x/it'\\''s \"here\"' && /p/herdr; exit"]`) {
 		t.Fatal(toml)
 	}
 	if line := ItermScript(a)[2]; line != `create window with default profile command "cd '/Users/x/it'\\''s \"here\"' && /p/herdr"` {

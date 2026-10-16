@@ -366,7 +366,7 @@ func TestBuildInstallsFilesClearsStaleMcpAndTrustsTheWorkspace(t *testing.T) {
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
 		t.Fatal("stale MCP config left")
 	}
-	if readFile(t, paths.Settings) != RenderSettings(settings.Default().Agent.Port) {
+	if readFile(t, paths.Settings) != shippedCoordinatorSettings(t, paths, settings.Default().Agent.Port) {
 		t.Fatal("settings not installed")
 	}
 	claude := readFile(t, filepath.Join(home, ".claude.json"))
@@ -596,4 +596,130 @@ func TestUpdatesIsTheBubblesCurrentList(t *testing.T) {
 		items, ok := f.agent.Updates().([]agent.UpdateItem)
 		return ok && items != nil && len(items) == 0
 	})
+}
+
+func manualProbes(f *fixture, model string, lists, org bool) {
+	f.agent.model, f.agent.coordModel = model, model
+	claude := agent.ClaudeLacksAuto
+	if lists {
+		claude = agent.ClaudeListsAuto
+	}
+	f.agent.claudeListsAuto = func() agent.ClaudeAuto { return claude }
+	f.agent.managedOff = func() bool { return org }
+}
+
+func TestManualModeShowsTheCauseAndTheModelFix(t *testing.T) {
+	f := newFixture(t, nil)
+	manualProbes(f, "claude-sonnet-4-5", true, false)
+	f.agent.ManualMode(agent.Coordinator, true)
+	waitFor(t, "the cause", func() bool { return f.agent.Tray().Mode != "" })
+	tr := f.agent.Tray()
+	if tr.Mode != "Coordinator is in Manual mode: its model is too old for auto mode" || tr.ModeFix == nil || tr.ModeFix.ID != "agent:fix-model" {
+		t.Fatalf("%+v", tr)
+	}
+	f.agent.ManualMode(agent.Coordinator, false)
+	if tr := f.agent.Tray(); tr.Mode != "" || tr.ModeFix != nil {
+		t.Fatalf("not cleared: %+v", tr)
+	}
+}
+
+func TestOldClaudeOffersTheUpdateCommandToCopy(t *testing.T) {
+	f := newFixture(t, nil)
+	manualProbes(f, "", false, false)
+	f.agent.ManualMode("fix-login", true)
+	waitFor(t, "the cause", func() bool { return f.agent.Tray().Mode != "" })
+	tr := f.agent.Tray()
+	if tr.Mode != "A worker is in Manual mode: Claude Code is too old for auto mode" || tr.ModeFix == nil || tr.ModeFix.Copy != "claude update" || tr.ModeFix.ID != "" {
+		t.Fatalf("%+v", tr)
+	}
+}
+
+func TestAnAgentClearedBeforeTheProbeFinishesShowsNothing(t *testing.T) {
+	f := newFixture(t, nil)
+	manualProbes(f, "", true, false)
+	release := make(chan struct{})
+	f.agent.claudeListsAuto = func() agent.ClaudeAuto { <-release; return agent.ClaudeListsAuto }
+	f.agent.ManualMode(agent.Coordinator, true)
+	f.agent.ManualMode(agent.Coordinator, false)
+	close(release)
+	time.Sleep(50 * time.Millisecond)
+	if tr := f.agent.Tray(); tr.Mode != "" {
+		t.Fatalf("%+v", tr)
+	}
+}
+
+func spawnWorker(t *testing.T, f *fixture, name string) []string {
+	t.Helper()
+	_ = os.MkdirAll(filepath.Join(f.home, "code", "repo", ".worktrees", name), 0o755)
+	p, err := f.agent.recipes.Prepare(agent.WorkerLaunch{Name: name, Kind: agent.Claude, Repo: filepath.Join(f.home, "code", "repo"), Worktree: filepath.Join(f.home, "code", "repo", ".worktrees", name), Token: "tok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p.Spec.Args
+}
+
+func TestFixWithOnlyAWorkerFlaggedKeepsTheCoordinatorAndFixesNewWorkers(t *testing.T) {
+	var cleared, restarted atomic.Int32
+	f := newFixture(t, func(c *Config) {
+		c.Hooks.ClearModel = func() { cleared.Add(1) }
+		c.Settings.Workers = settings.WorkerSettings{Enabled: true, Max: 2, Kinds: []string{"claude"}}
+		c.Settings.ProjectsRoot = "~/code"
+		_ = os.MkdirAll(filepath.Join(c.Home, "code"), 0o755)
+	})
+	f.agent.restart = func() { restarted.Add(1) }
+	manualProbes(f, "claude-sonnet-4-5", true, false)
+	if !slices.Contains(spawnWorker(t, f, "old-one"), "claude-sonnet-4-5") {
+		t.Fatal("the old worker starts on the model")
+	}
+	f.agent.ManualMode("old-one", true)
+	waitFor(t, "the cause", func() bool { return f.agent.Tray().ModeFix != nil })
+	f.agent.Menu("agent:fix-model")
+	if cleared.Load() != 1 || restarted.Load() != 0 {
+		t.Fatal("cleared/restarted", cleared.Load(), restarted.Load())
+	}
+	if slices.Contains(spawnWorker(t, f, "new-one"), "--model") {
+		t.Fatal("a new worker uses Claude Code's default")
+	}
+	tr := f.agent.Tray()
+	if tr.Mode != "A worker is in Manual mode: its model is too old for auto mode" || tr.ModeFix != nil {
+		t.Fatalf("%+v", tr)
+	}
+}
+
+func TestFixWithAFlaggedClaudeCoordinatorRestartsItWithoutTheModel(t *testing.T) {
+	var restarted atomic.Int32
+	f := newFixture(t, nil)
+	f.agent.restart = func() { restarted.Add(1) }
+	manualProbes(f, "claude-sonnet-4-5", true, false)
+	f.agent.coordModel = "claude-sonnet-4-5"
+	f.agent.ManualMode(agent.Coordinator, true)
+	waitFor(t, "the fix", func() bool { return f.agent.Tray().ModeFix != nil })
+	f.agent.Menu("agent:fix-model")
+	if restarted.Load() != 1 || f.agent.model != "" || f.agent.coordModel != "" {
+		t.Fatal("not restarted", restarted.Load())
+	}
+	if tr := f.agent.Tray(); tr.ModeFix != nil {
+		t.Fatalf("the fix is applied: %+v", tr)
+	}
+}
+
+func TestFixNeverRestartsACodexCoordinator(t *testing.T) {
+	var restarted atomic.Int32
+	f := newFixture(t, nil)
+	f.agent.restart = func() { restarted.Add(1) }
+	f.agent.kind = agent.Codex
+	manualProbes(f, "claude-sonnet-4-5", true, false)
+	f.agent.ManualMode(agent.Coordinator, true)
+	waitFor(t, "the fix", func() bool { return f.agent.Tray().ModeFix != nil })
+	f.agent.Menu("agent:fix-model")
+	if restarted.Load() != 0 {
+		t.Fatal("a Codex coordinator is never restarted")
+	}
+}
+
+func TestManualModeAfterShutdownStartsNothing(t *testing.T) {
+	f := newFixture(t, nil)
+	manualProbes(f, "", true, false)
+	f.agent.Shutdown()
+	f.agent.ManualMode(agent.Coordinator, true) // must not touch the wait group
 }

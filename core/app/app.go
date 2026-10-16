@@ -62,6 +62,10 @@ type AgentTray struct {
 	Jobs    []JobRow
 	// Status is the runtime's status line; Hint the standing hint (IntegrationHint).
 	Status, Hint string
+	// Mode is the Manual-mode line ("Coordinator is in Manual mode: <reason>"), "" when no
+	// Claude agent is in Manual mode (#97); ModeFix its one-click fix, or nil.
+	Mode    string
+	ModeFix *TrayFix
 }
 
 // Deps are the app's collaborators; zero values pick the real ones.
@@ -222,9 +226,12 @@ func New(d Deps) (*App, error) {
 			Celebrate:   a.Celebrate,
 			FlashError:  a.FlashError,
 			RefreshTray: a.pushTray,
-			Notify:      func(title, body string) { a.emit("notify", map[string]any{"title": title, "body": body}) },
-			Updates:     func(items any) { a.emit("updates", map[string]any{"lines": items}) },
-			Roster:      func(view any) { a.emit("agents", map[string]any{"roster": view}) },
+			// Action emits settings.changed after the menu id that calls this.
+			ClearModel: func() { a.save(func(c *settings.Config) { c.Agent.Model = nil }) },
+			Notify:     func(title, body string) { a.emit("notify", map[string]any{"title": title, "body": body}) },
+			Updates:    func(items any) { a.emit("updates", map[string]any{"lines": items}) },
+			Roster:     func(view any) { a.emit("agents", map[string]any{"roster": view}) },
+			ShowPane:   func(job, worker string) { a.emit("showPane", map[string]any{"job": job, "worker": worker}) },
 		})
 	}
 	a.buildVoice(cfg)
@@ -734,6 +741,9 @@ func (a *App) State() AppState {
 		StatusLines:  []string{},
 		Hotkey:       cfg.Hotkey,
 	}
+	if agent.Enabled {
+		s.AgentModeFix = agent.ModeFix
+	}
 	for id, p := range a.packs {
 		s.Packs = append(s.Packs, PackRef{ID: id, Name: p.Name})
 	}
@@ -749,6 +759,9 @@ func (a *App) State() AppState {
 	if agent.Enabled {
 		if line := AgentStatusLine(agent.Status, agent.Hint); line != "" {
 			s.StatusLines = append(s.StatusLines, line)
+		}
+		if agent.Mode != "" {
+			s.StatusLines = append(s.StatusLines, agent.Mode)
 		}
 	}
 	return s
@@ -1123,6 +1136,19 @@ func (a *App) Register(r Registrar) {
 		}
 		if a.agent != nil {
 			a.agent.UpdatesSeen(in.IDs)
+		}
+		return struct{}{}, nil
+	})
+	r.Register("agent.decide", func(args json.RawMessage) (any, error) {
+		var in struct {
+			Token string `json:"token"`
+			Allow bool   `json:"allow"`
+		}
+		if err := decodeArgs("agent.decide", args, &in); err != nil {
+			return nil, err
+		}
+		if a.agent != nil {
+			a.agent.Decide(in.Token, in.Allow)
 		}
 		return struct{}{}, nil
 	})

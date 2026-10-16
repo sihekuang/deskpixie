@@ -1064,3 +1064,72 @@ func TestEnsureBudgetIsTheRustValue(t *testing.T) {
 		t.Fatal(EnsureBudget)
 	}
 }
+
+func TestCreateProjectMakesARepoAWorkerCanUse(t *testing.T) {
+	f := newFixture(t)
+	g := f.fs()
+	path, err := g.CreateProject("spacex-dashboard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want, _ := filepath.EvalSymlinks(filepath.Join(f.root, "spacex-dashboard")); path != want {
+		t.Fatalf("%s != %s", path, want)
+	}
+	if got := f.git(path, "log", "--format=%s"); got != "Start spacex-dashboard" {
+		t.Fatalf("%q", got)
+	}
+	if _, err := g.Ensure(path, "first"); err != nil {
+		t.Fatal("a worktree must be creatable at once: ", err)
+	}
+	if _, err := g.CreateProject("spacex-dashboard"); err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatal(err)
+	}
+}
+
+func TestCreateProjectRefusesBadNamesWithoutTouchingDisk(t *testing.T) {
+	f := newFixture(t)
+	g := f.fs()
+	mustWrite(t, filepath.Join(f.root, "afile"), "x")
+	before, _ := os.ReadDir(f.root)
+	for _, name := range []string{"", ".", "..", ".hidden", "-x", "a/b", "naïve", "has space", strings.Repeat("a", 65), "afile"} {
+		if _, err := g.CreateProject(name); err == nil {
+			t.Errorf("%q was accepted", name)
+		}
+	}
+	after, _ := os.ReadDir(f.root)
+	if len(after) != len(before) {
+		t.Fatalf("disk changed: %v -> %v", before, after)
+	}
+}
+
+// The first commit keeps the user's own git identity and fills in only what is missing.
+func TestCreateProjectFillsInOnlyTheMissingIdentity(t *testing.T) {
+	for _, c := range []struct{ config, want string }{
+		{"", "DeskPixie <deskpixie@localhost>"},
+		{"[user]\n\temail = me@x\n", "DeskPixie <me@x>"},
+		{"[user]\n\tname = Me\n", "Me <deskpixie@localhost>"},
+		{"[user]\n\tname = Me\n\temail = me@x\n", "Me <me@x>"},
+	} {
+		f := newFixture(t)
+		mustWrite(t, filepath.Join(f.home, ".gitconfig"), c.config)
+		path, err := f.fs().CreateProject("p")
+		if err != nil {
+			t.Fatalf("%q: %v", c.config, err)
+		}
+		if got := f.gitRaw(path, "log", "--format=%an <%ae>"); got != c.want {
+			t.Errorf("%q: %q", c.config, got)
+		}
+	}
+}
+
+// gitRaw is git without the fixture's own identity, so the repo's commits show as made.
+func (f *fixture) gitRaw(dir string, args ...string) string {
+	f.t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = []string{"PATH=" + gitPath, "HOME=" + f.home}
+	out, err := cmd.Output()
+	if err != nil {
+		f.t.Fatalf("git %v: %v", args, err)
+	}
+	return strings.TrimSpace(string(out))
+}

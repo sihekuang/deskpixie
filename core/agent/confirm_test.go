@@ -307,3 +307,50 @@ func TestRemoveTakesOneRequestByID(t *testing.T) {
 		t.Fatal("pending")
 	}
 }
+
+func TestSpokenPathsShortenTheProjectsRootFirst(t *testing.T) {
+	p := SpokenPaths{ProjectsRoot: "/Users/u/Documents/Projects", Home: "/Users/u"}
+	cmd := "git -C /Users/daniel/Documents/Projects/spacex-dashboard rev-parse --is-inside-work-tree"
+	p0 := SpokenPaths{ProjectsRoot: "/Users/daniel/Documents/Projects", Home: "/Users/daniel"}
+	if got := ShortenPaths(cmd, p0); got != "git -C projects/spacex-dashboard rev-parse --is-inside-work-tree" {
+		t.Fatal(got)
+	}
+	if !VoiceConfirmableWith("Bash", map[string]any{"command": cmd}, p0) || VoiceConfirmable("Bash", map[string]any{"command": cmd}) {
+		t.Fatal("the 09:40 command must fit only once shortened")
+	}
+	if got := ShortenPaths("cat /Users/u/notes.txt", p); got != "cat home/notes.txt" {
+		t.Fatal(got)
+	}
+	// Whole path components only: a sibling that shares the prefix is left alone.
+	if got := ShortenPaths("ls /Users/u/Documents/Projects2/x", p); got != "ls home/Documents/Projects2/x" {
+		t.Fatal(got)
+	}
+	if got := ShortenPaths("ls /Users/u2/x", p); got != "ls /Users/u2/x" {
+		t.Fatal(got)
+	}
+	// The root itself has no "/" after it, so only the home prefix applies.
+	if got := ShortenPaths("ls /Users/u/Documents/Projects", p); got != "ls home/Documents/Projects" {
+		t.Fatal(got)
+	}
+	if got := ShortenPaths("ls /x", SpokenPaths{}); got != "ls /x" {
+		t.Fatal(got)
+	}
+	if got := DescribeWith("Bash", map[string]any{"command": "ls /Users/u/Documents/Projects/a"}, "focus", p); got != "Run ls projects/a in focus?" {
+		t.Fatal(got)
+	}
+}
+
+func TestDecideTokenDecidesOnceAndIgnoresUnknownTokens(t *testing.T) {
+	c := NewConfirmations(120_000)
+	tok, _ := c.Request(1, Coordinator, "", 0)
+	if _, ok := c.DecideToken("nope", true); ok {
+		t.Fatal("unknown token decided")
+	}
+	d, ok := c.DecideToken(tok, true)
+	if !ok || !d.Allow || d.Pending.ID != 1 {
+		t.Fatalf("%+v", d)
+	}
+	if _, ok := c.DecideToken(tok, false); ok {
+		t.Fatal("decided twice")
+	}
+}

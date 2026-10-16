@@ -16,21 +16,49 @@ type CodexExtraArgs func(repo string) []string
 // needs before its pane starts. A Claude worker gets folder trust for its worktree and a 0600
 // `mcp/<name>.json` with its bearer; both are app data, never written into the user's repo. A
 // Codex worker needs no file: its MCP server comes by `-c` overrides with the bearer from its
-// env. Its folder-trust prompt is never answered: the start fails until the user has trusted the
-// repo in Codex, and the start waits for Codex's input box before anything is typed.
+// env. Its folder-trust prompt is answered once for a repo strictly under the projects root (#97;
+// Codex records the trust itself); elsewhere it is never answered: the start fails until the user
+// has trusted the repo in Codex. The start waits for Codex's input box before the brief is typed.
 type FileWorkerRecipes struct {
 	mcpDir         string // <app_data>/agent/mcp: one 0600 MCP config per agent
 	workerSettings string // <app_data>/agent/worker-settings.json
 	port           uint16
-	model          string // agent.model (Claude workers only); "" = none
+	model          string        // agent.model (Claude workers only); "" = none
+	modelSrc       func() string // when set, read at each spawn instead of model
 	trust          agent.TrustStore
 	codexExtraArgs CodexExtraArgs
+	trustRoots     []string // Codex's trust screen is answered only for a repo strictly inside one
 }
 
 var _ agent.WorkerRecipes = (*FileWorkerRecipes)(nil)
 
-func NewFileWorkerRecipes(mcpDir, workerSettings string, port uint16, model string, trust agent.TrustStore) *FileWorkerRecipes {
-	return &FileWorkerRecipes{mcpDir: mcpDir, workerSettings: workerSettings, port: port, model: model, trust: trust}
+func NewFileWorkerRecipes(mcpDir, workerSettings string, port uint16, model string, trust agent.TrustStore, projectsRoot string) *FileWorkerRecipes {
+	r := &FileWorkerRecipes{mcpDir: mcpDir, workerSettings: workerSettings, port: port, model: model, trust: trust}
+	if projectsRoot != "" {
+		r.trustRoots = []string{projectsRoot}
+	}
+	return r
+}
+
+// insideTrustRoots: repo is strictly inside one of the roots (whole path components, symlinks
+// resolved); anything that can't be resolved is outside.
+func (r *FileWorkerRecipes) insideTrustRoots(repo string) bool {
+	real, err := canonicalize(repo)
+	if err != nil {
+		return false
+	}
+	for _, root := range r.trustRoots {
+		if c, err := canonicalize(root); err == nil && real != c && hasPrefix(real, c) {
+			return true
+		}
+	}
+	return false
+}
+
+// WithModelSource makes the Claude workers' model a live value, read at each spawn.
+func (r *FileWorkerRecipes) WithModelSource(src func() string) *FileWorkerRecipes {
+	r.modelSrc = src
+	return r
 }
 
 // WithCodexExtraArgs is for the live smoke only: extra arguments appended to a Codex worker's
@@ -53,11 +81,15 @@ func (r *FileWorkerRecipes) claude(l agent.WorkerLaunch) (agent.PreparedWorker, 
 	if err := WritePrivate(config, agent.McpConfigJSON(r.port, l.Token)); err != nil {
 		return agent.PreparedWorker{}, fmt.Errorf("cannot write the worker's MCP config: %w", err)
 	}
+	model := r.model
+	if r.modelSrc != nil {
+		model = strings.TrimSpace(r.modelSrc())
+	}
 	return agent.PreparedWorker{Spec: agent.AgentSpec{
 		Name: l.Name,
 		Kind: agent.Claude,
 		Cwd:  l.Worktree,
-		Args: agent.ClaudeWorkerArgs(r.workerSettings, config, r.model),
+		Args: agent.ClaudeWorkerArgs(r.workerSettings, config, model),
 		Env:  []agent.EnvVar{{Key: agent.TokenEnv, Value: l.Token}},
 	}}, nil
 }
@@ -204,6 +236,10 @@ func (r *FileWorkerRecipes) codex(l agent.WorkerLaunch) (agent.PreparedWorker, e
 	if r.codexExtraArgs != nil {
 		args = append(args, r.codexExtraArgs(l.Repo)...)
 	}
+	refusal := &agent.StartRefusal{Screens: agent.CodexTrustScreensOwned(), Reason: agent.CodexTrustRefusal(l.Repo)}
+	if r.insideTrustRoots(l.Repo) {
+		refusal.Answer = []string{"Enter"} // Codex records the trust itself (#97); see docs/parity/fewer-approvals-live-checks.md
+	}
 	return agent.PreparedWorker{
 		Spec: agent.AgentSpec{
 			Name: l.Name,
@@ -212,7 +248,7 @@ func (r *FileWorkerRecipes) codex(l agent.WorkerLaunch) (agent.PreparedWorker, e
 			Args: args,
 			Env:  []agent.EnvVar{{Key: agent.TokenEnv, Value: l.Token}},
 		},
-		Refusal: &agent.StartRefusal{Screens: agent.CodexTrustScreensOwned(), Reason: agent.CodexTrustRefusal(l.Repo)},
+		Refusal: refusal,
 		Ready:   &agent.StartReady{Marker: agent.CodexIdleMarker, Reason: agent.CodexNotReady(l.Repo), Settle: agent.CodexReadySettle},
 	}, nil
 }

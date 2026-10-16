@@ -72,6 +72,21 @@ func (o *Outbox) Push(line Line, now Millis) string {
 	return entry.record()
 }
 
+// Len is how many lines are kept.
+func (o *Outbox) Len() int { return len(o.lines) }
+
+// HasTokenSince: a line from index from on carries this confirm word.
+func (o *Outbox) HasTokenSince(from int, token string) bool {
+	return slices.ContainsFunc(o.lines[min(from, len(o.lines)):], func(l OutboxLine) bool { return l.Token != nil && *l.Token == token })
+}
+
+// PushHeard adds a line Pixie has already said (delivered); returns its jsonl record.
+func (o *Outbox) PushHeard(line Line, now Millis) string {
+	o.Push(line, now)
+	o.lines[len(o.lines)-1].Delivered = true
+	return o.lines[len(o.lines)-1].record()
+}
+
 func (o *Outbox) Undelivered() []OutboxLine {
 	var out []OutboxLine
 	for _, l := range o.lines {

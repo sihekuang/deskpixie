@@ -147,7 +147,7 @@ func (s *Server) hook(w http.ResponseWriter, r *http.Request, event string) {
 		refuse(http.StatusUnauthorized, "Not authorised.")
 		return
 	}
-	if event != "stop" && event != "permission" && event != "post-tool" && event != "state" {
+	if event != "stop" && event != "permission" && event != "post-tool" && event != "state" && event != "mode" {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
@@ -162,11 +162,16 @@ func (s *Server) hook(w http.ResponseWriter, r *http.Request, event string) {
 	}
 	input, _ := decodeJSON(body)
 	obj, _ := input.(map[string]any)
+	mode, _ := obj["permission_mode"].(string)
+	mode = clean(mode)
 	switch event {
 	case "stop":
 		if message, ok := obj["last_assistant_message"].(string); ok {
-			s.rt.Deliver(agent.HookEvent{Kind: agent.HookStop, Agent: agentName, Message: cleanTail(message)})
+			s.rt.Deliver(agent.HookEvent{Kind: agent.HookStop, Agent: agentName, Message: cleanTail(message), PermissionMode: mode})
 		}
+		json200(w, map[string]any{})
+	case "mode":
+		s.rt.Deliver(agent.HookEvent{Kind: agent.HookMode, Agent: agentName, PermissionMode: mode})
 		json200(w, map[string]any{})
 	case "state":
 		status, ok := stateOf(obj)
@@ -174,11 +179,11 @@ func (s *Server) hook(w http.ResponseWriter, r *http.Request, event string) {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		s.rt.Deliver(agent.HookEvent{Kind: agent.HookState, Agent: agentName, Status: status})
+		s.rt.Deliver(agent.HookEvent{Kind: agent.HookState, Agent: agentName, Status: status, PermissionMode: mode})
 		json200(w, map[string]any{})
 	case "post-tool":
 		if toolName, ok := obj["tool_name"].(string); ok {
-			s.rt.Deliver(agent.HookEvent{Kind: agent.HookPostTool, Agent: agentName, ToolName: clean(toolName), ToolInput: capped(obj["tool_input"])})
+			s.rt.Deliver(agent.HookEvent{Kind: agent.HookPostTool, Agent: agentName, ToolName: clean(toolName), ToolInput: capped(obj["tool_input"]), PermissionMode: mode})
 		}
 		json200(w, map[string]any{})
 	default:
@@ -189,7 +194,7 @@ func (s *Server) hook(w http.ResponseWriter, r *http.Request, event string) {
 			return
 		}
 		reply := make(chan agent.Decision, 1)
-		ev := agent.HookEvent{Kind: agent.HookPermission, Agent: agentName, ToolName: clean(toolName), ToolInput: toolInput, Reply: reply}
+		ev := agent.HookEvent{Kind: agent.HookPermission, Agent: agentName, ToolName: clean(toolName), ToolInput: toolInput, Reply: reply, PermissionMode: mode}
 		if !s.rt.Deliver(ev) {
 			deny(w, "The app is shutting down.")
 			return

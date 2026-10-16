@@ -66,6 +66,7 @@ type hostState struct {
 	startAttempts int
 	faults        []Fault
 	screens       map[string]string
+	afterKeys     map[string]string // screen to show once keys are sent to the agent
 	hangStart     bool
 	panicStart    bool
 	dieOnStart    bool
@@ -231,6 +232,17 @@ func (f *FakeSessionHost) SetScreen(name, text string) {
 	f.with(func(s *hostState) { s.screens[name] = text })
 }
 
+// SetScreenAfterKeys: the first SendKeys to name switches its screen to text (a dialog that goes
+// away once answered).
+func (f *FakeSessionHost) SetScreenAfterKeys(name, text string) {
+	f.with(func(s *hostState) {
+		if s.afterKeys == nil {
+			s.afterKeys = map[string]string{}
+		}
+		s.afterKeys[name] = text
+	})
+}
+
 // Kill: the agent's process dies; its pane disappears and Exited is reported once.
 func (f *FakeSessionHost) Kill(name string) {
 	f.with(func(s *hostState) {
@@ -340,6 +352,10 @@ func (f *FakeSessionHost) SendKeys(_ context.Context, name string, keys []string
 			return
 		}
 		s.keys = append(s.keys, Keys{name, slices.Clone(keys)})
+		if next, ok := s.afterKeys[name]; ok {
+			s.screens[name] = next
+			delete(s.afterKeys, name)
+		}
 		interrupt = slices.Contains(keys, "Escape") && !slices.Contains(s.faults, IgnoreEscape) && s.agents[name].Status == agent.PaneWorking
 	})
 	if err != nil {
@@ -746,6 +762,8 @@ type FakeWorktrees struct {
 	gate       chan struct{}
 	entered    atomic.Bool
 	auditGate  chan struct{}
+	created    []string
+	createErr  error
 }
 
 // FakeWorktreesWithRepo knows one repo, name, at /projects/<name>.
@@ -803,6 +821,33 @@ func (w *FakeWorktrees) AddForeign(slug string) {
 	w.mu.Lock()
 	w.foreign = append(w.foreign, slug)
 	w.mu.Unlock()
+}
+
+// Created is every CreateProject name, in order.
+func (w *FakeWorktrees) Created() []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return slices.Clone(w.created)
+}
+
+// SetCreateErr makes CreateProject fail with a WorktreeError saying why ("" clears it).
+func (w *FakeWorktrees) SetCreateErr(why string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.createErr = nil
+	if why != "" {
+		w.createErr = agent.WorktreeError(why)
+	}
+}
+
+func (w *FakeWorktrees) CreateProject(name string) (string, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.created = append(w.created, name)
+	if w.createErr != nil {
+		return "", w.createErr
+	}
+	return "/projects/" + name, nil
 }
 
 func (w *FakeWorktrees) Ensured() []RepoSlug {

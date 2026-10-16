@@ -55,6 +55,19 @@
           }
         ]
       }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "http",
+            "url": "http://127.0.0.1:{{PORT}}/hooks/mode",
+            "timeout": 5,
+            "headers": { "Authorization": "Bearer $PIXIE_AGENT_TOKEN" },
+            "allowedEnvVars": ["PIXIE_AGENT_TOKEN"]
+          }
+        ]
+      }
     ]
   }
 }

@@ -11,6 +11,9 @@ struct UpdatesBubbleView: View {
     let more: Int
     let onLine: (UpdateLine) -> Void
     let onMore: () -> Void
+    /// Allow or Deny on a permission question (token, allow). The controller ignores a tap that
+    /// comes too soon after the buttons appear (`UpdatesBubbleModel.acceptsDecision`).
+    let onDecide: (String, Bool) -> Void
     /// A click on the badge (opens the bubble, like hovering).
     let onBadge: () -> Void
 
@@ -45,8 +48,21 @@ struct UpdatesBubbleView: View {
     private var bubble: some View {
         VStack(alignment: .leading, spacing: 2) {
             ForEach(shown) { line in
-                Button { onLine(line) } label: { row(line) }
-                    .buttonStyle(.plain)
+                VStack(alignment: .leading, spacing: 0) {
+                    Button { onLine(line) } label: { row(line) }
+                        .buttonStyle(.plain)
+                    if line.offersDecision, let token = line.token {
+                        HStack(spacing: 6) {
+                            Button("Allow") { onDecide(token, true) }
+                                .buttonStyle(.borderedProminent)
+                            Button("Deny") { onDecide(token, false) }
+                                .buttonStyle(.bordered)
+                        }
+                        .controlSize(.small)
+                        .padding(.horizontal, 8)
+                        .padding(.bottom, 4)
+                    }
+                }
             }
             if more > 0 {
                 Button(action: onMore) {

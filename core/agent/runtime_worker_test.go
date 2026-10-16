@@ -937,3 +937,81 @@ func TestFocusJobFocusesTheJobsLiveWorker(t *testing.T) {
 		}
 	})
 }
+
+func TestCreateProjectGoesToTheWorktreesAndOnlyForTheCoordinator(t *testing.T) {
+	r := wRigWith(t, true)
+	got := okValue(t, call(r, Coordinator, McpCall{Kind: CallCreateProject, Name: "spacex-dashboard"}))
+	if got["name"] != "spacex-dashboard" || got["path"] != "/projects/spacex-dashboard" {
+		t.Fatalf("%v", got)
+	}
+	if rep := call(r, wName, McpCall{Kind: CallCreateProject, Name: "x"}); rep.Err == nil {
+		t.Fatal("a worker created a project")
+	}
+	if c := r.worktrees.Created(); len(c) != 1 || c[0] != "spacex-dashboard" {
+		t.Fatal(c)
+	}
+	r.worktrees.SetCreateErr("spacex-dashboard already exists under the projects root.")
+	wantErr(t, call(r, Coordinator, McpCall{Kind: CallCreateProject, Name: "spacex-dashboard"}), "spacex-dashboard already exists under the projects root.")
+	off := wRigWith(t, false)
+	if rep := call(off, Coordinator, McpCall{Kind: CallCreateProject, Name: "x"}); rep.Err == nil {
+		t.Fatal("workers are off")
+	}
+}
+
+const (
+	trustScreen = "Trust this folder?\n  1. Trust and continue\n  2. No, quit"
+	idleScreen  = "› Ask Codex to do anything\n\n  ? for shortcuts"
+)
+
+func answeringCodex(r *wRig, answer []string) {
+	r.recipes.SetRefusal(&StartRefusal{Screens: CodexTrustScreensOwned(), Reason: "refused", Answer: answer})
+	r.recipes.SetReady(&StartReady{Marker: CodexIdleMarker, Reason: CodexNotReady("/projects/focus"), Settle: CodexReadySettle})
+}
+
+func keysTo(r *wRig) [][]string {
+	var out [][]string
+	for _, k := range r.host.Keys() {
+		if k.Agent == wName {
+			out = append(out, k.Keys)
+		}
+	}
+	return out
+}
+
+// #97: inside the projects root the trust screen is answered once, then the start goes on.
+func TestATrustPromptInsideTheRootIsAnsweredOnceAndTheStartGoesOn(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := withJob(t, true)
+		answeringCodex(r, []string{"Enter"})
+		r.host.SetScreen(wName, trustScreen)
+		r.host.SetScreenAfterKeys(wName, idleScreen)
+		okValue(t, call(r, Coordinator, startCall("focus")))
+		if got := keysTo(r); len(got) != 1 || !slices.Equal(got[0], []string{"Enter"}) {
+			t.Fatalf("keys %v", got)
+		}
+	})
+}
+
+func TestATrustPromptThatStaysAfterTheAnswerFailsTheStart(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := withJob(t, true)
+		answeringCodex(r, []string{"Enter"})
+		r.host.SetScreen(wName, trustScreen) // never goes away
+		wantErr(t, call(r, Coordinator, startCall("focus")), "refused")
+		if got := keysTo(r); len(got) != 1 {
+			t.Fatalf("keys %v", got)
+		}
+	})
+}
+
+func TestARefusalWithoutAnAnswerStillTypesNothing(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := withJob(t, true)
+		answeringCodex(r, nil)
+		r.host.SetScreen(wName, trustScreen)
+		wantErr(t, call(r, Coordinator, startCall("focus")), "refused")
+		if typedInto(r.host.Keys(), wName) {
+			t.Fatal(r.host.Keys())
+		}
+	})
+}

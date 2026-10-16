@@ -672,7 +672,7 @@ func (c *Conversation) tryInject(now time.Time, fx []Effect) []Effect {
 	}
 	n := c.injects[0]
 	c.injects = c.injects[1:]
-	if isCoordinatorQuestion(n.Text) && !strings.Contains(n.Text, "Say confirm") {
+	if asksQuestion(n.Text) {
 		c.questionAsked = true
 	}
 	if c.endAfterNotice {

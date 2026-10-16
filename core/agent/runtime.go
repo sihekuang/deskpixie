@@ -58,6 +58,8 @@ const (
 	ReadyWindow = 55 * time.Second
 	// StartScreenPoll is between two reads of the start screen.
 	StartScreenPoll = 300 * time.Millisecond
+	// AnswerGrace is how long a refusal screen may stay after its Answer was sent.
+	AnswerGrace = 3 * time.Second
 )
 
 // LiveWorktreesFile holds the live workers' repos and worktree slugs (`{"repo":…,"slug":…}`
@@ -71,6 +73,8 @@ type Deps struct {
 	Notifier Notifier
 	Pixie    PixieCue
 	Status   StatusSink
+	// Modes hears each Claude agent's Manual-mode changes (nil: ignored).
+	Modes    ModeSink
 	Launcher TerminalLauncher
 	// TerminalDir is the folder the agent terminal starts in (the projects folder, else home).
 	TerminalDir string
@@ -83,6 +87,8 @@ type Deps struct {
 	Updates UpdatesSink
 	// Roster gets the roster beside Pixie on every change (nil: no roster is kept).
 	Roster RosterSink
+	// Panes brings up an agent's pane waiting at a prompt in its terminal (nil: ignored).
+	Panes PaneSink
 }
 
 // WorkerDeps are the worker adapters (spec §5.5), injected only when agent.workers.enabled.
@@ -483,13 +489,20 @@ func (h *AgentHandle) OpenTerminal(ctx context.Context) error {
 		return err
 	}
 	h.Input(EnsureCoordinatorInput())
-	// A coordinator already running is brought to the front; one being started is focused when it is up.
-	focusQuietly(ctx, h.deps.Host.Session(), Coordinator)
+	// The agent waiting at a prompt in its terminal, else the coordinator (one already running
+	// is brought to the front; one being started is focused when it is up).
+	h.ctlMu.Lock()
+	target := h.ctl.OpenTarget()
+	h.ctlMu.Unlock()
+	focusQuietly(ctx, h.deps.Host.Session(), target)
 	return h.deps.Launcher.Open(Attach{Argv: h.deps.Host.AttachCommand(), Dir: h.deps.TerminalDir})
 }
 
 // UpdatesSeen: the bubble showed these lines long enough to count as heard.
 func (h *AgentHandle) UpdatesSeen(ids []uint64) { h.Input(UpdatesSeenInput(ids)) }
+
+// Decide is a tap on Allow or Deny in the bubble for the question with this confirm word.
+func (h *AgentHandle) Decide(token string, allow bool) { h.Input(DecideInput(token, allow)) }
 
 // SetAway: the shell's presence (screen locked, displays asleep or idle).
 func (h *AgentHandle) SetAway(away bool) { h.Input(PresenceInput(away)) }
@@ -649,6 +662,11 @@ func (h *AgentHandle) Voice(sig VoiceSignal) { h.Input(VoiceInput(sig)) }
 
 // Restart is tray ▸ Restart coordinator.
 func (h *AgentHandle) Restart() { h.Input(RestartInput()) }
+
+// ClearCoordinatorModel makes the coordinator's next launches use Claude Code's default model.
+func (h *AgentHandle) ClearCoordinatorModel() {
+	h.deps.Host.ClearModel()
+}
 
 // Shutdown is the app's quit: deny pending permissions and stop the panes, in parallel,
 // within ShutdownLimit in all.
@@ -848,7 +866,12 @@ func (h *AgentHandle) runOpInner(ctx context.Context, op hostOp) {
 
 // hook handles one hook server event.
 func (h *AgentHandle) hook(ev HookEvent) {
+	// The mode first: a permission request is then decided knowing it.
+	if ev.PermissionMode != "" {
+		h.Input(ModeInput(ev.Agent, ev.PermissionMode))
+	}
 	switch ev.Kind {
+	case HookMode:
 	case HookStop:
 		h.Input(StopInput(ev.Agent, ev.Message))
 	case HookPostTool:
@@ -894,6 +917,9 @@ func (h *AgentHandle) mcp(agent string, call McpCall) McpReply {
 	}
 	if call.Kind == CallStartWorker {
 		return h.startWorker(agent, call.Worker)
+	}
+	if call.Kind == CallCreateProject {
+		return h.createProject(agent, call.Name)
 	}
 	if isSessionCall(call.Kind) {
 		// Sessions you started with pix (#89): the host answers, not the controller; they
@@ -946,6 +972,26 @@ func (h *AgentHandle) confirmClose(name string) Decision {
 	case <-h.ctx.Done():
 		return Deny("The app quit.")
 	}
+}
+
+// createProject is create_project (#97): a new repository under the projects root.
+func (h *AgentHandle) createProject(agent, name string) McpReply {
+	if agent != Coordinator {
+		return McpReply{Err: errors.New("This tool is not available to you.")}
+	}
+	if h.workers == nil {
+		return McpReply{Err: errors.New("Workers are turned off (agent.workers.enabled).")}
+	}
+	path, err := within(h.ctx, RepoLimit, func(context.Context) (string, error) {
+		return h.workers.Worktrees.CreateProject(name)
+	})
+	if errors.Is(err, errTimedOut) {
+		return McpReply{Err: errors.New("Couldn't create the project in time; try again.")}
+	}
+	if err != nil {
+		return McpReply{Err: err}
+	}
+	return McpReply{Value: map[string]any{"name": name, "path": path}}
 }
 
 // startWorker is start_worker (spec §5.5): resolve the repo, admit, make the worktree and
@@ -1406,6 +1452,14 @@ func (h *AgentHandle) apply(e Effect) {
 		d.Store.Rewrite(e.File, e.Lines)
 	case EfStatus:
 		d.Status.SetStatus(e.Text)
+	case EfShowPane:
+		if d.Panes != nil {
+			d.Panes.ShowPane(e.Job, e.Name)
+		}
+	case EfManual:
+		if d.Modes != nil {
+			d.Modes.ManualMode(e.Agent, e.Manual)
+		}
 	case EfStopCoordinator:
 		h.queueOp(hostOp{kind: opStop})
 	case EfLabel:
@@ -1516,15 +1570,27 @@ func checkStartScreen(ctx context.Context, session SessionHost, name string, ref
 		}
 	}
 	last := ""
-	var since time.Time // when the marker began to show on every read; zero: it doesn't
+	answeredAt := make([]time.Time, len(refusals)) // when each refusal's Answer was sent; zero: not yet
+	var since time.Time                            // when the marker began to show on every read; zero: it doesn't
 	for {
 		text, err := within(ctx, max(time.Until(deadline), 0), func(c context.Context) (string, error) {
 			return session.Read(c, name, 40)
 		})
 		if err == nil {
-			for _, refusal := range refusals {
-				if ShowsAnyScreen(text, refusal.Screens) {
-					return errors.New(refusal.Reason)
+			for i, r := range refusals {
+				if !ShowsAnyScreen(text, r.Screens) {
+					continue
+				}
+				if r.Answer != nil && answeredAt[i].IsZero() {
+					if err := session.SendKeys(ctx, name, r.Answer); err != nil {
+						return errors.New(r.Reason)
+					}
+					answeredAt[i] = time.Now()
+					log.Printf("agent: answered %s's start screen with %v", name, r.Answer)
+					continue
+				}
+				if r.Answer == nil || time.Since(answeredAt[i]) >= AnswerGrace {
+					return errors.New(r.Reason)
 				}
 			}
 			last = lastLine(text)
