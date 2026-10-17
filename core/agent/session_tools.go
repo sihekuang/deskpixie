@@ -22,7 +22,7 @@ func SessionCatalog() []map[string]any {
 	return []map[string]any{
 		{
 			"name":        "list_sessions",
-			"description": "Claude Code and Codex sessions the user started themselves with pix (in WebStorm, iTerm, …): name, description, past descriptions, tool, repo, folder, where, status, when it started and was last active. Match what the user says to a description; if several fit, ask which one by description (and where it runs or when it started), never by name.",
+			"description": "Claude Code and Codex sessions the user started themselves with pix (in WebStorm, iTerm, …): name, description, past descriptions, what its last turn came to, tool, repo, folder, where, status, when it started and was last active. Match what the user says to a description, past description or last turn; if several fit, ask which one by description (and where it runs or when it started), never by name.",
 			"inputSchema": objectSchema(map[string]any{}),
 		},
 		{
@@ -73,6 +73,7 @@ type SessionRow struct {
 	Verbatim         bool     `json:"verbatim"`              // messages are typed as given, not prefixed (#143)
 	Started          string   `json:"started,omitempty"`     // "1h30m ago"
 	LastActive       string   `json:"last_active,omitempty"` // "3m ago"
+	LastTurn         string   `json:"last_turn,omitempty"`   // its last turn's gist, "Asked: …" for a question (#146)
 }
 
 // ago is how long before now t was, as list_sessions shows it ("" for no time).
@@ -108,7 +109,9 @@ func isSessionCall(k McpCallKind) bool {
 }
 
 // sessionTool runs a session tool on host, the CompositeHost; any other host has no sessions.
-func sessionTool(ctx context.Context, host SessionHost, call McpCall) McpReply {
+// mask is applied to what sessions wrote (descriptions, last turns) before the coordinator
+// reads it: it removes pending confirm words.
+func sessionTool(ctx context.Context, host SessionHost, call McpCall, mask func(string) string) McpReply {
 	c, ok := host.(*CompositeHost)
 	if !ok {
 		if call.Kind == CallListSessions {
@@ -133,9 +136,17 @@ func sessionTool(ctx context.Context, host SessionHost, call McpCall) McpReply {
 		})
 		for _, a := range list {
 			u := a.User
-			rows = append(rows, SessionRow{Name: a.Name, Description: u.Description, PastDescriptions: u.PastDescriptions,
+			past := make([]string, len(u.PastDescriptions))
+			for i, d := range u.PastDescriptions {
+				past[i] = mask(d)
+			}
+			last := mask(u.LastTurn)
+			if last != "" && u.LastTurnAsks {
+				last = "Asked: " + last
+			}
+			rows = append(rows, SessionRow{Name: a.Name, Description: mask(u.Description), PastDescriptions: past,
 				Tool: u.Tool, Repo: u.Repo, Cwd: a.Cwd, Where: u.Where, Status: a.Status.String(), Reachable: u.Reachable, Verbatim: u.Verbatim,
-				Started: ago(u.Started, now), LastActive: ago(u.LastActive, now)})
+				Started: ago(u.Started, now), LastActive: ago(u.LastActive, now), LastTurn: last})
 		}
 		return McpReply{Value: map[string]any{"sessions": rows}}
 	}

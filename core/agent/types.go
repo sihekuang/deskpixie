@@ -384,6 +384,8 @@ type UserSession struct {
 	Verbatim         bool      // messages are typed as given, not prefixed (#143; on by default)
 	Started          time.Time // when it first registered with this app
 	LastActive       time.Time // its last hook, status or description
+	LastTurn         string    // the gist of its last finished turn (#146; "" = none, or nothing readable)
+	LastTurnAsks     bool      // that turn ended asking you something
 }
 
 // EnvVar is one environment entry (Rust's (String, String) pair).

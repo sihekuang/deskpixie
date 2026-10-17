@@ -565,3 +565,24 @@ func TestVerbatimPerSession(t *testing.T) {
 		t.Fatal("an unknown session is an error")
 	}
 }
+
+// #146: list_sessions shows what each session's last turn came to, so the coordinator can tell
+// sessions in one repo apart by what they just did.
+func TestListShowsTheLastTurnsGist(t *testing.T) {
+	h, sock := newHost(t)
+	events := h.Subscribe()
+	p, _ := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/focus"})
+	if u := listed(t, h)[0].User; u.LastTurn != "" || u.LastTurnAsks {
+		t.Fatalf("no turn yet: %+v", u)
+	}
+	wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "turn", Text: "I fixed the upload retry.\n\nAll 12 tests pass."})
+	<-events
+	if u := listed(t, h)[0].User; u.LastTurn != "All 12 tests pass." || u.LastTurnAsks {
+		t.Fatalf("%+v", u)
+	}
+	wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "turn", Text: "Done. Should I open the PR?"})
+	<-events
+	if u := listed(t, h)[0].User; u.LastTurn != "Should I open the PR?" || !u.LastTurnAsks {
+		t.Fatalf("%+v", u)
+	}
+}
