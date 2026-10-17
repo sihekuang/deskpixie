@@ -82,6 +82,39 @@ func TestAHandleThatIsNotWellFormedIsIgnored(t *testing.T) {
 	onlyThisRung(t, plan, agent.FocusPlan{ActivateApp: "/Applications/Warp.app"})
 }
 
+// An IDE's integrated terminal runs under a helper bundle nested in the IDE's; the IDE is what
+// comes forward. A Warp tab's variable it inherited (VS Code launched with `code .` from Warp)
+// must not send the click to that Warp tab.
+func TestYourSessionInAnIDEBringsTheIDEForwardNotAnInheritedWarpTab(t *testing.T) {
+	r := &psRunner{ps: table(
+		"  1     0 ??       /sbin/launchd",
+		"  500   1 ??       /Applications/Visual Studio Code.app/Contents/MacOS/Electron",
+		"  510 500 ??       /Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper.app/Contents/MacOS/Code Helper",
+		"  610 510 ttys013  /bin/zsh -l",
+		"  700 610 ttys013  /Users/x/.local/bin/pix claude",
+		" 4242 700 ttys040  /Users/x/.local/bin/claude",
+	), env: map[string]string{
+		"4242": "/Users/x/.local/bin/claude TERM_PROGRAM=vscode WARP_FOCUS_URL=warp://session/daccf2aa9b3b450eb477a09dfae3af2d\n",
+	}}
+	plan, err := NewSessionPlanner(r).PlanSession(4242)
+	if err != nil {
+		t.Fatal(err)
+	}
+	onlyThisRung(t, plan, agent.FocusPlan{ActivateApp: "/Applications/Visual Studio Code.app"})
+}
+
+// An iTerm session id inherited into Warp (iTerm launched Warp) is not used for a Warp session.
+func TestAnItermIDInheritedIntoWarpIsIgnored(t *testing.T) {
+	r := &psRunner{ps: sessionTable("/Applications/Warp.app"), env: map[string]string{
+		"4242": "/Users/x/.local/bin/claude ITERM_SESSION_ID=w0t1p0:5AB334EE-8AC2-41AE-B5EE-2A2D2CE3729C\n",
+	}}
+	plan, err := NewSessionPlanner(r).PlanSession(4242)
+	if err != nil {
+		t.Fatal(err)
+	}
+	onlyThisRung(t, plan, agent.FocusPlan{ActivateApp: "/Applications/Warp.app"})
+}
+
 // A session whose process is gone (or isn't in any app) has no terminal to show.
 func TestASessionWithNoProcessIsAnError(t *testing.T) {
 	r := &psRunner{ps: sessionTable("/Applications/Warp.app"), env: map[string]string{}}

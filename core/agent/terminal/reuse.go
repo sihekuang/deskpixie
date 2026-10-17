@@ -54,12 +54,13 @@ func (l *ReusingPlanner) Plan(a agent.Attach) (agent.FocusPlan, error) {
 	plan := agent.FocusPlan{
 		FocusURLs:   l.warpFocusURLs(clients),
 		RaiseScript: raiseWindowScript(app, titled.WindowTitle()),
-		KillPIDs:    clients,
 	}
 	// A failure here (e.g. an unwritable tab-configs directory) must not discard the rungs ps
 	// already found above — the focus URL or the raise may still work live, whether or not a
 	// fallback could ever be built. Only actually reaching the fallback can fail the whole plan.
-	if newTerminal, err := l.inner.Plan(a); err == nil {
+	// The attached clients are ended only to make room for that new terminal: without one, they stay.
+	if newTerminal, err := l.inner.Plan(a); err == nil && newTerminal.NewTerminal != nil {
+		plan.KillPIDs = clients
 		plan.NewTerminal = newTerminal.NewTerminal
 	}
 	return plan, nil
@@ -158,7 +159,9 @@ func processTable(runner agent.CommandRunner) (map[int]proc, bool) {
 	return procs, true
 }
 
-// appOf is the .app pid runs in (its nearest ancestor inside a .app bundle), "" if none.
+// appOf is the .app pid runs in (its nearest ancestor inside a .app bundle), "" if none. It is
+// the outermost bundle: an IDE terminal runs under a helper nested in the IDE's
+// (".../Visual Studio Code.app/Contents/Frameworks/Code Helper.app/..."), and the IDE is the app.
 func appOf(procs map[int]proc, pid int) string {
 	seen := map[int]bool{}
 	for at := procs[pid].ppid; at > 1 && !seen[at]; at = procs[at].ppid {
@@ -167,7 +170,8 @@ func appOf(procs map[int]proc, pid int) string {
 		if !known {
 			break
 		}
-		if i := strings.Index(p.command, ".app/Contents/MacOS/"); i >= 0 {
+		if strings.Contains(p.command, ".app/Contents/MacOS/") {
+			i := strings.Index(p.command, ".app/")
 			return p.command[:i+len(".app")]
 		}
 	}

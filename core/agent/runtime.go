@@ -613,7 +613,16 @@ func (h *AgentHandle) FocusSession(ctx context.Context, name string) error {
 	if h.deps.Sessions == nil {
 		return LaunchError("no way to show your sessions")
 	}
-	list, err := ListRunning(ctx, h.deps.Host.Session())
+	// Your sessions are the composite's pix part: listed on its own, so a failing Pixie host
+	// (which the roster shows past) can't hide them.
+	var list []AgentInfo
+	var err error
+	if c, ok := h.deps.Host.Session().(*CompositeHost); ok {
+		parts := c.ListRunningParts(ctx)
+		list, err = parts.Secondary, parts.SecondaryErr
+	} else {
+		list, err = ListRunning(ctx, h.deps.Host.Session())
+	}
 	if err != nil {
 		return err
 	}

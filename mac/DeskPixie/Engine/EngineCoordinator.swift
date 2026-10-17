@@ -34,6 +34,9 @@ final class EngineCoordinator {
     /// Walks the core's FocusPlan to show a terminal (#116); set in init, since its outcome
     /// closure needs self.
     private var terminalFocus: TerminalFocusExecutor!
+    /// Its own queue: a FocusPlan can block on an AppleScript for up to a minute (a consent
+    /// dialog, a hung terminal), which must not hold up the core calls queued on `worker`.
+    private let terminalFocusQueue = DispatchQueue(label: "com.sihekuang.deskpixie.terminal-focus")
     private lazy var canvas = CanvasWindowController(engine: engine, worker: worker)
 
     private(set) var pixie: PixieController?
@@ -438,9 +441,9 @@ final class EngineCoordinator {
             bubble?.showPane(r)
         case .focusPlan(let plan):
             // execute(_:) can block for seconds on a real AppleScript/NSWorkspace call: off main,
-            // same rule as every other core call that can touch the disk or spawn a process.
+            // and off `worker` so the core's own calls keep going meanwhile.
             let terminalFocus = terminalFocus!
-            worker.async { terminalFocus.execute(plan) }
+            terminalFocusQueue.async { terminalFocus.execute(plan) }
         }
     }
 

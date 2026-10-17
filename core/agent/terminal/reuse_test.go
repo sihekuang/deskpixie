@@ -254,11 +254,12 @@ func TestAnInnerPlanFailureStillLetsTheAttachedRungsThrough(t *testing.T) {
 	if len(plan.RaiseScript) == 0 {
 		t.Fatal("no raise script")
 	}
-	if !reflect.DeepEqual(plan.KillPIDs, []int{611, 621}) {
-		t.Fatalf("%v", plan.KillPIDs)
-	}
 	if plan.NewTerminal != nil {
 		t.Fatalf("no fallback terminal when the inner planner fails: %+v", plan.NewTerminal)
+	}
+	// Ending the attached clients only makes room for a new terminal: with none to open, they stay.
+	if len(plan.KillPIDs) != 0 {
+		t.Fatalf("attached clients killed with nothing to replace them: %v", plan.KillPIDs)
 	}
 }
 

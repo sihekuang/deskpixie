@@ -98,10 +98,12 @@ public final class TerminalFocusExecutor: @unchecked Sendable {
             report(true)
             return
         }
-        for pid in plan.killPIDs ?? [] {
-            primitives.killPID(Int32(pid))
-        }
+        // The attached clients are ended only to make room for a new terminal; never pid ≤ 1
+        // (a process group, launchd, or every process you own).
         if let newTerminal = plan.newTerminal {
+            for pid in plan.killPIDs ?? [] where pid > 1 {
+                primitives.killPID(Int32(pid))
+            }
             report(open(newTerminal), app: newTerminal.kind == "applescript" ? "iTerm" : "Warp")
             return
         }
@@ -156,13 +158,31 @@ public struct SystemTerminalFocusPrimitives: TerminalFocusPrimitives {
         return NSWorkspace.shared.open(URL(fileURLWithPath: url))
     }
 
+    /// Runs the script in its own `osascript` process: NSAppleScript is main-thread-only, and this
+    /// runs off main. nil when it fails or doesn't finish within `timeout`.
     public func runAppleScript(_ lines: [String]) -> String? {
-        guard let script = NSAppleScript(source: lines.joined(separator: "\n")) else { return nil }
-        var error: NSDictionary?
-        let result = script.executeAndReturnError(&error)
-        guard error == nil else { return nil }
-        return (result.stringValue ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        p.arguments = lines.flatMap { ["-e", $0] }
+        let out = Pipe()
+        p.standardOutput = out
+        p.standardError = FileHandle.nullDevice
+        let done = DispatchSemaphore(value: 0)
+        p.terminationHandler = { _ in done.signal() }
+        do { try p.run() } catch { return nil }
+        // Wait first: these scripts print a word ("ok"/"none"), far below the pipe's buffer, and a
+        // read before the wait would block past the timeout on a hung script.
+        if done.wait(timeout: .now() + Self.timeout) == .timedOut {
+            p.terminate()
+            return nil
+        }
+        guard p.terminationStatus == 0 else { return nil }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
     }
+
+    /// Past an Automation consent dialog left open or a hung target, give up.
+    static let timeout: DispatchTimeInterval = .seconds(60)
 
     public func isAccessibilityTrusted(prompt: Bool) -> Bool {
         // The literal value of kAXTrustedCheckOptionPrompt (a CFString constant): spelled out

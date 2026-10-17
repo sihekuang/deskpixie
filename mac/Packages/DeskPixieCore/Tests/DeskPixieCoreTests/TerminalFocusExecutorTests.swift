@@ -109,9 +109,9 @@ final class TerminalFocusExecutorTests: XCTestCase {
         let fake = FakeTerminalFocusPrimitives()
         fake.answerAppleScript("none") // ran fine, found nothing: not success, falls through
         fake.answerOpenURL("fake://new", with: true)
-        let plan = FocusPlan(raiseScript: ["raise"], killPIDs: [1], newTerminal: NewTerminalAction(kind: "url", url: "fake://new"))
+        let plan = FocusPlan(raiseScript: ["raise"], killPIDs: [611], newTerminal: NewTerminalAction(kind: "url", url: "fake://new"))
         let (_, outcome) = run(plan, fake: fake)
-        XCTAssertEqual(fake.log, ["trust:true", "script:raise", "kill:1", "open:fake://new"])
+        XCTAssertEqual(fake.log, ["trust:true", "script:raise", "kill:611", "open:fake://new"])
         XCTAssertEqual(outcome?.success, true)
     }
 
@@ -129,18 +129,44 @@ final class TerminalFocusExecutorTests: XCTestCase {
     func testWarpFallbackKillsThenOpensNewTerminal() {
         let fake = FakeTerminalFocusPrimitives()
         fake.answerOpenURL("fake://new", with: true)
-        let plan = FocusPlan(killPIDs: [1, 2], newTerminal: NewTerminalAction(kind: "url", url: "fake://new"))
+        let plan = FocusPlan(killPIDs: [611, 621], newTerminal: NewTerminalAction(kind: "url", url: "fake://new"))
         let (_, outcome) = run(plan, fake: fake)
-        XCTAssertEqual(fake.log, ["kill:1", "kill:2", "open:fake://new"])
+        XCTAssertEqual(fake.log, ["kill:611", "kill:621", "open:fake://new"])
         XCTAssertEqual(outcome?.success, true)
+    }
+
+    /// The real AppleScript primitive runs osascript (safe off main): its trimmed result, or nil
+    /// when the script fails. These scripts need no permission and touch nothing.
+    func testSystemRunAppleScriptReturnsTheResultOrNil() {
+        let real = SystemTerminalFocusPrimitives()
+        XCTAssertEqual(real.runAppleScript(["set x to \"o\"", "return x & \"k\""]), "ok")
+        XCTAssertNil(real.runAppleScript(["error \"nope\""]))
+    }
+
+    /// The attached clients are ended only to make room for a new terminal: with none to open,
+    /// nothing is killed.
+    func testNothingIsKilledWithoutANewTerminal() {
+        let fake = FakeTerminalFocusPrimitives()
+        let (_, outcome) = run(FocusPlan(killPIDs: [611, 621]), fake: fake)
+        XCTAssertEqual(fake.log, [])
+        XCTAssertEqual(outcome?.success, false)
+    }
+
+    /// 0, 1 and negative pids signal a process group, launchd or every process you own: never sent.
+    func testNoPidAtOrBelowOneIsSignalled() {
+        let fake = FakeTerminalFocusPrimitives()
+        fake.answerOpenURL("fake://new", with: true)
+        let plan = FocusPlan(killPIDs: [-1, 0, 1, 611], newTerminal: NewTerminalAction(kind: "url", url: "fake://new"))
+        _ = run(plan, fake: fake)
+        XCTAssertEqual(fake.log, ["kill:611", "open:fake://new"])
     }
 
     func testNewTerminalApplescriptKind() {
         let fake = FakeTerminalFocusPrimitives()
         fake.answerAppleScript("")
-        let plan = FocusPlan(killPIDs: [1], newTerminal: NewTerminalAction(kind: "applescript", script: ["tell application \"iTerm\""]))
+        let plan = FocusPlan(killPIDs: [611], newTerminal: NewTerminalAction(kind: "applescript", script: ["tell application \"iTerm\""]))
         let (_, outcome) = run(plan, fake: fake)
-        XCTAssertEqual(fake.log, ["kill:1", "script:tell application \"iTerm\""])
+        XCTAssertEqual(fake.log, ["kill:611", "script:tell application \"iTerm\""])
         XCTAssertEqual(outcome?.success, true)
     }
 

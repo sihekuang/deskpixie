@@ -255,6 +255,22 @@ func TestFocusSessionDoesNotStartPixiesSession(t *testing.T) {
 	})
 }
 
+// The roster lists your sessions even when Pixie's host can't list; a click must still work.
+func TestFocusSessionWorksWhilePixiesHostCannotList(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRosterRig(t, false)
+		r.user.connect(t, "api-claude")
+		time.Sleep(time.Second)
+		r.host.FailList(true)
+		if err := r.h.FocusSession(context.Background(), "api-claude"); err != nil {
+			t.Fatal(err)
+		}
+		if got := r.focus.Sent(); len(got) != 1 {
+			t.Fatalf("its plan goes to the app: %+v", got)
+		}
+	})
+}
+
 func TestFocusSessionOnlyFocusesYourSessions(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		r := newRosterRig(t, true)
