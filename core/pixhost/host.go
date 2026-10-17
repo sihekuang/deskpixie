@@ -37,6 +37,8 @@ type session struct {
 	labeled   bool // verbatim turned off: messages are prefixed (#143)
 	started   time.Time
 	active    time.Time // its last message
+	lastTurn  string    // its last turn's gist (#146)
+	asks      bool      // that turn ended asking you something
 	conn      net.Conn  // nil while unreachable
 	wmu       sync.Mutex
 	pending   map[string]chan wire.Msg
@@ -273,6 +275,7 @@ func (h *Host) onMsg(s *session, m wire.Msg) bool {
 			h.mu.Lock()
 			t := agent.SessionTurn{Label: s.label(), Reply: m.Text, App: s.hello.App,
 				Duration: agent.Millis(max(m.DurationMs, 0)), FromPixie: m.Source == "pixie"}
+			s.lastTurn, s.asks = agent.SessionGist(m.Text)
 			h.mu.Unlock()
 			h.broadcast(agent.PaneEvent{Kind: agent.PaneEventTurn, Agent: s.addr, Turn: &t})
 		case "exited":
@@ -478,7 +481,7 @@ func (h *Host) List(context.Context) ([]agent.AgentInfo, error) {
 			Name: s.addr, Pane: "pix:" + s.addr, Cwd: s.hello.Cwd, Status: s.status, Origin: agent.OriginUser,
 			User: &agent.UserSession{Tool: s.hello.Tool, Repo: repo, Where: s.hello.Where, App: s.hello.App,
 				Description: desc, PastDescriptions: s.desc.Past(), Reachable: s.conn != nil, Verbatim: !s.labeled,
-				Started: s.started, LastActive: s.active},
+				Started: s.started, LastActive: s.active, LastTurn: s.lastTurn, LastTurnAsks: s.asks},
 		})
 	}
 	return out, nil
