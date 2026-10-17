@@ -40,7 +40,7 @@ func TestRegistriesNameTheShippedAdapters(t *testing.T) {
 // #98: every shipped terminal reuses one already attached to the session.
 func TestEveryTerminalReusesAnAttachedOne(t *testing.T) {
 	for name, f := range Terminals() {
-		if _, ok := f(&agenttest.FakeRunner{}, "/Users/x").(*terminal.ReusingLauncher); !ok {
+		if _, ok := f(&agenttest.FakeRunner{}, "/Users/x").(*terminal.ReusingPlanner); !ok {
 			t.Fatalf("%s doesn't reuse an attached terminal", name)
 		}
 	}

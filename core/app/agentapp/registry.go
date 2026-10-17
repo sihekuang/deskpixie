@@ -32,7 +32,7 @@ type HostDeps struct {
 
 type (
 	HostFactory     func(HostDeps) (agent.SessionHost, error)
-	TerminalFactory func(runner agent.CommandRunner, home string) agent.TerminalLauncher
+	TerminalFactory func(runner agent.CommandRunner, home string) agent.TerminalPlanner
 )
 
 // SessionHosts is the session host registry.
@@ -108,11 +108,11 @@ func isFile(p string) bool {
 // terminal already attached to the session instead of opening another (#98).
 func Terminals() map[string]TerminalFactory {
 	return map[string]TerminalFactory{
-		"warp": func(r agent.CommandRunner, home string) agent.TerminalLauncher {
-			return terminal.Reuse(terminal.NewWarpLauncher(r, filepath.Join(home, ".warp/tab_configs")), r)
+		"warp": func(r agent.CommandRunner, home string) agent.TerminalPlanner {
+			return terminal.Reuse(terminal.NewWarpPlanner(filepath.Join(home, ".warp/tab_configs")), r)
 		},
-		"iterm": func(r agent.CommandRunner, _ string) agent.TerminalLauncher {
-			return terminal.Reuse(terminal.NewItermLauncher(r), r)
+		"iterm": func(r agent.CommandRunner, _ string) agent.TerminalPlanner {
+			return terminal.Reuse(terminal.NewItermPlanner(), r)
 		},
 	}
 }

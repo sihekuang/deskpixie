@@ -24,6 +24,7 @@ import (
 	agentfs "github.com/sihekuang/deskpixie/core/agent/fs"
 	"github.com/sihekuang/deskpixie/core/agent/httpserver"
 	"github.com/sihekuang/deskpixie/core/agent/proc"
+	"github.com/sihekuang/deskpixie/core/agent/terminal"
 	"github.com/sihekuang/deskpixie/core/app"
 	"github.com/sihekuang/deskpixie/core/pix/wire"
 	"github.com/sihekuang/deskpixie/core/pixhost"
@@ -327,7 +328,9 @@ func Build(c Config) *Agent {
 		Notifier:    NewNotifier(c.Runner, c.Hooks.Notify),
 		Pixie:       pixieCue{c.Hooks},
 		Status:      statusSink{a},
-		Launcher:    termFactory(c.Runner, c.Home),
+		Planner:     termFactory(c.Runner, c.Home),
+		Sessions:    terminal.NewSessionPlanner(c.Runner),
+		Focus:       focusSink{c.Hooks},
 		TerminalDir: TerminalDir(s.ProjectsRoot, c.Home),
 		Store:       NewJsonlStore(paths.Root),
 		Clock:       c.Clock,
@@ -640,6 +643,28 @@ func (a *Agent) FocusAgent(name string) {
 			a.setStatus(TerminalFailureStatus(err.Error()))
 		}
 	})
+}
+
+// FocusSession is a click on one of your own sessions in the roster (async, #148). A failure
+// becomes the tray status line, as for FocusAgent.
+func (a *Agent) FocusSession(name string) {
+	if a.ctx.Err() != nil {
+		return // quitting
+	}
+	a.wg.Go(func() {
+		if err := a.handle.FocusSession(a.ctx, name); err != nil {
+			log.Printf("agent: focus session: %v", err)
+			a.setStatus(TerminalFailureStatus(err.Error()))
+		}
+	})
+}
+
+// ReportFocusOutcome: the shell finished executing a FocusPlan (#116). A failure becomes the
+// tray status line through the same path as an OpenTerminal failure, so wording never diverges.
+func (a *Agent) ReportFocusOutcome(success bool, detail string) {
+	if !success {
+		a.setStatus(TerminalFailureStatus(detail))
+	}
 }
 
 // AttachVoice connects the voice loop once it exists: injections go to it, and its signals

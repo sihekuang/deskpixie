@@ -378,6 +378,7 @@ type UserSession struct {
 	Repo             string // the git root's folder name, "" outside a repo
 	Where            string // terminal or IDE, e.g. "WebStorm"
 	App              string // the terminal app's bundle id, e.g. "com.jetbrains.WebStorm" ("" = unknown)
+	Pid              int    // the agent process pix runs (0 = unknown): its environment names its tab (#148)
 	Description      string
 	PastDescriptions []string
 	Reachable        bool      // pix is connected (false for a few seconds after it dropped)

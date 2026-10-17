@@ -79,6 +79,34 @@ func waitUntil(t *testing.T, what string, within time.Duration, ok func() bool) 
 	}
 }
 
+// executeLive performs exactly the primitives the Swift app will perform, for this live test's
+// own verification (there is no Swift test target in this repo). It reports which rung
+// succeeded, so the test can check it never had to fall further than it expects.
+func executeLive(t *testing.T, plan agent.FocusPlan) string {
+	t.Helper()
+	for _, u := range plan.FocusURLs {
+		if exec.Command("/usr/bin/open", u).Run() == nil {
+			return "focus_url"
+		}
+	}
+	if len(plan.RaiseScript) > 0 {
+		var args []string
+		for _, s := range plan.RaiseScript {
+			args = append(args, "-e", s)
+		}
+		if out, err := exec.Command("/usr/bin/osascript", args...).Output(); err == nil && strings.TrimSpace(string(out)) == "ok" {
+			return "raise"
+		}
+	}
+	for _, pid := range plan.KillPIDs {
+		exec.Command("/bin/kill", "-HUP", strconv.Itoa(pid)).Run()
+	}
+	if plan.NewTerminal != nil && plan.NewTerminal.Kind == "url" {
+		exec.Command("/usr/bin/open", plan.NewTerminal.URL).Run()
+	}
+	return "new_terminal"
+}
+
 func TestLiveWarpShowsTheAttachedTabByItsFocusURL(t *testing.T) {
 	if _, err := os.Stat("/Applications/Warp.app"); err != nil {
 		t.Skip("Warp not installed")
@@ -100,16 +128,18 @@ func TestLiveWarpShowsTheAttachedTabByItsFocusURL(t *testing.T) {
 	}
 
 	r := &recordingRunner{CommandRunner: sm.Runner}
-	l := Reuse(NewWarpLauncher(r, dir), r)
+	l := Reuse(NewWarpPlanner(dir), r)
 	attach := agent.Attach{Argv: host.AttachCommand(), Dir: sm.Home}
 
 	// 1. Nothing attached: a new tab.
 	if _, _, _, ok := l.attached(attach.Argv); ok {
 		t.Fatal("something is already attached to the smoke session")
 	}
-	if err := l.Open(attach); err != nil {
-		t.Fatalf("open: %v", err)
+	plan, err := l.Plan(attach)
+	if err != nil {
+		t.Fatalf("plan: %v", err)
 	}
+	executeLive(t, plan)
 	var clients []int
 	waitUntil(t, "a Warp tab attached", 30*time.Second, func() bool {
 		var ok bool
@@ -149,22 +179,16 @@ func TestLiveWarpShowsTheAttachedTabByItsFocusURL(t *testing.T) {
 	waitUntil(t, "Finder in front", 10*time.Second, func() bool { return frontApp() == "com.apple.finder" })
 
 	// 3. The click: the attached tab, by its focus URL.
-	if err := l.Open(attach); err != nil {
-		t.Fatalf("open again: %v", err)
+	plan, err = l.Plan(attach)
+	if err != nil {
+		t.Fatalf("plan again: %v", err)
 	}
-	ran := r.take()
-	t.Logf("     ran %q", ran)
-	used := false
-	for _, c := range ran {
-		switch {
-		case strings.HasPrefix(c, "/usr/bin/open warp://session/"):
-			used = true
-		case strings.HasPrefix(c, "/usr/bin/osascript"), strings.HasPrefix(c, "/bin/kill"), strings.Contains(c, "tab_config"):
-			t.Errorf("fell back: %q", c)
-		}
+	t.Logf("     ran %q", r.take())
+	if len(plan.FocusURLs) == 0 {
+		t.Fatal("no focus URL in the plan")
 	}
-	if !used {
-		t.Fatal("no focus URL opened")
+	if rung := executeLive(t, plan); rung != "focus_url" {
+		t.Fatalf("fell back to %q instead of the focus url", rung)
 	}
 	waitUntil(t, "Warp in front", 10*time.Second, func() bool { return frontApp() == "dev.warp.Warp-Stable" })
 	if _, _, now, _ := l.attached(attach.Argv); len(now) != len(clients) {

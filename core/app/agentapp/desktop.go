@@ -83,6 +83,15 @@ func (p paneSink) ShowPane(job agent.JobID, worker string) {
 	}
 }
 
+// focusSink: a FocusPlan to show → the app's `focusPlan` event.
+type focusSink struct{ hooks app.AgentHooks }
+
+func (f focusSink) Focus(plan agent.FocusPlan) {
+	if f.hooks.Focus != nil {
+		f.hooks.Focus(plan)
+	}
+}
+
 type rosterSink struct{ hooks app.AgentHooks }
 
 func (r rosterSink) Roster(v agent.RosterView) {

@@ -69,6 +69,17 @@ final class EngineEventTests: XCTestCase {
         XCTAssertEqual(c, PaneRequest(job: "", worker: ""))
     }
 
+    func testFocusPlanEventDecodes() {
+        let json = #"{"kind":"focusPlan","plan":{"focus_urls":["warp://session/a"],"kill_pids":[611,621],"new_terminal":{"kind":"url","url":"warp://tab_config/x"}}}"#
+        guard case .focusPlan(let plan)? = d(json) else { return XCTFail("not decoded") }
+        XCTAssertEqual(plan.focusURLs, ["warp://session/a"])
+        XCTAssertEqual(plan.killPIDs, [611, 621])
+        XCTAssertEqual(plan.newTerminal, NewTerminalAction(kind: "url", url: "warp://tab_config/x"))
+        XCTAssertNil(plan.raiseScript)
+        XCTAssertNil(plan.itermSelect)
+        XCTAssertNil(plan.activateApp)
+    }
+
     func testUpdatesEventDecodes() {
         let json = #"{"kind":"updates","lines":[{"id":3,"text":"Done.","kind":"reply","at":1700000000000,"job":"job_000000000001"},{"id":4,"text":"hi","kind":"info","at":1700000000001}]}"#
         guard case .updates(let lines)? = EngineEvent.decode(Data(json.utf8)) else { return XCTFail() }

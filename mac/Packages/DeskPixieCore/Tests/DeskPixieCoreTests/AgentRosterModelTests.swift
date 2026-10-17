@@ -53,7 +53,8 @@ final class AgentRosterModelTests: XCTestCase {
     func testClickable() {
         XCTAssertTrue(AgentRosterModel.clickable(row("a")))
         XCTAssertTrue(AgentRosterModel.clickable(row("y", kind: "session", app: "com.googlecode.iterm2")))
-        XCTAssertFalse(AgentRosterModel.clickable(row("y", kind: "session")))
+        // #148: the core finds your session's tab from its process, not its bundle id.
+        XCTAssertTrue(AgentRosterModel.clickable(row("y", kind: "session")))
         XCTAssertFalse(AgentRosterModel.clickable(row("y", kind: "session", reachable: false, app: "com.apple.Terminal")))
     }
 

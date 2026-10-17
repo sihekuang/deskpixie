@@ -74,8 +74,12 @@ type Deps struct {
 	Pixie    PixieCue
 	Status   StatusSink
 	// Modes hears each Claude agent's Manual-mode changes (nil: ignored).
-	Modes    ModeSink
-	Launcher TerminalLauncher
+	Modes   ModeSink
+	Planner TerminalPlanner
+	// Sessions plans showing one of your own sessions' tab (#148; nil: a click on one fails).
+	Sessions SessionPlanner
+	// Focus hands a built FocusPlan to the shell to execute (#116).
+	Focus FocusSink
 	// TerminalDir is the folder the agent terminal starts in (the projects folder, else home).
 	TerminalDir string
 	Store       Store
@@ -495,7 +499,12 @@ func (h *AgentHandle) OpenTerminal(ctx context.Context) error {
 	target := h.ctl.OpenTarget()
 	h.ctlMu.Unlock()
 	focusQuietly(ctx, h.deps.Host.Session(), target)
-	return h.deps.Launcher.Open(Attach{Argv: h.deps.Host.AttachCommand(), Dir: h.deps.TerminalDir})
+	plan, err := h.deps.Planner.Plan(Attach{Argv: h.deps.Host.AttachCommand(), Dir: h.deps.TerminalDir})
+	if err != nil {
+		return err
+	}
+	h.deps.Focus.Focus(plan)
+	return nil
 }
 
 // UpdatesSeen: the bubble showed these lines long enough to count as heard.
@@ -557,7 +566,12 @@ func (h *AgentHandle) FocusJob(ctx context.Context, job JobID, worker string) er
 	target := h.ctl.FocusTarget(job, worker)
 	h.ctlMu.Unlock()
 	focusQuietly(ctx, h.deps.Host.Session(), target)
-	return h.deps.Launcher.Open(Attach{Argv: h.deps.Host.AttachCommand(), Dir: h.deps.TerminalDir})
+	plan, err := h.deps.Planner.Plan(Attach{Argv: h.deps.Host.AttachCommand(), Dir: h.deps.TerminalDir})
+	if err != nil {
+		return err
+	}
+	h.deps.Focus.Focus(plan)
+	return nil
 }
 
 // RosterDebounce coalesces a burst of changes into one rebuild; RosterBackstop rebuilds anyway,
@@ -585,7 +599,48 @@ func (h *AgentHandle) FocusAgent(ctx context.Context, name string) error {
 	}
 	h.Input(EnsureCoordinatorInput())
 	focusQuietly(ctx, h.deps.Host.Session(), name)
-	return h.deps.Launcher.Open(Attach{Argv: h.deps.Host.AttachCommand(), Dir: h.deps.TerminalDir})
+	plan, err := h.deps.Planner.Plan(Attach{Argv: h.deps.Host.AttachCommand(), Dir: h.deps.TerminalDir})
+	if err != nil {
+		return err
+	}
+	h.deps.Focus.Focus(plan)
+	return nil
+}
+
+// FocusSession is a click on one of your own sessions in the roster (#148): bring forward the
+// tab it runs in. Pixie's own session is left alone — nothing is started or attached.
+func (h *AgentHandle) FocusSession(ctx context.Context, name string) error {
+	if h.deps.Sessions == nil {
+		return LaunchError("no way to show your sessions")
+	}
+	// Your sessions are the composite's pix part: listed on its own, so a failing Pixie host
+	// (which the roster shows past) can't hide them.
+	var list []AgentInfo
+	var err error
+	if c, ok := h.deps.Host.Session().(*CompositeHost); ok {
+		parts := c.ListRunningParts(ctx)
+		list, err = parts.Secondary, parts.SecondaryErr
+	} else {
+		list, err = ListRunning(ctx, h.deps.Host.Session())
+	}
+	if err != nil {
+		return err
+	}
+	for _, a := range list {
+		if a.Name != name || a.Origin != OriginUser || a.User == nil {
+			continue
+		}
+		if a.User.Pid <= 0 {
+			return LaunchError("could not find the terminal of " + name)
+		}
+		plan, err := h.deps.Sessions.PlanSession(a.User.Pid)
+		if err != nil {
+			return err
+		}
+		h.deps.Focus.Focus(plan)
+		return nil
+	}
+	return LaunchError("no session of yours named " + name)
 }
 
 func (h *AgentHandle) pokeRoster() {

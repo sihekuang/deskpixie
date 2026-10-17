@@ -479,7 +479,7 @@ func (h *Host) List(context.Context) ([]agent.AgentInfo, error) {
 		}
 		out = append(out, agent.AgentInfo{
 			Name: s.addr, Pane: "pix:" + s.addr, Cwd: s.hello.Cwd, Status: s.status, Origin: agent.OriginUser,
-			User: &agent.UserSession{Tool: s.hello.Tool, Repo: repo, Where: s.hello.Where, App: s.hello.App,
+			User: &agent.UserSession{Tool: s.hello.Tool, Repo: repo, Where: s.hello.Where, App: s.hello.App, Pid: s.hello.Pid,
 				Description: desc, PastDescriptions: s.desc.Past(), Reachable: s.conn != nil, Verbatim: !s.labeled,
 				Started: s.started, LastActive: s.active, LastTurn: s.lastTurn, LastTurnAsks: s.asks},
 		})

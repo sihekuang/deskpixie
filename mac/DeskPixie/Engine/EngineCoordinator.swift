@@ -12,6 +12,9 @@ import os
 /// main thread. Launch (migration, `dp_configure`, first reads) runs in `StartupSequencer`;
 /// `app.action`, `app.state`, `settings.snapshot`/`choices`/`hotkeyFailed` go through `worker`.
 /// Only `dp_poll_event` (a non-blocking queue pop), `dp_hotkey` and `dp_pack_json` stay on main.
+/// `TerminalFocusExecutor.execute` (#116) is the same rule for a different reason: it isn't a
+/// core call, but NSAppleScript/NSWorkspace can block for seconds (launching an app, an
+/// Automation consent dialog, a hung target's Apple Event timeout), so it also runs on `worker`.
 @MainActor
 final class EngineCoordinator {
     static let pollInterval: UInt64 = 30_000_000
@@ -28,6 +31,12 @@ final class EngineCoordinator {
     /// Binding, rollback and the "Hotkey unavailable" line (DeskPixieCore, tested there).
     private var hotkeys: HotkeyBinder!
     private let notifier = Notifier()
+    /// Walks the core's FocusPlan to show a terminal (#116); set in init, since its outcome
+    /// closure needs self.
+    private var terminalFocus: TerminalFocusExecutor!
+    /// Its own queue: a FocusPlan can block on an AppleScript for up to a minute (a consent
+    /// dialog, a hung terminal), which must not hold up the core calls queued on `worker`.
+    private let terminalFocusQueue = DispatchQueue(label: "com.sihekuang.deskpixie.terminal-focus")
     private lazy var canvas = CanvasWindowController(engine: engine, worker: worker)
 
     private(set) var pixie: PixieController?
@@ -63,6 +72,16 @@ final class EngineCoordinator {
         self.micRing = micRing
         self.pump = pump
         hotkeys = HotkeyBinder(registrar: hotkey) { [weak self] in self?.talk() }
+        // No [weak self]/self.engine here: this closure is @Sendable and may run off the main
+        // actor (TerminalFocusExecutor.execute runs on worker — see the .focusPlan case below),
+        // so it captures engine/worker by value instead of reaching back through self.
+        let engine = engine, worker = worker
+        terminalFocus = TerminalFocusExecutor(primitives: SystemTerminalFocusPrimitives()) { success, detail in
+            worker.async {
+                do { _ = try engine.call("agent.reportFocusOutcome", ReportFocusOutcomeArgs(success: success, detail: detail)) }
+                catch { Self.log.error("agent.reportFocusOutcome: \(String(describing: error), privacy: .public)") }
+            }
+        }
     }
 
     // MARK: Lifecycle
@@ -420,6 +439,11 @@ final class EngineCoordinator {
             roster?.apply(view: view)
         case .showPane(let r):
             bubble?.showPane(r)
+        case .focusPlan(let plan):
+            // execute(_:) can block for seconds on a real AppleScript/NSWorkspace call: off main,
+            // and off `worker` so the core's own calls keep going meanwhile.
+            let terminalFocus = terminalFocus!
+            terminalFocusQueue.async { terminalFocus.execute(plan) }
         }
     }
 
@@ -477,8 +501,7 @@ final class EngineCoordinator {
     /// makes its `pixies/` pack folder (moving a pre-#68 `mascots/` there first, so it must not
     /// exist before the core starts). Runs off main (inside the startup work).
     nonisolated static func engineConfig() -> EngineConfig {
-        let support = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/com.sihekuang.deskpixie", isDirectory: true)
+        let support = AppSupportDirectory.resolve(home: FileManager.default.homeDirectoryForCurrentUser)
         do {
             try FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
         } catch {
@@ -499,4 +522,10 @@ final class EngineCoordinator {
 /// `presence.set` arguments.
 private struct PresenceArgs: Encodable, Sendable {
     let away: Bool
+}
+
+/// `agent.reportFocusOutcome` arguments: the shell finished executing a FocusPlan (#116).
+private struct ReportFocusOutcomeArgs: Encodable, Sendable {
+    let success: Bool
+    let detail: String
 }

@@ -95,7 +95,7 @@ public struct AgentRosterModel: Sendable, Equatable {
 
     /// Pixie's agents always; your sessions only when reachable with a known app.
     public static func clickable(_ r: RosterRow) -> Bool {
-        r.kind != "session" || (r.reachable && !(r.app ?? "").isEmpty)
+        r.kind != "session" || r.reachable
     }
 
     public static func dot(_ status: String) -> String {

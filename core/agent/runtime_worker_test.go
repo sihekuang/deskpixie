@@ -67,7 +67,7 @@ func rigBuild(t *testing.T, workers, keep bool, store *agenttest.MemStore, wt *a
 	notifier := &agenttest.RecordingNotifier{}
 	deps := Deps{
 		Host: NewAgentHost(host, clock, recipe), Voice: &agenttest.RecordingVoiceLink{}, Notifier: notifier,
-		Pixie: &agenttest.RecordingNotifier{}, Status: &agenttest.RecordingStatus{}, Launcher: &agenttest.FakeLauncher{},
+		Pixie: &agenttest.RecordingNotifier{}, Status: &agenttest.RecordingStatus{}, Planner: &agenttest.FakePlanner{}, Focus: &agenttest.FakeFocusSink{},
 		Store: store, Clock: clock, IDs: &agenttest.SeqIds{}, Kept: &agenttest.FakeKept{},
 		Roster: &agenttest.RecordingRoster{},
 	}

@@ -27,7 +27,8 @@ type rtRig struct {
 	voice    *agenttest.RecordingVoiceLink
 	alerts   *agenttest.RecordingNotifier
 	status   *agenttest.RecordingStatus
-	launcher *agenttest.FakeLauncher
+	launcher *agenttest.FakePlanner
+	focus    *agenttest.FakeFocusSink
 	updates  *agenttest.RecordingUpdates
 	store    *agenttest.MemStore
 	clock    *agenttest.ManualClock
@@ -37,12 +38,12 @@ func config(warm bool) RuntimeConfig {
 	return RuntimeConfig{Settings: DefaultSettings(), Warm: warm}
 }
 
-func build(t *testing.T, store *agenttest.MemStore, cfg RuntimeConfig, wrap func(*agenttest.FakeSessionHost) SessionHost, launch TerminalLauncher) *rtRig {
+func build(t *testing.T, store *agenttest.MemStore, cfg RuntimeConfig, wrap func(*agenttest.FakeSessionHost) SessionHost, launch TerminalPlanner) *rtRig {
 	host := agenttest.NewFakeSessionHost().ManualTurns()
 	clock := agenttest.ClockAt(1_000_000)
 	recipe := CoordinatorRecipe{Cwd: "/data/agent/workspace"}
 	r := &rtRig{host: host, voice: &agenttest.RecordingVoiceLink{}, alerts: &agenttest.RecordingNotifier{},
-		status: &agenttest.RecordingStatus{}, launcher: &agenttest.FakeLauncher{}, updates: &agenttest.RecordingUpdates{}, store: store, clock: clock}
+		status: &agenttest.RecordingStatus{}, launcher: &agenttest.FakePlanner{}, focus: &agenttest.FakeFocusSink{}, updates: &agenttest.RecordingUpdates{}, store: store, clock: clock}
 	var session SessionHost = host
 	if wrap != nil {
 		session = wrap(host)
@@ -52,7 +53,7 @@ func build(t *testing.T, store *agenttest.MemStore, cfg RuntimeConfig, wrap func
 	}
 	deps := Deps{
 		Host: NewAgentHost(session, clock, recipe), Voice: r.voice, Notifier: r.alerts, Pixie: r.alerts,
-		Status: r.status, Launcher: launch, TerminalDir: "/home/me/Projects", Store: store, Clock: clock, IDs: &agenttest.SeqIds{},
+		Status: r.status, Planner: launch, Focus: r.focus, TerminalDir: "/home/me/Projects", Store: store, Clock: clock, IDs: &agenttest.SeqIds{},
 		Updates: r.updates,
 	}
 	r.h = NewRuntime(deps, cfg)
@@ -288,6 +289,10 @@ func TestOpenTerminalEnsuresTheSessionStartsTheCoordinatorAndAttaches(t *testing
 		want := []Attach{{Argv: []string{"fake-herdr", "session", "attach", "test"}, Dir: "/home/me/Projects"}}
 		if !reflect.DeepEqual(r.launcher.Attaches(), want) {
 			t.Fatal(r.launcher.Attaches())
+		}
+		wantPlan := []FocusPlan{{NewTerminal: &NewTerminalAction{Kind: "url", URL: "fake://opened"}}}
+		if !reflect.DeepEqual(r.focus.Sent(), wantPlan) {
+			t.Fatal(r.focus.Sent())
 		}
 	})
 }
@@ -826,7 +831,7 @@ func TestAWarmStartWithASetupProblemStartsNothing(t *testing.T) {
 	})
 }
 
-// blockingLauncher blocks in Open until released.
+// blockingLauncher blocks in Plan until released.
 type blockingLauncher struct {
 	entered chan struct{}
 	release chan struct{}
@@ -834,14 +839,14 @@ type blockingLauncher struct {
 
 func (*blockingLauncher) Name() string { return "blocking" }
 
-func (l *blockingLauncher) Open(Attach) error {
+func (l *blockingLauncher) Plan(Attach) (FocusPlan, error) {
 	close(l.entered)
 	<-l.release
-	return nil
+	return FocusPlan{}, nil
 }
 
 // Rust checks that the (blocking) launch runs off the async runtime's thread. Go has no such
-// thread: the equivalent property is that a launcher blocked in Open (osascript, open) never
+// thread: the equivalent property is that a planner blocked in Plan (osascript, open) never
 // stalls the runtime, which keeps carrying out effects meanwhile.
 func TestOpenTerminalLaunchesOffTheAsyncThread(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {

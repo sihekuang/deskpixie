@@ -19,7 +19,9 @@ type rosterRig struct {
 	host     *agenttest.FakeSessionHost
 	user     *pixFake
 	roster   *agenttest.RecordingRoster
-	launcher *agenttest.FakeLauncher
+	launcher *agenttest.FakePlanner
+	focus    *agenttest.FakeFocusSink
+	sessions *agenttest.FakeSessionPlanner
 }
 
 type pixFake struct {
@@ -65,7 +67,7 @@ func (p *pixFake) List(ctx context.Context) ([]AgentInfo, error) {
 	l, err := p.FakeSessionHost.List(ctx)
 	for i := range l {
 		l[i].Origin = OriginUser
-		l[i].User = &UserSession{Tool: "claude", Repo: "api", Where: "iTerm", App: "com.googlecode.iterm2", Reachable: true}
+		l[i].User = &UserSession{Tool: "claude", Repo: "api", Where: "iTerm", App: "com.googlecode.iterm2", Reachable: true, Pid: 4242}
 	}
 	return l, err
 }
@@ -110,12 +112,13 @@ func newRosterRig(t *testing.T, warm bool) *rosterRig {
 func newRosterRigWith(t *testing.T, warm bool, wrap func(*primaryFake) SessionHost) *rosterRig {
 	host := agenttest.NewFakeSessionHost().ManualTurns()
 	user := &pixFake{agenttest.NewFakeSessionHost(), make(chan struct{}, 1), t.Context()}
-	r := &rosterRig{host: host, user: user, roster: &agenttest.RecordingRoster{}, launcher: &agenttest.FakeLauncher{}}
+	r := &rosterRig{host: host, user: user, roster: &agenttest.RecordingRoster{}, launcher: &agenttest.FakePlanner{}, focus: &agenttest.FakeFocusSink{},
+		sessions: &agenttest.FakeSessionPlanner{Plan: FocusPlan{FocusURLs: []string{"warp://session/abc"}}}}
 	clock := agenttest.ClockAt(1_000_000)
 	deps := Deps{
 		Host:  NewAgentHost(NewCompositeHost(wrap(&primaryFake{host, t.Context()}), user), clock, CoordinatorRecipe{Cwd: "/data/agent/workspace"}),
 		Voice: &agenttest.RecordingVoiceLink{}, Notifier: &agenttest.RecordingNotifier{}, Pixie: &agenttest.RecordingNotifier{},
-		Status: &agenttest.RecordingStatus{}, Launcher: r.launcher, TerminalDir: "/home/me/Projects",
+		Status: &agenttest.RecordingStatus{}, Planner: r.launcher, Sessions: r.sessions, Focus: r.focus, TerminalDir: "/home/me/Projects",
 		Store: &agenttest.MemStore{}, Clock: clock, IDs: &agenttest.SeqIds{}, Updates: &agenttest.RecordingUpdates{},
 		Roster: r.roster,
 	}
@@ -206,6 +209,79 @@ func TestFocusAgentFocusesThatPaneAndAttaches(t *testing.T) {
 		want := []Attach{{Argv: []string{"fake-herdr", "session", "attach", "test"}, Dir: "/home/me/Projects"}}
 		if !reflect.DeepEqual(r.launcher.Attaches(), want) {
 			t.Fatal(r.launcher.Attaches())
+		}
+	})
+}
+
+// #148: a click on one of your sessions shows that session's own terminal, planned from its
+// process — Pixie's session is not started and nothing is attached.
+func TestFocusSessionShowsThatSessionsOwnTerminal(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRosterRig(t, false)
+		r.user.connect(t, "api-claude")
+		time.Sleep(time.Second)
+		if err := r.h.FocusSession(context.Background(), "api-claude"); err != nil {
+			t.Fatal(err)
+		}
+		if got := r.sessions.Pids(); !reflect.DeepEqual(got, []int{4242}) {
+			t.Fatalf("planned from its process: %v", got)
+		}
+		if got := r.focus.Sent(); len(got) != 1 || !reflect.DeepEqual(got[0], FocusPlan{FocusURLs: []string{"warp://session/abc"}}) {
+			t.Fatalf("its plan goes to the app: %+v", got)
+		}
+		if len(r.launcher.Attaches()) != 0 || len(r.host.Focused()) != 0 {
+			t.Fatalf("nothing attached or focused in Pixie's session: %v %v", r.launcher.Attaches(), r.host.Focused())
+		}
+	})
+}
+
+// Finding your session lists passively: a click on it must not start Pixie's session host.
+func TestFocusSessionDoesNotStartPixiesSession(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var primary *passivePrimary
+		r := newRosterRigWith(t, false, func(p *primaryFake) SessionHost {
+			primary = &passivePrimary{primaryFake: p}
+			return primary
+		})
+		r.user.connect(t, "api-claude")
+		time.Sleep(time.Second)
+		before := primary.starting.Load()
+		if err := r.h.FocusSession(context.Background(), "api-claude"); err != nil {
+			t.Fatal(err)
+		}
+		if n := primary.starting.Load(); n != before {
+			t.Fatalf("the primary was asked to start %d time(s)", n-before)
+		}
+	})
+}
+
+// The roster lists your sessions even when Pixie's host can't list; a click must still work.
+func TestFocusSessionWorksWhilePixiesHostCannotList(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRosterRig(t, false)
+		r.user.connect(t, "api-claude")
+		time.Sleep(time.Second)
+		r.host.FailList(true)
+		if err := r.h.FocusSession(context.Background(), "api-claude"); err != nil {
+			t.Fatal(err)
+		}
+		if got := r.focus.Sent(); len(got) != 1 {
+			t.Fatalf("its plan goes to the app: %+v", got)
+		}
+	})
+}
+
+func TestFocusSessionOnlyFocusesYourSessions(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRosterRig(t, true)
+		time.Sleep(time.Second)
+		for _, name := range []string{"nobody-claude", Coordinator} {
+			if err := r.h.FocusSession(context.Background(), name); err == nil {
+				t.Fatalf("%s: no error", name)
+			}
+		}
+		if len(r.sessions.Pids()) != 0 || len(r.focus.Sent()) != 0 {
+			t.Fatalf("nothing planned or sent: %v %v", r.sessions.Pids(), r.focus.Sent())
 		}
 	})
 }

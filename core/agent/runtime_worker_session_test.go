@@ -38,7 +38,7 @@ func newPixWorkerRig(t *testing.T, sessions ...AgentInfo) *pixWorkerRig {
 	wt := agenttest.FakeWorktreesWithRepo("focus")
 	deps := Deps{
 		Host: NewAgentHost(host, clock, recipe), Voice: &agenttest.RecordingVoiceLink{}, Notifier: &agenttest.RecordingNotifier{},
-		Pixie: &agenttest.RecordingNotifier{}, Status: &agenttest.RecordingStatus{}, Launcher: &agenttest.FakeLauncher{},
+		Pixie: &agenttest.RecordingNotifier{}, Status: &agenttest.RecordingStatus{}, Planner: &agenttest.FakePlanner{}, Focus: &agenttest.FakeFocusSink{},
 		Store: &agenttest.MemStore{}, Clock: clock, IDs: &agenttest.SeqIds{}, Kept: &agenttest.FakeKept{},
 	}
 	settings := DefaultSettings()

@@ -1,47 +1,21 @@
 package terminal
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/sihekuang/deskpixie/core/agent"
 )
 
-// fakeRunner records every Run and answers from a canned result; it never launches anything.
-type fakeRunner struct {
-	mu  sync.Mutex
-	ran []ranCmd
-	out agent.CommandOutput
-	err error
-}
-
-type ranCmd struct {
-	argv []string
-	env  []agent.EnvVar
-}
-
-func (f *fakeRunner) Run(argv []string, env []agent.EnvVar) (agent.CommandOutput, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.ran = append(f.ran, ranCmd{argv, env})
-	return f.out, f.err
-}
-func (f *fakeRunner) RunBy(argv []string, env []agent.EnvVar, d time.Time) (agent.CommandOutput, error) {
-	return agent.DefaultRunBy(f, argv, env, d)
-}
-func (f *fakeRunner) SpawnDetached([]string, []agent.EnvVar) error { return errors.New("unused") }
-
 func argv() []string {
 	return []string{"/Users/x/.local/bin/herdr", "session", "attach", "deskpixie"}
 }
 
-// attach is the attach spec the runtime hands a launcher: argv plus the starting folder.
+// attach is the attach spec the runtime hands a planner: argv plus the starting folder.
 func attach() agent.Attach {
 	return agent.Attach{Argv: argv(), Dir: "/Users/x/Documents/Projects"}
 }
@@ -59,10 +33,10 @@ func TestPlainWordsStayPlainAndOthersAreQuoted(t *testing.T) {
 	}
 }
 
-func TestWarpWritesExactlyThisTabConfigAndOpensTheURL(t *testing.T) {
-	r := &fakeRunner{}
+func TestWarpPlanWritesExactlyThisTabConfigAndReturnsItsURL(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "tab_configs")
-	if err := NewWarpLauncher(r, dir).Open(attach()); err != nil {
+	plan, err := NewWarpPlanner(dir).Plan(attach())
+	if err != nil {
 		t.Fatal(err)
 	}
 	b, err := os.ReadFile(filepath.Join(dir, "deskpixie_attach.toml"))
@@ -77,14 +51,12 @@ func TestWarpWritesExactlyThisTabConfigAndOpensTheURL(t *testing.T) {
 	if string(b) != want {
 		t.Fatalf("%q", b)
 	}
-	if len(r.ran) != 1 || !reflect.DeepEqual(r.ran[0].argv, []string{"/usr/bin/open", "warp://tab_config/deskpixie_attach"}) {
-		// Deliberate deviation from Rust: no ?new_window=true. A new window also gets Warp's
-		// default tab, so one click made two tabs; without it the URL adds exactly one tab to
-		// the active window (and launches Warp when it is not running).
-		t.Fatalf("%v", r.ran)
-	}
-	if !reflect.DeepEqual(r.ran[0].env, baseEnv()) {
-		t.Fatal("nothing else from the app's environment")
+	// Deliberate deviation from Rust: no ?new_window=true. A new window also gets Warp's
+	// default tab, so one click made two tabs; without it the URL adds exactly one tab to
+	// the active window (and launches Warp when it is not running).
+	wantPlan := &agent.NewTerminalAction{Kind: "url", URL: "warp://tab_config/deskpixie_attach"}
+	if !reflect.DeepEqual(plan.NewTerminal, wantPlan) {
+		t.Fatalf("%+v", plan)
 	}
 	ents, _ := os.ReadDir(dir)
 	if len(ents) != 1 || ents[0].Name() != "deskpixie_attach.toml" {
@@ -99,25 +71,15 @@ func TestWarpEscapesQuotesForToml(t *testing.T) {
 	}
 }
 
-func TestItermRunsTheExpectedAppleScript(t *testing.T) {
-	r := &fakeRunner{}
+func TestItermPlanReturnsTheExpectedAppleScript(t *testing.T) {
 	script := ItermScript(attach())
-	if err := NewItermLauncher(r).Open(attach()); err != nil {
+	plan, err := NewItermPlanner().Plan(attach())
+	if err != nil {
 		t.Fatal(err)
 	}
-	if len(r.ran) != 1 {
-		t.Fatal(r.ran)
-	}
-	a := r.ran[0].argv
-	if a[0] != "/usr/bin/osascript" || a[1] != "-e" || len(a) != 1+2*4 {
-		t.Fatal(a)
-	}
-	var lines []string
-	for i := 2; i < len(a); i += 2 {
-		lines = append(lines, a[i])
-	}
-	if !reflect.DeepEqual(lines, script) || !reflect.DeepEqual(r.ran[0].env, baseEnv()) {
-		t.Fatal(a)
+	wantNewTerminal := &agent.NewTerminalAction{Kind: "applescript", Script: script}
+	if !reflect.DeepEqual(plan.NewTerminal, wantNewTerminal) {
+		t.Fatalf("%+v", plan)
 	}
 	want := []string{
 		`tell application "iTerm"`,
@@ -132,18 +94,23 @@ func TestItermRunsTheExpectedAppleScript(t *testing.T) {
 }
 
 func TestAFailingLaunchIsAnErrorNamingTheTerminal(t *testing.T) {
-	r := &fakeRunner{out: agent.CommandOutput{Status: 1, Stderr: "no app for warp://"}}
-	err := NewWarpLauncher(r, t.TempDir()).Open(attach())
-	if err == nil || err.Error() != "could not open Warp: no app for warp://" {
+	// Warp: an unwritable tab-configs directory (a file sits where the directory should be).
+	blocked := filepath.Join(t.TempDir(), "blocked")
+	if err := os.WriteFile(blocked, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := NewWarpPlanner(filepath.Join(blocked, "tab_configs")).Plan(attach())
+	if err == nil || !strings.HasPrefix(err.Error(), "could not open Warp: ") {
 		t.Fatal(err)
 	}
 	if _, ok := err.(agent.LaunchError); !ok {
 		t.Fatalf("%T", err)
 	}
-	// A runner error is wrapped too; iTerm failing names iTerm.
-	r2 := &fakeRunner{err: errors.New("spawn failed")}
-	err = NewItermLauncher(r2).Open(attach())
-	if err == nil || !strings.HasPrefix(err.Error(), "could not open iTerm") {
+	// iTerm has nothing left to run, so its only failure mode left is the same control-character
+	// check as TestControlCharactersAreEscapedForTomlAndRejectedForIterm/
+	// TestItermRefusesAControlCharacterInTheFolder: naming the terminal still works.
+	_, err = NewItermPlanner().Plan(bare([]string{"/p/herdr", "a\x07b"}))
+	if err == nil || err.Error() != "could not open iTerm: the command contains control characters" {
 		t.Fatal(err)
 	}
 }
@@ -174,22 +141,17 @@ func TestControlCharactersAreEscapedForTomlAndRejectedForIterm(t *testing.T) {
 	if strings.ContainsRune(toml, 7) || strings.ContainsRune(toml, 0x7f) {
 		t.Fatal("raw control char in toml")
 	}
-	r := &fakeRunner{}
-	err := NewItermLauncher(r).Open(bare(argv))
+	_, err := NewItermPlanner().Plan(bare(argv))
 	if err == nil || !strings.HasPrefix(err.Error(), "could not open iTerm") {
 		t.Fatal(err)
-	}
-	if len(r.ran) != 0 {
-		t.Fatal("nothing was run")
 	}
 }
 
 // Extra (no Rust twin): an unchanged tab config is not rewritten.
 func TestWarpDoesNotRewriteAnUnchangedTabConfig(t *testing.T) {
-	r := &fakeRunner{}
 	dir := t.TempDir()
-	l := NewWarpLauncher(r, dir)
-	if err := l.Open(attach()); err != nil {
+	l := NewWarpPlanner(dir)
+	if _, err := l.Plan(attach()); err != nil {
 		t.Fatal(err)
 	}
 	p := filepath.Join(dir, "deskpixie_attach.toml")
@@ -197,7 +159,7 @@ func TestWarpDoesNotRewriteAnUnchangedTabConfig(t *testing.T) {
 	if err := os.Chtimes(p, old, old); err != nil {
 		t.Fatal(err)
 	}
-	if err := l.Open(attach()); err != nil {
+	if _, err := l.Plan(attach()); err != nil {
 		t.Fatal(err)
 	}
 	st, _ := os.Stat(p)
@@ -207,9 +169,9 @@ func TestWarpDoesNotRewriteAnUnchangedTabConfig(t *testing.T) {
 }
 
 func TestLaunchersReportTheirNames(t *testing.T) {
-	var _ agent.TerminalLauncher = (*WarpLauncher)(nil)
-	var _ agent.TerminalLauncher = (*ItermLauncher)(nil)
-	if NewWarpLauncher(nil, "").Name() != "warp" || NewItermLauncher(nil).Name() != "iterm" {
+	var _ agent.TerminalPlanner = (*WarpPlanner)(nil)
+	var _ agent.TerminalPlanner = (*ItermPlanner)(nil)
+	if NewWarpPlanner("").Name() != "warp" || NewItermPlanner().Name() != "iterm" {
 		t.Fatal("names")
 	}
 }
@@ -243,9 +205,8 @@ func TestNoStartingFolderMeansNoDirectoryAndNoCd(t *testing.T) {
 
 // Extra (no Rust twin): a control character in the folder is refused by iTerm too.
 func TestItermRefusesAControlCharacterInTheFolder(t *testing.T) {
-	r := &fakeRunner{}
-	err := NewItermLauncher(r).Open(agent.Attach{Argv: argv(), Dir: "/a\x07b"})
-	if err == nil || !strings.HasPrefix(err.Error(), "could not open iTerm") || len(r.ran) != 0 {
-		t.Fatal(err, r.ran)
+	_, err := NewItermPlanner().Plan(agent.Attach{Argv: argv(), Dir: "/a\x07b"})
+	if err == nil || !strings.HasPrefix(err.Error(), "could not open iTerm") {
+		t.Fatal(err)
 	}
 }
