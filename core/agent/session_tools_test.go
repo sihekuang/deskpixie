@@ -1,6 +1,7 @@
 package agent_test
 
 import (
+	"cmp"
 	"context"
 	"strings"
 	"testing"
@@ -15,6 +16,10 @@ type userFake struct {
 	*agenttest.FakeSessionHost
 	described map[string]string
 	labeled   map[string]bool // sessions with verbatim turned off
+	desc      string          // "" = "login bug"
+	past      string          // "" = "auth"
+	lastTurn  string
+	asks      bool
 }
 
 func (u *userFake) Owns(n string) bool { _, ok := u.StatusOf(n); return ok }
@@ -23,8 +28,10 @@ func (u *userFake) List(ctx context.Context) ([]agent.AgentInfo, error) {
 	for i := range l {
 		l[i].Origin = agent.OriginUser
 		l[i].Cwd = "/x/focus"
-		l[i].User = &agent.UserSession{Tool: "claude", Repo: "focus", Where: "WebStorm", Description: "login bug",
-			PastDescriptions: []string{"auth"}, Reachable: true, Verbatim: !u.labeled[l[i].Name],
+		desc, past := cmp.Or(u.desc, "login bug"), cmp.Or(u.past, "auth")
+		l[i].User = &agent.UserSession{Tool: "claude", Repo: "focus", Where: "WebStorm", Description: desc,
+			PastDescriptions: []string{past}, Reachable: true, Verbatim: !u.labeled[l[i].Name],
+			LastTurn: u.lastTurn, LastTurnAsks: u.asks,
 			Started: time.Now().Add(-90 * time.Minute), LastActive: time.Now().Add(-3 * time.Minute)}
 	}
 	return l, err
@@ -232,4 +239,43 @@ func TestParseOverrideExistingSessionString(t *testing.T) {
 	if _, err := agent.ParseToolCall(agent.RoleCoordinator, "start_worker", args); err == nil {
 		t.Fatal(`override_existing_session "maybe" must be refused`)
 	}
+}
+
+// #146: list_sessions shows each session's last turn, a question as asked.
+func TestListSessionsShowsTheLastTurn(t *testing.T) {
+	c, user, _ := newSessionHarness(t)
+	user.lastTurn, user.asks = "All 12 tests pass.", false
+	if rows := sessionRows(t, agent.SessionToolForTest(context.Background(), c, agent.McpCall{Kind: agent.CallListSessions})); rows[0].LastTurn != "All 12 tests pass." {
+		t.Fatalf("%+v", rows)
+	}
+	user.lastTurn, user.asks = "Should I open the PR?", true
+	if rows := sessionRows(t, agent.SessionToolForTest(context.Background(), c, agent.McpCall{Kind: agent.CallListSessions})); rows[0].LastTurn != "Asked: Should I open the PR?" {
+		t.Fatalf("%+v", rows)
+	}
+}
+
+// #146: what a session wrote reaches the coordinator with pending confirm words masked, so it
+// can never read one back as the user's confirmation.
+func TestListSessionsMasksWhatTheSessionWrote(t *testing.T) {
+	c, user, _ := newSessionHarness(t)
+	user.lastTurn = "Say confirm hawk to merge."
+	mask := func(s string) string { return strings.ReplaceAll(s, "hawk", "(word removed)") }
+	rows := sessionRows(t, agent.SessionToolMaskedForTest(context.Background(), c, agent.McpCall{Kind: agent.CallListSessions}, mask))
+	if strings.Contains(rows[0].LastTurn, "hawk") || rows[0].Description != "login bug" {
+		t.Fatalf("%+v", rows)
+	}
+	user.desc, user.past = "merge with hawk", "hawk auth"
+	rows = sessionRows(t, agent.SessionToolMaskedForTest(context.Background(), c, agent.McpCall{Kind: agent.CallListSessions}, mask))
+	if strings.Contains(rows[0].Description, "hawk") || strings.Contains(rows[0].PastDescriptions[0], "hawk") {
+		t.Fatalf("%+v", rows)
+	}
+}
+
+func sessionRows(t *testing.T, r agent.McpReply) []agent.SessionRow {
+	t.Helper()
+	rows, _ := r.Value.(map[string]any)["sessions"].([]agent.SessionRow)
+	if r.Err != nil || len(rows) == 0 {
+		t.Fatalf("%+v %v", rows, r.Err)
+	}
+	return rows
 }

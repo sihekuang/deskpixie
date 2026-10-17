@@ -20,14 +20,14 @@ import (
 )
 
 // fakeClaude: reports a session id and idle, then for each line it reads, echoes it, reports
-// a prompt (working) and idle again; "quit" exits 7.
+// a prompt (working) and idle again with a reply; "quit" exits 7.
 const fakeClaude = `#!/bin/sh
 echo '{"session_id":"e2e-1"}' | pix hook Stop >/dev/null
 while IFS= read -r line; do
   echo "got:$line"
   echo '{"prompt":"fix the upload test","session_id":"e2e-1"}' | pix hook UserPromptSubmit >/dev/null
   case "$line" in *quit*) exit 7;; esac
-  echo '{}' | pix hook Stop >/dev/null
+  printf '%s\n' '{"last_assistant_message":"I fixed the upload test.\n\nAll tests pass."}' | pix hook Stop >/dev/null
 done
 `
 
@@ -160,6 +160,12 @@ func TestEndToEnd(t *testing.T) {
 		default:
 			return false
 		}
+	})
+
+	// 2b. The turn's gist is listed (#146).
+	waitFor(t, "last turn listed", 5*time.Second, func() bool {
+		i, ok := only(t, host)
+		return ok && i.User.LastTurn == "All tests pass." && !i.User.LastTurnAsks
 	})
 
 	// 3. Escape is delivered.

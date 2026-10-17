@@ -991,7 +991,7 @@ func (h *AgentHandle) mcp(agent string, call McpCall) McpReply {
 		}
 		ctx, cancel := context.WithTimeout(h.ctx, OpLimit)
 		defer cancel()
-		return sessionTool(ctx, h.deps.Host.Session(), call)
+		return sessionTool(ctx, h.deps.Host.Session(), call, h.maskPending)
 	}
 	r := h.stepLocked(McpInput(agent, call))
 	if r == nil || r.Kind != EfToolResult {
@@ -1001,6 +1001,15 @@ func (h *AgentHandle) mcp(agent string, call McpCall) McpReply {
 		return McpReply{Err: errors.New(r.Err)}
 	}
 	return McpReply{Value: r.Value}
+}
+
+// maskPending removes the pending confirm words from text a session wrote, so the coordinator
+// can never read one back as your confirmation.
+func (h *AgentHandle) maskPending(text string) string {
+	h.ctlMu.Lock()
+	tokens := h.ctl.pendingTokens()
+	h.ctlMu.Unlock()
+	return maskPendingTokens(text, tokens)
 }
 
 // confirmSession asks you before a session tool does something hard to undo to a session you
