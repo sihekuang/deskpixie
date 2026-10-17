@@ -1204,6 +1204,18 @@ func (a *App) Register(r Registrar) {
 		}
 		return struct{}{}, nil
 	})
+	r.Register("agent.focusSession", func(args json.RawMessage) (any, error) {
+		var in struct {
+			Name string `json:"name"`
+		}
+		if err := decodeArgs("agent.focusSession", args, &in); err != nil {
+			return nil, err
+		}
+		if a.agent != nil && in.Name != "" {
+			a.agent.FocusSession(in.Name)
+		}
+		return struct{}{}, nil
+	})
 	r.Register("agent.reportFocusOutcome", func(args json.RawMessage) (any, error) {
 		var in struct {
 			Success bool   `json:"success"`

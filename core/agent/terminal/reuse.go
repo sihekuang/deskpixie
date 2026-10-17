@@ -2,6 +2,7 @@ package terminal
 
 import (
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -109,13 +110,39 @@ type proc struct {
 // (the nearest ancestor inside a .app bundle), with its tty; clients are every process running
 // argv in that app.
 func (l *ReusingPlanner) attached(argv []string) (app, tty string, clients []int, ok bool) {
-	out, err := l.runner.Run([]string{psBin, "-axww", "-o", "pid=,ppid=,tty=,command="}, baseEnv())
-	if err != nil || out.Status != 0 {
+	procs, ok := processTable(l.runner)
+	if !ok {
 		return "", "", nil, false
 	}
-	procs := map[int]proc{}
+	ok = false
 	var attaches []int
 	line := strings.Join(argv, " ")
+	for pid, p := range procs {
+		if p.command == line {
+			attaches = append(attaches, pid)
+		}
+	}
+	slices.Sort(attaches)
+	for _, pid := range attaches {
+		if a := appOf(procs, pid); a != "" && !ok {
+			app, tty, ok = a, procs[pid].tty, true
+		}
+	}
+	for _, pid := range attaches {
+		if ok && appOf(procs, pid) == app {
+			clients = append(clients, pid)
+		}
+	}
+	return app, tty, clients, ok
+}
+
+// processTable is every process from `ps`, by pid; false if ps failed.
+func processTable(runner agent.CommandRunner) (map[int]proc, bool) {
+	out, err := runner.Run([]string{psBin, "-axww", "-o", "pid=,ppid=,tty=,command="}, baseEnv())
+	if err != nil || out.Status != 0 {
+		return nil, false
+	}
+	procs := map[int]proc{}
 	for _, row := range strings.Split(out.Stdout, "\n") {
 		f := strings.Fields(row)
 		if len(f) < 4 {
@@ -126,38 +153,25 @@ func (l *ReusingPlanner) attached(argv []string) (app, tty string, clients []int
 		if err1 != nil || err2 != nil {
 			continue
 		}
-		p := proc{ppid: ppid, tty: f[2], command: strings.Join(f[3:], " ")}
-		procs[pid] = p
-		if p.command == line {
-			attaches = append(attaches, pid)
+		procs[pid] = proc{ppid: ppid, tty: f[2], command: strings.Join(f[3:], " ")}
+	}
+	return procs, true
+}
+
+// appOf is the .app pid runs in (its nearest ancestor inside a .app bundle), "" if none.
+func appOf(procs map[int]proc, pid int) string {
+	seen := map[int]bool{}
+	for at := procs[pid].ppid; at > 1 && !seen[at]; at = procs[at].ppid {
+		seen[at] = true
+		p, known := procs[at]
+		if !known {
+			break
+		}
+		if i := strings.Index(p.command, ".app/Contents/MacOS/"); i >= 0 {
+			return p.command[:i+len(".app")]
 		}
 	}
-	// appOf is the .app pid runs in, "" if none.
-	appOf := func(pid int) string {
-		seen := map[int]bool{}
-		for at := procs[pid].ppid; at > 1 && !seen[at]; at = procs[at].ppid {
-			seen[at] = true
-			p, known := procs[at]
-			if !known {
-				break
-			}
-			if i := strings.Index(p.command, ".app/Contents/MacOS/"); i >= 0 {
-				return p.command[:i+len(".app")]
-			}
-		}
-		return ""
-	}
-	for _, pid := range attaches {
-		if a := appOf(pid); a != "" && !ok {
-			app, tty, ok = a, procs[pid].tty, true
-		}
-	}
-	for _, pid := range attaches {
-		if ok && appOf(pid) == app {
-			clients = append(clients, pid)
-		}
-	}
-	return app, tty, clients, ok
+	return ""
 }
 
 // ItermSelectScript selects the iTerm session on tty (its window and tab too) and activates iTerm.

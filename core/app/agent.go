@@ -75,6 +75,8 @@ type Agent interface {
 	Roster() any
 	// FocusAgent is a click on one of Pixie's agents in the roster: its pane in a terminal (async).
 	FocusAgent(name string)
+	// FocusSession is a click on one of your own sessions in the roster: the tab it runs in (async).
+	FocusSession(name string)
 	// ReportFocusOutcome: the shell finished executing a FocusPlan (#116). Failure becomes the
 	// tray status line, as for OpenTerminal.
 	ReportFocusOutcome(success bool, detail string)

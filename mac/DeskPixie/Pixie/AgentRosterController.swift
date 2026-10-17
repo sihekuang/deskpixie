@@ -5,7 +5,7 @@ import SwiftUI
 
 /// The roster chip under Pixie (#91): a child panel of the pixie panel showing
 /// `AgentRosterModel`. Hovering or clicking the chip opens the list; a row brings its agent
-/// forward (`agent.focusAgent`), or activates your session's terminal app by bundle id. Opaque
+/// forward (`agent.focusAgent`), or your session's own tab (`agent.focusSession`). Opaque
 /// through Pixie's proximity fade; hidden with Pixie. The pointer is polled, like the updates bubble.
 @MainActor
 final class AgentRosterController {
@@ -72,17 +72,14 @@ final class AgentRosterController {
 
     private func clicked(_ r: RosterRow) {
         guard AgentRosterModel.clickable(r) else { return }
-        if r.kind == "session" {
-            guard let id = r.app else { return }
-            AppActivation.activate(bundleID: id)
-        } else {
-            let engine = engine, name = r.name
-            worker.async {
-                do {
-                    _ = try engine.call("agent.focusAgent", FocusAgentArgs(name: name))
-                } catch {
-                    Self.log.error("agent.focusAgent: \(String(describing: error), privacy: .public)")
-                }
+        // Your own session: the core finds the tab it runs in (#148); Pixie's agents: their pane.
+        let method = r.kind == "session" ? "agent.focusSession" : "agent.focusAgent"
+        let engine = engine, name = r.name
+        worker.async {
+            do {
+                _ = try engine.call(method, FocusAgentArgs(name: name))
+            } catch {
+                Self.log.error("\(method, privacy: .public): \(String(describing: error), privacy: .public)")
             }
         }
     }

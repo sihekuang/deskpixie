@@ -19,23 +19,24 @@ import (
 // touchpoints), against a fake app.Agent.
 
 type fakeAgent struct {
-	mu            sync.Mutex
-	menu          []string
-	opened        int
-	mouths        []int
-	attached      AgentVoice
-	shut          int
-	tray          AgentTray
-	hooks         AgentHooks
-	cfg           settings.Config
-	seen          [][]uint64
-	decided       []string
-	away          []bool
-	focused       [][2]string
-	updates       any
-	roster        any
-	focusedAgents []string
-	focusOutcomes []string
+	mu              sync.Mutex
+	menu            []string
+	opened          int
+	mouths          []int
+	attached        AgentVoice
+	shut            int
+	tray            AgentTray
+	hooks           AgentHooks
+	cfg             settings.Config
+	seen            [][]uint64
+	decided         []string
+	away            []bool
+	focused         [][2]string
+	updates         any
+	roster          any
+	focusedAgents   []string
+	focusedSessions []string
+	focusOutcomes   []string
 }
 
 func (f *fakeAgent) Tools() []voice.Tool { return []voice.Tool{namedTool("delegate")} }
@@ -83,6 +84,11 @@ func (f *fakeAgent) Roster() any  { f.mu.Lock(); defer f.mu.Unlock(); return f.r
 func (f *fakeAgent) FocusAgent(name string) {
 	f.mu.Lock()
 	f.focusedAgents = append(f.focusedAgents, name)
+	f.mu.Unlock()
+}
+func (f *fakeAgent) FocusSession(name string) {
+	f.mu.Lock()
+	f.focusedSessions = append(f.focusedSessions, name)
 	f.mu.Unlock()
 }
 func (f *fakeAgent) ReportFocusOutcome(success bool, detail string) {
@@ -424,6 +430,19 @@ func TestAgentRosterAndFocusAgentReachTheAgent(t *testing.T) {
 	defer f.mu.Unlock()
 	if !slices.Equal(f.focusedAgents, []string{"deskpixie-claude"}) {
 		t.Fatal(f.focusedAgents)
+	}
+}
+
+// #148: a click on one of your sessions reaches the agent by name.
+func TestAgentFocusSessionReachesTheAgent(t *testing.T) {
+	f := &fakeAgent{}
+	h := newHarness(t, withAgent(f))
+	h.call("agent.focusSession", map[string]any{"name": "api-claude"})
+	h.call("agent.focusSession", map[string]any{"name": ""})
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !slices.Equal(f.focusedSessions, []string{"api-claude"}) {
+		t.Fatal(f.focusedSessions)
 	}
 }
 

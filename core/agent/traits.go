@@ -114,6 +114,12 @@ type TerminalPlanner interface {
 	Plan(a Attach) (FocusPlan, error)
 }
 
+// SessionPlanner decides how to show one of your own pix sessions' terminal tab, from its agent
+// process (#148). It only brings something forward; it never kills or replaces your terminal.
+type SessionPlanner interface {
+	PlanSession(pid int) (FocusPlan, error)
+}
+
 // VoiceLink is the delegation side's only view of the voice loop.
 type VoiceLink interface {
 	IsOpen() bool

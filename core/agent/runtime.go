@@ -76,6 +76,8 @@ type Deps struct {
 	// Modes hears each Claude agent's Manual-mode changes (nil: ignored).
 	Modes   ModeSink
 	Planner TerminalPlanner
+	// Sessions plans showing one of your own sessions' tab (#148; nil: a click on one fails).
+	Sessions SessionPlanner
 	// Focus hands a built FocusPlan to the shell to execute (#116).
 	Focus FocusSink
 	// TerminalDir is the folder the agent terminal starts in (the projects folder, else home).
@@ -603,6 +605,33 @@ func (h *AgentHandle) FocusAgent(ctx context.Context, name string) error {
 	}
 	h.deps.Focus.Focus(plan)
 	return nil
+}
+
+// FocusSession is a click on one of your own sessions in the roster (#148): bring forward the
+// tab it runs in. Pixie's own session is left alone — nothing is started or attached.
+func (h *AgentHandle) FocusSession(ctx context.Context, name string) error {
+	if h.deps.Sessions == nil {
+		return LaunchError("no way to show your sessions")
+	}
+	list, err := ListRunning(ctx, h.deps.Host.Session())
+	if err != nil {
+		return err
+	}
+	for _, a := range list {
+		if a.Name != name || a.Origin != OriginUser || a.User == nil {
+			continue
+		}
+		if a.User.Pid <= 0 {
+			return LaunchError("could not find the terminal of " + name)
+		}
+		plan, err := h.deps.Sessions.PlanSession(a.User.Pid)
+		if err != nil {
+			return err
+		}
+		h.deps.Focus.Focus(plan)
+		return nil
+	}
+	return LaunchError("no session of yours named " + name)
 }
 
 func (h *AgentHandle) pokeRoster() {

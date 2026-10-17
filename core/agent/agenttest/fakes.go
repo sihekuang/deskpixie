@@ -487,6 +487,27 @@ func (l *FakePlanner) SetFail(why string) {
 	l.mu.Unlock()
 }
 
+// FakeSessionPlanner records the pid of every session it plans for and answers Plan.
+type FakeSessionPlanner struct {
+	mu   sync.Mutex
+	pids []int
+	Plan agent.FocusPlan
+}
+
+func (p *FakeSessionPlanner) PlanSession(pid int) (agent.FocusPlan, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.pids = append(p.pids, pid)
+	return p.Plan, nil
+}
+
+// Pids is the pid of every session planned for.
+func (p *FakeSessionPlanner) Pids() []int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.pids)
+}
+
 // FakeFocusSink records every FocusPlan handed to it.
 type FakeFocusSink struct {
 	mu   sync.Mutex

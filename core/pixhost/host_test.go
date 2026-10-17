@@ -351,6 +351,15 @@ func TestAnUnreachableSessionIsNotTakenOverByAnotherPix(t *testing.T) {
 	}
 }
 
+// #148: the agent's pid travels with the session, so a click can find the tab it runs in.
+func TestRegisterCarriesTheAgentPid(t *testing.T) {
+	h, sock := newHost(t)
+	dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api", Pid: 4242})
+	if l := listed(t, h); len(l) != 1 || l[0].User.Pid != 4242 {
+		t.Fatalf("%+v", l[0].User)
+	}
+}
+
 func TestRegisterCarriesTheAppBundleID(t *testing.T) {
 	h, sock := newHost(t)
 	dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api", Where: "iTerm", App: "com.googlecode.iterm2"})

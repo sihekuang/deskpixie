@@ -33,6 +33,7 @@ func (b *bridgeAgent) SetAway(bool)                    {}
 func (b *bridgeAgent) FocusJob(string, string)         {}
 func (b *bridgeAgent) Roster() any                     { return struct{}{} }
 func (b *bridgeAgent) FocusAgent(string)               {}
+func (b *bridgeAgent) FocusSession(string)             {}
 func (b *bridgeAgent) ReportFocusOutcome(bool, string) {}
 
 func TestTheEngineBuildsTheAgentAndCloseShutsItDown(t *testing.T) {
