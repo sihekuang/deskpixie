@@ -114,7 +114,7 @@ final class OnboardingState {
 /// like Settings). Closing it at any step counts as done.
 @MainActor
 final class OnboardingController {
-    static let size = NSSize(width: 600, height: 520)
+    static let size = NSSize(width: 600, height: 640)
 
     private let state: OnboardingState
     private let settings: () -> SettingsModel

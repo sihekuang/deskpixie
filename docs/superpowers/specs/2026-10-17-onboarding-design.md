@@ -10,8 +10,8 @@ OPENAI_API_KEY)", "Coordinator: herdr not found").
 
 ## Goals
 
-- A window opens on a new user's first launch: welcome, choose features, set up each chosen
-  feature, done.
+- A window opens on a new user's first launch, in three steps: Welcome, Set up (choose and set
+  up each feature on one page), Done.
 - Every choice in it is the real setting (the same control and the same save path as Settings),
   so the window and Settings can never disagree.
 - Each setup page checks itself as you go (key found, microphone allowed, herdr and Claude Code
@@ -39,13 +39,14 @@ OPENAI_API_KEY)", "Coordinator: herdr not found").
 
 1. **Welcome.** What DeskPixie is in two lines: Pixie on your desktop you talk to, who can hand
    work to agents and keep an eye on the sessions you start yourself. Continue.
-2. **Choose what Pixie does.** One row per feature with its switch:
+2. **Set up.** One scrolling page, a card per feature. The card's top row is the feature, what it
+   does and its switch:
    - **Talk to Pixie** (always on: it is DeskPixie; no switch).
    - **Pixie runs agents for you**: `agent.enabled` (Delegation).
    - **Watch your own sessions**: `notifications.sessionTurns` (Announce finished sessions).
    - **Show canvas pages as they're made**: `canvas.autoOpen` (Open new pages).
-   Each switch is the Settings control, so a change saves at once.
-3. **One setup page per chosen feature that needs setup**, in the order above:
+   Each switch is the Settings control, so a change saves at once. While a feature is on, its
+   setup shows in its card under the switch:
    - **Talk to Pixie**: the voice service picker (`voice.provider`), the API key that service
      needs (saved to the Keychain, as in Settings ▸ Voice) with where a key was found, the
      microphone (Allow Microphone while undecided; Open Privacy Settings when denied), and the
@@ -56,13 +57,15 @@ OPENAI_API_KEY)", "Coordinator: herdr not found").
      Check Again; and the core's current "Coordinator: …" tray lines, if any.
    - **Watch your own sessions**: the `pix` command, with the Settings ▸ Coordinator controls
      (Install, Copy Aliases, the PATH line when `~/.local/bin` isn't on your PATH).
-   - Canvas needs no setup: no page.
-4. **Done.** A line per chosen feature: ready, or what still needs attention. Finish closes the
+   - Canvas needs no setup: its card is only the switch.
+3. **Done.** A line per chosen feature: ready, or what still needs attention. Finish closes the
    window; when a chosen switch only applies after a restart (Delegation, Announce finished
    sessions, the voice service), the button is "Finish and Restart" and restarts DeskPixie the way
    the Settings Restart bar does.
 
-Back and Continue move between pages; the window can be closed at any step.
+Back and Continue move between the steps, which the footer names (Welcome · Set up · Done); the
+window can be closed at any step. (First built as five or more pages, welcome, choose, a page per
+feature, done; cut to three after the first look: too many steps.)
 
 ## When it opens
 
@@ -97,9 +100,11 @@ or closing sets `DeskPixieOnboardingDone`. The tray item opens it regardless.
 - Existing users are detected by an existing `settings.json`, not by version.
 - Links, not install commands, for herdr / Claude Code / Codex: their install steps change and
   aren't DeskPixie's to own.
-- Canvas gets no setup page, only its switch.
+- Canvas gets no setup, only its switch.
+- The three steps are Welcome, Set up (switches and setup together), Done, rather than folding
+  Welcome into a separate choose step.
 - Tray item title: "Welcome to DeskPixie…", placed above Settings….
 
 ## Left to the builder
 
-Copy, layout and spacing; window size (fixed, about 560×460 points); SF Symbols per feature.
+Copy, layout and spacing; window size (fixed; 600×640 points as built); SF Symbols per feature.
