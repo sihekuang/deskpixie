@@ -115,6 +115,7 @@ public enum TrayMenu {
     public static let settingsID = "settings"
     public static let micModeID = "mic-mode"
     public static let micModeLabel = "Mic Mode (Voice Isolation)…"
+    public static let onboardingID = "onboarding"
 
     /// Where a clicked id goes.
     public enum Route: Equatable, Sendable {
@@ -123,6 +124,8 @@ public enum TrayMenu {
         case settings
         /// Opens the Mic Mode picker (`MicModes.show`).
         case micMode
+        /// Opens the first-run window (#149).
+        case onboarding
         /// Put this text on the pasteboard; nothing is sent to the core.
         case copy(String)
         /// `app.action {id}`; `focusCanvas` when the user asked for a canvas page, so the
@@ -140,6 +143,7 @@ public enum TrayMenu {
         case quitID: return .quit
         case settingsID: return .settings
         case micModeID: return .micMode
+        case onboardingID: return .onboarding
         default: return .core(id, focusCanvas: id == "canvas:open" || id.hasPrefix("canvas:page:"))
         }
     }
@@ -152,7 +156,7 @@ public enum TrayMenu {
     }
 
     /// Ids Swift handles itself (never sent to `app.action`).
-    public static func isLocal(_ id: String) -> Bool { [quitID, settingsID, micModeID].contains(id) || id.hasPrefix(copyPrefix) }
+    public static func isLocal(_ id: String) -> Bool { [quitID, settingsID, micModeID, onboardingID].contains(id) || id.hasPrefix(copyPrefix) }
 
     /// Size rows; a non-preset scale gets its own checked "Custom (×N)" row.
     public static func sizeItems(scale: Int) -> [Row] {
@@ -230,6 +234,7 @@ public enum TrayMenu {
         if micModeAvailable {
             items.append(.action(Row(id: micModeID, title: micModeLabel)))
         }
+        items.append(.action(Row(id: onboardingID, title: "Welcome to DeskPixie…", enabled: !starting)))
         items.append(.action(Row(id: settingsID, title: "Settings…", enabled: !starting, shortcut: ",")))
         items.append(.separator)
         items.append(.action(Row(id: quitID, title: "Quit")))

@@ -1050,6 +1050,11 @@ func (a *App) Register(r Registrar) {
 		}
 		return a.setSetting(in.Field, in.Value), nil
 	})
+	// setup.programs: where herdr, tmux, claude and codex were found ("" = not found), for the
+	// onboarding window's checks (#149).
+	r.Register("setup.programs", func(json.RawMessage) (any, error) {
+		return a.setupPrograms(), nil
+	})
 	r.Register("settings.hotkeyFailed", func(args json.RawMessage) (any, error) {
 		var in struct {
 			Combo string `json:"combo"`

@@ -75,6 +75,20 @@ final class MenuBarIconTests: XCTestCase {
         XCTAssertEqual(MenuBarIcon.tooltip, "DeskPixie")
     }
 
+    /// The bundled pack folder read whole, for drawing Pixie outside its panel (the first-run window).
+    func testAPackFolderLoadsAsPackAndSheet() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("pack-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let manifest = try JSONSerialization.jsonObject(with: Data(contentsOf: fixture("bit-pack", "json"))) as! [String: Any]
+        try JSONSerialization.data(withJSONObject: manifest["pack"]!).write(to: dir.appendingPathComponent("pixie.json"))
+        try FileManager.default.copyItem(at: fixture("bit-sheet", "png"), to: dir.appendingPathComponent("sheet.png"))
+        let loaded = try XCTUnwrap(PackFolder.load(dir))
+        XCTAssertEqual(loaded.pack.states["happy"]?.loop, false)
+        XCTAssertEqual(loaded.sheet.width, loaded.pack.cellWidth * 8)
+        XCTAssertNil(PackFolder.load(dir.appendingPathComponent("nope")))
+    }
+
     /// A pack made before the pixie rename (#68) has only `mascot.json`: it still loads.
     func testLoadsAPackWithOnlyAPreRenameManifest() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("icon-\(UUID().uuidString)")
@@ -84,6 +98,6 @@ final class MenuBarIconTests: XCTestCase {
         try JSONSerialization.data(withJSONObject: manifest["pack"]!).write(to: dir.appendingPathComponent("mascot.json"))
         try FileManager.default.copyItem(at: fixture("bit-sheet", "png"), to: dir.appendingPathComponent("sheet.png"))
         XCTAssertNotNil(MenuBarIcon.load(packDirectory: dir))
-        XCTAssertEqual(MenuBarIcon.manifestNames, ["pixie.json", "mascot.json"])
+        XCTAssertEqual(PackFolder.manifestNames, ["pixie.json", "mascot.json"])
     }
 }

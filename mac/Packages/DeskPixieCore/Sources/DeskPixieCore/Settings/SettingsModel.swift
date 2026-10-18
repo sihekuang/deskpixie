@@ -107,6 +107,12 @@ public final class SettingsModel {
                                    error: errors[field.path])
     }
 
+    /// The control of the field at `path`, nil when the snapshot has no such field (the
+    /// onboarding window shows single fields, #149).
+    public func spec(path: String) -> SettingsLayout.ControlSpec? {
+        snapshot?.fields.first { $0.path == path }.map(spec)
+    }
+
     /// The text a text or number field shows: what is being typed, else a kept draft, else
     /// the stored value.
     public func text(for spec: SettingsLayout.ControlSpec) -> String {

@@ -162,7 +162,7 @@ private final class WindowObservers {
                     window?.makeFirstResponder(nil)
                     model.commitPendingEdits()
                     model.recordingPath = nil
-                    NSApp.setActivationPolicy(.accessory)
+                    AppDock.windowClosed("settings")
                 }
             },
         ]

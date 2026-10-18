@@ -177,6 +177,7 @@ func TestConfigureRegistersTheContractMethods(t *testing.T) {
 		"settings.openFile", "settings.restart", "settings.hotkeyFailed",
 		"app.state", "app.action", "pixie.click", "pixie.moved",
 		"canvas.resolve", "canvas.geometry", "audio.deviceChanged", "audio.failed",
+		"setup.programs",
 	} {
 		if strings.HasPrefix(string(e.Call(m, []byte(`{"bogus":`))), `{"error":"unknown method`) {
 			t.Errorf("%s not registered", m)

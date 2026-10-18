@@ -90,13 +90,9 @@ public enum MenuBarIcon {
         return img
     }
 
-    /// From a pack folder (`pixie.json` + its sheet, e.g. the bundled `pixies/bit`; a pack made
-    /// before the pixie rename (#68) has only `mascot.json`, read when `pixie.json` is absent).
+    /// From a pack folder (`PackFolder`, e.g. the bundled `pixies/bit`).
     public static func load(packDirectory dir: URL) -> NSImage? {
-        guard let json = manifest(in: dir),
-              let pack = try? JSONDecoder().decode(Pack.self, from: json) else { return nil }
-        let sheetName = (try? JSONDecoder().decode(SheetName.self, from: json))?.sheet ?? "sheet.png"
-        guard let sheet = SpriteSheet(url: dir.appendingPathComponent(sheetName)) else { return nil }
+        guard let (pack, sheet) = PackFolder.load(dir) else { return nil }
         return image(pack: pack, sheet: sheet)
     }
 
@@ -106,18 +102,5 @@ public enum MenuBarIcon {
         let img = NSImage(systemSymbolName: fallbackSymbol, accessibilityDescription: tooltip) ?? NSImage()
         img.isTemplate = true
         return img
-    }
-
-    private struct SheetName: Decodable { var sheet: String? }
-
-    /// A pack's manifest file names: the current one first, then its pre-#68 name.
-    public static let manifestNames = ["pixie.json", "mascot.json"]
-
-    /// The bytes of the first manifest in `dir` that exists (see `manifestNames`).
-    static func manifest(in dir: URL) -> Data? {
-        for name in manifestNames {
-            if let data = try? Data(contentsOf: dir.appendingPathComponent(name)) { return data }
-        }
-        return nil
     }
 }
