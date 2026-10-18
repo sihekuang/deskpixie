@@ -71,6 +71,10 @@ struct OnboardingView: View {
     private var choose: some View {
         VStack(alignment: .leading, spacing: 12) {
             header("What should Pixie do?")
+            if settings.snapshot == nil {
+                Text(settings.loadError.map { "Couldn't read settings: \($0)" } ?? "Loading…")
+                    .foregroundStyle(.secondary)
+            }
             card {
                 ForEach(OnboardingFeature.allCases, id: \.self) { feature in
                     HStack(alignment: .center, spacing: 12) {
@@ -82,10 +86,12 @@ struct OnboardingView: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         Spacer(minLength: 8)
-                        if let path = feature.settingPath, let spec = settings.spec(path: path) {
-                            SettingsControlView(model: settings, spec: spec)
-                                .disabled(!settings.enabled)
-                                .accessibilityLabel(feature.title)
+                        if let path = feature.settingPath {
+                            if let spec = settings.spec(path: path) {
+                                SettingsControlView(model: settings, spec: spec)
+                                    .disabled(!settings.enabled)
+                                    .accessibilityLabel(feature.title)
+                            }
                         } else {
                             Text("Always on").font(.callout).foregroundStyle(.secondary)
                         }
@@ -139,9 +145,10 @@ struct OnboardingView: View {
 
     private var agents: some View {
         let lines = OnboardingChecks.coordinatorLines(state.statusLines)
+        let host = OnboardingChecks.sessionHostName(settings.snapshot?.values ?? .null)
         return VStack(alignment: .leading, spacing: 12) {
             header(OnboardingFeature.agents.title)
-            Text("When you ask for real work, Pixie hands it to the coordinator, an agent in a herdr session that runs workers for you.")
+            Text("When you ask for real work, Pixie hands it to the coordinator, an agent in a \(host) session that runs workers for you.")
                 .fixedSize(horizontal: false, vertical: true)
                 .foregroundStyle(.secondary)
             card {

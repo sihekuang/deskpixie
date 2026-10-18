@@ -149,9 +149,12 @@ final class EngineCoordinator {
         if configured { startAudio(retryForHotkey: false) }
 
         // A new user's first launch: the first-run window, with Pixie already on screen (#149).
+        let defaults = UserDefaults.standard
+        let pending = OnboardingGate.isPending(stored: defaults.string(forKey: OnboardingGate.pendingKey),
+                                               settingsFile: SettingsFileProbe.file)
         if configured, pixie != nil,
-           OnboardingGate.shouldOpenAtLaunch(done: UserDefaults.standard.bool(forKey: OnboardingGate.doneKey),
-                                             settingsExisted: settingsExisted) {
+           OnboardingGate.shouldOpenAtLaunch(done: defaults.bool(forKey: OnboardingGate.doneKey),
+                                             settingsExisted: settingsExisted, pending: pending) {
             showOnboarding()
         }
     }
@@ -560,15 +563,22 @@ private struct ReportFocusOutcomeArgs: Encodable, Sendable {
 }
 
 /// Whether settings.json existed when the app started (#149: only a new user gets the first-run
-/// window by itself). Set off main during startup, read back on main once startup is done.
+/// window by itself). Set off main during startup, read back on main once startup is done. A
+/// missing file is also remembered (`OnboardingGate.pendingKey`) until the window is done, since
+/// the core writes the file on this same launch.
 private final class SettingsFileProbe: @unchecked Sendable {
+    static var file: URL {
+        OnboardingGate.settingsFile(appSupport: AppSupportDirectory.resolve(home: FileManager.default.homeDirectoryForCurrentUser))
+    }
+
     private let lock = NSLock()
     private var _existed = false
     var existed: Bool { lock.withLock { _existed } }
 
     func check() {
-        let support = AppSupportDirectory.resolve(home: FileManager.default.homeDirectoryForCurrentUser)
-        let found = FileManager.default.fileExists(atPath: OnboardingGate.settingsFile(appSupport: support).path)
+        let file = Self.file
+        let found = FileManager.default.fileExists(atPath: file.path)
+        if !found { UserDefaults.standard.set(file.path, forKey: OnboardingGate.pendingKey) }
         lock.withLock { _existed = found }
     }
 }

@@ -14,6 +14,8 @@ final class OnboardingState {
     var flow = OnboardingFlow()
     /// nil until `setup.programs` answers.
     private(set) var programs: SetupPrograms?
+    /// The last `setup.programs` call failed (shown instead of "Checking…").
+    private(set) var programsFailed = false
     private(set) var mic = MicrophoneAccess.notDetermined
     /// nil until the login shell's PATH has been read (off main: up to 2 s).
     private(set) var pix: PixCommandModel?
@@ -41,6 +43,7 @@ final class OnboardingState {
 
     func refreshPrograms() {
         let engine = engine
+        programsFailed = false
         Task { @MainActor [weak self] in
             let found: SetupPrograms?? = await self?.worker.run {
                 do {
@@ -50,7 +53,11 @@ final class OnboardingState {
                     return nil
                 }
             }
-            if let found = found ?? nil { self?.programs = found }
+            if let found = found ?? nil {
+                self?.programs = found
+            } else {
+                self?.programsFailed = true
+            }
         }
     }
 
@@ -93,7 +100,7 @@ final class OnboardingState {
             return [OnboardingChecks.voiceKey(provider: values.at("voice.provider")?.stringValue, secrets: settings.secrets),
                     OnboardingChecks.microphone(mic)]
         case .agents:
-            return OnboardingChecks.agents(values: values, programs: programs, home: home)
+            return OnboardingChecks.agents(values: values, programs: programs, home: home, checkFailed: programsFailed)
         case .sessions:
             guard let pix else { return [OnboardingCheck(title: "pix command", ok: false, detail: "Checking…")] }
             return [OnboardingChecks.pix(state: pix.state, onPath: pix.onPath)]
@@ -112,7 +119,7 @@ final class OnboardingController {
     private let state: OnboardingState
     private let settings: () -> SettingsModel
     private var window: NSWindow?
-    private var closeToken: NSObjectProtocol?
+    private var tokens: [NSObjectProtocol] = []
 
     init(engine: CoreEngine, worker: CoreWorker, settings: @escaping () -> SettingsModel,
          statusLines: @escaping () -> [String]) {
@@ -140,31 +147,63 @@ final class OnboardingController {
         window.contentView = NSHostingView(rootView: view)
         window.collectionBehavior.insert([.moveToActiveSpace, .fullScreenAuxiliary])
         window.center()
-        closeToken = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window,
-                                                            queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.closed() }
-        }
+        let center = NotificationCenter.default
+        tokens = [
+            center.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.closed() }
+            },
+            // Back from System Settings or an editor: a microphone allowed, a key added to .env, pix
+            // installed by hand all show at once (Settings reloads the same way).
+            center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.becameKey() }
+            },
+        ]
         self.window = window
         WindowFocus.bringForward(window, app: NSApp, showInDock: true)
     }
 
     /// Finish: a chosen setting that applies only after a restart restarts the app (as the
-    /// Settings Restart bar does); otherwise the window just closes.
+    /// Settings Restart bar does); otherwise the window just closes. A restart that couldn't be
+    /// asked for keeps the window open, its notice saying why.
     private func finish() {
-        UserDefaults.standard.set(true, forKey: OnboardingGate.doneKey)
+        Self.markDone()
         let model = settings()
-        if model.restartText != nil, model.restart() { return }
+        if model.restartText != nil {
+            model.restart()
+            return
+        }
         window?.close()
     }
 
+    private func becameKey() {
+        settings().focusGained()
+        state.refreshMic()
+        state.refreshPix()
+    }
+
     private func closed() {
-        UserDefaults.standard.set(true, forKey: OnboardingGate.doneKey)
+        Self.markDone()
         settings().commitPendingEdits()
-        if let closeToken { NotificationCenter.default.removeObserver(closeToken) }
-        closeToken = nil
+        tokens.forEach(NotificationCenter.default.removeObserver)
+        tokens = []
         window = nil
-        // Back to a menu-bar app, unless Settings is still open.
-        let settingsOpen = NSApp.windows.contains { $0.identifier?.rawValue == "settings" && $0.isVisible }
-        if !settingsOpen { NSApp.setActivationPolicy(.accessory) }
+        AppDock.windowClosed("onboarding")
+    }
+
+    private static func markDone() {
+        UserDefaults.standard.set(true, forKey: OnboardingGate.doneKey)
+        UserDefaults.standard.removeObject(forKey: OnboardingGate.pendingKey)
+    }
+}
+
+/// Back to a menu-bar app when the last window that shows in the Dock closes (Settings or the
+/// first-run window, `DockPresence`).
+@MainActor
+enum AppDock {
+    static func windowClosed(_ id: String) {
+        let windows = NSApp.windows.compactMap { w in
+            w.identifier.map { DockPresence.Window(id: $0.rawValue, visible: w.isVisible, miniaturized: w.isMiniaturized) }
+        }
+        if !DockPresence.keepsDockIcon(closing: id, windows: windows) { NSApp.setActivationPolicy(.accessory) }
     }
 }

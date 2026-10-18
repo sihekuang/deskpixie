@@ -109,10 +109,21 @@ public struct OnboardingFlow: Equatable, Sendable {
 public enum OnboardingGate {
     /// UserDefaults: set once the window was finished or closed.
     public static let doneKey = "DeskPixieOnboardingDone"
+    /// UserDefaults: the settings file a first launch found missing, until the window is done.
+    /// The core writes that file on the same launch, so without it a first launch that never got
+    /// to the window (a crash, a quit while starting) would leave the user looking like an old one.
+    public static let pendingKey = "DeskPixieOnboardingPending"
 
-    /// Only for a new user (no settings file before this launch) who hasn't seen it.
-    public static func shouldOpenAtLaunch(done: Bool, settingsExisted: Bool) -> Bool {
-        !done && !settingsExisted
+    /// For a new user (no settings file before this launch, or a first launch that never got to
+    /// the window) who hasn't finished or closed it.
+    public static func shouldOpenAtLaunch(done: Bool, settingsExisted: Bool, pending: Bool) -> Bool {
+        !done && (pending || !settingsExisted)
+    }
+
+    /// Pending is kept per data folder (its settings file), so an isolated test copy
+    /// (`DESKPIXIE_SUPPORT_DIR`) never makes the real app open the window.
+    public static func isPending(stored: String?, settingsFile: URL) -> Bool {
+        stored == settingsFile.path
     }
 
     public static func settingsFile(appSupport: URL) -> URL {
@@ -207,23 +218,30 @@ public enum OnboardingChecks {
     static let claudePage = URL(string: "https://docs.anthropic.com/en/docs/claude-code/setup")!
     static let codexPage = URL(string: "https://github.com/openai/codex")!
 
-    /// The session host's program and the coordinator's. `programs` nil: not read (yet), so
-    /// nothing is reported found and no fix is offered.
-    public static func agents(values: JSONValue, programs: SetupPrograms?, home: String) -> [OnboardingCheck] {
-        let tmuxHost = values.at("agent.sessionHost")?.stringValue == "tmux"
+    /// The session host's name ("herdr" or "tmux").
+    public static func sessionHostName(_ values: JSONValue) -> String {
+        values.at("agent.sessionHost")?.stringValue == "tmux" ? "tmux" : "herdr"
+    }
+
+    /// The session host's program and the coordinator's. `programs` nil: not read (yet, or the
+    /// read failed: `checkFailed`), so nothing is reported found and no fix is offered.
+    public static func agents(values: JSONValue, programs: SetupPrograms?, home: String,
+                              checkFailed: Bool = false) -> [OnboardingCheck] {
         let codex = values.at("agent.coordinatorKind")?.stringValue == "codex"
-        let host = tmuxHost
-            ? program("tmux", programs?.tmux, home, programs == nil ? nil : .link("Get tmux", tmuxPage))
-            : program("herdr", programs?.herdr, home, programs == nil ? nil : .link("Get herdr", herdrPage))
+        let pending = checkFailed ? "Couldn't check. Try Check Again." : "Checking…"
+        let host = sessionHostName(values) == "tmux"
+            ? program("tmux", programs?.tmux, home, programs == nil ? nil : .link("Get tmux", tmuxPage), pending)
+            : program("herdr", programs?.herdr, home, programs == nil ? nil : .link("Get herdr", herdrPage), pending)
         let coordinator = codex
-            ? program("Codex", programs?.codex, home, programs == nil ? nil : .link("Get Codex", codexPage))
-            : program("Claude Code", programs?.claude, home, programs == nil ? nil : .link("Get Claude Code", claudePage))
+            ? program("Codex", programs?.codex, home, programs == nil ? nil : .link("Get Codex", codexPage), pending)
+            : program("Claude Code", programs?.claude, home, programs == nil ? nil : .link("Get Claude Code", claudePage), pending)
         return [host, coordinator]
     }
 
-    private static func program(_ name: String, _ path: String?, _ home: String, _ fix: OnboardingCheck.Fix?) -> OnboardingCheck {
+    private static func program(_ name: String, _ path: String?, _ home: String, _ fix: OnboardingCheck.Fix?,
+                                _ pending: String) -> OnboardingCheck {
         guard let path else {
-            return OnboardingCheck(title: name, ok: false, detail: "Checking…")
+            return OnboardingCheck(title: name, ok: false, detail: pending)
         }
         guard !path.isEmpty else {
             return OnboardingCheck(title: name, ok: false, detail: "Not found. Install it, then Check Again.", fix: fix)
@@ -261,5 +279,28 @@ public enum OnboardingChecks {
             }
             return OnboardingSummaryLine(feature: f, ok: true, detail: f.readyText)
         }
+    }
+}
+
+/// Whether the app stays in the Dock when one of its windows closes: Settings and the first-run
+/// window each make it a regular app while open, so closing one must not drop the other's Dock
+/// icon (a minimized one still needs its tile). Other windows (the canvas) never show in the Dock.
+public enum DockPresence {
+    public static let windowIDs: Set<String> = ["settings", "onboarding"]
+
+    public struct Window: Equatable, Sendable {
+        public let id: String
+        public let visible: Bool
+        public let miniaturized: Bool
+
+        public init(id: String, visible: Bool, miniaturized: Bool) {
+            self.id = id
+            self.visible = visible
+            self.miniaturized = miniaturized
+        }
+    }
+
+    public static func keepsDockIcon(closing: String, windows: [Window]) -> Bool {
+        windows.contains { $0.id != closing && windowIDs.contains($0.id) && ($0.visible || $0.miniaturized) }
     }
 }

@@ -9,10 +9,41 @@ final class OnboardingTests: XCTestCase {
     // MARK: Gate
 
     func testOpensAtLaunchOnlyForANewUserWhoHasNotSeenIt() {
-        XCTAssertTrue(OnboardingGate.shouldOpenAtLaunch(done: false, settingsExisted: false))
-        XCTAssertFalse(OnboardingGate.shouldOpenAtLaunch(done: true, settingsExisted: false))
+        XCTAssertTrue(OnboardingGate.shouldOpenAtLaunch(done: false, settingsExisted: false, pending: false))
+        XCTAssertFalse(OnboardingGate.shouldOpenAtLaunch(done: true, settingsExisted: false, pending: false))
         // Someone upgrading already has settings: never opened for them on its own.
-        XCTAssertFalse(OnboardingGate.shouldOpenAtLaunch(done: false, settingsExisted: true))
+        XCTAssertFalse(OnboardingGate.shouldOpenAtLaunch(done: false, settingsExisted: true, pending: false))
+    }
+
+    /// The core writes settings.json on the first launch: a new user whose first launch never got
+    /// to the window (a crash, a quit while starting) still gets it next time.
+    func testANewUserWhoNeverSawItStillGetsItOnALaterLaunch() {
+        XCTAssertTrue(OnboardingGate.shouldOpenAtLaunch(done: false, settingsExisted: true, pending: true))
+        XCTAssertFalse(OnboardingGate.shouldOpenAtLaunch(done: true, settingsExisted: true, pending: true))
+    }
+
+    /// Pending belongs to one data folder: an isolated test copy's first run never makes the real
+    /// app open it.
+    func testPendingCountsOnlyForTheDataFolderItWasSetFor() {
+        let real = URL(fileURLWithPath: "/Users/x/Library/Application Support/com.sihekuang.deskpixie/settings.json")
+        XCTAssertTrue(OnboardingGate.isPending(stored: real.path, settingsFile: real))
+        XCTAssertFalse(OnboardingGate.isPending(stored: "/tmp/dpx-e2e/settings.json", settingsFile: real))
+        XCTAssertFalse(OnboardingGate.isPending(stored: nil, settingsFile: real))
+    }
+
+    func testTheDockIconStaysWhileAnotherAppWindowIsOpen() {
+        let settings = DockPresence.Window(id: "settings", visible: true, miniaturized: false)
+        let onboarding = DockPresence.Window(id: "onboarding", visible: true, miniaturized: false)
+        let canvas = DockPresence.Window(id: "canvas", visible: true, miniaturized: false)
+        // Closing Settings while onboarding is open keeps the Dock icon, and the other way round.
+        XCTAssertTrue(DockPresence.keepsDockIcon(closing: "settings", windows: [settings, onboarding]))
+        XCTAssertTrue(DockPresence.keepsDockIcon(closing: "onboarding", windows: [settings, onboarding]))
+        // A minimized one still needs its Dock tile.
+        let minimized = DockPresence.Window(id: "settings", visible: false, miniaturized: true)
+        XCTAssertTrue(DockPresence.keepsDockIcon(closing: "onboarding", windows: [minimized, onboarding]))
+        // Only the closing one, or windows that never show in the Dock: back to the menu bar.
+        XCTAssertFalse(DockPresence.keepsDockIcon(closing: "onboarding", windows: [onboarding, canvas]))
+        XCTAssertFalse(DockPresence.keepsDockIcon(closing: "settings", windows: [settings]))
     }
 
     func testTheSettingsFileIsTheOneInTheAppDataFolder() {
@@ -24,6 +55,8 @@ final class OnboardingTests: XCTestCase {
 
     func testTheChosenFeaturesFollowTheirSettings() {
         XCTAssertEqual(OnboardingFlow.chosen(SettingsFixture.defaults), [.voice, .agents, .canvas])
+        // No snapshot yet: the core's defaults.
+        XCTAssertEqual(OnboardingFlow.chosen(.null), [.voice, .agents, .canvas])
         let v = values(#"{"agent":{"enabled":false},"notifications":{"sessionTurns":true},"canvas":{"autoOpen":false}}"#)
         XCTAssertEqual(OnboardingFlow.chosen(v), [.voice, .sessions])
     }
@@ -138,6 +171,18 @@ final class OnboardingTests: XCTestCase {
         let checks = OnboardingChecks.agents(values: SettingsFixture.defaults, programs: nil, home: "/Users/x")
         XCTAssertEqual(checks.map(\.ok), [false, false])
         XCTAssertTrue(checks.allSatisfy { $0.fix == nil })
+        XCTAssertEqual(checks.map(\.detail), ["Checking…", "Checking…"])
+    }
+
+    func testAFailedCheckSaysSoInsteadOfCheckingForever() {
+        let checks = OnboardingChecks.agents(values: SettingsFixture.defaults, programs: nil, home: "/Users/x", checkFailed: true)
+        XCTAssertEqual(checks.map(\.ok), [false, false])
+        XCTAssertTrue(checks.allSatisfy { $0.detail.hasPrefix("Couldn't check") })
+    }
+
+    func testTheSessionHostIsNamedForTheAgentsPage() {
+        XCTAssertEqual(OnboardingChecks.sessionHostName(SettingsFixture.defaults), "herdr")
+        XCTAssertEqual(OnboardingChecks.sessionHostName(values(#"{"agent":{"sessionHost":"tmux"}}"#)), "tmux")
     }
 
     func testOnlyTheCoordinatorsTrayLinesShowOnTheAgentsPage() {

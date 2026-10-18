@@ -116,6 +116,19 @@ final class StartupSequencerTests: XCTestCase {
         XCTAssertEqual(seq.phase, .ready)
     }
 
+    /// The first-run gate (#149) looks for settings.json in `migrate`: that must happen before the
+    /// core is configured, since configuring writes the file.
+    func testMigrationRunsBeforeTheCoreIsConfigured() async {
+        let engine = BlockingEngine()
+        engine.release()
+        let seq = StartupSequencer()
+        let config = config()
+        let callsAtMigrate = OrderLog()
+        _ = await seq.run(engine: engine, config: { config }, migrate: { callsAtMigrate.add(engine.calls.count) })
+        XCTAssertEqual(callsAtMigrate.values, [0], "nothing reached the core before migration")
+        XCTAssertEqual(engine.calls.first, "configure")
+    }
+
     func testConfigureFailureSkipsReadsAndReportsFailed() async {
         let engine = BlockingEngine()
         engine.configureError = DeskPixieEngineError.configureFailed("bad paths")

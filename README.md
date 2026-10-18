@@ -4,6 +4,13 @@ A desktop voice pixie: you talk with **Pixie**, and Pixie hands real work to **t
 
 This repo is the port of [ai-mascot](https://github.com/sihekuang/ai-mascot) (Rust/Tauri). See `docs/specs/2026-10-13-deskpixie-port-design.md`.
 
+## First run
+
+On a new Mac, DeskPixie opens a welcome window: pick what Pixie does (talk, run agents, watch your
+own sessions, show canvas pages) and set each part up (voice key and microphone, herdr and Claude
+Code or Codex, the `pix` command). Every choice is the same setting as in Settings. Open it again
+from the menu bar: Welcome to DeskPixie…. See `docs/superpowers/specs/2026-10-17-onboarding-design.md`.
+
 ## Sessions you start yourself
 
 Start Claude Code or Codex with `pix` (`pix claude`, `pix codex`) in any terminal — WebStorm,
