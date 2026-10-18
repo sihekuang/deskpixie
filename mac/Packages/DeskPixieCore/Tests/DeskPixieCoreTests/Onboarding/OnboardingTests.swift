@@ -61,10 +61,15 @@ final class OnboardingTests: XCTestCase {
         XCTAssertEqual(OnboardingFlow.chosen(v), [.voice, .sessions])
     }
 
-    func testEachChosenFeatureWithSetupGetsAPageBeforeDone() {
-        XCTAssertEqual(OnboardingFlow.pages(chosen: [.voice, .agents, .sessions, .canvas]),
-                       [.welcome, .choose, .setup(.voice), .setup(.agents), .setup(.sessions), .done])
-        XCTAssertEqual(OnboardingFlow.pages(chosen: [.voice, .canvas]), [.welcome, .choose, .setup(.voice), .done])
+    /// Three steps whatever is chosen: choosing and setting up share one page.
+    func testThereAreThreeSteps() {
+        XCTAssertEqual(OnboardingFlow.pages, [.welcome, .setup, .done])
+    }
+
+    /// On the setup page a feature's setup shows under its switch while it is on; canvas has none.
+    func testAFeatureShowsItsSetupWhileItIsOn() {
+        XCTAssertEqual(OnboardingFlow.setupShown(chosen: [.voice, .agents, .sessions, .canvas]), [.voice, .agents, .sessions])
+        XCTAssertEqual(OnboardingFlow.setupShown(chosen: [.voice, .canvas]), [.voice])
     }
 
     func testOnlyTheOptionalFeaturesHaveASwitch() {
@@ -74,34 +79,23 @@ final class OnboardingTests: XCTestCase {
         XCTAssertEqual(OnboardingFeature.canvas.settingPath, "canvas.autoOpen")
     }
 
-    func testNextAndBackStayWithinThePages() {
-        let pages = OnboardingFlow.pages(chosen: [.voice])
+    func testNextAndBackStayWithinTheThreeSteps() {
         var flow = OnboardingFlow()
-        XCTAssertEqual(flow.page(in: pages), .welcome)
+        XCTAssertEqual(flow.page, .welcome)
         XCTAssertFalse(flow.canGoBack)
-        flow.back(in: pages)
-        XCTAssertEqual(flow.page(in: pages), .welcome)
-        flow.next(in: pages)
-        flow.next(in: pages)
-        flow.next(in: pages)
-        XCTAssertEqual(flow.page(in: pages), .done)
-        XCTAssertTrue(flow.isLast(in: pages))
-        flow.next(in: pages)
-        XCTAssertEqual(flow.page(in: pages), .done)
-        flow.back(in: pages)
-        XCTAssertEqual(flow.page(in: pages), .setup(.voice))
-    }
-
-    /// Turning a feature off on a later visit can shorten the pages under the current index.
-    func testAPageIndexPastTheEndShowsDone() {
-        var flow = OnboardingFlow()
-        let long = OnboardingFlow.pages(chosen: [.voice, .agents, .sessions])
-        for _ in 0..<5 { flow.next(in: long) }
-        XCTAssertEqual(flow.page(in: long), .done)
-        let short = OnboardingFlow.pages(chosen: [.voice])
-        XCTAssertEqual(flow.page(in: short), .done)
-        flow.back(in: short)
-        XCTAssertEqual(flow.page(in: short), .setup(.voice))
+        flow.back()
+        XCTAssertEqual(flow.page, .welcome)
+        flow.next()
+        XCTAssertEqual(flow.page, .setup)
+        flow.next()
+        XCTAssertEqual(flow.page, .done)
+        XCTAssertTrue(flow.isLast)
+        flow.next()
+        XCTAssertEqual(flow.page, .done)
+        flow.back()
+        XCTAssertEqual(flow.page, .setup)
+        flow.restart()
+        XCTAssertEqual(flow.page, .welcome)
     }
 
     func testTheFinishButtonSaysWhenItRestarts() {

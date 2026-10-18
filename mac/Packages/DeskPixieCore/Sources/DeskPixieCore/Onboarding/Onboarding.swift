@@ -47,18 +47,19 @@ public enum OnboardingFeature: String, CaseIterable, Sendable {
     }
 
     /// Canvas has nothing to set up beyond its switch.
-    public var hasSetupPage: Bool { self != .canvas }
+    public var hasSetup: Bool { self != .canvas }
 }
 
-public enum OnboardingPage: Equatable, Sendable {
-    case welcome, choose
-    case setup(OnboardingFeature)
-    case done
+/// Three steps: welcome; set up, where each feature's card holds its switch and, while it is on,
+/// its setup; done.
+public enum OnboardingPage: Equatable, Sendable, CaseIterable {
+    case welcome, setup, done
 }
 
-/// Where the window is. The pages come from the settings each time (a switch on the choose page
-/// adds or drops setup pages), so only the index is kept.
+/// Where the window is.
 public struct OnboardingFlow: Equatable, Sendable {
+    public static let pages = OnboardingPage.allCases
+
     public private(set) var index = 0
 
     public init() {}
@@ -76,25 +77,23 @@ public struct OnboardingFlow: Equatable, Sendable {
         f == .agents || f == .canvas
     }
 
-    public static func pages(chosen: [OnboardingFeature]) -> [OnboardingPage] {
-        [.welcome, .choose] + chosen.filter(\.hasSetupPage).map { .setup($0) } + [.done]
+    /// The features whose setup shows under their switch on the setup page.
+    public static func setupShown(chosen: [OnboardingFeature]) -> [OnboardingFeature] {
+        chosen.filter(\.hasSetup)
     }
 
-    /// The page shown; an index past the end (pages dropped since) shows Done.
-    public func page(in pages: [OnboardingPage]) -> OnboardingPage {
-        pages[min(index, pages.count - 1)]
-    }
+    public var page: OnboardingPage { Self.pages[index] }
 
     public var canGoBack: Bool { index > 0 }
 
-    public func isLast(in pages: [OnboardingPage]) -> Bool { index >= pages.count - 1 }
+    public var isLast: Bool { index == Self.pages.count - 1 }
 
-    public mutating func next(in pages: [OnboardingPage]) {
-        index = min(index + 1, pages.count - 1)
+    public mutating func next() {
+        index = min(index + 1, Self.pages.count - 1)
     }
 
-    public mutating func back(in pages: [OnboardingPage]) {
-        index = max(min(index, pages.count - 1) - 1, 0)
+    public mutating func back() {
+        index = max(index - 1, 0)
     }
 
     public mutating func restart() { index = 0 }

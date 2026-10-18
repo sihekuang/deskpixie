@@ -2,8 +2,9 @@ import AppKit
 import DeskPixieCore
 import SwiftUI
 
-/// The first-run window's pages (#149): welcome, choose, a setup page per chosen feature, done.
-/// Every choice is a Settings control on the shared `SettingsModel`, so it saves at once.
+/// The first-run window (#149), three steps: welcome; set up, a card per feature with its switch
+/// and, while it is on, its setup; done. Every choice is a Settings control on the shared
+/// `SettingsModel`, so it saves at once.
 struct OnboardingView: View {
     @Bindable var state: OnboardingState
     let settings: SettingsModel
@@ -11,11 +12,9 @@ struct OnboardingView: View {
     let onClose: () -> Void
 
     private var chosen: [OnboardingFeature] { OnboardingFlow.chosen(settings.snapshot?.values ?? .null) }
-    private var pages: [OnboardingPage] { OnboardingFlow.pages(chosen: chosen) }
 
     var body: some View {
-        let pages = pages
-        let page = state.flow.page(in: pages)
+        let page = state.flow.page
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
@@ -30,7 +29,7 @@ struct OnboardingView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             Divider()
-            footer(pages: pages, page: page)
+            footer(page)
         }
         .frame(width: OnboardingController.size.width, height: OnboardingController.size.height)
     }
@@ -39,16 +38,12 @@ struct OnboardingView: View {
     private func content(_ page: OnboardingPage) -> some View {
         switch page {
         case .welcome: welcome
-        case .choose: choose
-        case .setup(.voice): voice
-        case .setup(.agents): agents
-        case .setup(.sessions): sessions
-        case .setup(.canvas): EmptyView()
+        case .setup: setup
         case .done: done
         }
     }
 
-    // MARK: Pages
+    // MARK: Steps
 
     private var welcome: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -61,43 +56,33 @@ struct OnboardingView: View {
                 .accessibilityAddTraits(.isHeader)
             Text("Pixie lives on your desktop and talks with you. It can hand real work to coding agents, and keep an eye on the Claude Code and Codex sessions you start yourself.")
                 .fixedSize(horizontal: false, vertical: true)
-            Text("Pick what you want Pixie to do, and get each part working. It takes a couple of minutes, and everything can be changed later in Settings.")
+            Text("Next, turn on what you want Pixie to do and get each part working. It takes a couple of minutes, and everything can be changed later in Settings.")
                 .fixedSize(horizontal: false, vertical: true)
                 .foregroundStyle(.secondary)
         }
         .padding(.top, 12)
     }
 
-    private var choose: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            header("What should Pixie do?")
+    private var setup: some View {
+        let shown = OnboardingFlow.setupShown(chosen: chosen)
+        return VStack(alignment: .leading, spacing: 12) {
+            header("Set up Pixie")
             if settings.snapshot == nil {
                 Text(settings.loadError.map { "Couldn't read settings: \($0)" } ?? "Loading…")
                     .foregroundStyle(.secondary)
             }
-            card {
-                ForEach(OnboardingFeature.allCases, id: \.self) { feature in
-                    HStack(alignment: .center, spacing: 12) {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(feature.title).font(.headline)
-                            Text(feature.summary)
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        Spacer(minLength: 8)
-                        if let path = feature.settingPath {
-                            if let spec = settings.spec(path: path) {
-                                SettingsControlView(model: settings, spec: spec)
-                                    .disabled(!settings.enabled)
-                                    .accessibilityLabel(feature.title)
-                            }
-                        } else {
-                            Text("Always on").font(.callout).foregroundStyle(.secondary)
+            ForEach(OnboardingFeature.allCases, id: \.self) { feature in
+                card {
+                    featureHeader(feature)
+                    if shown.contains(feature) {
+                        Divider()
+                        switch feature {
+                        case .voice: voiceSetup
+                        case .agents: agentsSetup
+                        case .sessions: sessionsSetup
+                        case .canvas: EmptyView()
                         }
                     }
-                    .padding(.vertical, 6)
-                    if feature != OnboardingFeature.allCases.last { Divider() }
                 }
             }
             Text("Each switch is the same setting as in Settings, and saves as you flip it.")
@@ -106,109 +91,109 @@ struct OnboardingView: View {
         }
     }
 
-    private var voice: some View {
+    /// The card's top row: the feature, what it does, and its switch ("Always on" for voice).
+    private func featureHeader(_ feature: OnboardingFeature) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(feature.title).font(.headline)
+                Text(feature.summary)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            if let path = feature.settingPath {
+                if let spec = settings.spec(path: path) {
+                    SettingsControlView(model: settings, spec: spec)
+                        .disabled(!settings.enabled)
+                        .accessibilityLabel(feature.title)
+                }
+            } else {
+                Text("Always on").font(.callout).foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 6)
+    }
+
+    @ViewBuilder
+    private var voiceSetup: some View {
         let provider = settings.snapshot?.values.at("voice.provider")?.stringValue
         let id = OnboardingChecks.secretID(forProvider: provider)
         let checks = state.checks(.voice, settings: settings)
-        return VStack(alignment: .leading, spacing: 12) {
-            header(OnboardingFeature.voice.title)
-            card {
-                field("voice.provider", label: "Voice service")
-                Divider()
-                VStack(alignment: .leading, spacing: 6) {
-                    checkRow(checks[0])
-                    if !checks[0].ok {
-                        HStack(spacing: 6) {
-                            SecureField("Paste key", text: Binding(get: { settings.keyDraft(id) },
-                                                                   set: { settings.setKeyDraft(id, $0) }))
-                                .onSubmit { settings.saveKey(id) }
-                                .accessibilityLabel(id.label)
-                            Button("Save") { settings.saveKey(id) }
-                                .disabled(!settings.canSaveKey(id))
-                        }
-                        if let error = settings.keyError(id) {
-                            Text(error).font(.callout).foregroundStyle(.red)
-                        }
-                    }
+        field("voice.provider", label: "Voice service")
+        VStack(alignment: .leading, spacing: 6) {
+            checkRow(checks[0])
+            if !checks[0].ok {
+                HStack(spacing: 6) {
+                    SecureField("Paste key", text: Binding(get: { settings.keyDraft(id) },
+                                                           set: { settings.setKeyDraft(id, $0) }))
+                        .onSubmit { settings.saveKey(id) }
+                        .accessibilityLabel(id.label)
+                    Button("Save") { settings.saveKey(id) }
+                        .disabled(!settings.canSaveKey(id))
                 }
-                .padding(.vertical, 4)
-                Divider()
-                checkRow(checks[1])
-                Divider()
-                field("hotkey", label: "Voice hotkey")
-                Text("Double-clicking Pixie starts a conversation too.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                if let error = settings.keyError(id) {
+                    Text(error).font(.callout).foregroundStyle(.red)
+                }
             }
         }
+        checkRow(checks[1])
+        field("hotkey", label: "Voice hotkey")
+        Text("Double-clicking Pixie starts a conversation too.")
+            .font(.callout)
+            .foregroundStyle(.secondary)
     }
 
-    private var agents: some View {
+    @ViewBuilder
+    private var agentsSetup: some View {
         let lines = OnboardingChecks.coordinatorLines(state.statusLines)
         let host = OnboardingChecks.sessionHostName(settings.snapshot?.values ?? .null)
-        return VStack(alignment: .leading, spacing: 12) {
-            header(OnboardingFeature.agents.title)
-            Text("When you ask for real work, Pixie hands it to the coordinator, an agent in a \(host) session that runs workers for you.")
-                .fixedSize(horizontal: false, vertical: true)
-                .foregroundStyle(.secondary)
-            card {
-                field("agent.coordinatorKind", label: "Coordinator agent")
-                ForEach(Array(state.checks(.agents, settings: settings).enumerated()), id: \.offset) { _, check in
-                    Divider()
-                    checkRow(check)
-                }
-                Divider()
-                HStack {
-                    Spacer()
-                    Button("Check Again") { state.refreshPrograms() }
-                }
-                .padding(.vertical, 4)
-            }
-            ForEach(lines, id: \.self) { line in
-                Label(line, systemImage: "exclamationmark.triangle.fill")
-                    .font(.callout)
-                    .foregroundStyle(.orange)
-            }
+        Text("The coordinator is an agent in a \(host) session that runs workers for you.")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        field("agent.coordinatorKind", label: "Coordinator agent")
+        ForEach(Array(state.checks(.agents, settings: settings).enumerated()), id: \.offset) { _, check in
+            checkRow(check)
+        }
+        ForEach(lines, id: \.self) { line in
+            Label(line, systemImage: "exclamationmark.triangle.fill")
+                .font(.callout)
+                .foregroundStyle(.orange)
+        }
+        HStack {
+            Spacer()
+            Button("Check Again") { state.refreshPrograms() }
         }
     }
 
-    private var sessions: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            header(OnboardingFeature.sessions.title)
-            Text("Start Claude Code or Codex with pix in any terminal (pix claude, pix codex). Pixie tells you when a turn finishes, shows their questions in its bubble, and can message them.")
-                .fixedSize(horizontal: false, vertical: true)
-                .foregroundStyle(.secondary)
-            card {
-                ForEach(Array(state.checks(.sessions, settings: settings).enumerated()), id: \.offset) { _, check in
-                    checkRow(check)
-                }
-                if let pix = state.pix {
-                    if let error = pix.error {
-                        Text(error).font(.callout).foregroundStyle(.red)
-                    }
-                    if pix.state == .installed && !pix.onPath {
-                        HStack {
-                            Text(PixInstaller.pathLine).font(.callout.monospaced()).textSelection(.enabled)
-                            Spacer()
-                            copyButton("Copy Line", PixInstaller.pathLine)
-                        }
-                    }
-                }
-                Divider()
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Aliases").font(.headline)
-                        Text("Make claude and codex start through pix every time.")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    copyButton("Copy Aliases", PixInstaller.aliases)
-                }
-                .padding(.vertical, 4)
+    @ViewBuilder
+    private var sessionsSetup: some View {
+        Text("Start Claude Code or Codex with pix in any terminal (pix claude, pix codex).")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        ForEach(Array(state.checks(.sessions, settings: settings).enumerated()), id: \.offset) { _, check in
+            checkRow(check)
+        }
+        if let pix = state.pix {
+            if let error = pix.error {
+                Text(error).font(.callout).foregroundStyle(.red)
             }
+            if pix.state == .installed && !pix.onPath {
+                HStack {
+                    Text(PixInstaller.pathLine).font(.callout.monospaced()).textSelection(.enabled)
+                    Spacer()
+                    copyButton("Copy Line", PixInstaller.pathLine)
+                }
+            }
+        }
+        HStack {
             Link("How pix works", destination: URL(string: "https://github.com/sihekuang/deskpixie/blob/main/docs/pix.md")!)
                 .font(.callout)
+            Spacer()
+            copyButton("Copy Aliases", PixInstaller.aliases)
+                .help("Copies alias lines for ~/.zshrc, so plain claude and codex run through pix.")
         }
     }
 
@@ -238,33 +223,41 @@ struct OnboardingView: View {
 
     // MARK: Parts
 
-    private func footer(pages: [OnboardingPage], page: OnboardingPage) -> some View {
-        let index = pages.firstIndex(of: page) ?? 0
-        return HStack {
+    private static func stepName(_ page: OnboardingPage) -> String {
+        switch page {
+        case .welcome: return "Welcome"
+        case .setup: return "Set up"
+        case .done: return "Done"
+        }
+    }
+
+    private func footer(_ page: OnboardingPage) -> some View {
+        HStack {
             Group {
                 if state.flow.canGoBack {
-                    Button("Back") { state.flow.back(in: pages) }
+                    Button("Back") { state.flow.back() }
                 } else {
                     Button("Not Now") { onClose() }
                 }
             }
             .frame(width: 140, alignment: .leading)
             Spacer()
-            HStack(spacing: 7) {
-                ForEach(pages.indices, id: \.self) { i in
-                    Circle()
-                        .fill(i == index ? Color.accentColor : Color.secondary.opacity(0.35))
-                        .frame(width: 7, height: 7)
+            HStack(spacing: 6) {
+                ForEach(Array(OnboardingFlow.pages.enumerated()), id: \.offset) { i, step in
+                    if i > 0 { Text("·").foregroundStyle(.tertiary) }
+                    Text(Self.stepName(step))
+                        .font(.callout.weight(step == page ? .semibold : .regular))
+                        .foregroundStyle(step == page ? Color.accentColor : Color.secondary)
                 }
             }
             .accessibilityElement()
-            .accessibilityLabel("Step \(index + 1) of \(pages.count)")
+            .accessibilityLabel("Step \(state.flow.index + 1) of \(OnboardingFlow.pages.count): \(Self.stepName(page))")
             Spacer()
             Group {
                 if page == .done {
                     Button(OnboardingFlow.finishTitle(restartPending: settings.restartText != nil)) { onFinish() }
                 } else {
-                    Button(page == .welcome ? "Get Started" : "Continue") { state.flow.next(in: pages) }
+                    Button(page == .welcome ? "Get Started" : "Continue") { state.flow.next() }
                 }
             }
             .keyboardShortcut(.defaultAction)
@@ -281,7 +274,7 @@ struct OnboardingView: View {
     }
 
     private func card<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 6) { content() }
+        VStack(alignment: .leading, spacing: 8) { content() }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -299,7 +292,6 @@ struct OnboardingView: View {
                 SettingsControlView(model: settings, spec: spec)
                     .disabled(!settings.enabled)
             }
-            .padding(.vertical, 4)
             if let error = spec.note.isError ? spec.note.text : nil {
                 Text(error).font(.callout).foregroundStyle(.red)
             }
@@ -322,7 +314,6 @@ struct OnboardingView: View {
             Spacer(minLength: 8)
             if let fix = check.fix { fixButton(fix) }
         }
-        .padding(.vertical, 4)
     }
 
     @ViewBuilder
