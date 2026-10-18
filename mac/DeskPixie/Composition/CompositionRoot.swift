@@ -46,5 +46,6 @@ final class CompositionRoot {
         pump = AudioPump(engine: engine, ring: ring, mic: micRing, gate: voiceIO.gate)
         coordinator = EngineCoordinator(appState: appState, engine: engine, voiceIO: voiceIO,
                                         ring: ring, micRing: micRing, pump: pump, hotkey: hotkey)
+        coordinator.settingsModel = { [unowned self] in SettingsHub.model(for: self) }
     }
 }

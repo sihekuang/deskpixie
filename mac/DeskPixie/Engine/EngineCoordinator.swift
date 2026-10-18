@@ -44,6 +44,10 @@ final class EngineCoordinator {
     private var bubble: UpdatesBubbleController?
     /// The agent roster chip under Pixie (#91).
     private var roster: AgentRosterController?
+    /// The first-run window (#149), made on first show.
+    private var onboarding: OnboardingController?
+    /// The Settings window's model, shared with the first-run window (CompositionRoot sets it).
+    var settingsModel: (() -> SettingsModel)?
     private var presence: PresenceMonitor?
     /// The combo the Carbon hotkey is bound to right now (nil = none).
     var boundCombo: String? { hotkeys.boundCombo }
@@ -91,15 +95,21 @@ final class EngineCoordinator {
     func start() {
         startup.onPhase = { [weak self] phase in self?.appState.startup = phase }
         let engine = engine
+        let settingsFile = SettingsFileProbe()
         Task { @MainActor [weak self] in
             guard let startup = self?.startup else { return }
             let result = await startup.run(engine: engine, config: { Self.engineConfig() },
-                                           migrate: { DataMigration.runIfNeeded() })
-            self?.finishStart(result)
+                                           migrate: {
+                                               DataMigration.runIfNeeded()
+                                               // After migration (a migrated ai-mascot user is an existing
+                                               // user), before the core starts and may write the file.
+                                               settingsFile.check()
+                                           })
+            self?.finishStart(result, settingsExisted: settingsFile.existed)
         }
     }
 
-    private func finishStart(_ result: StartupResult) {
+    private func finishStart(_ result: StartupResult, settingsExisted: Bool) {
         if let error = result.configureError {
             appState.engineError = "Engine error: \(error)"
             appState.pixieState = "error"
@@ -137,6 +147,23 @@ final class EngineCoordinator {
         startupFinished = true
         startPolling()
         if configured { startAudio(retryForHotkey: false) }
+
+        // A new user's first launch: the first-run window, with Pixie already on screen (#149).
+        if configured, pixie != nil,
+           OnboardingGate.shouldOpenAtLaunch(done: UserDefaults.standard.bool(forKey: OnboardingGate.doneKey),
+                                             settingsExisted: settingsExisted) {
+            showOnboarding()
+        }
+    }
+
+    /// The first-run window (launch, or the tray's Welcome to DeskPixie…).
+    func showOnboarding() {
+        guard configured, let settingsModel else { return }
+        if onboarding == nil {
+            onboarding = OnboardingController(engine: engine, worker: worker, settings: settingsModel,
+                                              statusLines: { [weak appState] in appState?.core?.statusLines ?? [] })
+        }
+        onboarding?.show()
     }
 
     /// Hands the core the API keys kept in the Keychain (`secrets.keychain`), off main: a
@@ -227,6 +254,8 @@ final class EngineCoordinator {
             NSApp.terminate(nil)
         case .micMode:
             MicModes.show(using: appState.micModes)
+        case .onboarding:
+            showOnboarding()
         case .copy(let text):
             // Terminal commands are only ever copied, never run.
             NSPasteboard.general.clearContents()
@@ -528,4 +557,18 @@ private struct PresenceArgs: Encodable, Sendable {
 private struct ReportFocusOutcomeArgs: Encodable, Sendable {
     let success: Bool
     let detail: String
+}
+
+/// Whether settings.json existed when the app started (#149: only a new user gets the first-run
+/// window by itself). Set off main during startup, read back on main once startup is done.
+private final class SettingsFileProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _existed = false
+    var existed: Bool { lock.withLock { _existed } }
+
+    func check() {
+        let support = AppSupportDirectory.resolve(home: FileManager.default.homeDirectoryForCurrentUser)
+        let found = FileManager.default.fileExists(atPath: OnboardingGate.settingsFile(appSupport: support).path)
+        lock.withLock { _existed = found }
+    }
 }

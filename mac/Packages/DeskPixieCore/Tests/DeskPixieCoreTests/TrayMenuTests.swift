@@ -75,7 +75,7 @@ final class TrayMenuTests: XCTestCase {
             "label:Voice: connection lost", "--",
             "label:Coordinator: herdr not found", "--",
             "menu:State", "talk", "menu:Size", "reset-position", "fade", "menu:Pixie", "reload", "menu:Canvas",
-            "menu:Coordinator", "--", "mic-mode", "settings", "--", "quit",
+            "menu:Coordinator", "--", "mic-mode", "onboarding", "settings", "--", "quit",
         ])
         let st = try XCTUnwrap(submenu(items, "State"))
         XCTAssertEqual(titles(st.items), TrayMenu.stateNames.map { "state:\($0)" })
@@ -115,7 +115,7 @@ final class TrayMenuTests: XCTestCase {
 
     func testNoAppStateShowsOnlyAppItems() {
         let items = TrayMenu.build(nil, localStatusLines: ["Engine error: x"], micModeAvailable: true)
-        XCTAssertEqual(titles(items), ["label:Engine error: x", "--", "mic-mode", "settings", "--", "quit"])
+        XCTAssertEqual(titles(items), ["label:Engine error: x", "--", "mic-mode", "onboarding", "settings", "--", "quit"])
     }
 
     func testEmptyAgentHasDisabledCancel() throws {

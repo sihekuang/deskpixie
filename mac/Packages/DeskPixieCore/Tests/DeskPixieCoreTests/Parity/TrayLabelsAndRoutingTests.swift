@@ -61,6 +61,7 @@ final class TrayLabelsAndRoutingTests: XCTestCase {
             "  Restart coordinator",
             "---",
             "Mic Mode (Voice Isolation)…",
+            "Welcome to DeskPixie…",
             "Settings… ⌘,",
             "---",
             "Quit",
@@ -71,6 +72,8 @@ final class TrayLabelsAndRoutingTests: XCTestCase {
         XCTAssertEqual(TrayMenu.route("quit"), .quit)
         XCTAssertEqual(TrayMenu.route("settings"), .settings)
         XCTAssertEqual(TrayMenu.route("mic-mode"), .micMode)
+        XCTAssertEqual(TrayMenu.route("onboarding"), .onboarding)
+        XCTAssertTrue(TrayMenu.isLocal("onboarding"))
         XCTAssertEqual(TrayMenu.route("agent:open"), .core("agent:open"))
         XCTAssertEqual(TrayMenu.route("agent:restart"), .core("agent:restart"))
         XCTAssertEqual(TrayMenu.route("agent:cancel:job_1"), .core("agent:cancel:job_1"))
