@@ -140,8 +140,13 @@ final class OnboardingController {
                                   onFinish: { [weak self] in self?.finish() },
                                   onClose: { [weak self] in self?.window?.close() })
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: Self.size),
-                              styleMask: [.titled, .closable], backing: .buffered, defer: false)
+                              styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
         window.title = "Welcome to DeskPixie"
+        // The pages run up under a clear title bar (the title stays for the Window menu and
+        // VoiceOver); dragging the background moves the window.
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.isMovableByWindowBackground = true
         window.identifier = NSUserInterfaceItemIdentifier("onboarding")
         window.isReleasedWhenClosed = false
         window.contentView = NSHostingView(rootView: view)

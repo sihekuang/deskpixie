@@ -48,6 +48,16 @@ public enum OnboardingFeature: String, CaseIterable, Sendable {
 
     /// Canvas has nothing to set up beyond its switch.
     public var hasSetup: Bool { self != .canvas }
+
+    /// The SF Symbol on its card.
+    public var symbol: String {
+        switch self {
+        case .voice: return "waveform"
+        case .agents: return "sparkles"
+        case .sessions: return "terminal"
+        case .canvas: return "square.on.square"
+        }
+    }
 }
 
 /// Three steps: welcome; set up, where each feature's card holds its switch and, while it is on,
@@ -269,6 +279,24 @@ public enum OnboardingChecks {
             return OnboardingCheck(title: "pix command", ok: false, detail: "~/.local/bin/pix is \(what); DeskPixie leaves it alone.")
         }
     }
+
+    /// A feature card's status: "Ready", or how many checks are still to do; nil with nothing to check.
+    public static func status(_ checks: [OnboardingCheck]) -> String? {
+        guard !checks.isEmpty else { return nil }
+        let todo = checks.filter { !$0.ok }.count
+        return todo == 0 ? "Ready" : "\(todo) to do"
+    }
+
+    /// The voice hotkey as keycaps ("⌃", "⌥", "Space"); none set: the core's default.
+    public static func hotkeyCaps(_ combo: String?) -> [String] {
+        let combo = (combo?.isEmpty ?? true) ? LaunchSettings.defaultHotkey : combo!
+        let text = SettingsLayout.formatHotkey(combo, platform: .macos)
+        let modifiers = text.prefix { "⌃⌥⇧⌘".contains($0) }
+        return modifiers.map(String.init) + [String(text.dropFirst(modifiers.count))]
+    }
+
+    /// The commands that start an agent through pix, shown on the sessions card.
+    public static let pixCommands = ["pix claude", "pix codex"]
 
     /// One line per chosen feature: its ready text, or the first check still missing.
     public static func summary(chosen: [OnboardingFeature], checks: [OnboardingFeature: [OnboardingCheck]]) -> [OnboardingSummaryLine] {

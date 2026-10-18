@@ -196,6 +196,28 @@ final class OnboardingTests: XCTestCase {
         XCTAssertNil(OnboardingChecks.pix(state: .other("a file"), onPath: true).fix)
     }
 
+    /// A feature card's header says at a glance whether its setup is done; canvas has nothing to check.
+    func testACardsStatusCountsWhatIsStillToDo() {
+        let ok = OnboardingCheck(title: "Microphone", ok: true, detail: "Allowed")
+        let bad = OnboardingCheck(title: "Key", ok: false, detail: "Missing")
+        XCTAssertEqual(OnboardingChecks.status([ok, ok]), "Ready")
+        XCTAssertEqual(OnboardingChecks.status([bad, ok]), "1 to do")
+        XCTAssertEqual(OnboardingChecks.status([bad, bad]), "2 to do")
+        XCTAssertNil(OnboardingChecks.status([]))
+    }
+
+    /// Done's "Try it" line shows the voice hotkey as keycaps; no hotkey set: the core's default.
+    func testTheHotkeyShowsAsKeycaps() {
+        XCTAssertEqual(OnboardingChecks.hotkeyCaps("ctrl+alt+Space"), ["⌃", "⌥", "Space"])
+        XCTAssertEqual(OnboardingChecks.hotkeyCaps("alt+super+KeyK"), ["⌥", "⌘", "K"])
+        XCTAssertEqual(OnboardingChecks.hotkeyCaps(nil), ["⌃", "⌥", "Space"])
+        XCTAssertEqual(OnboardingChecks.hotkeyCaps(""), ["⌃", "⌥", "Space"])
+    }
+
+    func testEachFeatureHasASymbol() {
+        XCTAssertEqual(OnboardingFeature.allCases.map(\.symbol), ["waveform", "sparkles", "terminal", "square.on.square"])
+    }
+
     // MARK: Done
 
     func testTheSummaryHasALinePerChosenFeature() {
