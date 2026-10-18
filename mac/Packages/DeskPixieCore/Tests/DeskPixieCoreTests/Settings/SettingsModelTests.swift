@@ -111,6 +111,12 @@ final class SettingsModelTests: XCTestCase {
         XCTAssertEqual(SettingsFixture.defaults.at("agent.session"), "deskpixie")
     }
 
+    /// The onboarding window (#149) shows single fields by path, with the Settings controls.
+    func test_a_fields_control_can_be_had_by_its_path() {
+        XCTAssertEqual(model.spec(path: "agent.enabled")?.control, .switch(on: true))
+        XCTAssertNil(model.spec(path: "no.such.field"))
+    }
+
     func test_set_args_encode_null_as_null() throws {
         struct Args: Encodable { let field: String; let value: JSONValue }
         let data = try JSONEncoder().encode(Args(field: "position", value: .null))

@@ -1,0 +1,265 @@
+import Foundation
+
+/// The first-run window (#149, spec docs/superpowers/specs/2026-10-17-onboarding-design.md):
+/// welcome, choose features, set up each chosen one, done. Pure: the window controller feeds it
+/// the settings snapshot and what it read (key status, microphone, programs, pix), and draws it.
+
+/// A feature the window offers, in the order it shows them.
+public enum OnboardingFeature: String, CaseIterable, Sendable {
+    case voice, agents, sessions, canvas
+
+    public var title: String {
+        switch self {
+        case .voice: return "Talk to Pixie"
+        case .agents: return "Pixie runs agents for you"
+        case .sessions: return "Watch your own sessions"
+        case .canvas: return "Show canvas pages as they're made"
+        }
+    }
+
+    public var summary: String {
+        switch self {
+        case .voice: return "Speak with Pixie from any app. This is DeskPixie, so it's always on."
+        case .agents: return "Pixie hands real work to a coordinator agent and its workers."
+        case .sessions: return "Pixie tells you when the sessions you start with pix finish, and shows their questions."
+        case .canvas: return "Pages Pixie writes to show you things open on their own."
+        }
+    }
+
+    /// The Done line when nothing is missing.
+    public var readyText: String {
+        switch self {
+        case .voice: return "Press your voice hotkey, or double-click Pixie, and say hello."
+        case .agents: return "Ask Pixie for real work and it hands it to the coordinator."
+        case .sessions: return "Start a session with pix claude or pix codex."
+        case .canvas: return "New pages open as Pixie makes them."
+        }
+    }
+
+    /// The setting its switch is; nil when it is always on.
+    public var settingPath: String? {
+        switch self {
+        case .voice: return nil
+        case .agents: return "agent.enabled"
+        case .sessions: return "notifications.sessionTurns"
+        case .canvas: return "canvas.autoOpen"
+        }
+    }
+
+    /// Canvas has nothing to set up beyond its switch.
+    public var hasSetupPage: Bool { self != .canvas }
+}
+
+public enum OnboardingPage: Equatable, Sendable {
+    case welcome, choose
+    case setup(OnboardingFeature)
+    case done
+}
+
+/// Where the window is. The pages come from the settings each time (a switch on the choose page
+/// adds or drops setup pages), so only the index is kept.
+public struct OnboardingFlow: Equatable, Sendable {
+    public private(set) var index = 0
+
+    public init() {}
+
+    /// The features on in `values` (settings.json's values), voice always first.
+    public static func chosen(_ values: JSONValue) -> [OnboardingFeature] {
+        OnboardingFeature.allCases.filter { f in
+            guard let path = f.settingPath else { return true }
+            return values.at(path)?.boolValue ?? Self.defaultOn(f)
+        }
+    }
+
+    /// The core's defaults (`settings.Default`), for a value the snapshot doesn't carry.
+    private static func defaultOn(_ f: OnboardingFeature) -> Bool {
+        f == .agents || f == .canvas
+    }
+
+    public static func pages(chosen: [OnboardingFeature]) -> [OnboardingPage] {
+        [.welcome, .choose] + chosen.filter(\.hasSetupPage).map { .setup($0) } + [.done]
+    }
+
+    /// The page shown; an index past the end (pages dropped since) shows Done.
+    public func page(in pages: [OnboardingPage]) -> OnboardingPage {
+        pages[min(index, pages.count - 1)]
+    }
+
+    public var canGoBack: Bool { index > 0 }
+
+    public func isLast(in pages: [OnboardingPage]) -> Bool { index >= pages.count - 1 }
+
+    public mutating func next(in pages: [OnboardingPage]) {
+        index = min(index + 1, pages.count - 1)
+    }
+
+    public mutating func back(in pages: [OnboardingPage]) {
+        index = max(min(index, pages.count - 1) - 1, 0)
+    }
+
+    public mutating func restart() { index = 0 }
+
+    /// The last page's button: a chosen setting that applies only after a restart restarts.
+    public static func finishTitle(restartPending: Bool) -> String {
+        restartPending ? "Finish and Restart" : "Finish"
+    }
+}
+
+/// When the window opens by itself.
+public enum OnboardingGate {
+    /// UserDefaults: set once the window was finished or closed.
+    public static let doneKey = "DeskPixieOnboardingDone"
+
+    /// Only for a new user (no settings file before this launch) who hasn't seen it.
+    public static func shouldOpenAtLaunch(done: Bool, settingsExisted: Bool) -> Bool {
+        !done && !settingsExisted
+    }
+
+    public static func settingsFile(appSupport: URL) -> URL {
+        appSupport.appendingPathComponent("settings.json")
+    }
+}
+
+/// `setup.programs`: where each program was found, "" when it wasn't.
+public struct SetupPrograms: Decodable, Equatable, Sendable {
+    public let herdr: String
+    public let tmux: String
+    public let claude: String
+    public let codex: String
+
+    public init(herdr: String, tmux: String, claude: String, codex: String) {
+        self.herdr = herdr
+        self.tmux = tmux
+        self.claude = claude
+        self.codex = codex
+    }
+}
+
+public enum MicrophoneAccess: Equatable, Sendable {
+    case notDetermined, granted, denied
+}
+
+/// One line of a setup page: what is checked, whether it is ready, and the fix if there is one.
+public struct OnboardingCheck: Equatable, Sendable {
+    public enum Fix: Equatable, Sendable {
+        case allowMicrophone
+        case openMicrophoneSettings
+        case installPix
+        /// Something to install: opens the page in the browser.
+        case link(String, URL)
+    }
+
+    public let title: String
+    public let ok: Bool
+    public let detail: String
+    public let fix: Fix?
+
+    public init(title: String, ok: Bool, detail: String, fix: Fix? = nil) {
+        self.title = title
+        self.ok = ok
+        self.detail = detail
+        self.fix = fix
+    }
+}
+
+/// A Done line.
+public struct OnboardingSummaryLine: Equatable, Sendable {
+    public let feature: OnboardingFeature
+    public let ok: Bool
+    public let detail: String
+}
+
+public enum OnboardingChecks {
+    /// The key the voice service needs.
+    public static func secretID(forProvider provider: String?) -> SettingsSecretID {
+        provider == "gemini-live" ? .gemini : .openAI
+    }
+
+    public static func voiceKey(provider: String?, secrets: SettingsSecrets?) -> OnboardingCheck {
+        let id = secretID(forProvider: provider)
+        switch secrets?[id] {
+        case .found?:
+            return OnboardingCheck(title: id.variable, ok: true, detail: SettingsLayout.secretText(secrets, id))
+        case .missing?:
+            return OnboardingCheck(title: id.variable, ok: false,
+                                   detail: "Paste your key to keep it in the Keychain, or set \(id.variable) in a .env file.")
+        case nil:
+            return OnboardingCheck(title: id.variable, ok: false, detail: "Couldn't read whether a key is set.")
+        }
+    }
+
+    public static func microphone(_ access: MicrophoneAccess) -> OnboardingCheck {
+        switch access {
+        case .granted:
+            return OnboardingCheck(title: "Microphone", ok: true, detail: "Allowed")
+        case .notDetermined:
+            return OnboardingCheck(title: "Microphone", ok: false, detail: "Not asked yet: macOS asks you once.",
+                                   fix: .allowMicrophone)
+        case .denied:
+            return OnboardingCheck(title: "Microphone", ok: false,
+                                   detail: "Turned off for DeskPixie in System Settings ▸ Privacy & Security.",
+                                   fix: .openMicrophoneSettings)
+        }
+    }
+
+    static let herdrPage = URL(string: "https://herdr.dev")!
+    static let tmuxPage = URL(string: "https://github.com/tmux/tmux/wiki/Installing")!
+    static let claudePage = URL(string: "https://docs.anthropic.com/en/docs/claude-code/setup")!
+    static let codexPage = URL(string: "https://github.com/openai/codex")!
+
+    /// The session host's program and the coordinator's. `programs` nil: not read (yet), so
+    /// nothing is reported found and no fix is offered.
+    public static func agents(values: JSONValue, programs: SetupPrograms?, home: String) -> [OnboardingCheck] {
+        let tmuxHost = values.at("agent.sessionHost")?.stringValue == "tmux"
+        let codex = values.at("agent.coordinatorKind")?.stringValue == "codex"
+        let host = tmuxHost
+            ? program("tmux", programs?.tmux, home, programs == nil ? nil : .link("Get tmux", tmuxPage))
+            : program("herdr", programs?.herdr, home, programs == nil ? nil : .link("Get herdr", herdrPage))
+        let coordinator = codex
+            ? program("Codex", programs?.codex, home, programs == nil ? nil : .link("Get Codex", codexPage))
+            : program("Claude Code", programs?.claude, home, programs == nil ? nil : .link("Get Claude Code", claudePage))
+        return [host, coordinator]
+    }
+
+    private static func program(_ name: String, _ path: String?, _ home: String, _ fix: OnboardingCheck.Fix?) -> OnboardingCheck {
+        guard let path else {
+            return OnboardingCheck(title: name, ok: false, detail: "Checking…")
+        }
+        guard !path.isEmpty else {
+            return OnboardingCheck(title: name, ok: false, detail: "Not found. Install it, then Check Again.", fix: fix)
+        }
+        let shown = !home.isEmpty && path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path
+        return OnboardingCheck(title: name, ok: true, detail: "Found at \(shown)")
+    }
+
+    /// The core's tray lines about the coordinator (herdr version, integration hook, …).
+    public static func coordinatorLines(_ statusLines: [String]) -> [String] {
+        statusLines.filter { $0.hasPrefix("Coordinator:") }
+    }
+
+    public static func pix(state: PixLinkState, onPath: Bool) -> OnboardingCheck {
+        switch state {
+        case .installed where onPath:
+            return OnboardingCheck(title: "pix command", ok: true, detail: "Installed at ~/.local/bin/pix")
+        case .installed:
+            return OnboardingCheck(title: "pix command", ok: false,
+                                   detail: "Installed, but ~/.local/bin isn't on your PATH yet. Add the line below to ~/.zshrc.")
+        case .notInstalled:
+            return OnboardingCheck(title: "pix command", ok: false, detail: "Not installed", fix: .installPix)
+        case .broken:
+            return OnboardingCheck(title: "pix command", ok: false, detail: "The link is broken (the app moved).", fix: .installPix)
+        case .other(let what):
+            return OnboardingCheck(title: "pix command", ok: false, detail: "~/.local/bin/pix is \(what); DeskPixie leaves it alone.")
+        }
+    }
+
+    /// One line per chosen feature: its ready text, or the first check still missing.
+    public static func summary(chosen: [OnboardingFeature], checks: [OnboardingFeature: [OnboardingCheck]]) -> [OnboardingSummaryLine] {
+        chosen.map { f in
+            if let missing = checks[f]?.first(where: { !$0.ok }) {
+                return OnboardingSummaryLine(feature: f, ok: false, detail: "\(missing.title): \(missing.detail)")
+            }
+            return OnboardingSummaryLine(feature: f, ok: true, detail: f.readyText)
+        }
+    }
+}
