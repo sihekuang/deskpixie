@@ -254,6 +254,22 @@ func TestTheCoordinatorPromptHandlesSeveralRequestsAtOnce(t *testing.T) {
 	}
 }
 
+// #160: a request is the person's words as said; the coordinator sorts out several things,
+// their order and corrections, and covers them all in the request's one <spoken> block.
+func TestTheCoordinatorPromptWorksOutARequestInThePersonsOwnWords(t *testing.T) {
+	for _, md := range []string{RenderClaudeMd("/data/canvas", ""), RenderClaudeMd("/data/canvas", "/Users/x/code")} {
+		for _, rule := range []string{"A request is the person's words as they said them",
+			"do each unrelated thing", "in the order they want, which may not be the order they said them",
+			"only the final version of anything they corrected", "leave out what they took back",
+			"The request's one `<spoken>` block covers all of it",
+			"Something that is only in Pixie's context is background, not work"} {
+			if !strings.Contains(md, rule) {
+				t.Errorf("coordinator.md does not say %q", rule)
+			}
+		}
+	}
+}
+
 // mcp__pixie in permissions.allow allows every tool of the pixie server, the local ones too.
 func TestThePermissionAllowListCoversTheLocalTools(t *testing.T) {
 	var v map[string]any

@@ -55,8 +55,8 @@ func (Delegate) Description() string {
 
 func (Delegate) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{` +
-		`"task":{"type":"string","description":"What the user wants done, in their words."},` +
-		`"context":{"type":"string","description":"Everything from the conversation the coordinator needs, since it cannot hear it: what pronouns refer to, names, numbers, choices, earlier Coordinator replies."}},` +
+		`"task":{"type":"string","description":"What the user said, word for word, as they said it, with every request, step, correction and change of mind in it. Don't split, reorder or reword it: the coordinator works out what they meant."},` +
+		`"context":{"type":"string","description":"What the user's words point back to from earlier in the conversation, since the coordinator cannot hear it: what pronouns refer to, names, numbers, choices, earlier Coordinator replies."}},` +
 		`"required":["task"],"additionalProperties":false}`)
 }
 

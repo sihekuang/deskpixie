@@ -394,7 +394,7 @@ func TestDelegateRequiresATaskAndThePersonaNamesEveryTool(t *testing.T) {
 }
 
 func TestThePersonaSendsUncertainFactsToTheAgent(t *testing.T) {
-	if !strings.Contains(DelegationPersona, "Check: ") || !strings.Contains(DelegationPersona, "Let me check that.") {
+	if !strings.Contains(DelegationPersona, "Facts you aren't certain of: don't say you don't know; hand the question off") {
 		t.Fatal(DelegationPersona)
 	}
 }
@@ -423,7 +423,7 @@ func TestThePersonaOffloadsWorkToTheAgentByDefault(t *testing.T) {
 		"If you are unsure whether something is work, delegate it.",
 		"Keep for yourself only:",
 		"The coordinator does not hear this conversation.",
-		"One delegate call per independent task.",
+		"Hand off what the user said in one delegate call",
 		"If you think you can't do it yourself, that is the signal to delegate",
 		"The app goes idle once that sentence has played",
 		"ask it before you call delegate",

@@ -141,11 +141,11 @@ func TestPixiesPromptsNameTheCoordinator(t *testing.T) {
 	}
 }
 
-// #83: a failed local tool (the weather lookup that can't find the place) is checked with the
+// #83: a failed local tool (the weather lookup that can't find the place) goes to the
 // coordinator, not answered with "I can't".
 func TestAFailedLocalToolIsCheckedWithTheCoordinator(t *testing.T) {
 	if !strings.Contains(DelegationPersona, "If one of your own tools fails or finds nothing") ||
-		!strings.Contains(DelegationPersona, `call delegate with "Check: "`) {
+		!strings.Contains(DelegationPersona, "hand the user's request off with delegate") {
 		t.Fatal("delegation rules lack the failed-tool fallback")
 	}
 }
@@ -160,22 +160,31 @@ func TestPixieDecidesWhetherToAskForMoreAfterACheck(t *testing.T) {
 	}
 }
 
-// #157: several things in one breath. Independent ones are separate calls; steps that come
-// in an order, or a change of mind, are one call in the user's order with nothing taken back.
-func TestTheDelegationPersonaKeepsStepsInOrderAndDropsWhatWasTakenBack(t *testing.T) {
+// #160: Pixie hands off what the user said as they said it, in one call; the coordinator
+// works out several things, their order and corrections. A mix with Pixie's own tools goes
+// whole too.
+func TestTheDelegationPersonaHandsOffTheUsersWordsAsSaid(t *testing.T) {
 	for _, phrase := range []string{
-		"One delegate call per independent task.",
-		"call delegate once",
-		"in the order the user wants",
-		"Never hand off a step the user put off or took back",
-		"never make two calls that contradict each other",
-		"don't mention what they took back",
-		"When one breath has both, an unrelated thing is still its own call",
-		"Unrelated things stay separate calls even when joined by \"and\", \"also\" or \"separately\"",
-		`"First write a program that checks the SpaceX stock price, then merge the build."`,
+		"Hand off what the user said in one delegate call, as they said it",
+		"Don't split it, reorder it, shorten it, reword it or drop what they took back",
+		"the coordinator works out what they meant",
+		"Do it yourself only when everything they said is for you",
+		"do your part with your own tool and hand off the rest",
+		"leave your part out of what you hand off",
 	} {
 		if !strings.Contains(DelegationPersona, phrase) {
 			t.Errorf("delegation.md does not say %q", phrase)
+		}
+	}
+	for _, gone := range []string{"One delegate call per independent task", `"Check: "`, "Let me check that."} {
+		if strings.Contains(DelegationPersona, gone) {
+			t.Errorf("delegation.md still says %q", gone)
+		}
+	}
+	p := string(Delegate{}.Parameters())
+	for _, phrase := range []string{"word for word, as they said it", "Don't split, reorder or reword it"} {
+		if !strings.Contains(p, phrase) {
+			t.Errorf("delegate's parameters don't say %q", phrase)
 		}
 	}
 }

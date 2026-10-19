@@ -73,10 +73,21 @@ terminal and type to you directly.
 Each request from Pixie ends with a line like `[ref job_0123456789ab]`. Several may arrive in one
 message, each with its own `[ref …]` line.
 
+A request is the person's words as they said them: Pixie passes them on without sorting them
+out. One request can hold several things, steps in an order, a correction or a change of mind
+("merge the build… actually, before that, write the SpaceX program", "lunch on Tuesday… make
+that Thursday"). Work out what they mean: do each unrelated thing,
+do steps in the order they want, which may not be the order they said them,
+use only the final version of anything they corrected, and leave out what they took back.
+If you can't tell what they want, ask.
+The request's one `<spoken>` block covers all of it.
+
 Requests that arrive together, or one right after another, can belong together:
 read them all before you act, and do their steps in the order the person gave.
 Pixie's context is its own reading of what the person said, not their words:
-never pass it on to a session or worker as an instruction. If a request seems to cancel or
+never pass it on to a session or worker as an instruction.
+Something that is only in Pixie's context is background, not work: Pixie may already have done it
+(set a timer, given the weather), so do only what the request asks. If a request seems to cancel or
 postpone one you already handed on, or a request and its context disagree,
 ask the person before you act on either.
 

@@ -2,7 +2,8 @@
 
 package voice_test
 
-// #157, live: how Pixie hands off what it hears, above all several requests in one breath. Steps in an order or a
+// #157/#160, live: Pixie hands off what it hears as said, above all several requests in one
+// breath, and keeps only what is all its own. Steps in an order or a
 // change of mind come out as one delegate call, in the user's order, with nothing taken back;
 // unrelated asks come out as one call each. Each utterance is spoken (say + afconvert) to the
 // real provider with the app's persona and delegation rules and a fake delegate that records
@@ -26,7 +27,6 @@ import (
 	"github.com/sihekuang/deskpixie/core/audio"
 	"github.com/sihekuang/deskpixie/core/tools"
 	"github.com/sihekuang/deskpixie/core/voice"
-	"github.com/sihekuang/deskpixie/core/voice/openailive"
 )
 
 // handOff is one delegate call: its task and context, lowercased.
@@ -80,12 +80,48 @@ func ownTools(mu *sync.Mutex, calls *[]string) []voice.Tool {
 	}
 }
 
+// severalCase is one utterance and what Pixie should do with it (#160): hand off everything
+// said in one call, with nothing dropped (every word in words appears in the task); when part
+// of it is for Pixie's own tools, call them and leave that part out of the task (notWords); when all of it
+// is, call them and hand off nothing.
 type severalCase struct {
 	name, say string
-	calls     int
-	// check returns what's wrong with the delegate calls and the names of Pixie's own tools it
-	// called ("" when right).
-	check func(calls []handOff, own []string) string
+	// calls: delegate calls wanted, 0 or 1; anyCalls allows either.
+	calls    int
+	anyCalls bool
+	// words must all appear in the task (lowercased), notWords must not; own are tools Pixie
+	// must call itself.
+	words, notWords, own []string
+}
+
+// wrong returns what's wrong with what Pixie did ("" when right).
+func (c severalCase) wrong(calls []handOff, own []string) string {
+	switch {
+	case c.anyCalls && len(calls) > 1, !c.anyCalls && len(calls) != c.calls:
+		return fmt.Sprintf("%d delegate calls, want %d", len(calls), c.calls)
+	case len(calls) == 1 && len(c.own) == 0 && len(own) > 0:
+		return "handed off, but did part of it itself"
+	}
+	if len(calls) == 1 {
+		for _, w := range c.words {
+			if !strings.Contains(calls[0].task, w) {
+				return fmt.Sprintf("the task dropped %q", w)
+			}
+		}
+		for _, w := range c.notWords {
+			// The task only: the context may say Pixie did it ("the timer is set"), which the
+			// coordinator treats as background.
+			if strings.Contains(calls[0].task, w) {
+				return fmt.Sprintf("handed off %q, which Pixie did itself", w)
+			}
+		}
+	}
+	for _, name := range c.own {
+		if !has(own, name) {
+			return name + " is Pixie's own tool"
+		}
+	}
+	return ""
 }
 
 // has reports whether name is among the tools called.
@@ -98,214 +134,40 @@ func has(own []string, name string) bool {
 	return false
 }
 
-// tasks joins the calls' tasks, for checks that don't care which call says what.
-func tasks(c []handOff) string {
-	var t []string
-	for _, h := range c {
-		t = append(t, h.task)
-	}
-	return strings.Join(t, " | ")
-}
-
-// before reports whether a appears before b in s (both present).
-func before(s, a, b string) bool {
-	i, j := strings.Index(s, a), strings.Index(s, b)
-	return i >= 0 && j >= 0 && i < j
-}
-
 var severalCases = []severalCase{
-	{
-		name:  "before-we-do-that",
-		say:   "Let's go ahead and get the build merged, since I've tested it. Oh actually, before we do that, write a program to check the latest SpaceX stock price.",
-		calls: 1,
-		check: func(c []handOff, _ []string) string {
-			if !before(c[0].task, "spacex", "merg") {
-				return "the program should come first, then the merge"
-			}
-			if strings.Contains(c[0].task+c[0].context, "instead") {
-				return "the merge was put off, not taken back"
-			}
-			return ""
-		},
-	},
-	{
-		name:  "instead",
-		say:   "Start a new project for my recipe collection. Wait, instead, just make me a shopping list for tacos.",
-		calls: 1,
-		check: func(c []handOff, _ []string) string {
-			if !strings.Contains(c[0].task, "taco") {
-				return "the shopping list is what's left"
-			}
-			if strings.Contains(c[0].task, "project") {
-				return "the project was taken back"
-			}
-			return ""
-		},
-	},
-	{
-		name:  "and-then",
-		say:   "Summarize my open GitHub issues for deskpixie, and then draft an email to Sam with that summary.",
-		calls: 1,
-		check: func(c []handOff, _ []string) string {
-			if !before(c[0].task, "summar", "email") {
-				return "the summary comes first, then the email"
-			}
-			return ""
-		},
-	},
-	{
-		name:  "unrelated",
-		say:   "Find me a good pasta recipe for tonight. Also, separately, check whether the deskpixie tests pass.",
-		calls: 2,
-		check: func(c []handOff, _ []string) string {
-			all := c[0].task + " | " + c[1].task
-			if !strings.Contains(all, "pasta") || !strings.Contains(all, "test") {
-				return "one call each for the recipe and the tests"
-			}
-			return ""
-		},
-	},
-	{
-		name:  "three-unrelated",
-		say:   "Find me a birthday gift idea for my mom. Also write a haiku about coffee. And separately, check whether the deskpixie build passes.",
-		calls: 3,
-		check: func(c []handOff, _ []string) string {
-			all := tasks(c)
-			if !strings.Contains(all, "gift") || !strings.Contains(all, "haiku") || !strings.Contains(all, "build") {
-				return "one call each for the gift, the haiku and the build"
-			}
-			return ""
-		},
-	},
-	{
-		name:  "first-said-last",
-		say:   "Open a pull request for my login branch, but first rebase it on main.",
-		calls: 1,
-		check: func(c []handOff, _ []string) string {
-			// The user's own "…, but first rebase it" keeps the order too.
-			if !before(c[0].task, "rebase", "pull request") && !strings.Contains(c[0].task, "first rebase") {
-				return "the rebase comes first, though it was said last"
-			}
-			return ""
-		},
-	},
-	{
-		name:  "after-that-if",
-		say:   "Run the deskpixie tests, and after that, if they pass, open a pull request.",
-		calls: 1,
-		check: func(c []handOff, _ []string) string {
-			// "run" rather than "test": speech recognition sometimes hears "tasks".
-			if !before(c[0].task, "run", "pull request") {
-				return "the tests run first, then the pull request"
-			}
-			if !strings.Contains(c[0].task+c[0].context, "pass") {
-				return "the pull request only if the tests pass"
-			}
-			return ""
-		},
-	},
-	{
-		name:  "detail-corrected",
-		say:   "Write an email to Sam inviting him to lunch on Tuesday. Wait, make that Thursday.",
-		calls: 1,
-		check: func(c []handOff, _ []string) string {
-			if !strings.Contains(c[0].task+c[0].context, "thursday") {
-				return "the lunch is on Thursday"
-			}
-			if strings.Contains(c[0].task+c[0].context, "tuesday") {
-				return "Tuesday was taken back"
-			}
-			return ""
-		},
-	},
-	{
-		name:  "never-mind-all",
-		say:   "Draft an email to my landlord about the broken heater. Actually, never mind, forget that. Just tell me a joke.",
-		calls: 0,
-		check: func([]handOff, []string) string { return "" },
-	},
-	{
-		name:  "own-tool-and-work",
-		say:   "Set a timer for ten minutes, and research the best cast iron pans.",
-		calls: 1,
-		check: func(c []handOff, own []string) string {
-			if !has(own, "timer") {
-				return "the timer is Pixie's own tool"
-			}
-			if !strings.Contains(c[0].task, "pan") || strings.Contains(c[0].task, "timer") {
-				return "only the research is handed off"
-			}
-			return ""
-		},
-	},
-	{
-		name:  "ordered-and-unrelated",
-		say:   "Summarize my unread emails, then draft replies to the urgent ones. Also, find a recipe for banana bread.",
-		calls: 2,
-		check: func(c []handOff, _ []string) string {
-			var mail, bread string
-			for _, h := range c {
-				switch {
-				case strings.Contains(h.task, "banana"):
-					bread = h.task
-				case strings.Contains(h.task, "email"):
-					mail = h.task
-				}
-			}
-			if mail == "" || bread == "" {
-				return "one call for the emails, one for the banana bread"
-			}
-			if !before(mail, "summar", "repl") {
-				return "the summary comes first, then the replies"
-			}
-			return ""
-		},
-	},
-	{
-		name:  "ordered-and-unrelated-2",
-		say:   "Back up my photos to the external drive, and after that free up some disk space. Oh, and what's a good movie to watch tonight?",
-		calls: 2,
-		check: func(c []handOff, _ []string) string {
-			var disk, movie string
-			for _, h := range c {
-				switch {
-				case strings.Contains(h.task, "movie"):
-					movie = h.task
-				case strings.Contains(h.task, "photo"):
-					disk = h.task
-				}
-			}
-			if disk == "" || movie == "" {
-				return "one call for the photos and disk space, one for the movie"
-			}
-			if !before(disk, "back", "space") {
-				return "the backup comes first, then freeing space"
-			}
-			return ""
-		},
-	},
-	{
-		name:  "fact-check",
-		say:   "Who won the World Series last year?",
-		calls: 1,
-		check: func(c []handOff, _ []string) string {
-			if !strings.HasPrefix(c[0].task, "check:") {
-				return `a fact Pixie isn't sure of is a "Check: " task`
-			}
-			return ""
-		},
-	},
-	{
-		name:  "kept-arithmetic",
-		say:   "What's fifteen percent of eighty?",
-		calls: 0,
-		check: func(_ []handOff, own []string) string {
-			if !has(own, "calculate") {
-				return "arithmetic is Pixie's own calculate tool"
-			}
-			return ""
-		},
-	},
+	{name: "before-we-do-that", calls: 1, words: []string{"merg", "spacex"},
+		say: "Let's go ahead and get the build merged, since I've tested it. Oh actually, before we do that, write a program to check the latest SpaceX stock price."},
+	{name: "instead", calls: 1, words: []string{"project", "taco"},
+		say: "Start a new project for my recipe collection. Wait, instead, just make me a shopping list for tacos."},
+	{name: "and-then", calls: 1, words: []string{"summar", "email"},
+		say: "Summarize my open GitHub issues for deskpixie, and then draft an email to Sam with that summary."},
+	{name: "unrelated", calls: 1, words: []string{"pasta", "test"},
+		say: "Find me a good pasta recipe for tonight. Also, separately, check whether the deskpixie tests pass."},
+	{name: "three-unrelated", calls: 1, words: []string{"gift", "haiku", "build"},
+		say: "Find me a birthday gift idea for my mom. Also write a haiku about coffee. And separately, check whether the deskpixie build passes."},
+	{name: "first-said-last", calls: 1, words: []string{"pull request", "rebase"},
+		say: "Open a pull request for my login branch, but first rebase it on main."},
+	// "pass", not "test": speech recognition sometimes hears "tasks".
+	{name: "after-that-if", calls: 1, words: []string{"pull request", "pass"},
+		say: "Run the deskpixie tests, and after that, if they pass, open a pull request."},
+	{name: "detail-corrected", calls: 1, words: []string{"tuesday", "thursday"},
+		say: "Write an email to Sam inviting him to lunch on Tuesday. Wait, make that Thursday."},
+	// What's left is a joke, Pixie's own: it may tell it, or hand off the whole thing.
+	{name: "never-mind-all", anyCalls: true, words: []string{"landlord", "joke"},
+		say: "Draft an email to my landlord about the broken heater. Actually, never mind, forget that. Just tell me a joke."},
+	// The timer is Pixie's own: it sets it and hands off only the research.
+	{name: "own-tool-and-work", calls: 1, words: []string{"pan"}, notWords: []string{"timer"}, own: []string{"timer"},
+		say: "Set a timer for ten minutes, and research the best cast iron pans."},
+	{name: "ordered-and-unrelated", calls: 1, words: []string{"email", "repl", "banana"},
+		say: "Summarize my unread emails, then draft replies to the urgent ones. Also, find a recipe for banana bread."},
+	{name: "ordered-and-unrelated-2", calls: 1, words: []string{"photo", "space", "movie"},
+		say: "Back up my photos to the external drive, and after that free up some disk space. Oh, and what's a good movie to watch tonight?"},
+	{name: "fact", calls: 1, words: []string{"world series"},
+		say: "Who won the World Series last year?"},
+	{name: "kept-arithmetic", calls: 0, own: []string{"calculate"},
+		say: "What's fifteen percent of eighty?"},
+	{name: "kept-timer-and-weather", calls: 0, own: []string{"timer", "get_weather"},
+		say: "Set a timer for ten minutes, and tell me the weather in Seattle."},
 }
 
 func TestLiveDelegationOfSeveralRequests(t *testing.T) {
@@ -317,9 +179,6 @@ func TestLiveDelegationOfSeveralRequests(t *testing.T) {
 	instructions := app.Instructions(voice.DefaultPersona(), agent.DelegationPersona)
 	lead := make([]int16, audio.SampleRate/2) // 0.5 s of silence before speaking
 	for _, p := range liveProviders() {
-		if p.name == openailive.Name {
-			continue // GPT-Live hands off by client delegation, not a delegate call
-		}
 		t.Run(p.name, func(t *testing.T) {
 			if _, ok := secrets.APIKey(p.name); !ok {
 				v, _ := voice.VarFor(p.name)
@@ -355,16 +214,17 @@ func TestLiveDelegationOfSeveralRequests(t *testing.T) {
 							return len(hs)+len(ow) > 0 || r.liveSpy.count(voice.EvResponseDone) > 0
 						})
 						time.Sleep(5 * time.Second) // more calls come in the same response, or after a tool's result
+						// GPT-Live's backend model calls tools after the voice has spoken: give it time.
+						for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); time.Sleep(200 * time.Millisecond) {
+							if hs, ow := got(); len(hs)+len(ow) > 0 {
+								break
+							}
+						}
 						r.rt.Hotkey()
 						hs, ow := got()
 						t.Logf("run %d: %s; delegate calls %+v; own tools %v", run, r.liveSpy.summary(), hs, ow)
-						switch {
-						case len(hs) != c.calls:
-							t.Errorf("run %d: %d delegate calls, want %d: %+v; own tools %v", run, len(hs), c.calls, hs, ow)
-						default:
-							if why := c.check(hs, ow); why != "" {
-								t.Errorf("run %d: %s: %+v; own tools %v", run, why, hs, ow)
-							}
+						if why := c.wrong(hs, ow); why != "" {
+							t.Errorf("run %d: %s: %+v; own tools %v", run, why, hs, ow)
 						}
 					}
 				})
