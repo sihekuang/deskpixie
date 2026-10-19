@@ -171,15 +171,6 @@ func TestBitsContextHasTheMemoriesAndRecallCarriesThem(t *testing.T) {
 		if strings.Count(f, "Blue it is.") != 1 {
 			t.Fatal(f)
 		}
-		invoke(t, Recall{H: r.h}, `{"question":"what does the person like?"}`)
-		r.clock.Advance(StopSettleMs)
-		time.Sleep(2 * time.Second)
-		prompts := r.host.Prompts()
-		last := prompts[len(prompts)-1].Text
-		if !strings.Contains(last, "Your saved memories") || !strings.Contains(last, "short weekly summaries on Fridays") ||
-			!strings.Contains(last, "pick a logo: Blue it is. [job_000000000001]") {
-			t.Fatal(last)
-		}
 	})
 }
 

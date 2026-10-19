@@ -94,6 +94,8 @@ func ownTools(mu *sync.Mutex, calls *[]string) []voice.Tool {
 // is, call them and hand off nothing.
 type severalCase struct {
 	name, say string
+	// notice: something Pixie was told just before (a Coordinator or Session line), if any.
+	notice string
 	// calls: delegate calls wanted, 0 or 1; anyCalls allows either.
 	calls    int
 	anyCalls bool
@@ -175,6 +177,13 @@ var severalCases = []severalCase{
 	// Sessions aren't jobs: the coordinator lists them (#162).
 	{name: "sessions-question", calls: 1, words: []string{"session"},
 		say: "How many sessions do I have open right now?"},
+	// Something from before goes to the coordinator, which answers from memory or asks the
+	// session that has it (#164). As on Oct 19, Pixie had just heard 153 mentioned.
+	{name: "state-after-mention", calls: 1, words: []string{"153"},
+		notice: "Session update: deskpixie: open and merge PR is done: still open: #159, and #153, which #156 may already have fixed; I can close it.",
+		say:    "Is issue 153 still relevant?"},
+	{name: "memory-question", calls: 1, words: []string{"logo"},
+		say: "What did we decide about the logo this morning?"},
 	{name: "kept-arithmetic", calls: 0, own: []string{"calculate"},
 		say: "What's fifteen percent of eighty?"},
 	{name: "kept-timer-and-weather", calls: 0, own: []string{"timer", "get_weather"},
@@ -221,6 +230,14 @@ func TestLiveDelegationOfSeveralRequests(t *testing.T) {
 						r.rt.Hotkey()
 						if !r.waitFor("Ready", 10*time.Second, func() bool { return r.liveSpy.count(voice.EvReady) > 0 }) {
 							return
+						}
+						if c.notice != "" {
+							r.rt.Inject(voice.Notice{Text: c.notice})
+							r.waitFor("Pixie passing on the notice", 30*time.Second, func() bool { return r.liveSpy.count(voice.EvResponseDone) > 0 })
+							time.Sleep(3 * time.Second) // its audio finishes playing
+							mu.Lock()
+							calls, own = nil, nil // what it did with the notice isn't the case
+							mu.Unlock()
 						}
 						r.say(append(append([]int16(nil), lead...), speech...))
 						got := func() ([]handOff, []string) {

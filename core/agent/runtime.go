@@ -433,10 +433,8 @@ func (h *AgentHandle) Delegate(task, context string) (JobID, error) {
 		return "", fmt.Errorf("Delegation is off (%s).", why)
 	}
 	id := h.deps.IDs.JobID()
-	if !strings.HasPrefix(task, RecallPrefix) {
-		if note := h.requestNote(); note != "" {
-			context = strings.TrimSpace(context + "\n" + note)
-		}
+	if note := h.requestNote(); note != "" {
+		context = strings.TrimSpace(context + "\n" + note)
 	}
 	h.Input(DelegateInput(id, task, context))
 	return id, nil

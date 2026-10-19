@@ -184,15 +184,6 @@ func TestANewRequestSaysNothingAboutSessionsWhenNoneAreOpen(t *testing.T) {
 }
 
 // Recall asks what the coordinator remembers: no work, so no sessions to hand it to.
-func TestARecallRequestDoesNotListSessions(t *testing.T) {
-	r, _ := pixRig(t)
-	delegate(t, r, RecallPrefix+"what did we decide about the logo?")
-	settle()
-	if got := coordinatorText(r); !strings.Contains(got, "the logo") || strings.Contains(got, "pix sessions") {
-		t.Fatal(got)
-	}
-}
-
 // #161: Pixie relays a session's question; the user's answer, through answer_job without a job
 // id, is typed into that session.
 func TestAnAnswerToASessionsQuestionIsTypedIntoIt(t *testing.T) {

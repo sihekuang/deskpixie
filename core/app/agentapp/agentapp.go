@@ -58,7 +58,7 @@ func (RandomIDs) JobID() agent.JobID {
 
 // DelegationTools are the voice tools over one handle.
 func DelegationTools(h *agent.AgentHandle) []voice.Tool {
-	return []voice.Tool{agent.Delegate{H: h}, agent.Jobs{H: h}, agent.AnswerJob{H: h}, agent.Recall{H: h}}
+	return []voice.Tool{agent.Delegate{H: h}, agent.Jobs{H: h}, agent.AnswerJob{H: h}}
 }
 
 // PermissionTimeoutMs is agent.permissionTimeoutSecs in ms, kept under the hook server's own
