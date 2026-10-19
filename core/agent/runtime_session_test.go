@@ -95,7 +95,7 @@ func TestAMessageThatPushesOrMergesAsksFirst(t *testing.T) {
 	r, user := pixRig(t)
 	reply := messageCall(r, "Commit, push, open one PR covering #137 and #138, and merge it.")
 	settle()
-	if !hasCall(r.voice.Calls(), agenttest.InjectCall("Coordinator question: Tell your session login bug to push and merge? Say confirm hawk.")) {
+	if !hasCall(r.voice.Calls(), agenttest.InjectCall("Coordinator question: Message your session login bug, asking it to push and merge? Say confirm hawk.")) {
 		t.Fatal(r.voice.Calls())
 	}
 	if len(user.Prompts()) != 0 {
@@ -122,6 +122,20 @@ func TestNoKeepsAPushMessageUnsent(t *testing.T) {
 	}
 	if len(user.Prompts()) != 0 {
 		t.Fatal("sent although you said no")
+	}
+}
+
+// #152: a message that only forbids a push, as a careful coordinator writes it, is not one.
+func TestAMessageThatForbidsPushingIsSentWithoutAsking(t *testing.T) {
+	r, user := pixRig(t)
+	if got := <-messageCall(r, "Is there anything committed on this branch? Please don't push anything or change anything, just tell me what's committed."); got.Err != nil {
+		t.Fatal(got.Err)
+	}
+	if p := user.Prompts(); len(p) != 1 || !strings.Contains(p[0].Text, "don't push") {
+		t.Fatalf("%+v", p)
+	}
+	if len(r.voice.Calls()) != 0 {
+		t.Fatalf("asked although nothing is pushed: %v", r.voice.Calls())
 	}
 }
 

@@ -1,0 +1,42 @@
+package agent
+
+import (
+	"slices"
+	"testing"
+)
+
+// #152: only a message that asks the session to push, merge, publish or deploy is gated. One
+// that forbids the step, or asks whether it happened, is an ordinary message.
+func TestGatedActions(t *testing.T) {
+	for _, tc := range []struct {
+		text string
+		want []string
+	}{
+		// Asks for the step.
+		{"Commit, push, open one PR covering #137 and #138, and merge it.", []string{"push", "merge"}},
+		{"Go ahead and git push.", []string{"push"}},
+		{"Please push your branch.", []string{"push"}},
+		{"Run the tests, then push.", []string{"push"}},
+		{"Don't wait for CI, just push it.", []string{"push"}},
+		{"Don't forget to push.", []string{"push"}},
+		{"Don't change anything else, but deploy the site.", []string{"deploy"}},
+		{"Can you publish the package?", []string{"publish"}},
+		{"Make sure everything is pushed.", []string{"push"}},
+		{"Have you pushed? If not, push it now.", []string{"push"}},
+		// The coordinator's messages from #152, verbatim: none asks for a push or a merge.
+		{"Please bring this folder up to date with origin/main using a fast-forward only: git pull --ff-only. First check git status; if there are any uncommitted changes or the fast-forward is not possible, stop and tell me instead of merging, rebasing or resetting. Do not push anything. Tell me the final status when done.", nil},
+		{"Question only, please don't change anything: have you built a build of current main that includes the merged onboarding window (PR 150)? The latest release, v0.8.0, was made before it. If there is no build of current main, can you tell me why? Just answer here in your terminal; don't update the folder, build, or push anything.", nil},
+		{"Question only, please don't change anything: has anything from your work been pushed to GitHub, and is there anything of yours that is still not pushed? Just answer here in your terminal; don't push, commit, or change anything.", nil},
+		{"Is there anything committed on this branch? Please don't push anything or change anything, just tell me what's committed.", nil},
+		// Other ways of saying no, or of asking what happened.
+		{"Never push to main.", nil},
+		{"Fix the test without pushing.", nil},
+		{"You can’t merge it yet.", nil},
+		{"Did you deploy it?", nil},
+		{"Run the tests and tell me what fails.", nil},
+	} {
+		if got := GatedActions(tc.text); !slices.Equal(got, tc.want) {
+			t.Errorf("GatedActions(%q) = %q, want %q", tc.text, got, tc.want)
+		}
+	}
+}
