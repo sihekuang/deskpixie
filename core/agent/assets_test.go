@@ -159,3 +159,20 @@ func TestPixieDecidesWhetherToAskForMoreAfterACheck(t *testing.T) {
 		}
 	}
 }
+
+// #157: several things in one breath. Independent ones are separate calls; steps that come
+// in an order, or a change of mind, are one call in the user's order with nothing taken back.
+func TestTheDelegationPersonaKeepsStepsInOrderAndDropsWhatWasTakenBack(t *testing.T) {
+	for _, phrase := range []string{
+		"One delegate call per independent task.",
+		"call delegate once",
+		"in the order the user wants",
+		"Never hand off a step the user put off or took back",
+		"never make two calls that contradict each other",
+		`"First write a program that checks the SpaceX stock price, then merge the build."`,
+	} {
+		if !strings.Contains(DelegationPersona, phrase) {
+			t.Errorf("delegation.md does not say %q", phrase)
+		}
+	}
+}
