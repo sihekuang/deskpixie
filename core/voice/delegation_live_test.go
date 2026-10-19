@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -354,5 +355,127 @@ func TestLiveAnsweringARelayedQuestion(t *testing.T) {
 		if p.name == gemini.Name && !passed {
 			geminiFailed = true
 		}
+	}
+}
+
+// TestLiveNoMadeUpConfirmWord (#166): the voice log's 22:09 notice, a question with no confirm
+// word, which Pixie relayed with "Say confirm hawk." added. With the claim check on as in the
+// app, Pixie's last words must not ask for a confirm word: either it never makes one up, or the
+// app's correction gets it to drop it. Gemini only: this is the voice model's own behavior.
+//
+//	go test -count=1 -tags live -run TestLiveNoMadeUpConfirmWord -v ./voice/
+func TestLiveNoMadeUpConfirmWord(t *testing.T) {
+	secrets := liveSecrets(t)
+	if _, ok := secrets.APIKey(gemini.Name); !ok {
+		t.Skip("no Gemini key")
+	}
+	var p liveProvider
+	for _, lp := range liveProviders() {
+		if lp.name == gemini.Name {
+			p = lp
+		}
+	}
+	notice := "Coordinator question: The deskpixie session never answered whether everything is committed, and it's busy now. Want me to check the repo's git status myself?"
+	sayConfirm := regexp.MustCompile(`(?i)\bconfirm\s+[a-z]+`)
+	for run := 1; run <= 3; run++ {
+		t.Run(fmt.Sprint("run-", run), func(t *testing.T) {
+			var mu sync.Mutex
+			var calls []handOff
+			var answers, own []string
+			reg := voice.NewToolRegistry()
+			reg.Register(recordingDelegate{mu: &mu, calls: &calls})
+			reg.Register(recordingAnswer{mu: &mu, answers: &answers})
+			for _, o := range ownTools(&mu, &own) {
+				reg.Register(o)
+			}
+			cfg := p.cfg
+			cfg.Instructions = app.Instructions(voice.DefaultPersona(), agent.DelegationPersona)
+			conv := voice.DefaultConversationConfig()
+			conv.CheckClaims, conv.HandOff, conv.ClaimTools = true, true, voice.ClaimTools
+			conv.IdleTimeout = 30 * time.Second
+			r := newLiveRigConv(t, p.model(&liveWireLog{}, t), cfg, secrets, reg, conv)
+			r.rt.Hotkey()
+			if !r.waitFor("Ready", 10*time.Second, func() bool { return r.liveSpy.count(voice.EvReady) > 0 }) {
+				return
+			}
+			r.rt.Inject(voice.Notice{Text: notice})
+			r.waitFor("Pixie relaying the question", 30*time.Second, func() bool { return r.liveSpy.count(voice.EvResponseDone) > 0 })
+			time.Sleep(12 * time.Second) // a correction, if one was needed, and Pixie's reply to it
+			// And how it takes the correction itself, sent as if it had made one up.
+			done := r.liveSpy.count(voice.EvResponseDone)
+			r.rt.Inject(voice.Notice{Text: voice.MadeUpConfirmFix})
+			r.waitFor("Pixie's reply to the correction", 30*time.Second, func() bool { return r.liveSpy.count(voice.EvResponseDone) > done })
+			time.Sleep(3 * time.Second)
+			r.rt.Hotkey()
+			r.liveSpy.mu.Lock()
+			said := append([]string(nil), r.liveSpy.said...)
+			r.liveSpy.mu.Unlock()
+			t.Logf("Pixie said %q", said)
+			if len(said) == 0 {
+				t.Fatal("Pixie said nothing")
+			}
+			if last := said[len(said)-1]; sayConfirm.MatchString(last) || strings.Contains(strings.ToLower(last), "correction") {
+				t.Errorf("after the correction Pixie asks for a confirm word or reads the correction out: %q", last)
+			}
+		})
+	}
+}
+
+// TestLiveConfirmWordKeepsTheConversation (#166): the voice log's 01:17: the user said "Confirm
+// lark" and Pixie hung up, so "Coordinator: allowed" waited for the next conversation. With the
+// app's 3 s silence timeout, the result that follows the confirm word must still be said.
+// Gemini doesn't always hang up here (it didn't when first run without the fix), so this checks
+// the outcome; conversation's TestSayingTheConfirmWordDoesNotEndTheConversation pins the fix.
+//
+//	go test -count=1 -tags live -run TestLiveConfirmWordKeepsTheConversation -v ./voice/
+func TestLiveConfirmWordKeepsTheConversation(t *testing.T) {
+	secrets := liveSecrets(t)
+	if _, ok := secrets.APIKey(gemini.Name); !ok {
+		t.Skip("no Gemini key")
+	}
+	var p liveProvider
+	for _, lp := range liveProviders() {
+		if lp.name == gemini.Name {
+			p = lp
+		}
+	}
+	speech := liveSpeech(t, "Confirm lark.")
+	lead := make([]int16, audio.SampleRate/2)
+	for run := 1; run <= 3; run++ {
+		t.Run(fmt.Sprint("run-", run), func(t *testing.T) {
+			var mu sync.Mutex
+			var calls []handOff
+			var answers, own []string
+			reg := voice.NewToolRegistry()
+			reg.Register(recordingDelegate{mu: &mu, calls: &calls})
+			reg.Register(recordingAnswer{mu: &mu, answers: &answers})
+			for _, o := range ownTools(&mu, &own) {
+				reg.Register(o)
+			}
+			cfg := p.cfg
+			cfg.Instructions = app.Instructions(voice.DefaultPersona(), agent.DelegationPersona)
+			conv := voice.DefaultConversationConfig()
+			conv.CheckClaims, conv.HandOff, conv.ClaimTools = true, true, voice.ClaimTools
+			conv.IdleTimeout, conv.HoldTimeout = 3*time.Second, 3*time.Second
+			r := newLiveRigConv(t, p.model(&liveWireLog{}, t), cfg, secrets, reg, conv)
+			r.rt.Hotkey()
+			if !r.waitFor("Ready", 10*time.Second, func() bool { return r.liveSpy.count(voice.EvReady) > 0 }) {
+				return
+			}
+			r.rt.Inject(voice.Notice{Text: "Coordinator question: Message your session deskpixie, fix the gate, asking it to merge? Say confirm lark."})
+			r.waitFor("Pixie relaying the question", 30*time.Second, func() bool { return r.liveSpy.count(voice.EvResponseDone) > 0 })
+			time.Sleep(3 * time.Second)
+			r.say(append(append([]int16(nil), lead...), speech...))
+			r.waitFor("the user's words", 20*time.Second, func() bool { r.liveSpy.mu.Lock(); defer r.liveSpy.mu.Unlock(); return len(r.liveSpy.heard) > 0 })
+			time.Sleep(time.Second) // the app decides on the word at once; its result follows
+			done := r.liveSpy.count(voice.EvResponseDone)
+			r.rt.Inject(voice.Notice{Text: "Coordinator: allowed"})
+			spoke := r.waitFor("Pixie saying the result", 20*time.Second, func() bool { return r.liveSpy.count(voice.EvResponseDone) > done })
+			r.rt.Hotkey()
+			t.Logf("%s", r.liveSpy.summary())
+			if !spoke {
+				t.Error("the conversation ended before the confirm word's result was said")
+			}
+		})
 	}
 }
