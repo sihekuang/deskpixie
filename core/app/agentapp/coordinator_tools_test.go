@@ -209,6 +209,26 @@ func TestTheCoordinatorPromptSendsTimersWeatherMusicTimeAndMathToTheTools(t *tes
 	}
 }
 
+// #153: with workers on or off, work a pix session is doing, and questions about it, go to
+// that session before the coordinator does anything itself.
+func TestTheCoordinatorPromptHandsASessionsWorkToThatSession(t *testing.T) {
+	for _, md := range []string{RenderClaudeMd("/data/canvas", ""), RenderClaudeMd("/data/canvas", "/Users/x/code")} {
+		handOff := strings.Index(md, "hand it to that session")
+		yourself := strings.Index(md, "do them yourself")
+		if handOff < 0 || yourself < 0 || handOff > yourself {
+			t.Errorf("the hand-off rule must come before doing things yourself:\n%s", md)
+		}
+		for _, rule := range []string{"committed, pushed or built", "without warnings they didn't give"} {
+			if !strings.Contains(md, rule) {
+				t.Errorf("coordinator.md does not mention %q", rule)
+			}
+		}
+	}
+	if solo := RenderClaudeMd("/data/canvas", ""); !strings.Contains(solo, "If no session fits, say so in your reply") {
+		t.Errorf("with workers off, code changes go to a session first:\n%s", solo)
+	}
+}
+
 // mcp__pixie in permissions.allow allows every tool of the pixie server, the local ones too.
 func TestThePermissionAllowListCoversTheLocalTools(t *testing.T) {
 	var v map[string]any
