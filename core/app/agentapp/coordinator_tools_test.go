@@ -225,7 +225,7 @@ func TestTheCoordinatorPromptHandsARequestOnInTheOrderGiven(t *testing.T) {
 		}
 		for _, rule := range []string{"lists your open pix sessions and Pixie's running workers", "DeskPixie or yourself",
 			"committed, pushed or built", "or whether a change", "without warnings they didn't give",
-			"ask the person first", "already allowed you to change"} {
+			"ask the person first", "already allowed you to change", "with no list under it, call `list_sessions`"} {
 			if !strings.Contains(md, rule) {
 				t.Errorf("coordinator.md does not mention %q", rule)
 			}
