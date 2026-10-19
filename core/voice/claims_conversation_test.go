@@ -384,3 +384,70 @@ func TestClaimARealConfirmWordIsLeftAlone(t *testing.T) {
 		t.Fatalf("injects: %q", got)
 	}
 }
+
+func closes(fx []Effect) bool {
+	for _, e := range fx {
+		if e.Kind == EfSignal && e.Signal.Kind == SigClosed {
+			return true
+		}
+	}
+	return false
+}
+
+// Voice log, Oct 18 (20:38, 22:09): with a 3 s silence timeout a conversation closed 3 s after
+// Pixie said "Say confirm …". After a confirm question it listens at least ConfirmListenMin.
+func TestAConfirmQuestionGetsTimeForTheAnswer(t *testing.T) {
+	c := NewConversation(ConversationConfig{IdleTimeout: 3 * time.Second})
+	c.Step(HotkeyInput(), t0())
+	model(c, evReady, t0())
+	c.Step(MicLiveInput(), t0())
+	c.Step(InjectInput(Notice{Text: "Coordinator question: Run git push in the coordinator? Say confirm hawk."}), t0())
+	reply(c, "The coordinator wants to run git push. Say confirm hawk.", ms(t0(), 500))
+	if fx := ticks(c, ms(t0(), 500), 5*time.Second); closes(fx) {
+		t.Fatal("closed before the user could say the confirm word")
+	}
+	if fx := ticks(c, ms(t0(), 5_600), ConfirmListenMin); !closes(fx) {
+		t.Fatal("never closed")
+	}
+}
+
+// Without a confirm question the user's own silence timeout decides.
+func TestAPlainNoticeKeepsTheSilenceTimeout(t *testing.T) {
+	c := NewConversation(ConversationConfig{IdleTimeout: 3 * time.Second})
+	c.Step(HotkeyInput(), t0())
+	model(c, evReady, t0())
+	c.Step(MicLiveInput(), t0())
+	c.Step(InjectInput(Notice{Text: "Coordinator reply: The build passed."}), t0())
+	reply(c, "The build passed.", ms(t0(), 500))
+	if fx := ticks(c, ms(t0(), 500), 5*time.Second); !closes(fx) {
+		t.Fatal("still open after the 3 s timeout")
+	}
+}
+
+// A confirm word from an earlier conversation doesn't make one Pixie says now real.
+func TestClaimAConfirmWordFromAnEarlierConversationDoesNotCount(t *testing.T) {
+	c := newClaimConv(true, true)
+	c.Step(InjectInput(Notice{Text: "Coordinator question: Run git push in the coordinator? Say confirm hawk."}), ms(t0(), 50))
+	c.Step(HotkeyInput(), ms(t0(), 100)) // closes it
+	ticks(c, ms(t0(), 100), 3*time.Second)
+	c.Step(HotkeyInput(), ms(t0(), 4000))
+	model(c, evReady, ms(t0(), 4000))
+	c.Step(MicLiveInput(), ms(t0(), 4000))
+	userTurn(c, "What's going on with the push?", ms(t0(), 4100))
+	fx := reply(c, "Should I check the repo? Say confirm hawk.", ms(t0(), 4500))
+	fx = append(fx, ticks(c, ms(t0(), 4500), 5*time.Second)...)
+	if got := injects(fx); len(got) != 1 || got[0] != MadeUpConfirmFix {
+		t.Fatalf("injects: %q", got)
+	}
+}
+
+// The real case, Oct 18 22:09: relaying a question that had no confirm word, Pixie added one.
+func TestClaimAMadeUpConfirmWordInAReplyToANoticeIsCorrected(t *testing.T) {
+	c := newClaimConv(true, true)
+	c.Step(InjectInput(Notice{Text: "Coordinator question: The deskpixie session is busy. Want me to check the repo's git status myself?"}), ms(t0(), 50))
+	fx := reply(c, "Should I check the repo's git status for you? Say confirm hawk.", ms(t0(), 400))
+	fx = append(fx, ticks(c, ms(t0(), 400), 5*time.Second)...)
+	if got := injects(fx); len(got) != 1 || got[0] != MadeUpConfirmFix {
+		t.Fatalf("injects: %q", got)
+	}
+}

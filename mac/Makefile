@@ -8,8 +8,13 @@ DeskPixie.xcodeproj/project.pbxproj: project.yml Configs/SharedSettings.xcconfig
 
 project: DeskPixie.xcodeproj/project.pbxproj
 
+# A debug build is ad-hoc signed unless SIGNING_IDENTITY names a real one. Ad-hoc, every rebuild
+# is a new app to macOS, which asks for the microphone again; signed, the permission is kept.
+#   make build [SIGNING_IDENTITY="Developer ID Application: ..."]
+BUILD_SIGN_FLAGS = $(if $(filter-out -,$(SIGNING_IDENTITY)),CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="$(SIGNING_IDENTITY)" DEVELOPMENT_TEAM="$(DEVELOPMENT_TEAM)",)
+
 build: project
-	xcodebuild -project DeskPixie.xcodeproj -scheme DeskPixie -configuration Debug -derivedDataPath build build
+	xcodebuild -project DeskPixie.xcodeproj -scheme DeskPixie -configuration Debug -derivedDataPath build $(BUILD_SIGN_FLAGS) build
 
 test:
 	cd Packages/DeskPixieCore && swift test

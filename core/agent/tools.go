@@ -108,9 +108,12 @@ func (j Jobs) Invoke(_ context.Context, raw json.RawMessage) voice.ToolOutcome {
 		}
 		return toolReply(map[string]any{"jobs": views})
 	case "cancel":
-		id, err := j.H.Cancel(textArg(args, "job_id"))
+		id, to, err := j.H.CancelAsked(textArg(args, "job_id"))
 		if err != nil {
 			return toolError(err)
+		}
+		if to != "" {
+			return toolReply(map[string]any{"job_id": id.String(), "status": "answered", "to": to})
 		}
 		return toolReply(map[string]any{"job_id": id.String(), "status": "cancelled"})
 	}

@@ -1058,3 +1058,28 @@ func TestAStateHookIsIgnoredByAHostThatDetectsStatusItself(t *testing.T) {
 		}
 	})
 }
+
+// Voice log, Oct 18 22:47: asked "keep waiting, or ask it for a status update?", the user said
+// "you can stop now" and Pixie cancelled the job, killing the run. A cancel of the job whose
+// question was just relayed goes to the coordinator as the answer: it works out what to stop.
+func TestCancellingTheJobThatJustAskedAnswersItInstead(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRig(t)
+		delegate(t, r, "how is the suite going?")
+		settle()
+		stopHook(r, `<spoken ref="job_000000000001" status="question">Keep waiting, or ask it for a status update?</spoken>`)
+		settle()
+		r.host.SetStatus(Coordinator, PaneIdle)
+		settle()
+		wantJSON(t, invoke(t, Jobs{H: r.h}, `{"action":"cancel"}`),
+			`{"job_id":"job_000000000001","status":"answered","to":"the coordinator, to work out what to stop"}`)
+		settle()
+		prompts := r.host.Prompts()
+		if last := prompts[len(prompts)-1].Text; !strings.Contains(last, "The user answered: stop") || !strings.Contains(last, "stop waiting or stop the work") {
+			t.Fatal(last)
+		}
+		if r.h.JobStatus()[0].Status != JobWorking {
+			t.Fatal(r.h.JobStatus())
+		}
+	})
+}

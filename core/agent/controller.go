@@ -1707,6 +1707,12 @@ func (c *AgentController) denyPendingFor(job JobID, why string, fx *[]Effect) {
 	}
 }
 
+// AskedLast: id's question is the one Pixie relayed last, and it is still waiting.
+func (c *AgentController) AskedLast(id JobID) bool {
+	j, ok := c.jobs.Get(id)
+	return c.asked.session == "" && c.asked.job == id && ok && j.Status == JobQuestion
+}
+
 // noAnswerWaiting: an answer with no question waiting for it.
 const noAnswerWaiting = "No job is waiting for an answer."
 
