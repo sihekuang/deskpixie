@@ -209,23 +209,33 @@ func TestTheCoordinatorPromptSendsTimersWeatherMusicTimeAndMathToTheTools(t *tes
 	}
 }
 
-// #153: with workers on or off, work a pix session is doing, and questions about it, go to
-// that session before the coordinator does anything itself.
-func TestTheCoordinatorPromptHandsASessionsWorkToThatSession(t *testing.T) {
+// #153: who does a request, in order: a pix session the person started that's on it, then a
+// worker Pixie already started on it, then the coordinator itself (a new worker for a bigger
+// job). The coordinator may edit a repository, after asking unless the person allowed it.
+func TestTheCoordinatorPromptHandsARequestOnInTheOrderGiven(t *testing.T) {
 	for _, md := range []string{RenderClaudeMd("/data/canvas", ""), RenderClaudeMd("/data/canvas", "/Users/x/code")} {
-		handOff := strings.Index(md, "hand it to that session")
-		yourself := strings.Index(md, "do them yourself")
-		if handOff < 0 || yourself < 0 || handOff > yourself {
-			t.Errorf("the hand-off rule must come before doing things yourself:\n%s", md)
+		order := []string{"1. A pix session the person started", "2. Else a worker Pixie already started", "3. Else do it yourself", "do them yourself"}
+		last := -1
+		for _, step := range order {
+			at := strings.Index(md, step)
+			if at <= last {
+				t.Errorf("%q missing or out of order:\n%s", step, md)
+			}
+			last = at
 		}
-		for _, rule := range []string{"committed, pushed or built", "without warnings they didn't give", "lists your open pix sessions", "DeskPixie or yourself", "or whether a change"} {
+		for _, rule := range []string{"lists your open pix sessions and Pixie's running workers", "DeskPixie or yourself",
+			"committed, pushed or built", "or whether a change", "without warnings they didn't give",
+			"ask the person first", "already allowed you to change"} {
 			if !strings.Contains(md, rule) {
 				t.Errorf("coordinator.md does not mention %q", rule)
 			}
 		}
+		if strings.Contains(md, "Never edit a repository yourself") {
+			t.Error("the coordinator may now edit a repository, after asking")
+		}
 	}
-	if solo := RenderClaudeMd("/data/canvas", ""); !strings.Contains(solo, "If no session fits, say so in your reply") {
-		t.Errorf("with workers off, code changes go to a session first:\n%s", solo)
+	if workers := RenderClaudeMd("/data/canvas", "/Users/x/code"); !strings.Contains(workers, "bigger job") {
+		t.Error("with workers on, a bigger job gets a new worker")
 	}
 }
 

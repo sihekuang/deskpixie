@@ -209,20 +209,33 @@ func userSessionRows(ctx context.Context, sec SessionHost, mask func(string) str
 	return rows, nil
 }
 
-// SessionsNote lists your open pix sessions under a new request (#153), so the coordinator
-// sees the one already working on it without having to look: "" with none open.
-func SessionsNote(rows []SessionRow) string {
-	if len(rows) == 0 {
+// RequestNote goes under a new request (#153): your open pix sessions, then Pixie's live workers
+// with their job's task, then the order to hand the request on in, so the coordinator sees who
+// is already on it without having to look. "" with neither open.
+func RequestNote(sessions []SessionRow, workers []WorkerRow, task func(JobID) string) string {
+	workers = slices.DeleteFunc(slices.Clone(workers), func(w WorkerRow) bool { return !w.Status.IsLive() })
+	if len(sessions) == 0 && len(workers) == 0 {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("Your open pix sessions (if one is working on this, hand it over with message_session):")
-	for _, r := range rows {
-		fmt.Fprintf(&b, "\n- %s: %q, %s repo, %s", r.Name, r.Description, r.Repo, r.Status)
-		if r.LastTurn != "" {
-			fmt.Fprintf(&b, ", last turn %q", clipRunes(r.LastTurn, maxNoteTurn))
+	if len(sessions) > 0 {
+		b.WriteString("Your open pix sessions:")
+		for _, r := range sessions {
+			fmt.Fprintf(&b, "\n- %s: %q, %s repo, %s", r.Name, r.Description, r.Repo, r.Status)
+			if r.LastTurn != "" {
+				fmt.Fprintf(&b, ", last turn %q", clipRunes(r.LastTurn, maxNoteTurn))
+			}
 		}
+		b.WriteString("\n")
 	}
+	if len(workers) > 0 {
+		b.WriteString("Pixie's workers:")
+		for _, w := range workers {
+			fmt.Fprintf(&b, "\n- %s: %s repo, %s, on %q", w.Name, w.Repo, w.Status, clipRunes(task(w.JobID), maxNoteTurn))
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("Hand this on in this order: a session on the same thing (message_session), else a worker on it (message_worker), else do it yourself.")
 	return b.String()
 }
 

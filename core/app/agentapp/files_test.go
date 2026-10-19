@@ -181,7 +181,7 @@ func TestInstallWritesClaudeMdAndSettingsIntoAppDataOnly(t *testing.T) {
 
 func TestClaudeMdSaysHowRepositoryWorkIsDone(t *testing.T) {
 	solo := RenderClaudeMd("/data/canvas", "")
-	if !strings.Contains(solo, "Workers that edit repositories") || strings.Contains(solo, "start_worker") {
+	if !strings.Contains(solo, "workers are turned off") || strings.Contains(solo, "start_worker") {
 		t.Fatal(solo)
 	}
 	with := RenderClaudeMd("/data/canvas", "/Users/x/Documents/Projects")
