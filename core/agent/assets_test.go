@@ -188,3 +188,22 @@ func TestTheDelegationPersonaHandsOffTheUsersWordsAsSaid(t *testing.T) {
 		}
 	}
 }
+
+// #161: an answer to a session's question goes through answer_job too (the app types it into
+// the session that asked), and Pixie never makes up a confirm word.
+func TestPixieAnswersASessionsQuestionThroughAnswerJob(t *testing.T) {
+	for _, phrase := range []string{
+		`or a "Session update:" line that says a session is asking`,
+		"it goes to whoever asked the question you relayed last",
+		"Never make up a confirm word",
+		`Lines starting "Session update:" are news from one of the user's own sessions`,
+		"ask the user that question in your own words; don't hand it off or answer it yourself",
+	} {
+		if !strings.Contains(DelegationPersona, phrase) {
+			t.Errorf("delegation.md does not say %q", phrase)
+		}
+	}
+	if d := (AnswerJob{}).Description(); !strings.Contains(d, "the question you relayed last, a job's or a session's") {
+		t.Error(d)
+	}
+}

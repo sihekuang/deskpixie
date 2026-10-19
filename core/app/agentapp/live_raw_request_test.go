@@ -111,6 +111,7 @@ func TestLiveRawRequestTheCoordinatorWorksOutWhatWasMeant(t *testing.T) {
 		t.Fatal("no delegate tool")
 	}
 
+	t.Run("answer-to-sort", func(t *testing.T) { liveAnswerToSort(t, a, v, delegate) })
 	for _, c := range rawRequestCases {
 		t.Run(c.name, func(t *testing.T) {
 			before := len(v.all())
@@ -143,5 +144,55 @@ func TestLiveRawRequestTheCoordinatorWorksOutWhatWasMeant(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// liveAnswerToSort (#161): two requests each end in a question; an answer that says neither job
+// goes to the coordinator with both questions, and it applies it to the one it fits.
+func liveAnswerToSort(t *testing.T, a *agentapp.Agent, v *liveVoice, delegate voice.Tool) {
+	var answer voice.Tool
+	for _, tool := range a.Tools() {
+		if tool.Name() == "answer_job" {
+			answer = tool
+		}
+	}
+	before := len(v.all())
+	for _, task := range []string{
+		"Ask me whether I'd like tea or coffee, as a question (status question), and wait for my answer.",
+		"Ask me which color I like, red or blue, as a question (status question), and wait for my answer.",
+	} {
+		args, _ := json.Marshal(map[string]string{"task": task})
+		delegate.Invoke(context.Background(), args)
+	}
+	questions := func() (n int) {
+		for _, text := range v.all()[before:] {
+			if strings.HasPrefix(text, "Coordinator question:") {
+				n++
+			}
+		}
+		return n
+	}
+	for deadline := time.Now().Add(3 * time.Minute); questions() < 2 && time.Now().Before(deadline); time.Sleep(500 * time.Millisecond) {
+	}
+	if questions() < 2 {
+		t.Fatalf("the coordinator didn't ask both; injected %q", v.all()[before:])
+	}
+	asked := len(v.all())
+	out := answer.Invoke(context.Background(), json.RawMessage(`{"answer":"Blue."}`))
+	t.Logf("answer_job → %s", out.Output)
+	reply := ""
+	for deadline := time.Now().Add(3 * time.Minute); reply == "" && time.Now().Before(deadline); time.Sleep(500 * time.Millisecond) {
+		for _, text := range v.all()[asked:] {
+			if strings.HasPrefix(text, "Coordinator reply:") || strings.HasPrefix(text, "Coordinator question:") {
+				reply += strings.ToLower(text) + " "
+			}
+		}
+	}
+	t.Logf("after the answer: %q", v.all()[asked:])
+	if !strings.Contains(reply, "blue") {
+		t.Errorf("the coordinator should apply \"Blue\" to the color question: %q", reply)
+	}
+	if strings.Contains(reply, "which color") || strings.Contains(reply, "red or blue") {
+		t.Errorf("the coordinator asked the color question again: %q", reply)
 	}
 }

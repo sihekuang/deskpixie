@@ -10,12 +10,16 @@ package voice_test
 // what it was handed. Providers without a key skip, as in live_test.go. Run:
 //
 //	LIVE_DELEGATION_N=3 go test -tags live -run TestLiveDelegationOfSeveralRequests -v ./voice/
+//
+// Gemini runs first; when it fails, the OpenAI providers are skipped (LIVE_ALL_PROVIDERS=1
+// runs them anyway).
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -27,6 +31,7 @@ import (
 	"github.com/sihekuang/deskpixie/core/audio"
 	"github.com/sihekuang/deskpixie/core/tools"
 	"github.com/sihekuang/deskpixie/core/voice"
+	"github.com/sihekuang/deskpixie/core/voice/gemini"
 )
 
 // handOff is one delegate call: its task and context, lowercased.
@@ -178,8 +183,16 @@ func TestLiveDelegationOfSeveralRequests(t *testing.T) {
 	}
 	instructions := app.Instructions(voice.DefaultPersona(), agent.DelegationPersona)
 	lead := make([]int16, audio.SampleRate/2) // 0.5 s of silence before speaking
-	for _, p := range liveProviders() {
-		t.Run(p.name, func(t *testing.T) {
+	// Gemini first: it costs far less, and when it fails the OpenAI runs are skipped
+	// (LIVE_ALL_PROVIDERS=1 runs them anyway).
+	providers := liveProviders()
+	sort.SliceStable(providers, func(i, j int) bool { return providers[i].name == gemini.Name && providers[j].name != gemini.Name })
+	geminiFailed := false
+	for _, p := range providers {
+		passed := t.Run(p.name, func(t *testing.T) {
+			if p.name != gemini.Name && geminiFailed && os.Getenv("LIVE_ALL_PROVIDERS") == "" {
+				t.Skip("Gemini failed: fix that first (LIVE_ALL_PROVIDERS=1 runs this anyway)")
+			}
 			if _, ok := secrets.APIKey(p.name); !ok {
 				v, _ := voice.VarFor(p.name)
 				t.Skipf("no %s found in the environment or the app's .env files", v)
@@ -230,5 +243,93 @@ func TestLiveDelegationOfSeveralRequests(t *testing.T) {
 				})
 			}
 		})
+		if p.name == gemini.Name && !passed {
+			geminiFailed = true
+		}
+	}
+}
+
+// recordingAnswer is answer_job with its real description and schema, recording each answer and
+// replying as the app does when the session that asked gets it (#161).
+type recordingAnswer struct {
+	agent.AnswerJob
+	mu      *sync.Mutex
+	answers *[]string
+}
+
+func (a recordingAnswer) Invoke(_ context.Context, raw json.RawMessage) voice.ToolOutcome {
+	var v struct {
+		Answer string
+		JobID  string `json:"job_id"`
+	}
+	_ = json.Unmarshal(raw, &v)
+	a.mu.Lock()
+	*a.answers = append(*a.answers, strings.ToLower(v.Answer+" | "+v.JobID))
+	a.mu.Unlock()
+	return voice.ToolOutcome{Output: json.RawMessage(`{"to":"the session that asked","status":"answered"}`)}
+}
+
+// #161, live: Pixie relays a question, the user answers it, and the answer goes through
+// answer_job without a job id; Pixie never makes up a confirm word.
+func TestLiveAnsweringARelayedQuestion(t *testing.T) {
+	secrets := liveSecrets(t)
+	instructions := app.Instructions(voice.DefaultPersona(), agent.DelegationPersona)
+	lead := make([]int16, audio.SampleRate/2)
+	cases := []struct{ name, notice, say string }{
+		{"session-asks", "Session update: deskpixie: hand-off tests is asking: should I rebuild it so you can try it, and open the PR?", "Yes, let's do that."},
+		{"coordinator-asks", "Coordinator question: The deskpixie session asks whether to make that the rule: Pixie does its own tool part and hands off the rest.", "Yes, make it the rule."},
+	}
+	providers := liveProviders()
+	sort.SliceStable(providers, func(i, j int) bool { return providers[i].name == gemini.Name && providers[j].name != gemini.Name })
+	geminiFailed := false
+	for _, p := range providers {
+		passed := t.Run(p.name, func(t *testing.T) {
+			if p.name != gemini.Name && geminiFailed && os.Getenv("LIVE_ALL_PROVIDERS") == "" {
+				t.Skip("Gemini failed: fix that first (LIVE_ALL_PROVIDERS=1 runs this anyway)")
+			}
+			if _, ok := secrets.APIKey(p.name); !ok {
+				t.Skip("no key")
+			}
+			for _, c := range cases {
+				speech := liveSpeech(t, c.say)
+				t.Run(c.name, func(t *testing.T) {
+					var mu sync.Mutex
+					var calls []handOff
+					var answers, own []string
+					reg := voice.NewToolRegistry()
+					reg.Register(recordingDelegate{mu: &mu, calls: &calls})
+					reg.Register(recordingAnswer{mu: &mu, answers: &answers})
+					for _, o := range ownTools(&mu, &own) {
+						reg.Register(o)
+					}
+					cfg := p.cfg
+					cfg.Instructions = instructions
+					r := newLiveRigWith(t, p.model(&liveWireLog{}, t), cfg, secrets, reg)
+					r.rt.Hotkey()
+					if !r.waitFor("Ready", 10*time.Second, func() bool { return r.liveSpy.count(voice.EvReady) > 0 }) {
+						return
+					}
+					r.rt.Inject(voice.Notice{Text: c.notice})
+					r.waitFor("Pixie relaying the question", 30*time.Second, func() bool { return r.liveSpy.count(voice.EvResponseDone) > 0 })
+					time.Sleep(3 * time.Second) // its audio finishes playing
+					r.say(append(append([]int16(nil), lead...), speech...))
+					r.waitFor("an answer_job call", 30*time.Second, func() bool { mu.Lock(); defer mu.Unlock(); return len(answers) > 0 })
+					time.Sleep(3 * time.Second)
+					r.rt.Hotkey()
+					mu.Lock()
+					defer mu.Unlock()
+					t.Logf("%s; answers %q; delegate calls %+v", r.liveSpy.summary(), answers, calls)
+					if len(answers) != 1 || len(calls) != 0 {
+						t.Errorf("want one answer_job and no delegate: answers %q, delegate %+v", answers, calls)
+					}
+					if strings.Contains(strings.ToLower(r.liveSpy.assistant()), "say confirm") {
+						t.Errorf("Pixie made up a confirm word: %q", r.liveSpy.assistant())
+					}
+				})
+			}
+		})
+		if p.name == gemini.Name && !passed {
+			geminiFailed = true
+		}
 	}
 }

@@ -122,9 +122,9 @@ type AnswerJob struct{ H *AgentHandle }
 func (AnswerJob) Name() string { return "answer_job" }
 
 func (AnswerJob) Description() string {
-	return "Give the coordinator the user's spoken answer to an \"Coordinator question:\" you relayed. Never use it for a " +
-		"confirm word: the app handles those itself. Without job_id it answers the only job waiting for an " +
-		"answer; if several are waiting it returns an error asking which."
+	return "Give the user's spoken answer to the question you relayed last, a job's or a session's: the coordinator's " +
+		"\"Coordinator question:\", or a \"Session update:\" that says a session is asking. Never use it for a confirm word: the app handles those " +
+		"itself. Leave out job_id: the app knows who asked, and the coordinator sorts out which of several questions it answers."
 }
 
 func (AnswerJob) Parameters() json.RawMessage {
@@ -140,9 +140,12 @@ func (a AnswerJob) Invoke(_ context.Context, raw json.RawMessage) voice.ToolOutc
 	if answer == "" {
 		return toolReply(map[string]any{"error": "answer is required"})
 	}
-	id, err := a.H.Answer(textArg(args, "job_id"), answer)
+	id, to, err := a.H.AnswerAsked(textArg(args, "job_id"), answer)
 	if err != nil {
 		return toolError(err)
+	}
+	if to != "" {
+		return toolReply(map[string]any{"to": to, "status": "answered"})
 	}
 	return toolReply(map[string]any{"job_id": id.String(), "status": "answered"})
 }

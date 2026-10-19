@@ -311,6 +311,7 @@ const (
 	EfManual           // Agent, Manual: a Claude agent is (or no longer is) in Manual mode
 	EfShowPane         // Job, Name: bring up this agent's pane (Name "": the coordinator) — it waits at a prompt in its terminal (#110)
 	EfAnswerSession    // Name, Text, Answer: type your answer to session Name's prompt Text (#105); a failure comes back as InSessionAnswerFailed
+	EfTellSession      // Name, Text: type your answer to the question session Name's turn ended on (#161); a failure comes back as InSessionAnswerFailed
 )
 
 // Effect is one thing the caller must do, in order. Err set (non-empty) is the Err branch of
@@ -358,6 +359,9 @@ type watchdog struct {
 
 // AgentController holds the delegation state. Not safe for concurrent use; the runtime owns it.
 type AgentController struct {
+	// asked: the question Pixie relayed last, which an answer without a job id answers (#161).
+	asked asker
+
 	// modes: agent -> in Manual mode (Claude agents only); manualSaid: Pixie told the user once (#97).
 	modes      map[string]bool
 	manualSaid bool
@@ -560,7 +564,7 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 			c.confirms.TakeSession(ev.Agent, ev.Question.ID)
 		case ev.Kind == PaneEventTurn:
 			if ev.Turn != nil {
-				c.onSessionTurn(*ev.Turn, now, &fx)
+				c.onSessionTurn(ev.Agent, *ev.Turn, now, &fx)
 			}
 		case ev.Kind == PaneEventQuestion || ev.Kind == PaneEventQuestionGone:
 		case ev.Kind == PaneEventStatus:
@@ -1329,6 +1333,7 @@ func (c *AgentController) onReply(id JobID, status SpokenStatus, text string, no
 		_, _ = c.jobs.Transition(id, JobQuestion, now)
 		c.jobs.SetReply(id, text, now)
 		c.saveJob(id, fx)
+		c.askedBy(asker{job: id, at: now})
 		c.deliverOpening(NewJobLine(LineQuestion, text, id), now, fx)
 	case SpokenDone:
 		_, _ = c.jobs.Transition(id, JobDone, now)
@@ -1549,7 +1554,7 @@ const MaxSessionDetailBytes = 2 << 10
 // a turn of yours that ran long enough, or any turn Pixie started, is told like an update:
 // its gist, or its question (never held by the cap). Pending confirm words are masked in all
 // of it: the label is agent-settable too.
-func (c *AgentController) onSessionTurn(t SessionTurn, now Millis, fx *[]Effect) {
+func (c *AgentController) onSessionTurn(name string, t SessionTurn, now Millis, fx *[]Effect) {
 	if !c.settings.SessionTurns || c.shutDown {
 		return
 	}
@@ -1559,6 +1564,12 @@ func (c *AgentController) onSessionTurn(t SessionTurn, now Millis, fx *[]Effect)
 	tokens := c.pendingTokens()
 	reply := maskPendingTokens(t.Reply, tokens)
 	gist, asking := SessionGist(reply)
+	switch {
+	case asking:
+		c.askedBy(asker{session: name, at: now})
+	case c.asked.session == name:
+		c.asked = asker{} // it moved on: its question is gone
+	}
 	c.deliverUpdate(Line{
 		Kind:   LineSession,
 		Text:   SessionTurnLine(maskPendingTokens(t.Label, tokens), gist, asking),
@@ -1710,6 +1721,13 @@ func (c *AgentController) answer(jobID JobID, text string, now Millis, fx *[]Eff
 		err = fmt.Sprintf("%s is not waiting for an answer.", jobID)
 	case jobID != "":
 		err = fmt.Sprintf("No open job %s.", jobID)
+	case c.asked.session != "":
+		*fx = append(*fx, Effect{Kind: EfTellSession, Name: c.asked.session, Text: strings.TrimSpace(text)},
+			Effect{Kind: EfAnswerResult, Name: c.asked.session})
+		c.asked = asker{}
+		return
+	case c.asked.job != "" && c.jobs.IsOpen(c.asked.job) && waiting(c.asked.job):
+		id = c.asked.job
 	default:
 		var asking []JobID
 		for _, o := range c.OpenJobs() {
@@ -1723,7 +1741,12 @@ func (c *AgentController) answer(jobID JobID, text string, now Millis, fx *[]Eff
 		case 1:
 			id = asking[0]
 		default:
-			err = fmt.Sprintf("Several jobs are waiting for an answer (%s). Which one?", joinIDs(asking))
+			// Several waiting, none asked last: the coordinator works out which this answers.
+			c.inbox.Push(c.answerToSort(asking, text))
+			*fx = append(*fx, Effect{Kind: EfAnswerResult, Text: "coordinator"})
+			c.asked = asker{}
+			c.flush(now, fx)
+			return
 		}
 	}
 	if err == "" && slices.ContainsFunc(c.confirms.Pending(), func(p Pending) bool { return p.Job == id }) {
@@ -1937,4 +1960,40 @@ func short(task string) string {
 		return string([]rune(t)[:59]) + "…"
 	}
 	return t
+}
+
+// asker is who asked the question Pixie relayed last (#161): a job, or a session whose turn
+// ended on a question. Two asked at once (several questions in one Stop) are no one: which to
+// answer is the user's to say.
+type asker struct {
+	job     JobID
+	session string
+	at      Millis
+	tie     bool
+}
+
+func (c *AgentController) askedBy(a asker) {
+	if prev := c.asked; prev.at == a.at && (prev.job != "" || prev.session != "" || prev.tie) && prev != a {
+		a = asker{tie: true, at: a.at}
+	}
+	c.asked = a
+}
+
+// answerToSort is the coordinator's message for an answer to one of several waiting questions
+// (#161): it works out which, and asks the user only if it can't tell.
+func (c *AgentController) answerToSort(asking []JobID, text string) Message {
+	var b strings.Builder
+	fmt.Fprintf(&b, "The user answered: %q. Several of your questions are waiting:", strings.TrimSpace(text))
+	for _, id := range asking {
+		q := ""
+		if j, ok := c.jobs.Get(id); ok && j.Reply != nil {
+			q = *j.Reply
+		}
+		fmt.Fprintf(&b, "\n- %s asked: %q", id, q)
+	}
+	b.WriteString("\nYou work out which question it answers (all of them, if they ask the same thing) and go on with it; ask the user only if you can't tell.")
+	for _, id := range asking {
+		fmt.Fprintf(&b, "\n[ref %s]", id)
+	}
+	return Message{Text: b.String(), Refs: asking}
 }

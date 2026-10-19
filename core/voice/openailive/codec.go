@@ -416,6 +416,8 @@ func (c *codec) clientReply(id string, output []byte) []obj {
 		text = "The app gave this question to the coordinator (" + r.JobID + "). Its answer arrives later as a \"Coordinator reply:\" line; until then don't answer it yourself. If you haven't yet, say only that you're checking."
 	case r.Routed == "delegate":
 		text = "The app handed this to the coordinator as " + r.JobID + ". Tell the user in a few words that you've passed it on and will let them know; don't answer it yourself."
+	case r.Routed == "answer_job" && r.JobID == "":
+		text = "The app passed the user's answer to " + r.Note + ". Say in a few words that you've passed it on."
 	case r.Routed == "answer_job":
 		text = "The app passed the user's answer to the coordinator (" + r.JobID + "). Say in a few words that you've passed it on."
 	case r.Routed == "none":

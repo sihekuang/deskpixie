@@ -353,3 +353,26 @@ func TestClientDelegationAfterAReplayedQuestionIsAnAnswer(t *testing.T) {
 		t.Fatalf("%+v", a)
 	}
 }
+
+// #161: an answer the app typed into the session that asked is answered, not a new request;
+// a session's turn that asks is a question to answer, its prompts in the bubble are not.
+func TestClientDelegationAnswersASessionsQuestion(t *testing.T) {
+	reg := NewToolRegistry()
+	del := &recTool{name: DelegateTool, out: `{"job_id":"job_1","status":"delegated"}`}
+	reg.Register(del)
+	reg.Register(&recTool{name: AnswerJobTool, out: `{"to":"the session that asked","status":"answered"}`})
+	if r, _ := route(t, reg, ClientDelegationArgs{Task: "yes, do it", Answer: true}); r.Routed != "answer_job" || len(del.got) != 0 {
+		t.Fatalf("%+v %v", r, del.got)
+	}
+	for text, want := range map[string]bool{
+		"Session update: deskpixie: hand-off is asking: should I rebuild it and open the PR?":     true,
+		"Coordinator replies while you were away:\n- Session update: api is asking: ship it?":     true,
+		"Session update: deskpixie is asking: Which file? Pick 1 or 2 in the bubble.":             false,
+		"Session update: deskpixie: hand-off is done: the suite passed.":                          false,
+		"Session update: deskpixie: Run make release. Say confirm hawk, or choose in the bubble.": false,
+	} {
+		if got := asksQuestion(text); got != want {
+			t.Errorf("asksQuestion(%q) = %v", text, got)
+		}
+	}
+}

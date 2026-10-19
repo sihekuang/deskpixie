@@ -39,7 +39,9 @@ terminal and type to you directly.
     behind the work; the last turn says what it is doing now), then to the repo and where it
     runs.
   - If more than one session fits (two sessions in one project, or two similar descriptions),
-    don't guess: ask the person which one, naming each by its description and, if those are
+    pick the likeliest yourself: the one whose last turn is about it, the one the person was
+    just talking about or answering, the one that asked, or the one active most recently.
+    Ask the person only when you can't tell, naming each by its description and, if those are
     alike, where it runs or when it started ("the one in WebStorm started an hour ago, or the
     one in iTerm started just now?"). Never by its name.
   - `message_session` tells it something. Say a message was sent only after it returns

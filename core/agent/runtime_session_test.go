@@ -2,6 +2,7 @@ package agent_test
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -189,5 +190,28 @@ func TestARecallRequestDoesNotListSessions(t *testing.T) {
 	settle()
 	if got := coordinatorText(r); !strings.Contains(got, "the logo") || strings.Contains(got, "pix sessions") {
 		t.Fatal(got)
+	}
+}
+
+// #161: Pixie relays a session's question; the user's answer, through answer_job without a job
+// id, is typed into that session.
+func TestAnAnswerToASessionsQuestionIsTypedIntoIt(t *testing.T) {
+	user := &userFake{FakeSessionHost: agenttest.NewFakeSessionHost(), described: map[string]string{}}
+	user.FakeSessionHost.StartAgent(context.Background(), AgentSpec{Name: "focus-claude"})
+	cfg := config(false)
+	cfg.Settings.SessionTurns = true
+	r := build(t, &agenttest.MemStore{}, cfg, func(h *agenttest.FakeSessionHost) SessionHost { return NewCompositeHost(h, user) }, nil)
+	r.voice.SetOpen(true)
+	r.h.Voice(VoiceSignal{Kind: voice.SigOpened})
+	r.h.Input(PaneInput(PaneEvent{Kind: PaneEventTurn, Agent: "focus-claude", Turn: &SessionTurn{Label: "focus: release",
+		Reply: "The build is ready.\n\nShould I open the PR?", FromPixie: true}}))
+	settle()
+	got := invoke(t, AnswerJob{H: r.h}, `{"answer":"Yes, open it."}`)
+	if !reflect.DeepEqual(got, jsonOf(`{"to":"the session that asked","status":"answered"}`)) {
+		t.Fatalf("%v", got)
+	}
+	settle()
+	if p := user.Prompts(); len(p) != 1 || p[0].Agent != "focus-claude" || p[0].Text != "Yes, open it." {
+		t.Fatalf("typed into the session: %+v", p)
 	}
 }
