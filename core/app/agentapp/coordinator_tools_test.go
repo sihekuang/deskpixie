@@ -209,6 +209,36 @@ func TestTheCoordinatorPromptSendsTimersWeatherMusicTimeAndMathToTheTools(t *tes
 	}
 }
 
+// #153: who does a request, in order: a pix session the person started that's on it, then a
+// worker Pixie already started on it, then the coordinator itself (a new worker for a bigger
+// job). The coordinator may edit a repository, after asking unless the person allowed it.
+func TestTheCoordinatorPromptHandsARequestOnInTheOrderGiven(t *testing.T) {
+	for _, md := range []string{RenderClaudeMd("/data/canvas", ""), RenderClaudeMd("/data/canvas", "/Users/x/code")} {
+		order := []string{"1. A pix session the person started", "2. Else a worker Pixie already started", "3. Else do it yourself", "do them yourself"}
+		last := -1
+		for _, step := range order {
+			at := strings.Index(md, step)
+			if at <= last {
+				t.Errorf("%q missing or out of order:\n%s", step, md)
+			}
+			last = at
+		}
+		for _, rule := range []string{"lists your open pix sessions and Pixie's running workers", "DeskPixie or yourself",
+			"committed, pushed or built", "or whether a change", "without warnings they didn't give",
+			"ask the person first", "already allowed you to change", "with no list under it, call `list_sessions`"} {
+			if !strings.Contains(md, rule) {
+				t.Errorf("coordinator.md does not mention %q", rule)
+			}
+		}
+		if strings.Contains(md, "Never edit a repository yourself") {
+			t.Error("the coordinator may now edit a repository, after asking")
+		}
+	}
+	if workers := RenderClaudeMd("/data/canvas", "/Users/x/code"); !strings.Contains(workers, "bigger job") {
+		t.Error("with workers on, a bigger job gets a new worker")
+	}
+}
+
 // mcp__pixie in permissions.allow allows every tool of the pixie server, the local ones too.
 func TestThePermissionAllowListCoversTheLocalTools(t *testing.T) {
 	var v map[string]any

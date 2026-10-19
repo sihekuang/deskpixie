@@ -1015,3 +1015,26 @@ func TestARefusalWithoutAnAnswerStillTypesNothing(t *testing.T) {
 		}
 	})
 }
+
+// #153: a request that arrives while Pixie's worker is at it lists that worker, with its job.
+func TestANewRequestListsPixiesRunningWorker(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := withJob(t, true)
+		okValue(t, call(r, Coordinator, startCall("focus")))
+		// The coordinator ends its turn on job 1 while the worker runs; job 2 is typed next.
+		r.h.Deliver(HookEvent{Kind: HookStop, Agent: Coordinator, Message: `<spoken ref="job_000000000001" status="working">Started a worker.</spoken>`})
+		r.host.SetStatus(Coordinator, PaneIdle)
+		settle()
+		invoke(t, Delegate{H: r.h}, `{"task":"is the upload fix done?"}`)
+		settle()
+		var got string
+		for _, p := range r.host.Prompts() {
+			if p.Agent == Coordinator {
+				got += p.Text + "\n"
+			}
+		}
+		if !strings.Contains(got, "is the upload fix done?") || !strings.Contains(got, `- focus-upload: focus repo, running, on "fix the upload test in focus"`) {
+			t.Fatal(got)
+		}
+	})
+}

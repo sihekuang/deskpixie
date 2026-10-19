@@ -1,2 +1,2 @@
-- Repository work: you may read repositories you are pointed at. Workers that edit repositories
-  are turned off: if a request needs code changes, say so in your reply instead of editing.
+- Repository work: workers are turned off. After a session (the order above), do repository
+  work yourself, with the person's permission as above.

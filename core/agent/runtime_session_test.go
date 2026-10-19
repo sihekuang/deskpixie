@@ -95,7 +95,7 @@ func TestAMessageThatPushesOrMergesAsksFirst(t *testing.T) {
 	r, user := pixRig(t)
 	reply := messageCall(r, "Commit, push, open one PR covering #137 and #138, and merge it.")
 	settle()
-	if !hasCall(r.voice.Calls(), agenttest.InjectCall("Coordinator question: Tell your session login bug to push and merge? Say confirm hawk.")) {
+	if !hasCall(r.voice.Calls(), agenttest.InjectCall("Coordinator question: Message your session login bug, asking it to push and merge? Say confirm hawk.")) {
 		t.Fatal(r.voice.Calls())
 	}
 	if len(user.Prompts()) != 0 {
@@ -125,6 +125,20 @@ func TestNoKeepsAPushMessageUnsent(t *testing.T) {
 	}
 }
 
+// #152: a message that only forbids a push, as a careful coordinator writes it, is not one.
+func TestAMessageThatForbidsPushingIsSentWithoutAsking(t *testing.T) {
+	r, user := pixRig(t)
+	if got := <-messageCall(r, "Is there anything committed on this branch? Please don't push anything or change anything, just tell me what's committed."); got.Err != nil {
+		t.Fatal(got.Err)
+	}
+	if p := user.Prompts(); len(p) != 1 || !strings.Contains(p[0].Text, "don't push") {
+		t.Fatalf("%+v", p)
+	}
+	if len(r.voice.Calls()) != 0 {
+		t.Fatalf("asked although nothing is pushed: %v", r.voice.Calls())
+	}
+}
+
 func TestAnOrdinaryMessageIsSentWithoutAsking(t *testing.T) {
 	r, user := pixRig(t)
 	if got := <-messageCall(r, "Run the tests and tell me what fails."); got.Err != nil {
@@ -132,5 +146,48 @@ func TestAnOrdinaryMessageIsSentWithoutAsking(t *testing.T) {
 	}
 	if len(user.Prompts()) != 1 {
 		t.Fatalf("%+v", user.Prompts())
+	}
+}
+
+// coordinatorText is everything typed into the coordinator so far.
+func coordinatorText(r *rtRig) string {
+	var b strings.Builder
+	for _, p := range r.host.Prompts() {
+		b.WriteString(p.Text + "\n")
+	}
+	return b.String()
+}
+
+// #153: a new request carries the sessions you have open, so the coordinator sees the one
+// already working on it without having to remember to look.
+func TestANewRequestListsYourOpenSessions(t *testing.T) {
+	r, user := pixRig(t)
+	user.lastTurn = "Fixed the redirect after sign-in."
+	delegate(t, r, "is the login fix pushed?")
+	settle()
+	got := coordinatorText(r)
+	for _, want := range []string{"is the login fix pushed?", "Your open pix sessions", `focus-claude: "login bug"`, "focus repo", "idle", `last turn "Fixed the redirect after sign-in."`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+}
+
+func TestANewRequestSaysNothingAboutSessionsWhenNoneAreOpen(t *testing.T) {
+	r := rigWith(t, &agenttest.MemStore{}, false)
+	delegate(t, r, "summarise the issues")
+	settle()
+	if got := coordinatorText(r); !strings.Contains(got, "summarise the issues") || strings.Contains(got, "pix sessions") {
+		t.Fatal(got)
+	}
+}
+
+// Recall asks what the coordinator remembers: no work, so no sessions to hand it to.
+func TestARecallRequestDoesNotListSessions(t *testing.T) {
+	r, _ := pixRig(t)
+	delegate(t, r, RecallPrefix+"what did we decide about the logo?")
+	settle()
+	if got := coordinatorText(r); !strings.Contains(got, "the logo") || strings.Contains(got, "pix sessions") {
+		t.Fatal(got)
 	}
 }

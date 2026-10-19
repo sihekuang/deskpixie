@@ -421,16 +421,73 @@ var gatedForms = map[string]string{
 	"deploy": "deploy", "deploys": "deploy", "deploying": "deploy",
 }
 
+// negators turn the rest of their clause into what not to do ("don't push", "without merging");
+// so do "instead of" and any "n't" word.
+var negators = map[string]bool{"not": true, "no": true, "never": true, "dont": true, "cannot": true, "without": true, "nor": true, "avoid": true}
+
+// affirmers after a negator undo it: "don't forget to push" asks for the push.
+var affirmers = map[string]bool{"forget": true, "hesitate": true, "fail": true, "neglect": true}
+
+// negationEnds start a new instruction inside a clause: "don't wait, just push".
+var negationEnds = map[string]bool{"but": true, "then": true, "just": true, "instead": true}
+
+// stateQuestions lead a question about what happened ("has it been pushed?", "did you
+// deploy?"), not a request; "can you push?" still asks for the push.
+var stateQuestions = map[string]bool{"has": true, "have": true, "had": true, "is": true, "are": true, "was": true, "were": true, "did": true, "does": true}
+
 // GatedActions are the hard-to-undo steps text asks for, by their base verb, in the order first
-// named ("push", "merge"): none for an ordinary message.
+// named ("push", "merge"): none for an ordinary message (#152), including one that only forbids
+// a step ("don't push anything") or asks whether it happened ("has anything been pushed?").
 func GatedActions(text string) []string {
 	var out []string
-	for _, w := range strings.FieldsFunc(strings.ToLower(text), func(r rune) bool { return !unicode.IsLetter(r) }) {
-		if base, ok := gatedForms[w]; ok && !slices.Contains(out, base) {
-			out = append(out, base)
+	for _, c := range clauses(strings.ToLower(strings.ReplaceAll(text, "’", "'"))) {
+		words := strings.FieldsFunc(c.text, func(r rune) bool { return !unicode.IsLetter(r) && r != '\'' })
+		if c.question && len(words) > 0 && stateQuestions[words[0]] {
+			continue
+		}
+		negated := false
+		for i, w := range words {
+			prev, next := "", ""
+			if i > 0 {
+				prev = words[i-1]
+			}
+			if i+1 < len(words) {
+				next = words[i+1]
+			}
+			switch {
+			case (negators[w] || strings.HasSuffix(w, "n't")) && prev != "if" && prev != "or":
+				// "if not, push" and "whether or not" don't forbid anything.
+				negated = !affirmers[next]
+			case w == "instead" && next == "of":
+				negated = true
+			case negationEnds[w]:
+				negated = false
+			}
+			if base, ok := gatedForms[w]; ok && !negated && !slices.Contains(out, base) {
+				out = append(out, base)
+			}
 		}
 	}
 	return out
+}
+
+// clause is a stretch of text up to a full stop, semicolon, colon, ! or ?: how far a "don't"
+// reaches, and whether it was asked.
+type clause struct {
+	text     string
+	question bool
+}
+
+func clauses(text string) []clause {
+	var out []clause
+	start := 0
+	for i, r := range text {
+		if strings.ContainsRune(".;:!?", r) {
+			out = append(out, clause{text[start:i], r == '?'})
+			start = i + 1
+		}
+	}
+	return append(out, clause{text: text[start:]})
 }
 
 // spokenList joins words as said aloud: "a", "a and b", "a, b and c".
@@ -487,7 +544,7 @@ func Describe(toolName string, toolInput any, agent string) string {
 			what = stringField(toolInput, "name")
 		}
 		actions, _ := toolInput.(map[string]any)["actions"].([]string)
-		return fmt.Sprintf("Tell your session %s to %s?", what, spokenList(actions))
+		return fmt.Sprintf("Message your session %s, asking it to %s?", what, spokenList(actions))
 	}
 	return fmt.Sprintf("Use %s in %s?", Clean(toolName), agent)
 }
