@@ -17,8 +17,8 @@ import (
 func TestClaudesCoordinatorMdIsUnchanged(t *testing.T) {
 	// The renderings since sessions get asked about by description (pix, #89), byte for byte; with workers on, since #97 (create_project) and #126 (prefer an existing pix session over a worker), #141 (the app asks before a push or merge; no made-up confirm words), #143 (each session verbatim by default), #146 (match a session by its last turn too), and #153 (hand a session's work and questions about it to that session).
 	for _, c := range []struct{ root, sum string }{
-		{"", "b07c8c4999ceaabe81c7ec18e6e79e6a26ce7bb50f2004399db2249543dea60f"},
-		{"/Users/x/code", "d06dab5967cd8fcbeba55878bf4e3168589f03b4075df4efd6032f005e025fa4"},
+		{"", "9c3fa7831f5a227dc8ae7ce2d17baab72ec54d7ba659275d13079749d8f654d9"},
+		{"/Users/x/code", "e63ba73c3bea6f23d75a67456f08fc1c08a0ffb54224a98ef2ddb5ea6565ba6f"},
 	} {
 		if got := fmt.Sprintf("%x", sha256.Sum256([]byte(RenderClaudeMd("/data/canvas", c.root)))); got != c.sum {
 			t.Fatal(c.root, got)

@@ -433,8 +433,32 @@ func (h *AgentHandle) Delegate(task, context string) (JobID, error) {
 		return "", fmt.Errorf("Delegation is off (%s).", why)
 	}
 	id := h.deps.IDs.JobID()
+	if !strings.HasPrefix(task, RecallPrefix) {
+		if note := h.sessionsNote(); note != "" {
+			context = strings.TrimSpace(context + "\n" + note)
+		}
+	}
 	h.Input(DelegateInput(id, task, context))
 	return id, nil
+}
+
+// SessionsNoteLimit: the longest Delegate waits to list your sessions for a new request.
+const SessionsNoteLimit = time.Second
+
+// sessionsNote is SessionsNote for the sessions open now: "" with none, or when they can't be
+// listed in time (the coordinator can still call list_sessions).
+func (h *AgentHandle) sessionsNote() string {
+	c, ok := h.deps.Host.Session().(*CompositeHost)
+	if !ok {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(h.ctx, SessionsNoteLimit)
+	defer cancel()
+	rows, err := userSessionRows(ctx, c.Secondary(), h.maskPending)
+	if err != nil {
+		return ""
+	}
+	return SessionsNote(rows)
 }
 
 // JobStatus is the jobs tool's status: from the job table, never from the agent.

@@ -218,7 +218,7 @@ func TestTheCoordinatorPromptHandsASessionsWorkToThatSession(t *testing.T) {
 		if handOff < 0 || yourself < 0 || handOff > yourself {
 			t.Errorf("the hand-off rule must come before doing things yourself:\n%s", md)
 		}
-		for _, rule := range []string{"committed, pushed or built", "without warnings they didn't give"} {
+		for _, rule := range []string{"committed, pushed or built", "without warnings they didn't give", "lists your open pix sessions", "DeskPixie or yourself", "or whether a change"} {
 			if !strings.Contains(md, rule) {
 				t.Errorf("coordinator.md does not mention %q", rule)
 			}

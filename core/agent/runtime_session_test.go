@@ -148,3 +148,46 @@ func TestAnOrdinaryMessageIsSentWithoutAsking(t *testing.T) {
 		t.Fatalf("%+v", user.Prompts())
 	}
 }
+
+// coordinatorText is everything typed into the coordinator so far.
+func coordinatorText(r *rtRig) string {
+	var b strings.Builder
+	for _, p := range r.host.Prompts() {
+		b.WriteString(p.Text + "\n")
+	}
+	return b.String()
+}
+
+// #153: a new request carries the sessions you have open, so the coordinator sees the one
+// already working on it without having to remember to look.
+func TestANewRequestListsYourOpenSessions(t *testing.T) {
+	r, user := pixRig(t)
+	user.lastTurn = "Fixed the redirect after sign-in."
+	delegate(t, r, "is the login fix pushed?")
+	settle()
+	got := coordinatorText(r)
+	for _, want := range []string{"is the login fix pushed?", "Your open pix sessions", `focus-claude: "login bug"`, "focus repo", "idle", `last turn "Fixed the redirect after sign-in."`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+}
+
+func TestANewRequestSaysNothingAboutSessionsWhenNoneAreOpen(t *testing.T) {
+	r := rigWith(t, &agenttest.MemStore{}, false)
+	delegate(t, r, "summarise the issues")
+	settle()
+	if got := coordinatorText(r); !strings.Contains(got, "summarise the issues") || strings.Contains(got, "pix sessions") {
+		t.Fatal(got)
+	}
+}
+
+// Recall asks what the coordinator remembers: no work, so no sessions to hand it to.
+func TestARecallRequestDoesNotListSessions(t *testing.T) {
+	r, _ := pixRig(t)
+	delegate(t, r, RecallPrefix+"what did we decide about the logo?")
+	settle()
+	if got := coordinatorText(r); !strings.Contains(got, "the logo") || strings.Contains(got, "pix sessions") {
+		t.Fatal(got)
+	}
+}

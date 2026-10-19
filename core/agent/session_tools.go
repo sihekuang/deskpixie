@@ -121,32 +121,9 @@ func sessionTool(ctx context.Context, host SessionHost, call McpCall, mask func(
 	}
 	sec := c.Secondary()
 	if call.Kind == CallListSessions {
-		list, err := sec.List(ctx)
+		rows, err := userSessionRows(ctx, sec, mask)
 		if err != nil {
 			return McpReply{Err: err}
-		}
-		rows, now := []SessionRow{}, time.Now()
-		list = slices.DeleteFunc(list, func(a AgentInfo) bool { return a.Origin != OriginUser || a.User == nil })
-		// The same project's sessions next to each other, oldest first.
-		slices.SortStableFunc(list, func(a, b AgentInfo) int {
-			if a.User.Repo != b.User.Repo {
-				return strings.Compare(a.User.Repo, b.User.Repo)
-			}
-			return a.User.Started.Compare(b.User.Started)
-		})
-		for _, a := range list {
-			u := a.User
-			past := make([]string, len(u.PastDescriptions))
-			for i, d := range u.PastDescriptions {
-				past[i] = mask(d)
-			}
-			last := mask(u.LastTurn)
-			if last != "" && u.LastTurnAsks {
-				last = "Asked: " + last
-			}
-			rows = append(rows, SessionRow{Name: a.Name, Description: mask(u.Description), PastDescriptions: past,
-				Tool: u.Tool, Repo: u.Repo, Cwd: a.Cwd, Where: u.Where, Status: a.Status.String(), Reachable: u.Reachable, Verbatim: u.Verbatim,
-				Started: ago(u.Started, now), LastActive: ago(u.LastActive, now), LastTurn: last})
 		}
 		return McpReply{Value: map[string]any{"sessions": rows}}
 	}
@@ -198,4 +175,63 @@ func sessionTool(ctx context.Context, host SessionHost, call McpCall, mask func(
 		return McpReply{Err: err}
 	}
 	return McpReply{Value: map[string]any{"name": call.Name, "status": status}}
+}
+
+// userSessionRows are the sessions you started with pix on sec, as list_sessions shows them.
+func userSessionRows(ctx context.Context, sec SessionHost, mask func(string) string) ([]SessionRow, error) {
+	list, err := sec.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, now := []SessionRow{}, time.Now()
+	list = slices.DeleteFunc(list, func(a AgentInfo) bool { return a.Origin != OriginUser || a.User == nil })
+	// The same project's sessions next to each other, oldest first.
+	slices.SortStableFunc(list, func(a, b AgentInfo) int {
+		if a.User.Repo != b.User.Repo {
+			return strings.Compare(a.User.Repo, b.User.Repo)
+		}
+		return a.User.Started.Compare(b.User.Started)
+	})
+	for _, a := range list {
+		u := a.User
+		past := make([]string, len(u.PastDescriptions))
+		for i, d := range u.PastDescriptions {
+			past[i] = mask(d)
+		}
+		last := mask(u.LastTurn)
+		if last != "" && u.LastTurnAsks {
+			last = "Asked: " + last
+		}
+		rows = append(rows, SessionRow{Name: a.Name, Description: mask(u.Description), PastDescriptions: past,
+			Tool: u.Tool, Repo: u.Repo, Cwd: a.Cwd, Where: u.Where, Status: a.Status.String(), Reachable: u.Reachable, Verbatim: u.Verbatim,
+			Started: ago(u.Started, now), LastActive: ago(u.LastActive, now), LastTurn: last})
+	}
+	return rows, nil
+}
+
+// SessionsNote lists your open pix sessions under a new request (#153), so the coordinator
+// sees the one already working on it without having to look: "" with none open.
+func SessionsNote(rows []SessionRow) string {
+	if len(rows) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("Your open pix sessions (if one is working on this, hand it over with message_session):")
+	for _, r := range rows {
+		fmt.Fprintf(&b, "\n- %s: %q, %s repo, %s", r.Name, r.Description, r.Repo, r.Status)
+		if r.LastTurn != "" {
+			fmt.Fprintf(&b, ", last turn %q", clipRunes(r.LastTurn, maxNoteTurn))
+		}
+	}
+	return b.String()
+}
+
+// maxNoteTurn: the most of a session's last turn SessionsNote quotes.
+const maxNoteTurn = 160
+
+func clipRunes(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n]) + "…"
+	}
+	return s
 }
