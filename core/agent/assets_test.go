@@ -207,3 +207,15 @@ func TestPixieAnswersASessionsQuestionThroughAnswerJob(t *testing.T) {
 		t.Error(d)
 	}
 }
+
+// #162: jobs lists the coordinator's requests, not the user's sessions; a question about their
+// sessions is handed off (the coordinator has list_sessions).
+func TestASessionsQuestionIsHandedOffNotAnsweredFromJobs(t *testing.T) {
+	if !strings.Contains(DelegationPersona, "The jobs tool lists the coordinator's requests, not the user's sessions") ||
+		!strings.Contains(DelegationPersona, "a question about their sessions (how many are open, which ones, what one is doing) is handed off with delegate") {
+		t.Error("delegation.md doesn't keep sessions questions off the jobs tool")
+	}
+	if d := (Jobs{}).Description(); !strings.Contains(d, "Not the user's sessions") {
+		t.Error(d)
+	}
+}

@@ -85,7 +85,8 @@ func (Jobs) Name() string { return "jobs" }
 
 func (Jobs) Description() string {
 	return "The coordinator's jobs. action \"status\": what each job is doing (status, age in seconds, latest " +
-		"progress), to answer \"what's the coordinator doing?\". action \"cancel\": stop a job; without job_id it " +
+		"progress), to answer \"what's the coordinator doing?\". Not the user's sessions (\"how many sessions are open?\"): " +
+		"delegate those. action \"cancel\": stop a job; without job_id it " +
 		"cancels the only open job, and if several are open it returns an error asking which."
 }
 

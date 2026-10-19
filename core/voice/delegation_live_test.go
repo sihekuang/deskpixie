@@ -82,6 +82,9 @@ func ownTools(mu *sync.Mutex, calls *[]string) []voice.Tool {
 		stub(app.AdaptTool(tools.Calculate{}), `{"result":12}`),
 		stub(app.AdaptTool(tools.TimerTool{}), `{"ok":true,"timer":"10 minutes","ends_in":"10 minutes"}`),
 		stub(app.AdaptTool(tools.Media{}), `{"ok":true,"state":"paused"}`),
+		// jobs too: the coordinator's requests, which Pixie must not mistake for sessions (#162).
+		stub(agent.Jobs{}, `{"jobs":[{"job_id":"job_1","status":"done","task":"Where's the test build coming from?","age_secs":137},`+
+			`{"job_id":"job_2","status":"failed","task":"Ask the deskpixie session what the timer case decision is.","age_secs":3040}]}`),
 	}
 }
 
@@ -169,6 +172,9 @@ var severalCases = []severalCase{
 		say: "Back up my photos to the external drive, and after that free up some disk space. Oh, and what's a good movie to watch tonight?"},
 	{name: "fact", calls: 1, words: []string{"world series"},
 		say: "Who won the World Series last year?"},
+	// Sessions aren't jobs: the coordinator lists them (#162).
+	{name: "sessions-question", calls: 1, words: []string{"session"},
+		say: "How many sessions do I have open right now?"},
 	{name: "kept-arithmetic", calls: 0, own: []string{"calculate"},
 		say: "What's fifteen percent of eighty?"},
 	{name: "kept-timer-and-weather", calls: 0, own: []string{"timer", "get_weather"},
