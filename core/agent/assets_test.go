@@ -170,6 +170,7 @@ func TestTheDelegationPersonaKeepsStepsInOrderAndDropsWhatWasTakenBack(t *testin
 		"Never hand off a step the user put off or took back",
 		"never make two calls that contradict each other",
 		"don't mention what they took back",
+		"When one breath has both, an unrelated thing is still its own call",
 		"Unrelated things stay separate calls even when joined by \"and\", \"also\" or \"separately\"",
 		`"First write a program that checks the SpaceX stock price, then merge the build."`,
 	} {
