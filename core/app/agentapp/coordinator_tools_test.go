@@ -286,6 +286,16 @@ func TestTheCoordinatorAnswersFromMemoryOrHandsItOn(t *testing.T) {
 	}
 }
 
+// #165: sessions don't report back, so a request handed to one is done once the message is
+// sent; left "working", the app's nudges turned into made-up questions for the person.
+func TestARequestHandedToASessionIsDoneOnceSent(t *testing.T) {
+	for _, md := range []string{RenderClaudeMd("/data/canvas", ""), RenderClaudeMd("/data/canvas", "/Users/x/code")} {
+		if !strings.Contains(md, "once `message_session` returns `\"status\": \"sent\"`, reply `status=\"done\"`") {
+			t.Error("coordinator.md doesn't close a request handed to a session")
+		}
+	}
+}
+
 // mcp__pixie in permissions.allow allows every tool of the pixie server, the local ones too.
 func TestThePermissionAllowListCoversTheLocalTools(t *testing.T) {
 	var v map[string]any

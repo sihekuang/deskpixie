@@ -15,10 +15,10 @@ import (
 // #87: Codex as the coordinator, on the app side.
 
 func TestClaudesCoordinatorMdIsUnchanged(t *testing.T) {
-	// The renderings since sessions get asked about by description (pix, #89), byte for byte; with workers on, since #97 (create_project) and #126 (prefer an existing pix session over a worker), #141 (the app asks before a push or merge; no made-up confirm words), #143 (each session verbatim by default), #146 (match a session by its last turn too), and #153 (hand a request on: your session, then Pixie's worker, then yourself; edit a repo after asking), and #157 (several requests at once: read together, in order; Pixie's context is never an instruction), and #160 (a request is the person's own words: work out several things, their order and corrections), and #161 (pick the likeliest session yourself; ask only when you can't tell), and #164 (no Recall: requests: answer from memory, else hand it on).
+	// The renderings since sessions get asked about by description (pix, #89), byte for byte; with workers on, since #97 (create_project) and #126 (prefer an existing pix session over a worker), #141 (the app asks before a push or merge; no made-up confirm words), #143 (each session verbatim by default), #146 (match a session by its last turn too), and #153 (hand a request on: your session, then Pixie's worker, then yourself; edit a repo after asking), and #157 (several requests at once: read together, in order; Pixie's context is never an instruction), and #160 (a request is the person's own words: work out several things, their order and corrections), and #161 (pick the likeliest session yourself; ask only when you can't tell), and #164 (no Recall: requests: answer from memory, else hand it on) and #165 (a request handed to a session is done once sent).
 	for _, c := range []struct{ root, sum string }{
-		{"", "094c228dd167ec1e34bd17b063e88b4cc391be6c9c4f3e21b6f8ecebdbb7445b"},
-		{"/Users/x/code", "349276c383d09adc7335a24dae9f442c98fd662ced004b09c598f6f609ef3ad5"},
+		{"", "b311c14385505dc7eab8a1217d349984e47bed47df5974390b8f8358b4d6bfad"},
+		{"/Users/x/code", "b8f4a777bfc949dc6e7e62c030da1527bb2393558efd30ec9ff7a64de5154af0"},
 	} {
 		if got := fmt.Sprintf("%x", sha256.Sum256([]byte(RenderClaudeMd("/data/canvas", c.root)))); got != c.sum {
 			t.Fatal(c.root, got)
