@@ -169,6 +169,8 @@ func TestTheDelegationPersonaKeepsStepsInOrderAndDropsWhatWasTakenBack(t *testin
 		"in the order the user wants",
 		"Never hand off a step the user put off or took back",
 		"never make two calls that contradict each other",
+		"don't mention what they took back",
+		"Unrelated things stay separate calls even when joined by \"and\", \"also\" or \"separately\"",
 		`"First write a program that checks the SpaceX stock price, then merge the build."`,
 	} {
 		if !strings.Contains(DelegationPersona, phrase) {
