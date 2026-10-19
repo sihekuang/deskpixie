@@ -451,3 +451,36 @@ func TestClaimAMadeUpConfirmWordInAReplyToANoticeIsCorrected(t *testing.T) {
 		t.Fatalf("injects: %q", got)
 	}
 }
+
+// Voice log, Oct 19 01:17: the user said "Confirm lark" and Pixie hung up, so "Coordinator:
+// allowed" waited for the next conversation. A confirm phrase is no goodbye.
+func TestSayingTheConfirmWordDoesNotEndTheConversation(t *testing.T) {
+	c := newClaimConv(true, true)
+	userTurn(c, "Confirm lark.", ms(t0(), 100))
+	model(c, evResponseCreated, ms(t0(), 200))
+	model(c, evToolCall("c1", EndConversationTool), ms(t0(), 200))
+	model(c, evResponseDone, ms(t0(), 200))
+	c.Step(ToolDoneInput("c1", true), ms(t0(), 300))
+	fx := c.Step(InjectInput(Notice{Text: "Coordinator: allowed"}), ms(t0(), 400))
+	fx = append(fx, ticks(c, ms(t0(), 400), time.Second)...)
+	if closes(fx) {
+		t.Fatal("hung up on the confirm word")
+	}
+	if got := injects(fx); len(got) != 1 || got[0] != "Coordinator: allowed" {
+		t.Fatalf("injects: %q", got)
+	}
+}
+
+// A real goodbye still ends it.
+func TestAGoodbyeStillEndsTheConversation(t *testing.T) {
+	c := newClaimConv(true, true)
+	userTurn(c, "Thanks, bye.", ms(t0(), 100))
+	model(c, evResponseCreated, ms(t0(), 200))
+	model(c, evToolCall("c1", EndConversationTool), ms(t0(), 200))
+	model(c, evResponseDone, ms(t0(), 200))
+	fx := c.Step(ToolDoneInput("c1", true), ms(t0(), 300))
+	fx = append(fx, ticks(c, ms(t0(), 300), time.Second)...)
+	if !closes(fx) {
+		t.Fatal("a goodbye didn't end it")
+	}
+}

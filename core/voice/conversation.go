@@ -478,7 +478,8 @@ func (c *Conversation) Step(in Input, now time.Time) []Effect {
 				// Only a goodbye from the current turn ends the conversation: a user who is
 				// talking, or who has already asked something new, interrupted it.
 				talking := c.phase == PhaseListening && c.silenceSince.IsZero()
-				if thisTurn && !talking {
+				// A confirm phrase is no goodbye: the app's answer to it is on its way.
+				if thisTurn && !talking && !confirmPhrase.MatchString(c.hoUser) {
 					c.ending, c.endWhy = true, "goodbye"
 				}
 			} else {
@@ -888,6 +889,9 @@ func (c *Conversation) maybeHandOff(now time.Time, fx []Effect) []Effect {
 
 // MadeUpConfirmFix corrects a confirm word Pixie made up: only the app's own questions have one.
 const MadeUpConfirmFix = CorrectionPrefix + "there is no confirm word for this; don't ask for one. Ask the user a plain yes or no question instead."
+
+// confirmPhrase: all the user said was a confirm word ("Confirm lark.").
+var confirmPhrase = regexp.MustCompile(`(?i)^\W*(confirm|allow|approve)\s+[a-z]+\W*$`)
 
 var sayConfirm = regexp.MustCompile(`(?i)\bsay\s+confirm\s+([a-z]+)`)
 
