@@ -248,6 +248,24 @@ func TestLivePixSessionThroughTheHerdrCoordinator(t *testing.T) {
 	}
 	t.Log("ok   a request handed to the session is done once sent")
 
+	// 1b'. A question about where things stand is no order to merge: it goes without a confirm
+	// word (#165: "Where are we on the commit, the PR and the merge?" asked "Say confirm lark").
+	heardBefore := len(heard())
+	ask("Use message_session to send my marmalade jar session exactly this text: Where are we on the commit, the PR and the merge?")
+	sent := func() bool {
+		return strings.Contains(heard()[heardBefore:], "Coordinator reply:") &&
+			strings.Contains(strings.ToLower(noSpaces(screen.String())), "themerge")
+	}
+	for deadline := time.Now().Add(5 * time.Minute); !sent(); time.Sleep(time.Second) {
+		if strings.Contains(heard()[heardBefore:], "Say confirm") {
+			t.Fatalf("a status question asked for a confirm word: %q", heard()[heardBefore:])
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the status question never reached the wrapped Claude; heard %q", heard()[heardBefore:])
+		}
+	}
+	t.Log("ok   a status question goes without a confirm word")
+
 	// 1b. The roster beside Pixie: the coordinator listed but not counted; your session counted,
 	// with its terminal's bundle id (#91).
 	var view agent.RosterView

@@ -111,6 +111,8 @@ func TestLiveRawRequestTheCoordinatorWorksOutWhatWasMeant(t *testing.T) {
 		t.Fatal("no delegate tool")
 	}
 
+	t.Run("answer-nobody-waiting", func(t *testing.T) { liveAnswerNobodyWaiting(t, a, v) })
+	t.Run("cancel-after-question", func(t *testing.T) { liveCancelAfterQuestion(t, a, v, delegate) })
 	t.Run("answer-to-sort", func(t *testing.T) { liveAnswerToSort(t, a, v, delegate) })
 	for _, c := range rawRequestCases {
 		t.Run(c.name, func(t *testing.T) {
@@ -195,4 +197,61 @@ func liveAnswerToSort(t *testing.T, a *agentapp.Agent, v *liveVoice, delegate vo
 	if strings.Contains(reply, "which color") || strings.Contains(reply, "red or blue") {
 		t.Errorf("the coordinator asked the color question again: %q", reply)
 	}
+}
+
+func agentTool(t *testing.T, a *agentapp.Agent, name string) voice.Tool {
+	t.Helper()
+	for _, tool := range a.Tools() {
+		if tool.Name() == name {
+			return tool
+		}
+	}
+	t.Fatalf("no %s tool", name)
+	return nil
+}
+
+// replyAfter waits for a Coordinator reply or question injected after index from.
+func replyAfter(t *testing.T, v *liveVoice, from int) string {
+	t.Helper()
+	for deadline := time.Now().Add(3 * time.Minute); time.Now().Before(deadline); time.Sleep(500 * time.Millisecond) {
+		for _, text := range v.all()[from:] {
+			if strings.HasPrefix(text, "Coordinator reply:") || strings.HasPrefix(text, "Coordinator question:") {
+				return text
+			}
+		}
+	}
+	t.Fatalf("no coordinator reply; injected %q", v.all()[from:])
+	return ""
+}
+
+// liveAnswerNobodyWaiting (#166): with no question waiting, an answer (with a made-up job id, as
+// Gemini sent them) reaches the coordinator as a request instead of failing.
+func liveAnswerNobodyWaiting(t *testing.T, a *agentapp.Agent, v *liveVoice) {
+	before := len(v.all())
+	out := agentTool(t, a, "answer_job").Invoke(context.Background(), json.RawMessage(`{"answer":"Reply with the word plum.","job_id":"job_0123456789ab"}`))
+	t.Logf("answer_job → %s", out.Output)
+	if !strings.Contains(string(out.Output), "as a new request") {
+		t.Fatalf("answer_job: %s", out.Output)
+	}
+	if reply := replyAfter(t, v, before); !strings.Contains(strings.ToLower(reply), "plum") {
+		t.Errorf("the coordinator didn't act on it: %q", reply)
+	}
+}
+
+// liveCancelAfterQuestion (#166): a cancel of the job whose question was just relayed is its
+// answer, and the coordinator works out what to stop instead of the job being killed.
+func liveCancelAfterQuestion(t *testing.T, a *agentapp.Agent, v *liveVoice, delegate voice.Tool) {
+	before := len(v.all())
+	args, _ := json.Marshal(map[string]string{"task": "Ask me whether you should keep waiting for my build or check on it now, as a question (status question), and wait for my answer."})
+	delegate.Invoke(context.Background(), args)
+	if q := replyAfter(t, v, before); !strings.HasPrefix(q, "Coordinator question:") {
+		t.Fatalf("no question: %q", q)
+	}
+	asked := len(v.all())
+	out := agentTool(t, a, "jobs").Invoke(context.Background(), json.RawMessage(`{"action":"cancel"}`))
+	t.Logf("jobs cancel → %s", out.Output)
+	if !strings.Contains(string(out.Output), `"status":"answered"`) {
+		t.Fatalf("the job was cancelled, not answered: %s", out.Output)
+	}
+	t.Logf("after the cancel: %q", replyAfter(t, v, asked))
 }

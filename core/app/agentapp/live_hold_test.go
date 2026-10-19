@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+	"github.com/sihekuang/deskpixie/core/agent"
 	agentfs "github.com/sihekuang/deskpixie/core/agent/fs"
 	"github.com/sihekuang/deskpixie/core/app"
 	"github.com/sihekuang/deskpixie/core/app/agentapp"
@@ -190,7 +191,7 @@ func TestLiveHoldASessionPromptNeverTakesIt(t *testing.T) {
 	}
 	t.Cleanup(func() { os.RemoveAll(short) })
 	sock := filepath.Join(short, "pix.sock")
-	_, v, sm, tmp := holdApp(t, sock)
+	a, v, sm, tmp := holdApp(t, sock)
 
 	bin := filepath.Join(short, "bin")
 	work := filepath.Join(tmp, "mine")
@@ -218,7 +219,7 @@ func TestLiveHoldASessionPromptNeverTakesIt(t *testing.T) {
 		}
 		env = append(env, kv)
 	}
-	pix := exec.Command(filepath.Join(bin, "pix"), "--description", "quince crate", "claude", "--model", "haiku")
+	pix := exec.Command(filepath.Join(bin, "pix"), "--description", "quince crate", "claude", "--model", "haiku", "--allowedTools", "Bash(sleep:*)")
 	pix.Dir = work
 	pix.Env = append(env, "PATH="+bin+":"+os.Getenv("PATH"), "DESKPIXIE_PIX_SOCK="+sock, "__CFBundleIdentifier=com.googlecode.iterm2")
 	pix.Stdin, pix.Stdout, pix.Stderr = tty, tty, tty
@@ -240,7 +241,7 @@ func TestLiveHoldASessionPromptNeverTakesIt(t *testing.T) {
 	time.Sleep(5 * time.Second) // Claude's TUI comes up
 	t.Log("ok   pix claude registered")
 
-	io.WriteString(ptmx, "Use the AskUserQuestion tool to ask me one question, whether to plant a quince tree, with the options Plant and Skip. Do nothing else.")
+	io.WriteString(ptmx, "Use the AskUserQuestion tool to ask me one question, whether to plant a quince tree, with the options Plant and Skip. After I answer, run the shell command sleep 20, then say done. Do nothing else.")
 	time.Sleep(time.Second)
 	io.WriteString(ptmx, "\r")
 
@@ -254,4 +255,29 @@ func TestLiveHoldASessionPromptNeverTakesIt(t *testing.T) {
 		t.Fatalf("a session prompt held Pixie in delegating (event %d)", i)
 	}
 	t.Log("ok   never held while the session waits on its prompt")
+
+	// #165: once the question is answered and the session works on, it isn't "blocked" any more
+	// (it stayed blocked until its turn ended, ten minutes later).
+	status := func() string {
+		if view, ok := a.Roster().(agent.RosterView); ok && len(view.Yours) > 0 {
+			return view.Yours[0].Status
+		}
+		return ""
+	}
+	// Claude Code's Notification for a waiting menu comes after a while, not at once.
+	for end := time.Now().Add(90 * time.Second); status() != "blocked" && time.Now().Before(end); time.Sleep(time.Second) {
+	}
+	if status() != "blocked" {
+		t.Fatalf("the session never showed blocked at its question (status %q)", status())
+	}
+	t.Log("ok   blocked while its question waits")
+	io.WriteString(ptmx, "\r") // the menu's first option, Plant
+	v.waitFor(t, "the session running sleep", 2*time.Minute, func() bool { return strings.Contains(noSpaces(screen.String()), "sleep20") })
+	time.Sleep(3 * time.Second)
+	for end := time.Now().Add(12 * time.Second); time.Now().Before(end); time.Sleep(time.Second) {
+		if st := status(); st != "working" {
+			t.Fatalf("status %q while the session runs sleep after the answer, want working", st)
+		}
+	}
+	t.Log("ok   working again once the question was answered")
 }
