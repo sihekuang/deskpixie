@@ -459,7 +459,9 @@ func TestCoordinatorAsksWhichSessionAndOnlyClaimsSentMessages(t *testing.T) {
 	md := RenderClaudeMd("/canvas", "")
 	for _, want := range []string{
 		"If more than one session fits",
-		"ask the person which one, naming each by its description",
+		"pick the likeliest yourself",
+		"Ask the person only when you can't tell",
+		"naming each by its description",
 		"Never by its name",
 		"only after it returns\n    `\"status\": \"sent\"`",
 	} {

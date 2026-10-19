@@ -657,9 +657,7 @@ func TestAnAmbiguousOrUnknownAnswerIsAnErrorAndChangesNothing(t *testing.T) {
 	eq(errOf(job(1)), "job_000000000001 is not waiting for an answer.")
 	eq(errOf(job(9)), "No open job job_000000000009.")
 	c.Step(StopInput(Coordinator, `<spoken ref="job_000000000001" status="question">A?</spoken><spoken ref="job_000000000002" status="question">B?</spoken>`), T0)
-	if e := errOf(""); !strings.HasPrefix(e, "Several jobs are waiting for an answer") {
-		t.Fatal(e)
-	}
+	// #161: several waiting is the coordinator's to sort out (answer_asker_test.go).
 	wantJobStatus(t, c, 1, JobQuestion)
 	wantJobStatus(t, c, 2, JobQuestion)
 }

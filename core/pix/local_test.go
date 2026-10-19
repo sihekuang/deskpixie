@@ -110,3 +110,29 @@ func TestMCPWithoutParentReportsError(t *testing.T) {
 		t.Fatalf("%s", out.String())
 	}
 }
+
+// #158: Haiku passes the description as "description", not "text"; a stray non-string
+// argument must not lose it either.
+func TestMCPSetDescriptionTakesTheTextUnderOtherNames(t *testing.T) {
+	for _, args := range []string{`{"description":"live smoke test"}`, `{"text":"live smoke test","force":true}`} {
+		f := &fakeLocal{}
+		sock := serveFake(t, f)
+		in := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"set_description","arguments":` + args + `}}` + "\n"
+		var out bytes.Buffer
+		RunMCP(sock, strings.NewReader(in), &out)
+		if f.desc != "live smoke test" || strings.Contains(out.String(), `"isError":true`) {
+			t.Errorf("%s: desc %q reply %s", args, f.desc, out.String())
+		}
+	}
+}
+
+func TestMCPSetDescriptionWithoutTextNamesTheField(t *testing.T) {
+	f := &fakeLocal{}
+	sock := serveFake(t, f)
+	in := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"set_description","arguments":{}}}` + "\n"
+	var out bytes.Buffer
+	RunMCP(sock, strings.NewReader(in), &out)
+	if !strings.Contains(out.String(), `"isError":true`) || !strings.Contains(out.String(), `\"text\"`) {
+		t.Fatalf("%s", out.String())
+	}
+}

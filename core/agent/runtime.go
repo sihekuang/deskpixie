@@ -490,25 +490,39 @@ func (h *AgentHandle) Cancel(jobID string) (JobID, error) {
 // Answer is answer_job: the user's answer to a job's question (jobID "" = the only job
 // waiting). The controller decides which job it goes to and rejects it if none is waiting.
 func (h *AgentHandle) Answer(jobID, text string) (JobID, error) {
+	id, _, err := h.AnswerAsked(jobID, text)
+	return id, err
+}
+
+// AnswerAsked is Answer that also says where the answer went when not to one job (#161): the
+// session whose turn asked the question Pixie relayed last, or the coordinator, to work out
+// which of several waiting questions it answers.
+func (h *AgentHandle) AnswerAsked(jobID, text string) (JobID, string, error) {
 	var id JobID
 	if raw := strings.TrimSpace(jobID); raw != "" {
 		j, ok := ParseJobID(raw)
 		if !ok {
-			return "", fmt.Errorf("No open job %s.", raw)
+			return "", "", fmt.Errorf("No open job %s.", raw)
 		}
 		id = j
 	}
 	if h.quitting() {
-		return "", errQuitting
+		return "", "", errQuitting
 	}
 	r := h.stepLocked(AnswerInput(id, text))
 	if r == nil || r.Kind != EfAnswerResult {
-		return "", errors.New("The answer was not processed.")
+		return "", "", errors.New("The answer was not processed.")
 	}
 	if r.Err != "" {
-		return "", errors.New(r.Err)
+		return "", "", errors.New(r.Err)
 	}
-	return r.Job, nil
+	switch {
+	case r.Name != "":
+		return r.Job, "the session that asked", nil
+	case r.Text == "coordinator":
+		return r.Job, "the coordinator, to work out which question it answers", nil
+	}
+	return r.Job, "", nil
 }
 
 // OpenTerminal is a single click on Pixie / Tray ▸ Open coordinator terminal: the session is running,
@@ -566,6 +580,17 @@ func (h *AgentHandle) answerSession(name, id, answer string) {
 			}
 		}
 		h.Input(SessionAnswerFailedInput(name, why))
+	}
+}
+
+// tellSession types your answer into session name, which ended its turn on a question (#161),
+// as message_session would (its own verbatim setting decides the prefix).
+func (h *AgentHandle) tellSession(name, answer string) {
+	ctx, cancel := context.WithTimeout(h.ctx, OpLimit)
+	defer cancel()
+	if r := sessionTool(ctx, h.deps.Host.Session(), McpCall{Kind: CallMessageSession, Name: name, Text: answer}, h.maskPending); r.Err != nil {
+		log.Printf("agent: answering %s: %v", name, r.Err)
+		h.Input(SessionAnswerFailedInput(name, r.Err.Error()))
 	}
 }
 
@@ -1604,6 +1629,8 @@ func (h *AgentHandle) apply(e Effect) {
 		h.queueOp(hostOp{kind: opInterrupt})
 	case EfAnswerSession:
 		go h.answerSession(e.Name, e.Text, e.Answer)
+	case EfTellSession:
+		go h.tellSession(e.Name, e.Text)
 	case EfInject:
 		if d.Voice.IsOpen() {
 			d.Voice.Inject(e.Notice)

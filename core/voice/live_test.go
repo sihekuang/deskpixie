@@ -288,6 +288,11 @@ type liveRig struct {
 func newLiveRig(t *testing.T, m voice.Model, cfg voice.SessionConfig, secrets voice.SecretSource) *liveRig {
 	reg := voice.DefaultTools()
 	reg.Register(app.AdaptTool(tools.Calculate{}))
+	return newLiveRigWith(t, m, cfg, secrets, reg)
+}
+
+// newLiveRigWith is newLiveRig with the voice loop's tools given.
+func newLiveRigWith(t *testing.T, m voice.Model, cfg voice.SessionConfig, secrets voice.SecretSource, reg *voice.ToolRegistry) *liveRig {
 	sp := newLiveSpy()
 	r := &liveRig{t: t, liveSpy: sp, stop: make(chan struct{}), done: make(chan struct{})}
 	r.rt = voice.NewRuntime(liveSpyModel{Model: m, liveSpy: sp}, nil, voice.RuntimeConfig{

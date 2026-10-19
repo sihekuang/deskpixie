@@ -15,10 +15,10 @@ import (
 // #87: Codex as the coordinator, on the app side.
 
 func TestClaudesCoordinatorMdIsUnchanged(t *testing.T) {
-	// The renderings since sessions get asked about by description (pix, #89), byte for byte; with workers on, since #97 (create_project) and #126 (prefer an existing pix session over a worker), #141 (the app asks before a push or merge; no made-up confirm words), #143 (each session verbatim by default), #146 (match a session by its last turn too), and #153 (hand a request on: your session, then Pixie's worker, then yourself; edit a repo after asking).
+	// The renderings since sessions get asked about by description (pix, #89), byte for byte; with workers on, since #97 (create_project) and #126 (prefer an existing pix session over a worker), #141 (the app asks before a push or merge; no made-up confirm words), #143 (each session verbatim by default), #146 (match a session by its last turn too), and #153 (hand a request on: your session, then Pixie's worker, then yourself; edit a repo after asking), and #157 (several requests at once: read together, in order; Pixie's context is never an instruction), and #160 (a request is the person's own words: work out several things, their order and corrections), and #161 (pick the likeliest session yourself; ask only when you can't tell).
 	for _, c := range []struct{ root, sum string }{
-		{"", "e26c85cd5672c50857e3e6f4fed06e441a8e4790cc7b27de33fd352b6d78977c"},
-		{"/Users/x/code", "0f4c7b63f512a94e96a384e3d002bb3ad845b6351e0c2bd963d0bb8b9eed3278"},
+		{"", "993e3b2d66f78d883a92261fbf4b23b5831fc6c1153e72cc7feadf34bcd7b88a"},
+		{"/Users/x/code", "a4bea3afeb0e7209a6230d4e65415e45ef66666fe82bdd3bbc1aa8e966b6b822"},
 	} {
 		if got := fmt.Sprintf("%x", sha256.Sum256([]byte(RenderClaudeMd("/data/canvas", c.root)))); got != c.sum {
 			t.Fatal(c.root, got)

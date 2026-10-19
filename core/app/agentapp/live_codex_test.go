@@ -140,6 +140,12 @@ func (m *mockResponses) reply(body map[string]any) map[string]any {
 	if _, hasTools := body["tools"]; !hasTools {
 		return message("Smoke title") // Codex's thread-title request
 	}
+	// Match a request on its own line: the note under it lists running workers' tasks, which
+	// must not script the reply (#156).
+	if i := strings.LastIndex(user, "New request from the user:"); i >= 0 {
+		line, _, _ := strings.Cut(user[i:], "\n")
+		user = line
+	}
 	switch {
 	case strings.Contains(user, "You are a worker for the DeskPixie coordinator"):
 		if afterTool {

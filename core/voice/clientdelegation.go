@@ -31,12 +31,16 @@ func isCoordinatorQuestion(text string) bool {
 	return strings.HasPrefix(text, CoordinatorQuestionPrefix) || strings.HasPrefix(text, "Agent question: ")
 }
 
-// asksQuestion: the notice relays a "Coordinator question:" that is not a confirm prompt, on
-// its own or as a line of the "while you were away" replay.
+// asksQuestion: the notice relays a "Coordinator question:" that is not a confirm prompt, or a
+// session's turn that ends asking (#161; not its prompts, answered in the bubble), on its own
+// or as a line of the "while you were away" replay.
 func asksQuestion(text string) bool {
 	for _, line := range strings.Split(text, "\n") {
 		line = strings.TrimPrefix(strings.TrimSpace(line), "- ")
-		if isCoordinatorQuestion(line) && !strings.Contains(line, "Say confirm") {
+		if strings.Contains(line, "Say confirm") || strings.Contains(line, "in the bubble") {
+			continue
+		}
+		if isCoordinatorQuestion(line) || strings.HasPrefix(line, "Session update: ") && strings.Contains(line, " is asking: ") {
 			return true
 		}
 	}
@@ -91,6 +95,17 @@ func jobResult(out json.RawMessage) (jobID, errText string) {
 	return v.JobID, v.Error
 }
 
+// answeredTo: where an answer_job output says the answer went when not to one job (#161): the
+// session that asked, or the coordinator to sort out; "" otherwise.
+func answeredTo(out json.RawMessage) string {
+	var v struct{ To, Status string }
+	_ = json.Unmarshal(out, &v)
+	if v.Status != "answered" {
+		return ""
+	}
+	return v.To
+}
+
 func (t clientDelegation) Invoke(ctx context.Context, raw json.RawMessage) ToolOutcome {
 	var a ClientDelegationArgs
 	_ = json.Unmarshal(raw, &a)
@@ -105,8 +120,11 @@ func (t clientDelegation) Invoke(ctx context.Context, raw json.RawMessage) ToolO
 	if a.Answer && words != "" {
 		if aj, ok := t.reg.Get(AnswerJobTool); ok {
 			args, _ := json.Marshal(map[string]string{"answer": words})
-			id, e := jobResult(aj.Invoke(ctx, args).Output)
+			out := aj.Invoke(ctx, args).Output
+			id, e := jobResult(out)
 			switch {
+			case answeredTo(out) != "":
+				return resultOutcome(ClientDelegationResult{Routed: "answer_job", Note: answeredTo(out)})
 			case id != "":
 				return resultOutcome(ClientDelegationResult{Routed: "answer_job", JobID: id})
 			case strings.Contains(e, "confirm word"):
