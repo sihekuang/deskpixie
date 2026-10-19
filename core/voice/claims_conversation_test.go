@@ -345,3 +345,42 @@ func TestRuntimeAHandOffClaimAfterASplitRequestDelegatesIt(t *testing.T) {
 	}
 	t.Logf("handed off: %q", task)
 }
+
+// Oct 18, 21:03: Pixie said "On it" to a statement that is no request and nothing was handed
+// off. A promise to hand it on is made true for anything said that isn't small talk.
+func TestClaimADelegateClaimToAStatementHandsItOn(t *testing.T) {
+	c := newClaimConv(true, true)
+	userTurn(c, "The coordinator should not answer me questions like that.", ms(t0(), 100))
+	fx := reply(c, "On it, I'll let you know when it's done.", ms(t0(), 500))
+	fx = append(fx, ticks(c, ms(t0(), 500), 5*time.Second)...)
+	if h := handOffs(fx); len(h) != 1 || h[0].Text != "The coordinator should not answer me questions like that." {
+		t.Fatalf("hand-offs: %+v", h)
+	}
+}
+
+// Oct 18, 22:09: Pixie added "Say confirm hawk." to a question that had no confirm word. A
+// confirm phrase no notice in this conversation gave is corrected.
+func TestClaimAMadeUpConfirmWordIsCorrected(t *testing.T) {
+	c := newClaimConv(true, true)
+	userTurn(c, "What's happening with the build?", ms(t0(), 100))
+	model(c, evResponseCreated, ms(t0(), 200))
+	model(c, toolCall(DelegateTool), ms(t0(), 200))
+	model(c, evResponseDone, ms(t0(), 200))
+	c.Step(ToolDoneInput("c1", false), ms(t0(), 300))
+	fx := reply(c, "Should I check the repo's git status? Say confirm hawk.", ms(t0(), 400))
+	fx = append(fx, ticks(c, ms(t0(), 400), 5*time.Second)...)
+	if got := injects(fx); len(got) != 1 || !strings.HasPrefix(got[0], CorrectionPrefix+"there is no confirm word") {
+		t.Fatalf("injects: %q", got)
+	}
+}
+
+// A confirm word the app gave is said as given.
+func TestClaimARealConfirmWordIsLeftAlone(t *testing.T) {
+	c := newClaimConv(true, true)
+	c.Step(InjectInput(Notice{Text: "Coordinator question: Run git push in the coordinator? Say confirm hawk."}), ms(t0(), 50))
+	fx := reply(c, "The coordinator wants to run git push. Say confirm hawk.", ms(t0(), 400))
+	fx = append(fx, ticks(c, ms(t0(), 400), 5*time.Second)...)
+	if got := injects(fx); len(got) != 0 {
+		t.Fatalf("injects: %q", got)
+	}
+}

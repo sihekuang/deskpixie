@@ -478,10 +478,14 @@ func TestAnswerJobErrorsAreReturnedNotRaised(t *testing.T) {
 		r := newRig(t)
 		tool := AnswerJob{H: r.h}
 		wantJSON(t, invoke(t, tool, `{}`), `{"error":"answer is required"}`)
-		wantJSON(t, invoke(t, tool, `{"answer":"x"}`), `{"error":"No job is waiting for an answer."}`)
-		wantJSON(t, invoke(t, tool, `{"answer":"x","job_id":"nope"}`), `{"error":"No open job nope."}`)
-		if len(r.host.Prompts()) != 0 {
-			t.Fatal(r.host.Prompts())
+		// Voice log, Oct 18 21:05: "It was not sent." with nothing waiting failed, and Pixie asked
+		// "did you mean something else?". Nobody waiting, the coordinator gets it as a request.
+		wantJSON(t, invoke(t, tool, `{"answer":"It was not sent.","job_id":"nope"}`),
+			`{"to":"the coordinator, as a new request","status":"answered"}`)
+		settle()
+		if p := r.host.Prompts(); len(p) != 1 || !strings.Contains(p[0].Text, "New request from the user: It was not sent.") ||
+			!strings.Contains(p[0].Text, "no question was waiting") {
+			t.Fatal(p)
 		}
 		if tool.Name() != "answer_job" {
 			t.Fatal(tool.Name())

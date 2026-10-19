@@ -99,3 +99,21 @@ func TestAnAnswerToTwoQuestionsAskedTogetherGoesToTheCoordinatorToSort(t *testin
 		}
 	}
 }
+
+// Voice models copy example ids or make them up (job_0123456789ab, Oct 18): an id that isn't a
+// waiting job is ignored, and the answer goes to whoever asked.
+func TestAnAnswerWithAMadeUpJobIDGoesToWhoeverAsked(t *testing.T) {
+	c := turnCtl(nil)
+	sessionTurn(c, askingTurn, T0)
+	fx := c.Step(AnswerInput("job_0123456789ab", "yes"), T0+1_000)
+	if r := answerResult(t, fx); r.Err != "" || r.Name != "api-claude" {
+		t.Fatalf("answered %+v", r)
+	}
+	delegate(c, 1, "a")
+	c.Step(CoordinatorUpInput(PaneIdle), T0)
+	c.Step(StopInput(Coordinator, `<spoken ref="job_000000000001" status="question">A?</spoken>`), T0+2_000)
+	fx = c.Step(AnswerInput("job_f876543210ab", "the blue one"), T0+3_000)
+	if r := answerResult(t, fx); r.Err != "" || r.Job != job(1) {
+		t.Fatalf("answered %+v", r)
+	}
+}

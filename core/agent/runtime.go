@@ -498,11 +498,10 @@ func (h *AgentHandle) Answer(jobID, text string) (JobID, error) {
 func (h *AgentHandle) AnswerAsked(jobID, text string) (JobID, string, error) {
 	var id JobID
 	if raw := strings.TrimSpace(jobID); raw != "" {
-		j, ok := ParseJobID(raw)
-		if !ok {
-			return "", "", fmt.Errorf("No open job %s.", raw)
+		// A malformed id is ignored like an unknown one: the answer goes to whoever asked.
+		if j, ok := ParseJobID(raw); ok {
+			id = j
 		}
-		id = j
 	}
 	if h.quitting() {
 		return "", "", errQuitting
@@ -510,6 +509,14 @@ func (h *AgentHandle) AnswerAsked(jobID, text string) (JobID, string, error) {
 	r := h.stepLocked(AnswerInput(id, text))
 	if r == nil || r.Kind != EfAnswerResult {
 		return "", "", errors.New("The answer was not processed.")
+	}
+	if r.Err == noAnswerWaiting {
+		// Nobody is waiting: the coordinator works out what the words are about, like any request.
+		id, err := h.Delegate(text, "The user said this as an answer, but no question was waiting for one.")
+		if err != nil {
+			return "", "", err
+		}
+		return id, "the coordinator, as a new request", nil
 	}
 	if r.Err != "" {
 		return "", "", errors.New(r.Err)

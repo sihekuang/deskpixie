@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"regexp"
 	"strings"
 	"testing"
@@ -225,5 +226,14 @@ func TestASessionsQuestionIsHandedOffNotAnsweredFromJobs(t *testing.T) {
 	}
 	if d := (Jobs{}).Description(); !strings.Contains(d, "Not the user's sessions") {
 		t.Error(d)
+	}
+}
+
+// Gemini copied the schema's example id into its calls (Oct 18): no example ids.
+func TestToolSchemasGiveNoExampleJobID(t *testing.T) {
+	for _, p := range []json.RawMessage{Jobs{}.Parameters(), AnswerJob{}.Parameters()} {
+		if strings.Contains(string(p), "job_0") {
+			t.Error(string(p))
+		}
 	}
 }

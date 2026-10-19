@@ -166,23 +166,39 @@ var leadIns = map[string]bool{
 // IsRequest reports whether the user's words ask a question or for something to be done, not
 // small talk, an acknowledgement, a goodbye or a question about Pixie itself.
 func IsRequest(said string) bool {
-	words := strings.Fields(normalize(said))
-	for len(words) > 0 && leadIns[words[0]] {
-		words = words[1:]
-	}
-	if len(words) < requestMinWords {
-		return false
-	}
-	text := strings.Join(words, " ")
-	if text == "whats up" || hasPrefixPhrase(text, chitChat) {
-		return false
-	}
-	if hasPrefixPhrase(text, smallTalk) && !hasAnyPhrase(text, requestAnywhere) {
+	text, ok := content(said)
+	if !ok {
 		return false
 	}
 	return strings.HasSuffix(strings.TrimSpace(said), "?") ||
 		hasPrefixPhrase(text, questionStarts) || hasPrefixPhrase(text, requestStarts) ||
 		hasAnyPhrase(text, requestAnywhere)
+}
+
+// HasContent: what was said is more than small talk, a request or not ("the coordinator
+// shouldn't ask me that"): worth handing on when Pixie promised to.
+func HasContent(said string) bool {
+	_, ok := content(said)
+	return ok
+}
+
+// content is said without its lead-ins, and whether it is more than small talk.
+func content(said string) (string, bool) {
+	words := strings.Fields(normalize(said))
+	for len(words) > 0 && leadIns[words[0]] {
+		words = words[1:]
+	}
+	if len(words) < requestMinWords {
+		return "", false
+	}
+	text := strings.Join(words, " ")
+	if text == "whats up" || hasPrefixPhrase(text, chitChat) {
+		return "", false
+	}
+	if hasPrefixPhrase(text, smallTalk) && !hasAnyPhrase(text, requestAnywhere) {
+		return "", false
+	}
+	return text, true
 }
 
 // ShouldHandOff: the user asked for something and Pixie's whole reply was a non-answer.

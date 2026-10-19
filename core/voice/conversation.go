@@ -6,6 +6,8 @@ package voice
 
 import (
 	"encoding/json"
+	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -210,10 +212,11 @@ type Conversation struct {
 	thinkingSince        time.Time
 	stalledSince         time.Time // Speaking looks stalled: quiet playback, no reply open/pending/expected
 	playbackIdle         bool
-	pendingTools         int    // until they finish, ResponseDone doesn't end the turn
-	ending               bool   // end_conversation was called: end once the reply finished playing
-	endWhy               string // why ending was set ("goodbye", "after a hand-off")
-	endReason            string // why the last conversation ended (#71's voice log)
+	pendingTools         int      // until they finish, ResponseDone doesn't end the turn
+	ending               bool     // end_conversation was called: end once the reply finished playing
+	heard                []string // every notice given to Pixie in this conversation, lowercased
+	endWhy               string   // why ending was set ("goodbye", "after a hand-off")
+	endReason            string   // why the last conversation ended (#71's voice log)
 	// checksOpen: "Check: " facts delegated in this conversation whose answer hasn't been
 	// read yet; reading the last one ends the conversation.
 	checksOpen int
@@ -365,6 +368,7 @@ func (c *Conversation) Step(in Input, now time.Time) []Effect {
 		fx = c.fail(in.Failure, now, fx)
 	case InInject:
 		if c.IsActive() {
+			c.heard = append(c.heard, strings.ToLower(in.Notice.Text))
 			c.injects = append(c.injects, in.Notice)
 			fx = c.tryInject(now, fx)
 		} else {
@@ -845,12 +849,17 @@ func (c *Conversation) maybeHandOff(now time.Time, fx []Effect) []Effect {
 		return c.handOffTask(c.hoUser, false, fx)
 	}
 	if !hasClaim {
+		if c.checkClaims && c.madeUpConfirm(bot) {
+			n := Notice{Text: MadeUpConfirmFix}
+			c.injects = append(c.injects, n)
+			c.claimFix = n
+		}
 		return fx
 	}
 	if claim.Tool == DelegateTool {
 		task := c.requestWords()
-		if !IsRequest(task) {
-			return fx // likely about earlier work: nothing new to hand off
+		if !HasContent(task) {
+			return fx // small talk: nothing to hand off
 		}
 		if claim.Check {
 			task = "Check: " + task
@@ -862,6 +871,23 @@ func (c *Conversation) maybeHandOff(now time.Time, fx []Effect) []Effect {
 		c.claimFix, c.claimFixTool = n, claim.Tool
 	}
 	return fx
+}
+
+// MadeUpConfirmFix corrects a confirm word Pixie made up: only the app's own questions have one.
+const MadeUpConfirmFix = CorrectionPrefix + "there is no confirm word for this; don't ask for one. Ask the user a plain yes or no question instead."
+
+var sayConfirm = regexp.MustCompile(`(?i)\bsay\s+confirm\s+([a-z]+)`)
+
+// madeUpConfirm: Pixie said "say confirm <word>" and no notice in this conversation has
+// "confirm <word>" (Oct 18: "Say confirm hawk" for a plain question).
+func (c *Conversation) madeUpConfirm(said string) bool {
+	for _, m := range sayConfirm.FindAllStringSubmatch(said, -1) {
+		phrase := "confirm " + strings.ToLower(m[1])
+		if !slices.ContainsFunc(c.heard, func(n string) bool { return strings.Contains(n, phrase) }) {
+			return true
+		}
+	}
+	return false
 }
 
 // withdrawClaimFix drops this turn's queued correction when its tool is called after all.

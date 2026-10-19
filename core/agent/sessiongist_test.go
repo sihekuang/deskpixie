@@ -27,6 +27,12 @@ func TestSessionGist(t *testing.T) {
 		{"question as a list of three", "Which should I do next?\n1. tests\n2. docs\n3. release", "Which should I do next: tests, docs or release?", true},
 		{"question, blank line, list", "Done with the fix.\n\nShould I:\n\n- **commit** it\n- open a PR", "Should I commit it or open a PR?", true},
 		{"list that is not a question", "Changes:\n- fixed the loop\n- added a test", "Changes: fixed the loop.", false},
+		// Voice log, Oct 18: these went to Pixie as "is done: how do you want to proceed?" and
+		// "is asking: which do you want?" with the options gone.
+		{"question then one more sentence", "Both builds failed.\n\nHow do you want to proceed? I can rerun them or skip CI.", "How do you want to proceed? I can rerun them or skip CI.", true},
+		{"should I, then a note", "The suite passed. Should I run both? It takes ten minutes.", "Should I run both? It takes ten minutes.", true},
+		{"a question that isn't for you", "Why did it fail? The cache was stale, so I cleared it.", "Why did it fail?", false},
+		{"short question after a list", "Two ways:\n\n1. **Restart the app.** I'd test it myself.\n2. **No restart, you speak two requests.** I'd watch the logs.\n\nEither way, I'd make a scratch repo.\n\nWhich do you want?", "Which do you want: restart the app or no restart, you speak two requests?", true},
 	} {
 		got, asking := SessionGist(tc.reply)
 		if got != tc.want || asking != tc.asking {
