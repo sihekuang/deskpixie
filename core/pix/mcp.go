@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/sihekuang/deskpixie/core/pix/wire"
@@ -46,14 +47,17 @@ func RunMCP(sock string, in io.Reader, out io.Writer) error {
 			result = map[string]any{"tools": []any{setDescriptionTool}}
 		case "tools/call":
 			var p struct {
-				Name      string            `json:"name"`
-				Arguments map[string]string `json:"arguments"`
+				Name      string         `json:"name"`
+				Arguments map[string]any `json:"arguments"`
 			}
 			json.Unmarshal(req.Params, &p)
 			text, isErr := "ok", false
+			desc := descriptionArg(p.Arguments)
 			if p.Name != "set_description" {
 				text, isErr = "unknown tool "+p.Name, true
-			} else if reply, err := askLocal(sock, wire.Msg{Kind: wire.KindEvent, Event: "description", Source: "agent", Description: p.Arguments["text"]}, 4*time.Second); err != nil {
+			} else if desc == "" {
+				text, isErr = `put the description in "text": 3 to 8 words naming the project and the task`, true
+			} else if reply, err := askLocal(sock, wire.Msg{Kind: wire.KindEvent, Event: "description", Source: "agent", Description: desc}, 4*time.Second); err != nil {
 				text, isErr = "pix is not reachable; the description was not saved", true
 			} else if reply.Err != "" {
 				text, isErr = reply.Err, true
@@ -66,4 +70,15 @@ func RunMCP(sock string, in io.Reader, out io.Writer) error {
 		enc.Encode(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": result})
 	}
 	return s.Err()
+}
+
+// descriptionArg is set_description's text: "text", or "description", the name agents guess from
+// the tool's (#158).
+func descriptionArg(args map[string]any) string {
+	for _, k := range []string{"text", "description"} {
+		if v, ok := args[k].(string); ok && strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }
