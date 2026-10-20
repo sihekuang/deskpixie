@@ -73,7 +73,7 @@ Read the Rust source with `git -C ~/Documents/Projects/ai-moscot show origin/mai
 ## settings.json schema (camelCase, defaults)
 ```jsonc
 { "hotkey": "ctrl+alt+Space", "pack": "bit", "scale": 8, "position": null,
-  "proximityFade": { "enabled": true, "radius": 150 },
+  "proximityFade": { "enabled": false, "radius": 150 },
   "voice": { "provider": "openai-realtime", "audio": "macos-vpio", "model": "gpt-realtime", "voice": "marin",
              "chimes": true, "idleTimeoutSecs": 7, "personaPath": null, "noiseFilter": false, "noiseModel": "hush",
              "noisyRoom": false, "inputDevice": null, "outputDevice": null, "homeCity": null },

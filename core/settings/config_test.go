@@ -121,7 +121,7 @@ func TestDefaultsMatchSpec(t *testing.T) {
 	if c.Hotkey != "ctrl+alt+Space" || c.Pack != "bit" || c.Scale != 8 || c.Position != nil {
 		t.Fatalf("%+v", c)
 	}
-	if c.ProximityFade != (Fade{Enabled: true, Radius: 150}) {
+	if c.ProximityFade != (Fade{Enabled: false, Radius: 150}) {
 		t.Fatalf("%+v", c.ProximityFade)
 	}
 }
@@ -172,7 +172,7 @@ func TestPartialFileFillsInDefaults(t *testing.T) {
 	if c.Pack != "blob" || c.Hotkey != "ctrl+alt+Space" {
 		t.Fatalf("%+v", c)
 	}
-	if c.ProximityFade != (Fade{Enabled: true, Radius: 90}) {
+	if c.ProximityFade != (Fade{Enabled: false, Radius: 90}) {
 		t.Fatalf("%+v", c.ProximityFade)
 	}
 }

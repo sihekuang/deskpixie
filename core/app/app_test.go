@@ -520,12 +520,12 @@ func TestSizeActionSavesAndResendsThePack(t *testing.T) {
 func TestFadeActionTogglesTheSavedSetting(t *testing.T) {
 	h := newHarness(t)
 	h.action("fade")
-	if h.saved().ProximityFade.Enabled || h.state().Fade {
-		t.Fatal("fade still on")
+	if !h.saved().ProximityFade.Enabled || !h.state().Fade {
+		t.Fatal("fade still off")
 	}
 	h.action("fade")
-	if !h.saved().ProximityFade.Enabled {
-		t.Fatal("fade still off")
+	if h.saved().ProximityFade.Enabled {
+		t.Fatal("fade still on")
 	}
 }
 
@@ -657,9 +657,12 @@ func TestAudioMethodsReachTheRuntime(t *testing.T) {
 func TestHotkeyWithoutAKeyShowsTheStatusLine(t *testing.T) {
 	h := newHarness(t)
 	h.app.Hotkey()
-	h.waitFor("state", func(e event) bool { return e["state"] == "error" }, 3*time.Second)
+	// The voice runtime sends the error state and the status line as separate events: wait
+	// for the status line itself, not just the state (read too early, the lines were empty).
+	const want = "Voice: no API key (set OPENAI_API_KEY)"
+	h.waitFor("status", func(e event) bool { return e["text"] == want }, 3*time.Second)
 	lines := h.state().StatusLines
-	if len(lines) != 1 || lines[0] != "Voice: no API key (set OPENAI_API_KEY)" {
+	if len(lines) != 1 || lines[0] != want {
 		t.Fatalf("%v", lines)
 	}
 }
