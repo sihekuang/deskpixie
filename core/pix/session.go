@@ -80,6 +80,7 @@ type Session struct {
 	afterStop bool   // the next prompt starts new work (an auto description)
 	sessionID string
 	userDesc  string // --description
+	outdated  bool   // the app says this pix is older than its own (#189)
 	agentDesc string // set_description
 	autoDesc  string // first prompt of the current work
 	flushing  bool
@@ -582,15 +583,27 @@ func (s *Session) description() string {
 	return ""
 }
 
-// title sets the terminal tab title (OSC 2): the description, with waiting messages first.
+// title sets the terminal tab title (OSC 2): titleText.
 func (s *Session) title() {
+	if t := s.titleText(); t != "" {
+		fmt.Fprintf(s.o.stdout, "\x1b]2;%s\x07", Sanitize(t))
+	}
+}
+
+// titleText is the description, with waiting messages first, and first of all a note when
+// this pix is older than the app's (#189).
+func (s *Session) titleText() string {
 	t := s.description()
 	if n := s.queue.Len(); n > 0 {
 		t = fmt.Sprintf("📨 %d · %s", n, t)
 	}
-	if t != "" {
-		fmt.Fprintf(s.o.stdout, "\x1b]2;%s\x07", Sanitize(t))
+	s.mu.Lock()
+	outdated := s.outdated
+	s.mu.Unlock()
+	if outdated {
+		t = "⟳ restart pix · " + t
 	}
+	return t
 }
 
 // resend is the state DeskPixie needs after (re)registering.
@@ -616,8 +629,17 @@ func (s *Session) start(ctx context.Context) error {
 	s.client = &Client{
 		Sock: s.o.daemonSock,
 		Hello: wire.Msg{Kind: wire.KindRegister, Tool: s.o.tool, Cwd: cwd, GitRoot: gitRoot(cwd),
-			Where: s.o.where, App: s.o.app, Description: s.o.description},
+			Where: s.o.where, App: s.o.app, Description: s.o.description, Build: wire.SelfBuild()},
 		OnCommand: s.command,
+		OnRegistered: func(reply wire.Msg) {
+			s.mu.Lock()
+			changed := s.outdated != reply.Outdated
+			s.outdated = reply.Outdated
+			s.mu.Unlock()
+			if changed {
+				s.title()
+			}
+		},
 		OnRefused: func(r string) {
 			s.mu.Lock()
 			s.userDesc = "pix: " + r

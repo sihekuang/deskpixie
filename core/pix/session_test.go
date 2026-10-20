@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -24,6 +25,8 @@ import (
 type fakeDaemon struct {
 	conn   chan net.Conn
 	events chan wire.Msg
+	// outdated: registered replies say this pix is older than the app's (#189).
+	outdated atomic.Bool
 }
 
 func newFakeDaemon(t *testing.T, refuse string) (*fakeDaemon, string) {
@@ -51,7 +54,7 @@ func newFakeDaemon(t *testing.T, refuse string) (*fakeDaemon, string) {
 							wire.Encode(c, wire.Msg{Kind: wire.KindRefused, Reason: refuse})
 							continue
 						}
-						wire.Encode(c, wire.Msg{Kind: wire.KindRegistered, Address: "repo-claude"})
+						wire.Encode(c, wire.Msg{Kind: wire.KindRegistered, Address: "repo-claude", Outdated: d.outdated.Load()})
 						d.conn <- c
 					}
 					d.events <- m
@@ -84,7 +87,7 @@ func TestClientRegistersAndReconnects(t *testing.T) {
 	defer cancel()
 	got := make(chan string, 2)
 	c := &Client{Sock: sock, Hello: wire.Msg{Kind: wire.KindRegister, Tool: "claude", SessionID: "s1"},
-		OnRegistered: func(a string) { got <- a }, OnCommand: func(wire.Msg) wire.Msg { return wire.Msg{} }}
+		OnRegistered: func(m wire.Msg) { got <- m.Address }, OnCommand: func(wire.Msg) wire.Msg { return wire.Msg{} }}
 	go c.Run(ctx)
 	if a := <-got; a != "repo-claude" {
 		t.Fatal(a)
@@ -1121,3 +1124,33 @@ var (
 	tapMu  sync.Mutex
 	tapped = map[*Session][]byte{}
 )
+
+// #189: pix tells the app which build it is; told it's older than the app's, it shows that on
+// its tab title until it reconnects to an app that says otherwise.
+func TestSessionSendsItsBuildAndShowsWhenOutdated(t *testing.T) {
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 5"}})
+	hello := waitEvent(t, h.d.events, "register", func(m wire.Msg) bool { return m.Kind == wire.KindRegister })
+	if hello.Build == "" || hello.Build != wire.BuildOf(os.Args[0]) {
+		t.Fatalf("build %q", hello.Build)
+	}
+	if strings.Contains(h.s.titleText(), "restart") {
+		t.Fatal(h.s.titleText())
+	}
+	h.d.outdated.Store(true)
+	h.conn.Close()
+	eventually(t, "the outdated title", func() bool { return strings.Contains(h.s.titleText(), "restart pix") })
+	h.d.outdated.Store(false)
+	(<-h.d.conn).Close()
+	eventually(t, "the title back", func() bool { return !strings.Contains(h.s.titleText(), "restart") })
+}
+
+// eventually retries f until it passes or 5 s have gone by.
+func eventually(t *testing.T, what string, f func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if f() {
+			return
+		}
+	}
+	t.Fatal("timed out waiting for " + what)
+}

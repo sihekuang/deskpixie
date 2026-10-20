@@ -388,6 +388,7 @@ type UserSession struct {
 	LastTurn         string    // the gist of its last finished turn (#146; "" = none, or nothing readable)
 	LastTurnAsks     bool      // that turn ended asking you something
 	Waiting          int       // Pixie's messages pix holds for it, not yet delivered (#183)
+	Outdated         bool      // it runs another pix than the app's: restart it to update (#189)
 }
 
 // EnvVar is one environment entry (Rust's (String, String) pair).

@@ -15,10 +15,10 @@ import (
 // #87: Codex as the coordinator, on the app side.
 
 func TestClaudesCoordinatorMdIsUnchanged(t *testing.T) {
-	// The renderings since sessions get asked about by description (pix, #89), byte for byte; with workers on, since #97 (create_project) and #126 (prefer an existing pix session over a worker), #141 (the app asks before a push or merge; no made-up confirm words), #143 (each session verbatim by default), #146 (match a session by its last turn too), and #153 (hand a request on: your session, then Pixie's worker, then yourself; edit a repo after asking), and #157 (several requests at once: read together, in order; Pixie's context is never an instruction), and #160 (a request is the person's own words: work out several things, their order and corrections), and #161 (pick the likeliest session yourself; ask only when you can't tell), and #164 (no Recall: requests: answer from memory, else hand it on) and #165 (a request handed to a session is done once sent), and #177 (a session in the same project gets it, questions too, before you look; the app says the hand-off, so the done block is short), and #183 (message_session may return waiting, with why).
+	// The renderings since sessions get asked about by description (pix, #89), byte for byte; with workers on, since #97 (create_project) and #126 (prefer an existing pix session over a worker), #141 (the app asks before a push or merge; no made-up confirm words), #143 (each session verbatim by default), #146 (match a session by its last turn too), and #153 (hand a request on: your session, then Pixie's worker, then yourself; edit a repo after asking), and #157 (several requests at once: read together, in order; Pixie's context is never an instruction), and #160 (a request is the person's own words: work out several things, their order and corrections), and #161 (pick the likeliest session yourself; ask only when you can't tell), and #164 (no Recall: requests: answer from memory, else hand it on) and #165 (a request handed to a session is done once sent), and #177 (a session in the same project gets it, questions too, before you look; the app says the hand-off, so the done block is short), and #183 (message_session may return waiting, with why), #187 (flush_session, or force, when they say send it anyway) and #189 (a session on an older pix says so).
 	for _, c := range []struct{ root, sum string }{
-		{"", "4969020f09b130a4bfced57193cc7befd8fd7d549df61bbc1bc9919fe50e633c"},
-		{"/Users/x/code", "c6a1d6dd5ffbde93180a9e1724d6443b7323981c22e8d5daf6e71c27b8cba8d3"},
+		{"", "2354cd3e210febd4edebb3f399ec0f751f4aae89d6f2afd56b2e573441cdce42"},
+		{"/Users/x/code", "7d9b95665b6af9989510d366c6f8f4d1f2e6551b58c423e7c01a89192314dee0"},
 	} {
 		if got := fmt.Sprintf("%x", sha256.Sum256([]byte(RenderClaudeMd("/data/canvas", c.root)))); got != c.sum {
 			t.Fatal(c.root, got)
@@ -187,5 +187,11 @@ func TestAKeptClaudeCoordinatorIsReplacedByACodexOne(t *testing.T) {
 	}
 	if !slices.Contains(f.host.Closed(), agent.Coordinator) {
 		t.Fatal("the Claude pane was not replaced", f.host.Closed())
+	}
+}
+
+func TestBundledPixIsBesideTheApp(t *testing.T) {
+	if got := BundledPix("/Applications/DeskPixie.app/Contents/MacOS/DeskPixie"); got != "/Applications/DeskPixie.app/Contents/Helpers/pix" {
+		t.Fatal(got)
 	}
 }

@@ -20,9 +20,9 @@ type Client struct {
 	Sock         string
 	Hello        wire.Msg
 	OnCommand    func(wire.Msg) wire.Msg // its reply is sent back as the result
-	OnRegistered func(address string)
-	OnRefused    func(reason string) // the daemon refused; pix runs standalone from then on
-	Resend       func() []wire.Msg   // state to send after each registration
+	OnRegistered func(reply wire.Msg)    // Address, and Outdated (#189)
+	OnRefused    func(reason string)     // the daemon refused; pix runs standalone from then on
+	Resend       func() []wire.Msg       // state to send after each registration
 
 	mu   sync.Mutex
 	conn net.Conn
@@ -80,7 +80,7 @@ func (c *Client) connect(ctx context.Context) (registered, refused bool) {
 	c.Hello.Address = reply.Address // asked for again after a reconnect
 	c.mu.Unlock()
 	if c.OnRegistered != nil {
-		c.OnRegistered(reply.Address)
+		c.OnRegistered(reply)
 	}
 	if c.Resend != nil {
 		for _, m := range c.Resend() {

@@ -662,3 +662,35 @@ func TestFlushSaysTypedOrWhyItStillWaits(t *testing.T) {
 		t.Fatalf("old pix: %v", err)
 	}
 }
+
+// #189: pix says which build it is when it registers. One older than the pix the app ships (or
+// from before builds, with none) is registered all the same, marked outdated: in its reply, in
+// List, and in what a message to it returns. With no build of its own, the app marks none.
+func TestAnOlderPixIsMarkedOutdated(t *testing.T) {
+	h, sock := newHost(t)
+	h.SetBuild("new")
+	_, current := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/a", Build: "new"})
+	_, older := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/b", Build: "old"})
+	po, unknown := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/c"})
+	if current.Kind != wire.KindRegistered || current.Outdated || !older.Outdated || !unknown.Outdated {
+		t.Fatalf("%+v %+v %+v", current, older, unknown)
+	}
+	out := map[string]bool{}
+	for _, s := range listed(t, h) {
+		out[s.Name] = s.User.Outdated
+	}
+	if out[current.Address] || !out[older.Address] || !out[unknown.Address] {
+		t.Fatal(out)
+	}
+	go po.answer("")
+	d, err := h.PromptDelivery(context.Background(), unknown.Address, "hi")
+	if err != nil || !d.Outdated {
+		t.Fatalf("%+v %v", d, err)
+	}
+
+	h2, sock2 := newHost(t)
+	_, r := dialPix(t, sock2, wire.Msg{Tool: "claude", GitRoot: "/x/a", Build: "old"})
+	if r.Outdated || listed(t, h2)[0].User.Outdated {
+		t.Fatal("marked outdated by an app that doesn't know its own pix")
+	}
+}

@@ -58,6 +58,7 @@ type Host struct {
 	mu       sync.Mutex
 	l        net.Listener
 	sessions map[string]*session // by address
+	build    string              // the build of the pix this app ships (SetBuild)
 	subs     []chan agent.PaneEvent
 	changes  chan struct{}
 	seq      atomic.Uint64
@@ -108,6 +109,17 @@ func (h *Host) Listen() error {
 	return nil
 }
 
+// SetBuild sets the build of the pix this app ships (wire.BuildOf; #189): a pix of another
+// build is marked outdated. "" (the default) marks none.
+func (h *Host) SetBuild(build string) {
+	h.mu.Lock()
+	h.build = build
+	h.mu.Unlock()
+}
+
+// outdated: s runs another pix than the app's (h.mu held).
+func (h *Host) outdated(s *session) bool { return h.build != "" && s.hello.Build != h.build }
+
 // Shutdown stops listening. pix sessions keep running and reconnect when the app is back.
 func (h *Host) Shutdown() {
 	h.mu.Lock()
@@ -146,8 +158,11 @@ func (h *Host) serve(c net.Conn) {
 		return
 	}
 	h.changed()
+	h.mu.Lock()
+	outdated := h.outdated(s)
+	h.mu.Unlock()
 	s.wmu.Lock()
-	err = wire.Encode(c, wire.Msg{Kind: wire.KindRegistered, Address: s.addr})
+	err = wire.Encode(c, wire.Msg{Kind: wire.KindRegistered, Address: s.addr, Outdated: outdated})
 	s.wmu.Unlock()
 	if err == nil {
 		for {
@@ -463,15 +478,19 @@ func (h *Host) PromptDelivery(ctx context.Context, name, text string) (agent.Del
 	if err != nil {
 		return agent.Delivery{}, err
 	}
-	if r.Status == "waiting" {
-		h.mu.Lock()
-		if s := h.sessions[name]; s != nil {
+	h.mu.Lock()
+	outdated := false
+	if s := h.sessions[name]; s != nil {
+		outdated = h.outdated(s)
+		if r.Status == "waiting" {
 			s.waiting++
 		}
-		h.mu.Unlock()
+	}
+	h.mu.Unlock()
+	if r.Status == "waiting" {
 		h.changed()
 	}
-	return agent.Delivery{Status: r.Status, Reason: r.Reason}, nil
+	return agent.Delivery{Status: r.Status, Reason: r.Reason, Outdated: outdated}, nil
 }
 
 // Flush has pix type session name's waiting messages now, past its typing gate (#187).
@@ -525,7 +544,8 @@ func (h *Host) List(context.Context) ([]agent.AgentInfo, error) {
 			Name: s.addr, Pane: "pix:" + s.addr, Cwd: s.hello.Cwd, Status: s.status, Origin: agent.OriginUser,
 			User: &agent.UserSession{Tool: s.hello.Tool, Repo: repo, Where: s.hello.Where, App: s.hello.App, Pid: s.hello.Pid,
 				Description: desc, PastDescriptions: s.desc.Past(), Reachable: s.conn != nil, Verbatim: !s.labeled,
-				Started: s.started, LastActive: s.active, LastTurn: s.lastTurn, LastTurnAsks: s.asks, Waiting: s.waiting},
+				Started: s.started, LastActive: s.active, LastTurn: s.lastTurn, LastTurnAsks: s.asks, Waiting: s.waiting,
+				Outdated: h.outdated(s)},
 		})
 	}
 	return out, nil

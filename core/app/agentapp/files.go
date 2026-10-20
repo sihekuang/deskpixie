@@ -392,6 +392,12 @@ func KeptFor(kept agent.KeptAgents, kind agent.AgentKind, stamp string) agent.Ke
 	return kept
 }
 
+// BundledPix is the pix shipped in the app whose executable is exe
+// (DeskPixie.app/Contents/MacOS/DeskPixie → DeskPixie.app/Contents/Helpers/pix).
+func BundledPix(exe string) string {
+	return filepath.Join(filepath.Dir(filepath.Dir(exe)), "Helpers", "pix")
+}
+
 // CoordinatorStamp sums up what a coordinator started from recipe starts with: its kind and
 // arguments, and the files it reads at its start (its instructions and settings; a missing one
 // counts as empty). Not its env: a kept coordinator keeps its token.

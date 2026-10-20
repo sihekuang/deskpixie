@@ -302,7 +302,7 @@ func (d *deliveringFake) PromptDelivery(ctx context.Context, name, text string) 
 func (d *deliveringFake) List(ctx context.Context) ([]agent.AgentInfo, error) {
 	l, err := d.userFake.List(ctx)
 	for i := range l {
-		l[i].User.Waiting = d.waiting
+		l[i].User.Waiting, l[i].User.Outdated = d.waiting, d.delivery.Outdated
 	}
 	return l, err
 }
@@ -368,5 +368,34 @@ func TestFlushSessionAndForcedMessages(t *testing.T) {
 	r = agent.SessionToolForTest(ctx, c, agent.McpCall{Kind: agent.CallFlushSession, Name: "focus-claude"})
 	if v, _ := r.Value.(map[string]any); v["status"] != "waiting" || v["reason"] != "working" {
 		t.Fatalf("flush while working: %v", r.Value)
+	}
+}
+
+// #189: a session running an older pix than the app's says so, in list_sessions and in what a
+// message to it returns, with what to do; a current one says nothing about it.
+func TestASessionOnAnOlderPixSaysSo(t *testing.T) {
+	_, user, primary := newSessionHarness(t)
+	d := &deliveringFake{userFake: user, delivery: agent.Delivery{Status: "typed"}}
+	c := agent.NewCompositeHost(primary, d)
+	ctx := context.Background()
+	send := func() map[string]any {
+		t.Helper()
+		r := agent.SessionToolForTest(ctx, c, agent.McpCall{Kind: agent.CallMessageSession, Name: "focus-claude", Text: "hi"})
+		if r.Err != nil {
+			t.Fatal(r.Err)
+		}
+		return r.Value.(map[string]any)
+	}
+	if got := send(); got["outdated"] != nil || sessionRows(t, agent.SessionToolForTest(ctx, c, agent.McpCall{Kind: agent.CallListSessions}))[0].Outdated {
+		t.Fatalf("current: %v", got)
+	}
+	for _, d.delivery = range []agent.Delivery{{Status: "typed", Outdated: true}, {Status: "waiting", Reason: "typing", Outdated: true}} {
+		got := send()
+		if update, _ := got["update"].(string); got["outdated"] != true || !strings.Contains(update, "--resume") {
+			t.Fatalf("%+v: %v", d.delivery, got)
+		}
+	}
+	if rows := sessionRows(t, agent.SessionToolForTest(ctx, c, agent.McpCall{Kind: agent.CallListSessions})); !rows[0].Outdated {
+		t.Fatalf("%+v", rows)
 	}
 }

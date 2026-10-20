@@ -108,6 +108,9 @@ type Config struct {
 	IDs       agent.IdSource             // nil = RandomIDs
 	// Listen binds the hook/MCP server; nil = httpserver.Listen (127.0.0.1:port).
 	Listen func(port uint16) (net.Listener, error)
+	// Pix is the pix this app ships, whose build a session's pix must be to be current (#189);
+	// "" = BundledPix of the running app. A path with no file marks no session outdated.
+	Pix string
 	// PixSocket is where sessions you start with pix connect (#89); "" = wire.SocketPath
 	// under AppSupport.
 	PixSocket string
@@ -255,6 +258,11 @@ func Build(c Config) *Agent {
 		c.PixSocket = wire.SocketPath(c.AppSupport, os.Getuid(), os.TempDir())
 	}
 	primary := session
+	if c.Pix == "" {
+		if exe, err := os.Executable(); err == nil {
+			c.Pix = BundledPix(exe)
+		}
+	}
 	ph := pixhost.New(c.PixSocket, func() []string {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -268,6 +276,7 @@ func Build(c Config) *Agent {
 		}
 		return names
 	})
+	ph.SetBuild(wire.BuildOf(c.Pix))
 	if err := ph.Listen(); err != nil {
 		log.Printf("agent: pix: %v", err) // delegation still works without it
 	} else {

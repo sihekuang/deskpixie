@@ -81,6 +81,7 @@ type SessionRow struct {
 	LastActive       string   `json:"last_active,omitempty"` // "3m ago"
 	LastTurn         string   `json:"last_turn,omitempty"`   // its last turn's gist, "Asked: …" for a question (#146)
 	Waiting          int      `json:"waiting,omitempty"`     // messages waiting to be delivered to it (#183)
+	Outdated         bool     `json:"outdated,omitempty"`    // it runs an older pix than the app's (#189)
 }
 
 // ago is how long before now t was, as list_sessions shows it ("" for no time).
@@ -106,6 +107,8 @@ type Describer interface {
 type Delivery struct {
 	Status string
 	Reason string
+	// Outdated: the session runs another pix than the app's (#189).
+	Outdated bool
 }
 
 // DeliveryPrompter prompts a session and says whether the message was typed or waits.
@@ -121,11 +124,19 @@ type Flusher interface {
 
 // deliveryReply is message_session's or flush_session's reply for d.
 func deliveryReply(name string, d Delivery) McpReply {
+	v := map[string]any{"name": name, "status": "sent"}
 	if d.Status == "waiting" {
-		return McpReply{Value: map[string]any{"name": name, "status": "waiting", "reason": d.Reason, "why": WaitingWhy(d.Reason)}}
+		v = map[string]any{"name": name, "status": "waiting", "reason": d.Reason, "why": WaitingWhy(d.Reason)}
 	}
-	return McpReply{Value: map[string]any{"name": name, "status": "sent"}}
+	if d.Outdated {
+		v["outdated"], v["update"] = true, OutdatedUpdate
+	}
+	return McpReply{Value: v}
 }
+
+// OutdatedUpdate is what to tell the person about a session on an older pix (#189).
+const OutdatedUpdate = "This session runs an older pix than the app: newer things (like flush_session) may not work there. " +
+	"It updates when the person restarts it with pix and --resume (pix claude --resume, or pix codex resume)."
 
 // WaitingWhy is why a waiting message waits, for the coordinator and Pixie.
 func WaitingWhy(reason string) string {
@@ -273,7 +284,7 @@ func userSessionRows(ctx context.Context, sec SessionHost, mask func(string) str
 		}
 		rows = append(rows, SessionRow{Name: a.Name, Description: mask(u.Description), PastDescriptions: past,
 			Tool: u.Tool, Repo: u.Repo, Cwd: a.Cwd, Where: u.Where, Status: a.Status.String(), Reachable: u.Reachable, Verbatim: u.Verbatim,
-			Started: ago(u.Started, now), LastActive: ago(u.LastActive, now), LastTurn: last, Waiting: u.Waiting})
+			Started: ago(u.Started, now), LastActive: ago(u.LastActive, now), LastTurn: last, Waiting: u.Waiting, Outdated: u.Outdated})
 	}
 	return rows, nil
 }
