@@ -293,11 +293,16 @@ func newLiveRig(t *testing.T, m voice.Model, cfg voice.SessionConfig, secrets vo
 
 // newLiveRigWith is newLiveRig with the voice loop's tools given.
 func newLiveRigWith(t *testing.T, m voice.Model, cfg voice.SessionConfig, secrets voice.SecretSource, reg *voice.ToolRegistry) *liveRig {
+	return newLiveRigConv(t, m, cfg, secrets, reg, voice.DefaultConversationConfig())
+}
+
+// newLiveRigConv is newLiveRigWith with the conversation's settings given (the claim check...).
+func newLiveRigConv(t *testing.T, m voice.Model, cfg voice.SessionConfig, secrets voice.SecretSource, reg *voice.ToolRegistry, conv voice.ConversationConfig) *liveRig {
 	sp := newLiveSpy()
 	r := &liveRig{t: t, liveSpy: sp, stop: make(chan struct{}), done: make(chan struct{})}
 	r.rt = voice.NewRuntime(liveSpyModel{Model: m, liveSpy: sp}, nil, voice.RuntimeConfig{
 		Session: cfg, Secrets: secrets, Tools: reg, MouthLevels: 4,
-		Conversation: voice.DefaultConversationConfig(),
+		Conversation: conv,
 	}, func(e voice.UIEvent) {
 		if e.Kind == "state" || e.Kind == "status" || e.Kind == "error" {
 			t.Logf("ui %s %s%s", e.Kind, e.State, e.Text)

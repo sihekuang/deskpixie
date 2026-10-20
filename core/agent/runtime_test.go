@@ -478,10 +478,14 @@ func TestAnswerJobErrorsAreReturnedNotRaised(t *testing.T) {
 		r := newRig(t)
 		tool := AnswerJob{H: r.h}
 		wantJSON(t, invoke(t, tool, `{}`), `{"error":"answer is required"}`)
-		wantJSON(t, invoke(t, tool, `{"answer":"x"}`), `{"error":"No job is waiting for an answer."}`)
-		wantJSON(t, invoke(t, tool, `{"answer":"x","job_id":"nope"}`), `{"error":"No open job nope."}`)
-		if len(r.host.Prompts()) != 0 {
-			t.Fatal(r.host.Prompts())
+		// Voice log, Oct 18 21:05: "It was not sent." with nothing waiting failed, and Pixie asked
+		// "did you mean something else?". Nobody waiting, the coordinator gets it as a request.
+		wantJSON(t, invoke(t, tool, `{"answer":"It was not sent.","job_id":"nope"}`),
+			`{"to":"the coordinator, as a new request","status":"answered"}`)
+		settle()
+		if p := r.host.Prompts(); len(p) != 1 || !strings.Contains(p[0].Text, "New request from the user: It was not sent.") ||
+			!strings.Contains(p[0].Text, "no question was waiting") {
+			t.Fatal(p)
 		}
 		if tool.Name() != "answer_job" {
 			t.Fatal(tool.Name())
@@ -1051,6 +1055,31 @@ func TestAStateHookIsIgnoredByAHostThatDetectsStatusItself(t *testing.T) {
 		settle()
 		if len(r.host.Starts()) != 0 || len(r.host.Prompts()) != 0 || len(r.status.Lines()) != 0 {
 			t.Fatal(r.host.Starts(), r.host.Prompts(), r.status.Lines())
+		}
+	})
+}
+
+// Voice log, Oct 18 22:47: asked "keep waiting, or ask it for a status update?", the user said
+// "you can stop now" and Pixie cancelled the job, killing the run. A cancel of the job whose
+// question was just relayed goes to the coordinator as the answer: it works out what to stop.
+func TestCancellingTheJobThatJustAskedAnswersItInstead(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRig(t)
+		delegate(t, r, "how is the suite going?")
+		settle()
+		stopHook(r, `<spoken ref="job_000000000001" status="question">Keep waiting, or ask it for a status update?</spoken>`)
+		settle()
+		r.host.SetStatus(Coordinator, PaneIdle)
+		settle()
+		wantJSON(t, invoke(t, Jobs{H: r.h}, `{"action":"cancel"}`),
+			`{"job_id":"job_000000000001","status":"answered","to":"the coordinator, to work out what to stop"}`)
+		settle()
+		prompts := r.host.Prompts()
+		if last := prompts[len(prompts)-1].Text; !strings.Contains(last, "The user answered: stop") || !strings.Contains(last, "stop waiting or stop the work") {
+			t.Fatal(last)
+		}
+		if r.h.JobStatus()[0].Status != JobWorking {
+			t.Fatal(r.h.JobStatus())
 		}
 	})
 }

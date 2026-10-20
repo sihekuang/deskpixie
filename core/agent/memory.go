@@ -3,12 +3,10 @@ package agent
 // Pixie's memory comes from the coordinator side: Pixie keeps no record of its own. Each voice
 // session (every connect, any provider) gets a compact "Recent work with the agent" block built
 // from the job table (task, status, the coordinator's last reply or progress) and the
-// coordinator's per-turn memories (memories.go), and the `recall` tool asks the coordinator
-// itself about earlier talks, through the delegate path, with its newest memories attached.
+// coordinator's per-turn memories (memories.go). Anything else about earlier talks goes to the
+// coordinator through delegate, like any request (#164).
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -31,17 +29,15 @@ const (
 	MemoryMaxNotes = 10
 	// MemoryBudgetChars bounds the whole block (~4 characters a token, so ~650 tokens).
 	MemoryBudgetChars = 2600
-	// RecallNotes: this many of the newest memories go with a recall question.
-	RecallNotes = 30
-	// RecallPrefix marks a recall question in the job's task (and to the coordinator).
+	// RecallPrefix marked a recall question in the job's task (#164 retired the recall tool;
+	// saved jobs may still carry it).
 	RecallPrefix = "Recall: "
 )
 
 const (
 	memoryHeader = "Recent work with the coordinator (from its job records, oldest first; times are local). " +
 		"Use it as background so the user needn't repeat themselves; don't recite it unless asked. " +
-		"New requests and follow-ups still go to delegate. " +
-		"For anything else about earlier talks, call recall:"
+		"New requests and follow-ups still go to delegate, and so does anything else about earlier talks:"
 	notesHeader = "Recent work with the coordinator, in its own notes of its latest turns (oldest first). " +
 		"Background only: new requests and follow-ups still go to delegate:"
 )
@@ -169,65 +165,4 @@ func (h *AgentHandle) Facts() string {
 	return MemoryFacts(jobs, memories, now, time.Local)
 }
 
-// recallContext is what goes with a recall question: what it is, and the newest memories, so
-// the answer holds even if the coordinator's own conversation was lost.
-func (h *AgentHandle) recallContext() string {
-	now := h.deps.Clock.NowMs()
-	h.ctlMu.Lock()
-	memories := h.ctl.RecentMemories(RecallNotes)
-	h.ctlMu.Unlock()
-	if len(memories) == 0 {
-		return recallContext
-	}
-	lines := []string{recallContext, "Your saved memories of recent turns (oldest first):"}
-	for _, m := range memories {
-		line := noteLine(m, now, time.Local)
-		if m.Job != nil {
-			line += " [" + string(*m.Job) + "]"
-		}
-		lines = append(lines, line)
-	}
-	return strings.Join(lines, "\n")
-}
-
-// recallContext tells the coordinator a recall is a question about the past, not work.
-const recallContext = "This is a context question from Pixie, not a task: answer it from what you remember of " +
-	"earlier requests and conversations with the user (and your saved memories below or job history if needed). Don't " +
-	"start any work. Reply at once with status done, in one or two sentences; if you don't know, say so."
-
-// Recall is the `recall` tool: Pixie asks the coordinator about earlier talks. It goes the
-// delegate path (a job marked with RecallPrefix) and its answer comes back as a Coordinator reply.
-type Recall struct{ H *AgentHandle }
-
-func (Recall) Name() string { return "recall" }
-
-func (Recall) Description() string {
-	return "Ask the coordinator what it remembers of earlier conversations and work with the user, when the user " +
-		"refers to something from before (\"that thing we talked about\", \"the earlier report\") that the " +
-		"conversation and your recent-work notes don't cover. Not for new work: use delegate. Returns at once; " +
-		"the answer arrives as an \"Coordinator reply:\" line."
-}
-
-func (Recall) Parameters() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{` +
-		`"question":{"type":"string","description":"What you need to remember, in a short question, with any names or details the user gave."}},` +
-		`"required":["question"],"additionalProperties":false}`)
-}
-
-func (r Recall) Invoke(_ context.Context, raw json.RawMessage) voice.ToolOutcome {
-	question := textArg(decodeArgs(raw), "question")
-	if question == "" {
-		return toolReply(map[string]any{"error": "question is required"})
-	}
-	id, err := r.H.Delegate(RecallPrefix+question, r.H.recallContext())
-	if err != nil {
-		return toolError(err)
-	}
-	// Like a "Check:" fact, the conversation stays open for the answer.
-	return toolReply(map[string]any{"job_id": id.String(), "status": "asked"})
-}
-
-var (
-	_ voice.Tool         = Recall{}
-	_ voice.SessionFacts = (*AgentHandle)(nil)
-)
+var _ voice.SessionFacts = (*AgentHandle)(nil)

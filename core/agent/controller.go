@@ -1707,6 +1707,15 @@ func (c *AgentController) denyPendingFor(job JobID, why string, fx *[]Effect) {
 	}
 }
 
+// AskedLast: id's question is the one Pixie relayed last, and it is still waiting.
+func (c *AgentController) AskedLast(id JobID) bool {
+	j, ok := c.jobs.Get(id)
+	return c.asked.session == "" && c.asked.job == id && ok && j.Status == JobQuestion
+}
+
+// noAnswerWaiting: an answer with no question waiting for it.
+const noAnswerWaiting = "No job is waiting for an answer."
+
 func (c *AgentController) answer(jobID JobID, text string, now Millis, fx *[]Effect) {
 	waiting := func(id JobID) bool {
 		j, ok := c.jobs.Get(id)
@@ -1717,10 +1726,7 @@ func (c *AgentController) answer(jobID JobID, text string, now Millis, fx *[]Eff
 	switch {
 	case jobID != "" && c.jobs.IsOpen(jobID) && waiting(jobID):
 		id = jobID
-	case jobID != "" && c.jobs.IsOpen(jobID):
-		err = fmt.Sprintf("%s is not waiting for an answer.", jobID)
-	case jobID != "":
-		err = fmt.Sprintf("No open job %s.", jobID)
+	// Any other id is ignored: voice models copy example ids or make them up (Oct 18).
 	case c.asked.session != "":
 		*fx = append(*fx, Effect{Kind: EfTellSession, Name: c.asked.session, Text: strings.TrimSpace(text)},
 			Effect{Kind: EfAnswerResult, Name: c.asked.session})
@@ -1737,7 +1743,7 @@ func (c *AgentController) answer(jobID JobID, text string, now Millis, fx *[]Eff
 		}
 		switch len(asking) {
 		case 0:
-			err = "No job is waiting for an answer."
+			err = noAnswerWaiting
 		case 1:
 			id = asking[0]
 		default:

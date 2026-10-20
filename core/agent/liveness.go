@@ -16,7 +16,7 @@ const (
 )
 
 // unbackedNudge is what the coordinator is told about a working job with nothing behind it.
-const unbackedNudge = "This job shows as working, but no worker is running for it and you haven't replied about it. Reply now with its result, a question for the user, or that it failed."
+const unbackedNudge = "This job shows as working, but no worker is running for it and you haven't replied about it. Reply now with its result, a question for the user, or that it failed. If you handed it to a session, reply done: sessions don't report back, and the person hears its answer from Pixie."
 
 // questionExpiredNote tells the coordinator a question's job was closed.
 const questionExpiredNote = "The user didn't answer your question within 30 minutes, so the app closed this job. Drop it; no reply is needed."

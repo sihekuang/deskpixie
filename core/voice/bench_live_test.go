@@ -306,9 +306,6 @@ func benchRegistry(b *benchTools) *voice.ToolRegistry {
 	reg.Register(benchTool{inner: agent.AnswerJob{}, b: b, fn: func(json.RawMessage) voice.ToolOutcome {
 		return ok(map[string]any{"error": "No job is waiting for an answer."})
 	}})
-	reg.Register(benchTool{inner: agent.Recall{}, b: b, fn: func(json.RawMessage) voice.ToolOutcome {
-		return ok(map[string]any{"job_id": "job_recall", "status": "delegated"})
-	}})
 	return reg
 }
 
@@ -467,7 +464,7 @@ type BenchTurn struct {
 	Note           string         `json:"note,omitempty"`
 }
 
-var agentTools = map[string]bool{voice.DelegateTool: true, "jobs": true, voice.AnswerJobTool: true, "recall": true}
+var agentTools = map[string]bool{voice.DelegateTool: true, "jobs": true, voice.AnswerJobTool: true}
 
 func ms(d time.Duration) int64 { return d.Milliseconds() }
 

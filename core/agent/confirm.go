@@ -435,6 +435,25 @@ var negationEnds = map[string]bool{"but": true, "then": true, "just": true, "ins
 // deploy?"), not a request; "can you push?" still asks for the push.
 var stateQuestions = map[string]bool{"has": true, "have": true, "had": true, "is": true, "are": true, "was": true, "were": true, "did": true, "does": true}
 
+// whWords lead a question about where things stand when a state word follows ("where are we on
+// the merge?", "how did the deploy go?", "what's left?"); "how about you merge it?" and "when can
+// you push?" still ask for the step (#165).
+var whWords = map[string]bool{"where": true, "what": true, "how": true, "when": true, "which": true, "who": true}
+
+// asksWhereThingsStand: words start a question about what happened, not a request.
+func asksWhereThingsStand(words []string) bool {
+	if len(words) == 0 {
+		return false
+	}
+	if stateQuestions[words[0]] {
+		return true
+	}
+	if wh, ok := strings.CutSuffix(words[0], "'s"); ok && whWords[wh] {
+		return true
+	}
+	return whWords[words[0]] && len(words) > 1 && stateQuestions[words[1]]
+}
+
 // GatedActions are the hard-to-undo steps text asks for, by their base verb, in the order first
 // named ("push", "merge"): none for an ordinary message (#152), including one that only forbids
 // a step ("don't push anything") or asks whether it happened ("has anything been pushed?").
@@ -442,7 +461,7 @@ func GatedActions(text string) []string {
 	var out []string
 	for _, c := range clauses(strings.ToLower(strings.ReplaceAll(text, "’", "'"))) {
 		words := strings.FieldsFunc(c.text, func(r rune) bool { return !unicode.IsLetter(r) && r != '\'' })
-		if c.question && len(words) > 0 && stateQuestions[words[0]] {
+		if c.question && asksWhereThingsStand(words) {
 			continue
 		}
 		negated := false
@@ -532,14 +551,14 @@ func Describe(toolName string, toolInput any, agent string) string {
 	}
 	if toolName == CloseSessionTool {
 		// Its description when that reads aloud (Pixie says descriptions, not names).
-		what := stringField(toolInput, "description")
+		what := spokenDescription(toolInput)
 		if !isSpeakableText(what) {
 			what = stringField(toolInput, "name")
 		}
 		return fmt.Sprintf("Close your session %s?", what)
 	}
 	if toolName == MessageSessionTool {
-		what := stringField(toolInput, "description")
+		what := spokenDescription(toolInput)
 		if !isSpeakableText(what) {
 			what = stringField(toolInput, "name")
 		}
@@ -547,6 +566,12 @@ func Describe(toolName string, toolInput any, agent string) string {
 		return fmt.Sprintf("Message your session %s, asking it to %s?", what, spokenList(actions))
 	}
 	return fmt.Sprintf("Use %s in %s?", Clean(toolName), agent)
+}
+
+// spokenDescription is a session's description as said aloud: a pix description's "project:
+// task" colon reads as a comma (#165).
+func spokenDescription(toolInput any) string {
+	return strings.ReplaceAll(stringField(toolInput, "description"), ":", ",")
 }
 
 // ConfirmQuestionLine is the spoken question: the description plus `Say confirm <token>.`

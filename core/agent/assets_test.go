@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"regexp"
 	"strings"
 	"testing"
@@ -15,9 +16,17 @@ func TestDelegationPersonaIsEmbedded(t *testing.T) {
 	}
 }
 
+// #164: the coordinator is Pixie's memory, and Pixie doesn't decide what is memory and what is
+// work: a question about something from before is handed off like any request.
 func TestTheDelegationPersonaUsesTheAgentAsPixiesMemory(t *testing.T) {
-	if !strings.Contains(DelegationPersona, "call recall") || !strings.Contains(DelegationPersona, "Recent work with the coordinator") {
+	if !strings.Contains(DelegationPersona, "hand it off with delegate like any request") ||
+		!strings.Contains(DelegationPersona, "Recent work with the coordinator") {
 		t.Fatal(DelegationPersona)
+	}
+	for _, text := range []string{DelegationPersona, memoryHeader, notesHeader} {
+		if strings.Contains(text, "recall") {
+			t.Errorf("still mentions recall: %q", text)
+		}
 	}
 }
 
@@ -131,7 +140,7 @@ func TestPixiesPromptsNameTheCoordinator(t *testing.T) {
 			t.Errorf("the delegation rules don't say %q", phrase)
 		}
 	}
-	for _, d := range []string{Delegate{}.Description(), Jobs{}.Description(), AnswerJob{}.Description(), Recall{}.Description()} {
+	for _, d := range []string{Delegate{}.Description(), Jobs{}.Description(), AnswerJob{}.Description()} {
 		if !strings.Contains(d, "coordinator") || strings.Contains(d, "the agent") || strings.Contains(d, "bigger brain") {
 			t.Errorf("a tool description doesn't name the coordinator: %q", d)
 		}
@@ -217,5 +226,14 @@ func TestASessionsQuestionIsHandedOffNotAnsweredFromJobs(t *testing.T) {
 	}
 	if d := (Jobs{}).Description(); !strings.Contains(d, "Not the user's sessions") {
 		t.Error(d)
+	}
+}
+
+// Gemini copied the schema's example id into its calls (Oct 18): no example ids.
+func TestToolSchemasGiveNoExampleJobID(t *testing.T) {
+	for _, p := range []json.RawMessage{Jobs{}.Parameters(), AnswerJob{}.Parameters()} {
+		if strings.Contains(string(p), "job_0") {
+			t.Error(string(p))
+		}
 	}
 }

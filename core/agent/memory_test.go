@@ -1,10 +1,8 @@
 package agent_test
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
-	"slices"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -12,7 +10,6 @@ import (
 
 	. "github.com/sihekuang/deskpixie/core/agent"
 	"github.com/sihekuang/deskpixie/core/agent/agenttest"
-	"github.com/sihekuang/deskpixie/core/voice"
 )
 
 // Pixie's memory comes from the coordinator side: the job table as a session block, and recall.
@@ -109,36 +106,4 @@ func TestAnOldJobLineWithoutAReplyStillLoads(t *testing.T) {
 	if err := json.Unmarshal(b, &back); err != nil || back.Reply == nil || *back.Reply != "ok" {
 		t.Fatal(string(b))
 	}
-}
-
-func TestRecallAsksTheCoordinatorAndKeepsListening(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		r := newRig(t)
-		out := Recall{H: r.h}.Invoke(context.Background(), json.RawMessage(`{"question":"what did we decide about the logo?"}`))
-		wantJSON(t, jsonOf(string(out.Output)), `{"job_id":"job_000000000001","status":"asked"}`)
-		if out.EndAfterReply || out.EndConversation {
-			t.Fatal("recall keeps the conversation open for the answer")
-		}
-		settle()
-		prompts := r.host.Prompts()
-		if len(prompts) != 1 || prompts[0].Agent != Coordinator ||
-			!strings.HasPrefix(prompts[0].Text, "New request from the user: Recall: what did we decide about the logo?\n") ||
-			!strings.Contains(prompts[0].Text, "not a task") || !strings.HasSuffix(prompts[0].Text, "[ref job_000000000001]") {
-			t.Fatal(prompts)
-		}
-		r.voice.SetOpen(true)
-		r.h.Voice(VoiceSignal{Kind: voice.SigOpened})
-		settle()
-		stopHook(r, `<spoken ref="job_000000000001" status="done">We picked the blue one.</spoken>`)
-		settle()
-		if !slices.Contains(r.voice.Calls(), agenttest.InjectCall("Coordinator reply: We picked the blue one.")) {
-			t.Fatal(r.voice.Calls())
-		}
-		if strings.Contains(r.h.Facts(), "Recall:") {
-			t.Fatal(r.h.Facts())
-		}
-		if bad := invoke(t, Recall{H: r.h}, `{"question":"  "}`); bad.(map[string]any)["error"] == nil {
-			t.Fatal(bad)
-		}
-	})
 }

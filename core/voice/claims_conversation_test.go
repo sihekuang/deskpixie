@@ -345,3 +345,142 @@ func TestRuntimeAHandOffClaimAfterASplitRequestDelegatesIt(t *testing.T) {
 	}
 	t.Logf("handed off: %q", task)
 }
+
+// Oct 18, 21:03: Pixie said "On it" to a statement that is no request and nothing was handed
+// off. A promise to hand it on is made true for anything said that isn't small talk.
+func TestClaimADelegateClaimToAStatementHandsItOn(t *testing.T) {
+	c := newClaimConv(true, true)
+	userTurn(c, "The coordinator should not answer me questions like that.", ms(t0(), 100))
+	fx := reply(c, "On it, I'll let you know when it's done.", ms(t0(), 500))
+	fx = append(fx, ticks(c, ms(t0(), 500), 5*time.Second)...)
+	if h := handOffs(fx); len(h) != 1 || h[0].Text != "The coordinator should not answer me questions like that." {
+		t.Fatalf("hand-offs: %+v", h)
+	}
+}
+
+// Oct 18, 22:09: Pixie added "Say confirm hawk." to a question that had no confirm word. A
+// confirm phrase no notice in this conversation gave is corrected.
+func TestClaimAMadeUpConfirmWordIsCorrected(t *testing.T) {
+	c := newClaimConv(true, true)
+	userTurn(c, "What's happening with the build?", ms(t0(), 100))
+	model(c, evResponseCreated, ms(t0(), 200))
+	model(c, toolCall(DelegateTool), ms(t0(), 200))
+	model(c, evResponseDone, ms(t0(), 200))
+	c.Step(ToolDoneInput("c1", false), ms(t0(), 300))
+	fx := reply(c, "Should I check the repo's git status? Say confirm hawk.", ms(t0(), 400))
+	fx = append(fx, ticks(c, ms(t0(), 400), 5*time.Second)...)
+	if got := injects(fx); len(got) != 1 || !strings.HasPrefix(got[0], CorrectionPrefix+"there is no confirm word") {
+		t.Fatalf("injects: %q", got)
+	}
+}
+
+// A confirm word the app gave is said as given.
+func TestClaimARealConfirmWordIsLeftAlone(t *testing.T) {
+	c := newClaimConv(true, true)
+	c.Step(InjectInput(Notice{Text: "Coordinator question: Run git push in the coordinator? Say confirm hawk."}), ms(t0(), 50))
+	fx := reply(c, "The coordinator wants to run git push. Say confirm hawk.", ms(t0(), 400))
+	fx = append(fx, ticks(c, ms(t0(), 400), 5*time.Second)...)
+	if got := injects(fx); len(got) != 0 {
+		t.Fatalf("injects: %q", got)
+	}
+}
+
+func closes(fx []Effect) bool {
+	for _, e := range fx {
+		if e.Kind == EfSignal && e.Signal.Kind == SigClosed {
+			return true
+		}
+	}
+	return false
+}
+
+// Voice log, Oct 18 (20:38, 22:09): with a 3 s silence timeout a conversation closed 3 s after
+// Pixie said "Say confirm …". After a confirm question it listens at least ConfirmListenMin.
+func TestAConfirmQuestionGetsTimeForTheAnswer(t *testing.T) {
+	c := NewConversation(ConversationConfig{IdleTimeout: 3 * time.Second})
+	c.Step(HotkeyInput(), t0())
+	model(c, evReady, t0())
+	c.Step(MicLiveInput(), t0())
+	c.Step(InjectInput(Notice{Text: "Coordinator question: Run git push in the coordinator? Say confirm hawk."}), t0())
+	reply(c, "The coordinator wants to run git push. Say confirm hawk.", ms(t0(), 500))
+	if fx := ticks(c, ms(t0(), 500), 5*time.Second); closes(fx) {
+		t.Fatal("closed before the user could say the confirm word")
+	}
+	if fx := ticks(c, ms(t0(), 5_600), ConfirmListenMin); !closes(fx) {
+		t.Fatal("never closed")
+	}
+}
+
+// Without a confirm question the user's own silence timeout decides.
+func TestAPlainNoticeKeepsTheSilenceTimeout(t *testing.T) {
+	c := NewConversation(ConversationConfig{IdleTimeout: 3 * time.Second})
+	c.Step(HotkeyInput(), t0())
+	model(c, evReady, t0())
+	c.Step(MicLiveInput(), t0())
+	c.Step(InjectInput(Notice{Text: "Coordinator reply: The build passed."}), t0())
+	reply(c, "The build passed.", ms(t0(), 500))
+	if fx := ticks(c, ms(t0(), 500), 5*time.Second); !closes(fx) {
+		t.Fatal("still open after the 3 s timeout")
+	}
+}
+
+// A confirm word from an earlier conversation doesn't make one Pixie says now real.
+func TestClaimAConfirmWordFromAnEarlierConversationDoesNotCount(t *testing.T) {
+	c := newClaimConv(true, true)
+	c.Step(InjectInput(Notice{Text: "Coordinator question: Run git push in the coordinator? Say confirm hawk."}), ms(t0(), 50))
+	c.Step(HotkeyInput(), ms(t0(), 100)) // closes it
+	ticks(c, ms(t0(), 100), 3*time.Second)
+	c.Step(HotkeyInput(), ms(t0(), 4000))
+	model(c, evReady, ms(t0(), 4000))
+	c.Step(MicLiveInput(), ms(t0(), 4000))
+	userTurn(c, "What's going on with the push?", ms(t0(), 4100))
+	fx := reply(c, "Should I check the repo? Say confirm hawk.", ms(t0(), 4500))
+	fx = append(fx, ticks(c, ms(t0(), 4500), 5*time.Second)...)
+	if got := injects(fx); len(got) != 1 || got[0] != MadeUpConfirmFix {
+		t.Fatalf("injects: %q", got)
+	}
+}
+
+// The real case, Oct 18 22:09: relaying a question that had no confirm word, Pixie added one.
+func TestClaimAMadeUpConfirmWordInAReplyToANoticeIsCorrected(t *testing.T) {
+	c := newClaimConv(true, true)
+	c.Step(InjectInput(Notice{Text: "Coordinator question: The deskpixie session is busy. Want me to check the repo's git status myself?"}), ms(t0(), 50))
+	fx := reply(c, "Should I check the repo's git status for you? Say confirm hawk.", ms(t0(), 400))
+	fx = append(fx, ticks(c, ms(t0(), 400), 5*time.Second)...)
+	if got := injects(fx); len(got) != 1 || got[0] != MadeUpConfirmFix {
+		t.Fatalf("injects: %q", got)
+	}
+}
+
+// Voice log, Oct 19 01:17: the user said "Confirm lark" and Pixie hung up, so "Coordinator:
+// allowed" waited for the next conversation. A confirm phrase is no goodbye.
+func TestSayingTheConfirmWordDoesNotEndTheConversation(t *testing.T) {
+	c := newClaimConv(true, true)
+	userTurn(c, "Confirm lark.", ms(t0(), 100))
+	model(c, evResponseCreated, ms(t0(), 200))
+	model(c, evToolCall("c1", EndConversationTool), ms(t0(), 200))
+	model(c, evResponseDone, ms(t0(), 200))
+	c.Step(ToolDoneInput("c1", true), ms(t0(), 300))
+	fx := c.Step(InjectInput(Notice{Text: "Coordinator: allowed"}), ms(t0(), 400))
+	fx = append(fx, ticks(c, ms(t0(), 400), time.Second)...)
+	if closes(fx) {
+		t.Fatal("hung up on the confirm word")
+	}
+	if got := injects(fx); len(got) != 1 || got[0] != "Coordinator: allowed" {
+		t.Fatalf("injects: %q", got)
+	}
+}
+
+// A real goodbye still ends it.
+func TestAGoodbyeStillEndsTheConversation(t *testing.T) {
+	c := newClaimConv(true, true)
+	userTurn(c, "Thanks, bye.", ms(t0(), 100))
+	model(c, evResponseCreated, ms(t0(), 200))
+	model(c, evToolCall("c1", EndConversationTool), ms(t0(), 200))
+	model(c, evResponseDone, ms(t0(), 200))
+	fx := c.Step(ToolDoneInput("c1", true), ms(t0(), 300))
+	fx = append(fx, ticks(c, ms(t0(), 300), time.Second)...)
+	if !closes(fx) {
+		t.Fatal("a goodbye didn't end it")
+	}
+}

@@ -6,6 +6,8 @@ package voice
 
 import (
 	"encoding/json"
+	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -210,10 +212,13 @@ type Conversation struct {
 	thinkingSince        time.Time
 	stalledSince         time.Time // Speaking looks stalled: quiet playback, no reply open/pending/expected
 	playbackIdle         bool
-	pendingTools         int    // until they finish, ResponseDone doesn't end the turn
-	ending               bool   // end_conversation was called: end once the reply finished playing
-	endWhy               string // why ending was set ("goodbye", "after a hand-off")
-	endReason            string // why the last conversation ended (#71's voice log)
+	pendingTools         int      // until they finish, ResponseDone doesn't end the turn
+	ending               bool     // end_conversation was called: end once the reply finished playing
+	heard                []string // every notice given to Pixie in this conversation, lowercased
+	confirmAsked         bool     // a confirm question was relayed and the user hasn't spoken since
+	confirmFixed         bool     // a made-up confirm word was corrected in this conversation
+	endWhy               string   // why ending was set ("goodbye", "after a hand-off")
+	endReason            string   // why the last conversation ended (#71's voice log)
 	// checksOpen: "Check: " facts delegated in this conversation whose answer hasn't been
 	// read yet; reading the last one ends the conversation.
 	checksOpen int
@@ -297,14 +302,22 @@ func (c *Conversation) IsActive() bool {
 }
 
 func (c *Conversation) timeout() time.Duration {
-	if c.held {
-		return c.holdTimeout
+	t := c.idleTimeout
+	switch {
+	case c.held:
+		t = c.holdTimeout
+	case !c.followUpUntil.IsZero() && c.idleTimeout < FollowUpWindow:
+		t = FollowUpWindow // the follow-up window decides, not the shorter silence timeout
 	}
-	if !c.followUpUntil.IsZero() && c.idleTimeout < FollowUpWindow {
-		return FollowUpWindow // the follow-up window decides, not the shorter silence timeout
+	if c.confirmAsked && t < ConfirmListenMin {
+		t = ConfirmListenMin
 	}
-	return c.idleTimeout
+	return t
 }
+
+// ConfirmListenMin: after Pixie relays a confirm question ("Say confirm hawk."), it listens at
+// least this long, however short the silence timeout is set.
+const ConfirmListenMin = 10 * time.Second
 
 // FollowUpWindow: after Pixie answers a check and asks if there's anything else, the user has
 // this long to start a real reply (#103).
@@ -365,6 +378,8 @@ func (c *Conversation) Step(in Input, now time.Time) []Effect {
 		fx = c.fail(in.Failure, now, fx)
 	case InInject:
 		if c.IsActive() {
+			c.heard = append(c.heard, strings.ToLower(in.Notice.Text))
+			c.confirmAsked = c.confirmAsked || sayConfirm.MatchString(in.Notice.Text)
 			c.injects = append(c.injects, in.Notice)
 			fx = c.tryInject(now, fx)
 		} else {
@@ -463,7 +478,8 @@ func (c *Conversation) Step(in Input, now time.Time) []Effect {
 				// Only a goodbye from the current turn ends the conversation: a user who is
 				// talking, or who has already asked something new, interrupted it.
 				talking := c.phase == PhaseListening && c.silenceSince.IsZero()
-				if thisTurn && !talking {
+				// A confirm phrase is no goodbye: the app's answer to it is on its way.
+				if thisTurn && !talking && !confirmPhrase.MatchString(c.hoUser) {
 					c.ending, c.endWhy = true, "goodbye"
 				}
 			} else {
@@ -514,7 +530,8 @@ func (c *Conversation) onModel(ev Event, now time.Time, fx []Effect) []Effect {
 				Effect{Kind: EfSignal, Signal: VoiceSignal{Kind: SigOpened}})
 		}
 	case EvSpeechStarted:
-		c.turn++ // the user's new turn: earlier tool calls no longer belong to it
+		c.turn++               // the user's new turn: earlier tool calls no longer belong to it
+		c.confirmAsked = false // they are answering
 		c.newHandOffTurn()
 		switch c.phase {
 		case PhaseSpeaking:
@@ -613,6 +630,11 @@ func (c *Conversation) onModel(ev Event, now time.Time, fx []Effect) []Effect {
 			}
 		} else if t := strings.TrimSpace(ev.Text); t != "" {
 			c.hoBot = append(c.hoBot, t)
+			// Any reply, a notice's too: a confirm word no notice gave is corrected, once.
+			if c.checkClaims && !c.confirmFixed && c.madeUpConfirm(t) {
+				c.confirmFixed = true
+				c.injects = append(c.injects, Notice{Text: MadeUpConfirmFix})
+			}
 		}
 	case EvError:
 		if ev.Fatal {
@@ -770,6 +792,7 @@ func (c *Conversation) resetTurn() {
 	c.hoHistory = nil
 	c.questionAsked, c.answerTurn = false, false
 	c.endNotBefore = time.Time{}
+	c.heard, c.confirmAsked, c.confirmFixed = nil, false, false
 }
 
 // ---------- the hand-off safety net (#71) ----------
@@ -849,8 +872,8 @@ func (c *Conversation) maybeHandOff(now time.Time, fx []Effect) []Effect {
 	}
 	if claim.Tool == DelegateTool {
 		task := c.requestWords()
-		if !IsRequest(task) {
-			return fx // likely about earlier work: nothing new to hand off
+		if !HasContent(task) {
+			return fx // small talk: nothing to hand off
 		}
 		if claim.Check {
 			task = "Check: " + task
@@ -862,6 +885,26 @@ func (c *Conversation) maybeHandOff(now time.Time, fx []Effect) []Effect {
 		c.claimFix, c.claimFixTool = n, claim.Tool
 	}
 	return fx
+}
+
+// MadeUpConfirmFix corrects a confirm word Pixie made up: only the app's own questions have one.
+const MadeUpConfirmFix = CorrectionPrefix + "there is no confirm word for this; don't ask for one. Ask the user a plain yes or no question instead."
+
+// confirmPhrase: all the user said was a confirm word ("Confirm lark.").
+var confirmPhrase = regexp.MustCompile(`(?i)^\W*(confirm|allow|approve)\s+[a-z]+\W*$`)
+
+var sayConfirm = regexp.MustCompile(`(?i)\bsay\s+confirm\s+([a-z]+)`)
+
+// madeUpConfirm: Pixie said "say confirm <word>" and no notice in this conversation has
+// "confirm <word>" (Oct 18: "Say confirm hawk" for a plain question).
+func (c *Conversation) madeUpConfirm(said string) bool {
+	for _, m := range sayConfirm.FindAllStringSubmatch(said, -1) {
+		phrase := "confirm " + strings.ToLower(m[1])
+		if !slices.ContainsFunc(c.heard, func(n string) bool { return strings.Contains(n, phrase) }) {
+			return true
+		}
+	}
+	return false
 }
 
 // withdrawClaimFix drops this turn's queued correction when its tool is called after all.

@@ -433,10 +433,8 @@ func (h *AgentHandle) Delegate(task, context string) (JobID, error) {
 		return "", fmt.Errorf("Delegation is off (%s).", why)
 	}
 	id := h.deps.IDs.JobID()
-	if !strings.HasPrefix(task, RecallPrefix) {
-		if note := h.requestNote(); note != "" {
-			context = strings.TrimSpace(context + "\n" + note)
-		}
+	if note := h.requestNote(); note != "" {
+		context = strings.TrimSpace(context + "\n" + note)
 	}
 	h.Input(DelegateInput(id, task, context))
 	return id, nil
@@ -487,6 +485,27 @@ func (h *AgentHandle) Cancel(jobID string) (JobID, error) {
 	return id, nil
 }
 
+// stopAnswer is a cancel of the job that just asked, as its answer: the user may only have meant
+// stop waiting (Oct 18: "you can stop now" killed a test run).
+const stopAnswer = "stop (they said it in reply to this question: work out whether they meant stop waiting or stop the work, and ask them if you can't tell)"
+
+// CancelAsked is jobs cancel. A job whose question Pixie relayed last gets the cancel as its
+// answer instead, and the result names where it went.
+func (h *AgentHandle) CancelAsked(jobID string) (JobID, string, error) {
+	h.ctlMu.Lock()
+	id, err := h.ctl.ResolveCancel(jobID)
+	asked := err == nil && h.ctl.AskedLast(id)
+	h.ctlMu.Unlock()
+	if !asked {
+		id, err := h.Cancel(jobID)
+		return id, "", err
+	}
+	if _, _, err := h.AnswerAsked(string(id), stopAnswer); err != nil {
+		return "", "", err
+	}
+	return id, "the coordinator, to work out what to stop", nil
+}
+
 // Answer is answer_job: the user's answer to a job's question (jobID "" = the only job
 // waiting). The controller decides which job it goes to and rejects it if none is waiting.
 func (h *AgentHandle) Answer(jobID, text string) (JobID, error) {
@@ -500,11 +519,10 @@ func (h *AgentHandle) Answer(jobID, text string) (JobID, error) {
 func (h *AgentHandle) AnswerAsked(jobID, text string) (JobID, string, error) {
 	var id JobID
 	if raw := strings.TrimSpace(jobID); raw != "" {
-		j, ok := ParseJobID(raw)
-		if !ok {
-			return "", "", fmt.Errorf("No open job %s.", raw)
+		// A malformed id is ignored like an unknown one: the answer goes to whoever asked.
+		if j, ok := ParseJobID(raw); ok {
+			id = j
 		}
-		id = j
 	}
 	if h.quitting() {
 		return "", "", errQuitting
@@ -512,6 +530,14 @@ func (h *AgentHandle) AnswerAsked(jobID, text string) (JobID, string, error) {
 	r := h.stepLocked(AnswerInput(id, text))
 	if r == nil || r.Kind != EfAnswerResult {
 		return "", "", errors.New("The answer was not processed.")
+	}
+	if r.Err == noAnswerWaiting {
+		// Nobody is waiting: the coordinator works out what the words are about, like any request.
+		id, err := h.Delegate(text, "The user said this as an answer, but no question was waiting for one.")
+		if err != nil {
+			return "", "", err
+		}
+		return id, "the coordinator, as a new request", nil
 	}
 	if r.Err != "" {
 		return "", "", errors.New(r.Err)

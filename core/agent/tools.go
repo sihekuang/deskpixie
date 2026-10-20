@@ -93,7 +93,7 @@ func (Jobs) Description() string {
 func (Jobs) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{` +
 		`"action":{"type":"string","enum":["status","cancel"]},` +
-		`"job_id":{"type":"string","description":"For cancel: e.g. job_0123456789ab; only if several jobs are open."}},` +
+		`"job_id":{"type":"string","description":"For cancel: the job's id from jobs status, only if several jobs are open."}},` +
 		`"required":["action"],"additionalProperties":false}`)
 }
 
@@ -108,9 +108,12 @@ func (j Jobs) Invoke(_ context.Context, raw json.RawMessage) voice.ToolOutcome {
 		}
 		return toolReply(map[string]any{"jobs": views})
 	case "cancel":
-		id, err := j.H.Cancel(textArg(args, "job_id"))
+		id, to, err := j.H.CancelAsked(textArg(args, "job_id"))
 		if err != nil {
 			return toolError(err)
+		}
+		if to != "" {
+			return toolReply(map[string]any{"job_id": id.String(), "status": "answered", "to": to})
 		}
 		return toolReply(map[string]any{"job_id": id.String(), "status": "cancelled"})
 	}
@@ -131,7 +134,7 @@ func (AnswerJob) Description() string {
 func (AnswerJob) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{` +
 		`"answer":{"type":"string","description":"The user's answer, in their words."},` +
-		`"job_id":{"type":"string","description":"e.g. job_0123456789ab; only if several jobs are waiting."}},` +
+		`"job_id":{"type":"string","description":"Leave it out. Only a job_id exactly as a line gave it."}},` +
 		`"required":["answer"],"additionalProperties":false}`)
 }
 

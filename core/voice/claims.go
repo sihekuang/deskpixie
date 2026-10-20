@@ -58,8 +58,8 @@ type claimSpec struct {
 const claimWindow = 5
 
 var claimSpecs = []claimSpec{
-	// Asking the agent covers asking it about a job (jobs), to remember (recall) or an answer.
-	{tool: DelegateTool, backed: []string{DelegateTool, "recall", "answer_job", "jobs"}, groups: []claimGroup{
+	// Asking the agent covers asking it about a job (jobs) or an answer.
+	{tool: DelegateTool, backed: []string{DelegateTool, "answer_job", "jobs"}, groups: []claimGroup{
 		{verbs: words("hand handed handing pass passed passing ask asked asking"),
 			objects: words("coordinator agent agents claude brain")},
 	}},

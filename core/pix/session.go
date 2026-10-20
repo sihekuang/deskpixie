@@ -271,6 +271,10 @@ func (s *Session) Hook(event string, p map[string]any) string {
 		s.setStatus("blocked")
 	case "PostToolUse":
 		s.clearQuestion()
+		// A tool finished, so nothing waits on you any more (#165).
+		if s.currentStatus() == "blocked" {
+			s.setStatus("working")
+		}
 		if msgs := s.queue.Drain(); len(msgs) > 0 {
 			s.title()
 			ctx := "Messages from Pixie:\n- " + strings.Join(msgs, "\n- ")

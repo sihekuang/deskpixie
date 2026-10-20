@@ -34,9 +34,29 @@ func TestGatedActions(t *testing.T) {
 		{"You can’t merge it yet.", nil},
 		{"Did you deploy it?", nil},
 		{"Run the tests and tell me what fails.", nil},
+		// #165: a question about where things stand, and the step named as a thing, ask for nothing.
+		{"Where are we on the commit, the PR and the merge?", nil},
+		{"What's the status of the push?", nil},
+		{"How did the deploy go?", nil},
+		{"Where's the push at?", nil},
+		{"Merge the PR.", []string{"merge"}},
+		{"Do the merge.", []string{"merge"}},
+		{"How about you merge it?", []string{"merge"}},
+		{"When can you push?", []string{"push"}},
 	} {
 		if got := GatedActions(tc.text); !slices.Equal(got, tc.want) {
 			t.Errorf("GatedActions(%q) = %q, want %q", tc.text, got, tc.want)
 		}
+	}
+}
+
+// #165: a pix description ("deskpixie: fix the gate") is said, not the session's name.
+func TestTheMessageQuestionSaysTheSessionsDescription(t *testing.T) {
+	in := map[string]any{"name": "deskpixie-claude", "description": "deskpixie: fix the gate", "actions": []string{"merge"}}
+	if got, want := Describe(MessageSessionTool, in, Coordinator), "Message your session deskpixie, fix the gate, asking it to merge?"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	if got, want := Describe(CloseSessionTool, in, Coordinator), "Close your session deskpixie, fix the gate?"; got != want {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }

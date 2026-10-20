@@ -52,7 +52,7 @@ func TestTheDelegationToolsAndRecallAreRegistered(t *testing.T) {
 	for _, tool := range DelegationTools(h) {
 		names = append(names, tool.Name())
 	}
-	if !reflect.DeepEqual(names, []string{"delegate", "jobs", "answer_job", "recall"}) {
+	if !reflect.DeepEqual(names, []string{"delegate", "jobs", "answer_job"}) {
 		t.Fatal(names)
 	}
 }

@@ -270,6 +270,32 @@ func TestTheCoordinatorPromptWorksOutARequestInThePersonsOwnWords(t *testing.T) 
 	}
 }
 
+// #164: no Recall: requests any more. A question about earlier requests is answered from
+// memory when that is enough, else handed on like any request (a session first).
+func TestTheCoordinatorAnswersFromMemoryOrHandsItOn(t *testing.T) {
+	for _, md := range []string{RenderClaudeMd("/data/canvas", ""), RenderClaudeMd("/data/canvas", "/Users/x/code")} {
+		if strings.Contains(md, "Recall:") {
+			t.Error("coordinator.md still explains Recall: requests")
+		}
+		for _, rule := range []string{"When a request asks about earlier requests or conversations with the person",
+			"If it is really about the current state of something (a project, an issue, a session's work), hand it on like any request"} {
+			if !strings.Contains(md, rule) {
+				t.Errorf("coordinator.md does not say %q", rule)
+			}
+		}
+	}
+}
+
+// #165: sessions don't report back, so a request handed to one is done once the message is
+// sent; left "working", the app's nudges turned into made-up questions for the person.
+func TestARequestHandedToASessionIsDoneOnceSent(t *testing.T) {
+	for _, md := range []string{RenderClaudeMd("/data/canvas", ""), RenderClaudeMd("/data/canvas", "/Users/x/code")} {
+		if !strings.Contains(md, "once `message_session` returns `\"status\": \"sent\"`, reply `status=\"done\"`") {
+			t.Error("coordinator.md doesn't close a request handed to a session")
+		}
+	}
+}
+
 // mcp__pixie in permissions.allow allows every tool of the pixie server, the local ones too.
 func TestThePermissionAllowListCoversTheLocalTools(t *testing.T) {
 	var v map[string]any

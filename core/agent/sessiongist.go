@@ -33,6 +33,7 @@ func SessionGist(reply string) (string, bool) {
 	if q, ok := listQuestion(text); ok {
 		return capGist(q), true
 	}
+	raw := text
 	text = gistListItem.ReplaceAllStringFunc(text, func(item string) string {
 		item = strings.TrimSpace(gistMarker.ReplaceAllString(item, ""))
 		if r, _ := utf8.DecodeLastRuneInString(item); item != "" && !strings.ContainsRune(".!?:;", r) {
@@ -52,7 +53,18 @@ func SessionGist(reply string) (string, bool) {
 	}
 	last := sentences(paras[len(paras)-1])
 	if strings.HasSuffix(paras[len(paras)-1], "?") {
-		return capGist(last[len(last)-1]), true
+		q := last[len(last)-1]
+		if options := optionsBefore(raw); len(options) > 1 && whichQuestion(q) {
+			q = strings.TrimSuffix(q, "?") + ": " + strings.Join(options[:len(options)-1], ", ") + " or " + options[len(options)-1] + "?"
+		}
+		return capGist(q), true
+	}
+	// A question to you with one more sentence after it ("Should I run both? It takes ten
+	// minutes.") still asks.
+	for i := len(last) - 1; i >= 0 && i >= len(last)-2; i-- {
+		if strings.HasSuffix(last[i], "?") && asksYou(last[i]) {
+			return capGist(strings.Join(last[i:], " ")), true
+		}
 	}
 	gist := last[0]
 	if len(strings.Fields(gist)) < 3 {
@@ -64,6 +76,63 @@ func SessionGist(reply string) (string, bool) {
 		}
 	}
 	return capGist(gist), false
+}
+
+// asksYou: a question put to you ("should I…?", "how do you want…?"), not one the agent asks
+// itself ("why did it fail?").
+func asksYou(q string) bool {
+	words := strings.FieldsFunc(strings.ToLower(q), func(r rune) bool { return !unicode.IsLetter(r) && r != '\'' })
+	if len(words) == 0 || !questionWords[words[0]] {
+		return false
+	}
+	for _, w := range words {
+		switch w {
+		case "you", "i", "me", "we", "i'd", "i'll":
+			return true
+		}
+	}
+	return false
+}
+
+// whichQuestion: a short pick ("Which do you want?") that leaves its options to a list above.
+func whichQuestion(q string) bool {
+	words := strings.Fields(strings.ToLower(q))
+	return len(words) <= 5 && len(words) > 0 && words[0] == "which"
+}
+
+var gistBoldLead = regexp.MustCompile(`^\*\*(.+?)\*\*`)
+
+// optionsBefore: the options of the nearest list in the paragraphs before the last one, each
+// by its bold lead or its first sentence, at most six words.
+func optionsBefore(text string) []string {
+	paras := gistParagraph.Split(strings.TrimSpace(text), -1)
+	for i := len(paras) - 2; i >= 0 && i >= len(paras)-4; i-- {
+		var out []string
+		for _, line := range strings.Split(paras[i], "\n") {
+			if !gistListItem.MatchString(line) {
+				continue
+			}
+			item := strings.TrimSpace(gistMarker.ReplaceAllString(line, ""))
+			if m := gistBoldLead.FindStringSubmatch(item); m != nil {
+				item = m[1]
+			} else {
+				item = sentences(strings.Join(strings.Fields(gistEmphasis.ReplaceAllString(item, "")), " "))[0]
+			}
+			words := strings.Fields(strings.TrimRight(item, ".;,:?!"))
+			if len(words) > 6 {
+				words = words[:6]
+			}
+			if len(words) > 0 {
+				first, size := utf8.DecodeRuneInString(words[0])
+				words[0] = string(unicode.ToLower(first)) + words[0][size:]
+				out = append(out, strings.Join(words, " "))
+			}
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+	return nil
 }
 
 // questionWords open a lead-in that asks, when it ends in ":" ("Would you like me to:").

@@ -172,3 +172,11 @@ func TestARunningJobKeepsTheHoldBesideAQuestion(t *testing.T) {
 	fx := stop(c, `<spoken ref="job_000000000001" status="question">Which repo?</spoken>`, T0)
 	wantNotContains(t, fx, eHold(false))
 }
+
+// #165: a job handed to a session has nothing behind it the app can see; the nudge tells the
+// coordinator to close it rather than ask the user about the session.
+func TestTheNudgeClosesAJobHandedToASession(t *testing.T) {
+	if !strings.Contains(unbackedNudge, "If you handed it to a session, reply done") {
+		t.Fatal(unbackedNudge)
+	}
+}

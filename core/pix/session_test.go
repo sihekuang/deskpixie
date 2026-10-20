@@ -982,3 +982,15 @@ func TestPermissionNoticeStillBlocks(t *testing.T) {
 		}
 	}
 }
+
+// #165: once the prompt it waited on is answered and a tool finishes, it is working again; it
+// stayed "blocked" until the turn ended, ten minutes later.
+func TestAToolFinishingAfterAPromptMeansItIsWorkingAgain(t *testing.T) {
+	h := keyHarness(t, "claude")
+	h.s.Hook("UserPromptSubmit", map[string]any{"prompt": "fix it"})
+	h.s.Hook("Notification", map[string]any{"notification_type": "elicitation_dialog"})
+	h.s.Hook("PostToolUse", map[string]any{"tool_name": "AskUserQuestion"})
+	if st := h.s.currentStatus(); st != "working" {
+		t.Fatalf("got %q, want working", st)
+	}
+}
