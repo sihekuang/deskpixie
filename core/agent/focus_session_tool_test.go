@@ -27,6 +27,46 @@ func TestFocusSessionShowsTheSessionYouAskedFor(t *testing.T) {
 	})
 }
 
+// #177: Pixie may name a session by its project or description, not its name ("bring up the
+// landing session" became "deskpixie-landing", the session being repo-claude). One session that
+// fits is shown; when several fit, none is, and Pixie gets the list to ask which.
+func TestFocusSessionFindsASessionByItsProjectOrDescription(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRosterRig(t, false)
+		r.user.about = map[string][2]string{
+			"repo-claude":      {"repo", "deskpixie-landing: transparent Bit favicon"},
+			"deskpixie-claude": {"deskpixie", "deskpixie: README roadmap section"},
+			"trader-claude":    {"arbitrage-trader", "arbitrage-trader: build new pair families"},
+		}
+		for name := range r.user.about {
+			r.user.connect(t, name)
+		}
+		time.Sleep(time.Second)
+		for said, want := range map[string]string{
+			"deskpixie-landing": "repo-claude",      // the description's project
+			"Deskpixie Landing": "repo-claude",      // as Pixie may say it
+			"deskpixie":         "deskpixie-claude", // its repo and project, not the landing one's prefix
+			"roadmap":           "deskpixie-claude", // a word of its description
+			"arbitrage trader":  "trader-claude",
+		} {
+			got := invoke(t, FocusSessionTool{H: r.h}, `{"name":"`+said+`"}`)
+			if w := map[string]any{"name": want, "status": "shown"}; !reflect.DeepEqual(got, w) {
+				t.Fatalf("%q: got %v; want %v", said, got, w)
+			}
+		}
+		shown := len(r.focus.Sent())
+		for _, said := range []string{"claude", "landing page redesign"} {
+			got, _ := invoke(t, FocusSessionTool{H: r.h}, `{"name":"`+said+`"}`).(map[string]any)
+			if got["error"] == nil || len(got["your_sessions"].([]any)) != 3 {
+				t.Fatalf("%q: several or none fit, so none is shown: %v", said, got)
+			}
+		}
+		if len(r.focus.Sent()) != shown {
+			t.Fatalf("shown anyway: %v", r.focus.Sent())
+		}
+	})
+}
+
 // A name that isn't one of your sessions (closed since, misheard, or Pixie's own coordinator)
 // shows nothing; the reply lists your sessions as they are now, so Pixie can ask which.
 func TestFocusSessionListsYourSessionsWhenTheNameIsNotOne(t *testing.T) {

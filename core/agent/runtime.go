@@ -693,8 +693,15 @@ func (h *AgentHandle) FocusAgent(ctx context.Context, name string) error {
 // FocusSession is a click on one of your own sessions in the roster (#148): bring forward the
 // tab it runs in. Pixie's own session is left alone — nothing is started or attached.
 func (h *AgentHandle) FocusSession(ctx context.Context, name string) error {
+	_, err := h.ShowSession(ctx, name)
+	return err
+}
+
+// ShowSession is FocusSession for a session Pixie named (#177): its name, or else its project
+// or a part of its description that fits only it (MatchSession). It returns the name shown.
+func (h *AgentHandle) ShowSession(ctx context.Context, said string) (string, error) {
 	if h.deps.Sessions == nil {
-		return LaunchError("no way to show your sessions")
+		return "", LaunchError("no way to show your sessions")
 	}
 	// Your sessions are the composite's pix part: listed on its own, so a failing Pixie host
 	// (which the roster shows past) can't hide them.
@@ -707,23 +714,62 @@ func (h *AgentHandle) FocusSession(ctx context.Context, name string) error {
 		list, err = ListRunning(ctx, h.deps.Host.Session())
 	}
 	if err != nil {
-		return err
+		return "", err
+	}
+	list = slices.DeleteFunc(list, func(a AgentInfo) bool { return a.Origin != OriginUser || a.User == nil })
+	name, ok := MatchSession(list, said)
+	if !ok {
+		return "", LaunchError("no session of yours named " + said)
 	}
 	for _, a := range list {
-		if a.Name != name || a.Origin != OriginUser || a.User == nil {
+		if a.Name != name {
 			continue
 		}
 		if a.User.Pid <= 0 {
-			return LaunchError("could not find the terminal of " + name)
+			return "", LaunchError("could not find the terminal of " + name)
 		}
 		plan, err := h.deps.Sessions.PlanSession(a.User.Pid)
 		if err != nil {
-			return err
+			return "", err
 		}
 		h.deps.Focus.Focus(plan)
-		return nil
 	}
-	return LaunchError("no session of yours named " + name)
+	return name, nil
+}
+
+// MatchSession picks the one session of yours that said names: its name; else its repo or its
+// description's project (the part before the colon); else words of its description. Case,
+// hyphens and spacing don't count. A step that fits several sessions settles it: none.
+func MatchSession(yours []AgentInfo, said string) (string, bool) {
+	words := func(s string) string {
+		return strings.Join(strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
+			return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+		}), " ")
+	}
+	w := words(said)
+	if w == "" {
+		return "", false
+	}
+	steps := []func(a AgentInfo) bool{
+		func(a AgentInfo) bool { return a.Name == said },
+		func(a AgentInfo) bool {
+			project, _, _ := strings.Cut(a.User.Description, ":")
+			return words(a.User.Repo) == w || words(project) == w
+		},
+		func(a AgentInfo) bool { return strings.Contains(" "+words(a.User.Description)+" ", " "+w+" ") },
+	}
+	for _, fits := range steps {
+		var found []string
+		for _, a := range yours {
+			if fits(a) {
+				found = append(found, a.Name)
+			}
+		}
+		if len(found) > 0 {
+			return found[0], len(found) == 1
+		}
+	}
+	return "", false
 }
 
 func (h *AgentHandle) pokeRoster() {
