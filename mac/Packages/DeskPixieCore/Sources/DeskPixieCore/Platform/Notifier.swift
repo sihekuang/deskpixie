@@ -1,4 +1,5 @@
 import AppKit
+import os
 import UserNotifications
 
 /// Abstraction so tests don't touch UNUserNotificationCenter or play sounds.
@@ -61,6 +62,7 @@ public final class Notifier {
 
 @MainActor
 public final class SystemNotificationSink: NotificationSink {
+    nonisolated private static let log = Logger(subsystem: "com.sihekuang.deskpixie", category: "notify")
     private var authorization: Task<Bool, Never>?
 
     /// Built once at launch (the coordinator's Notifier); installs the foreground presenter so
@@ -72,7 +74,14 @@ public final class SystemNotificationSink: NotificationSink {
     private func authorized() async -> Bool {
         if let authorization { return await authorization.value }
         let t = Task {
-            (try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert])) ?? false
+            do {
+                let ok = try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert])
+                if !ok { Self.log.error("notifications not allowed") }
+                return ok
+            } catch {
+                Self.log.error("notification authorization: \(String(describing: error), privacy: .public)")
+                return false
+            }
         }
         authorization = t
         return await t.value
@@ -82,7 +91,7 @@ public final class SystemNotificationSink: NotificationSink {
         guard await authorized() else { return }
         let req = UNNotificationRequest(identifier: UUID().uuidString, content: Self.content(title: title, body: body),
                                         trigger: nil)
-        try? await UNUserNotificationCenter.current().add(req)
+        await Self.add(req)
     }
 
     public func post(title: String, body: String, update: UpdateLine) async {
@@ -92,7 +101,7 @@ public final class SystemNotificationSink: NotificationSink {
             content.userInfo = [Self.updateKey: json]
         }
         let req = UNNotificationRequest(identifier: Self.identifier(update: update.id), content: content, trigger: nil)
-        try? await UNUserNotificationCenter.current().add(req)
+        await Self.add(req)
     }
 
     /// The notification of bubble line `id`: removed when the line is dismissed in the bubble.
@@ -111,6 +120,14 @@ public final class SystemNotificationSink: NotificationSink {
     public nonisolated static func removeNotifications(updates ids: [UInt64]) {
         guard !ids.isEmpty else { return }
         UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ids.map { identifier(update: $0) })
+    }
+
+    private static func add(_ req: UNNotificationRequest) async {
+        do {
+            try await UNUserNotificationCenter.current().add(req)
+        } catch {
+            log.error("notification: \(String(describing: error), privacy: .public)")
+        }
     }
 
     /// The chime for `sound: "glass"` (MacNotifier's `afplay` file).
