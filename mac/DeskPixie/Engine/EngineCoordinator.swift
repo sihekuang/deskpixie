@@ -249,8 +249,9 @@ final class EngineCoordinator {
         startAudio(retryForHotkey: true)
     }
 
-    /// A tray menu id. Quit and Mic Mode are handled here (Settings… by the menu view);
-    /// every other id is the core's (`app.action`), after which the menu is re-read.
+    /// A tray menu id. Quit and Mic Mode are handled here (Settings… by the menu view), and
+    /// Restart coordinator… asks first; every other id is the core's (`app.action`), after
+    /// which the menu is re-read.
     func perform(_ id: String) {
         switch TrayMenu.route(id) {
         case .quit:
@@ -265,24 +266,41 @@ final class EngineCoordinator {
             NSPasteboard.general.setString(text, forType: .string)
         case .settings:
             break // MenuBarMenu opens the Settings scene
-        case .core(let id, let focusCanvas):
-            struct Action: Encodable { let id: String }
-            // A canvas the user asked for comes forward; core-initiated opens never take focus.
-            if focusCanvas { canvas.requestFocusOnNextShow() }
-            // Off main: actions open Finder/Terminal, rescan packs, restart the agent, …
-            let engine = engine, worker = worker
-            Task { @MainActor [weak self] in
-                await worker.run {
-                    do {
-                        _ = try engine.call("app.action", Action(id: id))
-                    } catch {
-                        Self.log.error("app.action \(id, privacy: .public): \(String(describing: error), privacy: .public)")
-                    }
-                }
-                guard let self else { return }
-                if id == "fade" { self.applyPixieSettings() }
-                self.refreshTray()
+        case .restartCoordinator:
+            // #179: it stops whatever the coordinator is doing, so ask first.
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = CoordinatorRestart.title
+            alert.informativeText = CoordinatorRestart.message
+            alert.addButton(withTitle: CoordinatorRestart.confirm).hasDestructiveAction = true
+            alert.addButton(withTitle: "Cancel").keyEquivalent = "\u{1b}"
+            NSApp.activate()
+            if alert.runModal() == .alertFirstButtonReturn {
+                sendAction(CoordinatorRestart.actionID, focusCanvas: false)
             }
+        case .core(let id, let focusCanvas):
+            sendAction(id, focusCanvas: focusCanvas)
+        }
+    }
+
+    /// `app.action {id}` off main, then the menu is re-read.
+    private func sendAction(_ id: String, focusCanvas: Bool) {
+        struct Action: Encodable { let id: String }
+        // A canvas the user asked for comes forward; core-initiated opens never take focus.
+        if focusCanvas { canvas.requestFocusOnNextShow() }
+        // Off main: actions open Finder/Terminal, rescan packs, restart the agent, …
+        let engine = engine, worker = worker
+        Task { @MainActor [weak self] in
+            await worker.run {
+                do {
+                    _ = try engine.call("app.action", Action(id: id))
+                } catch {
+                    Self.log.error("app.action \(id, privacy: .public): \(String(describing: error), privacy: .public)")
+                }
+            }
+            guard let self else { return }
+            if id == "fade" { self.applyPixieSettings() }
+            self.refreshTray()
         }
     }
 

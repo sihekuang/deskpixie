@@ -58,7 +58,7 @@ final class TrayLabelsAndRoutingTests: XCTestCase {
             "    Fix the login bug — working, 2 min",
             "    Write tests — waiting, 10 s",
             "  Open coordinator terminal",
-            "  Restart coordinator",
+            "  Restart coordinator…",
             "---",
             "Mic Mode (Voice Isolation)…",
             "Welcome to DeskPixie…",
@@ -75,7 +75,8 @@ final class TrayLabelsAndRoutingTests: XCTestCase {
         XCTAssertEqual(TrayMenu.route("onboarding"), .onboarding)
         XCTAssertTrue(TrayMenu.isLocal("onboarding"))
         XCTAssertEqual(TrayMenu.route("agent:open"), .core("agent:open"))
-        XCTAssertEqual(TrayMenu.route("agent:restart"), .core("agent:restart"))
+        // #179: asks first (CoordinatorRestart), then sends agent:restart.
+        XCTAssertEqual(TrayMenu.route("agent:restart"), .restartCoordinator)
         XCTAssertEqual(TrayMenu.route("agent:cancel:job_1"), .core("agent:cancel:job_1"))
         XCTAssertEqual(TrayMenu.route("canvas:open"), .core("canvas:open", focusCanvas: true))
         XCTAssertEqual(TrayMenu.route("canvas:page:q3"), .core("canvas:page:q3", focusCanvas: true))

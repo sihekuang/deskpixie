@@ -331,9 +331,14 @@ final class SettingsLayoutTests: XCTestCase {
                     help: "Type the key here to keep it in the Keychain (used first), or set GEMINI_API_KEY in your environment or a .env file. Keys are never shown here."),
         ])
         XCTAssertTrue(L.extras(.workers).isEmpty)
-        guard case .pix(let help)? = L.extras(.agent).first, L.extras(.agent).count == 1
+        guard case .pix(let help)? = L.extras(.agent).first, L.extras(.agent).count == 2
         else { return XCTFail("the agent section has the pix command row") }
         XCTAssertTrue(help.contains("pix claude"), help)
+        // #179: then Restart Coordinator…, which asks first.
+        guard case .button(let label, _, let t3, let a3)? = L.extras(.agent).last else { return XCTFail() }
+        XCTAssertEqual(label, "Restart coordinator")
+        XCTAssertEqual(t3, "Restart Coordinator…")
+        XCTAssertEqual(a3, .restartCoordinator)
         let s = SettingsSecrets(openai: .found, gemini: .missing)
         XCTAssertEqual(L.secretText(s, .openAI), "Found")
         XCTAssertEqual(L.secretText(s, .gemini), "Missing")

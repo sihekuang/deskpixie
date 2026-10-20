@@ -62,6 +62,12 @@ final class FakeSettingsClient: SettingsClient {
         calls.append("settings.restart")
     }
 
+    var restartCoordinatorThrows: Error?
+    func restartCoordinator() throws {
+        calls.append("agent:restart")
+        if let restartCoordinatorThrows { throw restartCoordinatorThrows }
+    }
+
     var keychainPushes: [[String: String]] = []
     func setKeychain(_ values: [String: String]) throws {
         calls.append("secrets.keychain")
@@ -265,6 +271,22 @@ final class SettingsModelTests: XCTestCase {
         XCTAssertEqual(model.noticeText, "Couldn't open the settings file")
     }
 
+    // #179: Settings ▸ Coordinator restarts the coordinator (after the view asked).
+    func test_restart_coordinator_asks_the_core_and_a_failure_is_a_notice() {
+        model.load()
+        model.restartCoordinator()
+        XCTAssertEqual(client.calls.last, "agent:restart")
+        client.restartCoordinatorThrows = DeskPixieEngineError.callFailed("Delegation is off")
+        model.restartCoordinator()
+        XCTAssertEqual(model.noticeText, "Delegation is off")
+    }
+
+    func test_the_restart_prompt_warns_it_is_disruptive() {
+        XCTAssertEqual(CoordinatorRestart.title, "Restart the coordinator?")
+        XCTAssertEqual(CoordinatorRestart.confirm, "Restart")
+        XCTAssertTrue(CoordinatorRestart.message.contains("stops whatever the coordinator is doing"), CoordinatorRestart.message)
+    }
+
     func test_a_failed_first_read_is_reported() {
         final class Failing: SettingsClient {
             func snapshot() throws -> SettingsSnapshot { throw DeskPixieEngineError.callFailed("unknown method settings.snapshot") }
@@ -273,6 +295,7 @@ final class SettingsModelTests: XCTestCase {
             func secrets() throws -> SettingsSecrets { throw DeskPixieEngineError.notInitialized }
             func openFile() throws {}
             func restart() throws {}
+            func restartCoordinator() throws {}
             func setKeychain(_ values: [String: String]) throws {}
         }
         let m = SettingsModel(client: Failing())

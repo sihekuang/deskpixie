@@ -448,7 +448,7 @@ public enum SettingsLayout {
 
     // MARK: Extra rows
 
-    public enum Action: Equatable, Sendable { case resetPosition, openFile }
+    public enum Action: Equatable, Sendable { case resetPosition, openFile, restartCoordinator }
 
     /// The rows a section has besides its fields.
     public enum Extra: Equatable, Sendable {
@@ -475,7 +475,10 @@ public enum SettingsLayout {
             return [.button(label: "Settings file", help: "settings.json holds every setting on this page.",
                             title: "Open Settings File", action: .openFile)]
         case .agent:
-            return [.pix(help: pixHelp)]
+            return [.pix(help: pixHelp),
+                    .button(label: "Restart coordinator",
+                            help: "Stops the coordinator and starts it again on your next request, with its conversation. Asks first.",
+                            title: "Restart Coordinator…", action: .restartCoordinator)]
         case .workers, .notifications, .canvas:
             return []
         }
