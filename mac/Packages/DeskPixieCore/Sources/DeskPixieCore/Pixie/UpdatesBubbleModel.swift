@@ -20,10 +20,22 @@ public struct UpdateLine: Decodable, Sendable, Equatable, Identifiable {
     public let app: String?
     /// A session line's session (its name): a click brings up the tab it runs in (#194).
     public let session: String?
+    /// The bubble's short form (#197): who the line is about, on its own line, and the news.
+    /// Either may be missing: the bubble then shows `text`.
+    public let title: String?
+    public let brief: String?
+    /// The line asks you something.
+    public let asking: Bool?
     /// A session menu's choices (#105): one button each, answered with `agent.choose`.
     public let options: [String]?
     /// Shown small under the line, never said: a session dialog's command (#105).
     public let note: String?
+
+    /// What the row says: the brief when there is one, else the full text.
+    public var shownText: String {
+        if let brief, !brief.isEmpty { return brief }
+        return text
+    }
 
     /// Whether the row shows Allow and Deny buttons.
     public var offersDecision: Bool { kind == "question" && token != nil && (options ?? []).isEmpty }
@@ -33,6 +45,7 @@ public struct UpdateLine: Decodable, Sendable, Equatable, Identifiable {
 
     public init(id: UInt64, text: String, kind: String, at: Int64, job: String?, worker: String?,
                 token: String? = nil, app: String? = nil, session: String? = nil,
+                title: String? = nil, brief: String? = nil, asking: Bool? = nil,
                 options: [String]? = nil, note: String? = nil) {
         self.id = id
         self.text = text
@@ -43,8 +56,22 @@ public struct UpdateLine: Decodable, Sendable, Equatable, Identifiable {
         self.token = token
         self.app = app
         self.session = session
+        self.title = title
+        self.brief = brief
+        self.asking = asking
         self.options = options
         self.note = note
+    }
+}
+
+/// How long ago a line came, as the bubble shows it (#197): "now", "4m ago", "2h ago", "3d ago".
+public func updateAge(seconds: TimeInterval) -> String {
+    let s = Int(max(0, seconds))
+    switch s {
+    case ..<60: return "now"
+    case ..<3600: return "\(s / 60)m ago"
+    case ..<86400: return "\(s / 3600)h ago"
+    default: return "\(s / 86400)d ago"
     }
 }
 

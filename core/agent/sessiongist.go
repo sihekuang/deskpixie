@@ -225,6 +225,26 @@ func OutdatedLine(label, tool string) string {
 	return label + " runs an older pix than the app: restart it with " + resume + " to update it."
 }
 
+// SessionTurnBrief is the bubble's short form of a session's turn (#197): its gist alone, the
+// session's label on the title line.
+func SessionTurnBrief(gist string) string {
+	if gist == "" {
+		return "Finished."
+	}
+	if r, _ := utf8.DecodeLastRuneInString(gist); !strings.ContainsRune(".!?…", r) {
+		gist += "."
+	}
+	return upperFirst(gist)
+}
+
+// OutdatedBrief is the bubble's short form of OutdatedLine (#197).
+func OutdatedBrief(tool string) string {
+	if tool == "codex" {
+		return "Older pix: restart with pix codex resume."
+	}
+	return "Older pix: restart with pix " + tool + " --resume."
+}
+
 func SessionTurnLine(label, gist string, asking bool) string {
 	switch {
 	case gist == "":
@@ -249,4 +269,13 @@ func lowerFirst(s string) string {
 		return s
 	}
 	return string(unicode.ToLower(r)) + s[n:]
+}
+
+// upperFirst capitalizes the first letter.
+func upperFirst(s string) string {
+	r, n := utf8.DecodeRuneInString(s)
+	if n == 0 {
+		return s
+	}
+	return string(unicode.ToUpper(r)) + s[n:]
 }

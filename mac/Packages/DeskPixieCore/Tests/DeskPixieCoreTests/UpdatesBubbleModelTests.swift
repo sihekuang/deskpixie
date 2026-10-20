@@ -64,6 +64,25 @@ final class UpdatesBubbleModelTests: XCTestCase {
         XCTAssertEqual(line.session, "api-claude")
     }
 
+    func testAgeIsShort() {
+        XCTAssertEqual(updateAge(seconds: 5), "now")
+        XCTAssertEqual(updateAge(seconds: 63), "1m ago")
+        XCTAssertEqual(updateAge(seconds: 7_300), "2h ago")
+        XCTAssertEqual(updateAge(seconds: 200_000), "2d ago")
+    }
+
+    /// #197: the bubble shows the brief under its title; a line without one shows its text.
+    func testALineShowsItsBriefWhenItHasOne() throws {
+        let line = try JSONDecoder().decode(UpdateLine.self, from: Data(
+            #"{"id":4,"text":"api: fix login is done: tests pass.","kind":"session","at":4,"title":"api: fix login","brief":"Tests pass.","asking":true}"#.utf8))
+        XCTAssertEqual(line.title, "api: fix login")
+        XCTAssertEqual(line.shownText, "Tests pass.")
+        XCTAssertEqual(line.asking, true)
+        let reply = try JSONDecoder().decode(UpdateLine.self, from: Data(#"{"id":5,"text":"Done.","kind":"reply","at":5}"#.utf8))
+        XCTAssertEqual(reply.shownText, "Done.")
+        XCTAssertNil(reply.title)
+    }
+
     /// #194: a clicked line leaves the open bubble at once; the rest stay.
     func testAClickedLineIsDismissed() {
         var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)

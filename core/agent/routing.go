@@ -82,6 +82,9 @@ type Line struct {
 	// Session: the name of the session you started that the line is about; a click on it in
 	// the bubble brings up that session's tab (#194).
 	Session string
+	// Title and Brief: the bubble's short form of a line Pixie builds (#197): who it is about,
+	// and the news in a few words. Empty: the bubble shows Text. Never said.
+	Title, Brief string
 	// Note: shown small under the line in the bubble, never said (a dialog's command, #105).
 	Note string
 }

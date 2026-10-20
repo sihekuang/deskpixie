@@ -586,9 +586,11 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 				// Each app run tells it once: not again when a run in the last OutdatedRetellMs
 				// already did (a rebuild restarts the app, #194).
 				o := *ev.Outdated
-				text := OutdatedLine(maskPendingTokens(o.Label, c.pendingTokens()), o.Tool)
+				label := maskPendingTokens(o.Label, c.pendingTokens())
+				text := OutdatedLine(label, o.Tool)
 				if !c.outbox.ToldSince(text, satSub(now, OutdatedRetellMs)) {
-					c.deliverUpdate(Line{Kind: LineSession, App: o.App, Session: ev.Agent, Text: text}, now, &fx)
+					c.deliverUpdate(Line{Kind: LineSession, App: o.App, Session: ev.Agent, Text: text,
+						Title: label, Brief: OutdatedBrief(o.Tool)}, now, &fx)
 				}
 			}
 		case ev.Kind == PaneEventQuestion || ev.Kind == PaneEventQuestionGone:
@@ -1539,11 +1541,12 @@ func (c *AgentController) onSessionSent(description, waiting string, now Millis,
 		return
 	}
 	job := refs[0]
-	session := "your session"
+	session, title := "your session", "Your session"
 	if d := oneLine(description); d != "" {
-		session = "your session on " + strings.TrimSuffix(d, ".")
+		title = strings.TrimSuffix(d, ".")
+		session = "your session on " + title
 	}
-	text := "Passed on to " + session + "."
+	text, brief := "Passed on to "+session+".", "Message passed on."
 	if waiting != "" {
 		// #183: pix holds it; say so, and why.
 		why := map[string]string{
@@ -1555,11 +1558,22 @@ func (c *AgentController) onSessionSent(description, waiting string, now Millis,
 			why = "it gets it as soon as it can"
 		}
 		text = strings.ToUpper(session[:1]) + session[1:] + " hasn't got your message yet: " + why + "."
+		brief = map[string]string{
+			"working": "Message held: it's busy.",
+			"blocked": "Message held: it's waiting on a question.",
+			"typing":  "Message held: you're typing there.",
+		}[waiting]
+		if brief == "" {
+			brief = "Message held for now."
+		}
 	}
 	c.handedOff[job] = true
 	c.jobs.SetProgress(job, text, now)
 	c.saveJob(job, fx)
-	c.deliverOpening(NewJobLine(LineReply, maskPendingTokens(text, c.pendingTokens()), job), now, fx)
+	tokens := c.pendingTokens()
+	line := NewJobLine(LineReply, maskPendingTokens(text, tokens), job)
+	line.Title, line.Brief = maskPendingTokens(title, tokens), brief
+	c.deliverOpening(line, now, fx)
 }
 
 func (c *AgentController) onPostTool(toolName string, toolInput any, now Millis, fx *[]Effect) {
@@ -1638,9 +1652,12 @@ func (c *AgentController) onSessionTurn(name string, t SessionTurn, now Millis, 
 	case c.asked.session == name:
 		c.asked = asker{} // it moved on: its question is gone
 	}
+	label := maskPendingTokens(t.Label, tokens)
 	c.deliverUpdate(Line{
 		Kind:    LineSession,
-		Text:    SessionTurnLine(maskPendingTokens(t.Label, tokens), gist, asking),
+		Text:    SessionTurnLine(label, gist, asking),
+		Title:   label,
+		Brief:   SessionTurnBrief(gist),
 		Asking:  asking,
 		App:     t.App,
 		Session: name,
@@ -1704,7 +1721,9 @@ func (c *AgentController) tick(now Millis, fx *[]Effect) {
 	if blockedLong && !c.hinted && !c.confirms.HasPendingFor(Coordinator) {
 		c.hinted = true
 		c.setStatus("Coordinator: waiting in terminal", fx)
-		c.deliver(NewLine(LineInfo, BlockedHint), now, fx)
+		l := NewLine(LineInfo, BlockedHint)
+		l.Title, l.Brief = "Coordinator", "Waiting at a prompt in its terminal."
+		c.deliver(l, now, fx)
 		// No job: FocusTarget would pick the job's worker; this is the coordinator's own pane.
 		*fx = append(*fx, Effect{Kind: EfShowPane})
 	}

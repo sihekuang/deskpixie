@@ -23,7 +23,7 @@ func (c *AgentController) onSessionQuestion(session string, q SessionQuestion, n
 	c.confirms.TakeSession(session, "")
 	tokens := c.pendingTokens()
 	label := maskPendingTokens(q.Label, tokens)
-	line := Line{Kind: LineQuestion, App: q.App, Session: session}
+	line := Line{Kind: LineQuestion, App: q.App, Session: session, Title: label}
 	pending := Pending{Session: session, Question: q.ID, Label: label}
 	var input any
 	if q.Input != "" {
@@ -70,6 +70,7 @@ func (c *AgentController) onSessionQuestion(session string, q SessionQuestion, n
 	// Announced only: a menu pix can't answer, or a dialog it mustn't (a notice).
 	if q.Kind == "notice" || (q.Kind == "menu" && len(q.Options) == 0) {
 		line.Text = describe("")
+		line.Brief = QuestionBrief(line.Text, label)
 		c.deliver(line, now, fx)
 		return
 	}
@@ -84,10 +85,12 @@ func (c *AgentController) onSessionQuestion(session string, q SessionQuestion, n
 	token, ok := c.confirms.RequestSession(pending)
 	if !ok {
 		line.Text = fmt.Sprintf("%s is waiting on you in its terminal.", label)
+		line.Brief = QuestionBrief(line.Text, label)
 		c.deliver(line, now, fx)
 		return
 	}
 	line.Text, line.Token = describe(token), &token
+	line.Brief = QuestionBrief(line.Text, label)
 	if q.Kind == "permission" && len(q.Options) > 0 {
 		line.Note = mask(q.Body)
 	}

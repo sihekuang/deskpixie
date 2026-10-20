@@ -34,7 +34,7 @@ struct UpdatesBubbleView: View {
         func one(_ s: String, _ f: NSFont) -> CGFloat { (s as NSString).size(withAttributes: [.font: f]).width }
         var need: CGFloat = 0
         for l in lines where l.kind == "question" {
-            need = max(need, one(l.text, callout) + 48)                       // icon, row and bubble padding
+            need = max(need, one(l.shownText, callout) + 48)                       // icon, row and bubble padding
             for o in l.options ?? [] { need = max(need, one(o, small) + 52) } // button and bubble padding
             for n in (l.note ?? "").split(separator: "\n") { need = max(need, one(String(n), mono) + 48) }
         }
@@ -124,12 +124,19 @@ struct UpdatesBubbleView: View {
 
     private func row(_ line: UpdateLine) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
-            if line.kind == "question" {
+            if line.kind == "question" || line.asking == true {
                 Image(systemName: "questionmark.circle")
                     .foregroundStyle(.orange)
             }
             VStack(alignment: .leading, spacing: 1) {
-                Text(line.text)
+                if let title = line.title, !title.isEmpty {
+                    Text(title)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                Text(line.shownText)
                     .font(.callout)
                     .lineLimit(line.kind == "question" ? nil : 2) // a question is read in full
                     .truncationMode(.tail)
@@ -142,9 +149,11 @@ struct UpdatesBubbleView: View {
                         .truncationMode(.tail)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                (Text(Date(timeIntervalSince1970: Double(line.at) / 1000), style: .relative) + Text(" ago"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                TimelineView(.periodic(from: .now, by: 30)) { context in
+                    Text(updateAge(seconds: context.date.timeIntervalSince1970 - Double(line.at) / 1000))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
