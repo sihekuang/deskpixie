@@ -40,6 +40,7 @@ func (g *Gate) Keys(b []byte, now time.Time) {
 	if b = withoutReports(b); len(b) == 0 {
 		return
 	}
+	b = []byte(kittyKeys.Replace(string(b)))
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.last = now
@@ -76,10 +77,19 @@ func (g *Gate) Keys(b []byte, now time.Time) {
 
 // terminalReports is what a terminal sends that you didn't type (#138): its window gaining or
 // losing focus (ESC[I, ESC[O), and SGR mouse reports (ESC[<b;x;yM or m), which fullscreen
-// Claude Code asks for on every mouse move.
-var terminalReports = regexp.MustCompile(`\x1b\[[IO]|\x1b\[<\d+;\d+;\d+[Mm]`)
+// Claude Code asks for on every mouse move. And its answers to what an agent asks it at
+// startup (#181): device attributes (ESC[?…c, ESC[>…c), keyboard protocol flags (ESC[?…u), a
+// mode report (ESC[?…$y), the cursor position (ESC[row;colR), and DCS and OSC strings (its
+// version, colors, Warp's own queries).
+var terminalReports = regexp.MustCompile(`\x1b\[[IO]|\x1b\[<\d+;\d+;\d+[Mm]` +
+	`|\x1b\[[?>][\d;]*c|\x1b\[\?\d*u|\x1b\[\?[\d;]*\$y|\x1b\[\d+;\d+R` +
+	`|\x1bP[^\x1b]*\x1b\\|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)`)
 
 func withoutReports(b []byte) []byte { return terminalReports.ReplaceAll(b, nil) }
+
+// kittyKeys are Esc and Ctrl-C as the kitty keyboard protocol sends them, which Claude Code
+// turns on (#181): read as the bytes they were before.
+var kittyKeys = strings.NewReplacer("\x1b[27u", "\x1b", "\x1b[27;1u", "\x1b", "\x1b[99;5u", "\x03")
 
 // Clear reports whether typing into the agent now can't mix with your text.
 func (g *Gate) Clear(now time.Time) bool {

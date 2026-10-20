@@ -243,3 +243,52 @@ func TestSessionStopOpensTheGate(t *testing.T) {
 	h.s.runner.Hangup()
 	h.s.finish()
 }
+
+// startupReplies are a terminal's answers to what Claude Code 2.1.304 asks at startup (#181):
+// device attributes (ESC[c), keyboard protocol flags (ESC[?u), its version (ESC[>0q, a DCS
+// string), Warp's own query (ESC]7501;?, an OSC string), plus a mode report and a cursor
+// position, which other agents ask for.
+var startupReplies = []string{
+	"\x1b[?62;22;52c", "\x1b[>1;10;0c", "\x1b[?5u", "\x1b[?0u",
+	"\x1bP>|WarpTerminal(v0.2026.10.14)\x1b\\", "\x1b]7501;1\x07", "\x1b]11;rgb:1e1e/1e1e/1e1e\x1b\\",
+	"\x1b[?2026;2$y", "\x1b[24;1R",
+}
+
+// TestGateIgnoresTerminalReplies (#181): the terminal answering Claude Code's startup
+// questions isn't you typing. Counted as keys it couldn't follow, they shut the gate until an
+// Enter that a session you haven't typed into never gets, and Pixie's messages waited forever.
+func TestGateIgnoresTerminalReplies(t *testing.T) {
+	var g Gate
+	t0 := time.Unix(100, 0)
+	g.Keys([]byte(strings.Join(startupReplies, "")), t0)
+	for _, r := range startupReplies {
+		g.Keys([]byte(r), t0)
+		if !onlyReports([]byte(r)) {
+			t.Errorf("%q is the terminal, not you", r)
+		}
+	}
+	if !g.Clear(t0) {
+		t.Fatal("terminal replies shut the gate")
+	}
+	// Typing around them still counts.
+	g.Keys([]byte("hi\x1b[?0u"), t0)
+	if g.Clear(t0.Add(10 * time.Second)) {
+		t.Fatal("your text was lost with the reply")
+	}
+}
+
+// TestGateReadsKittyKeys (#181): Claude Code turns on the kitty keyboard protocol, in which
+// Esc arrives as ESC[27u and Ctrl-C as ESC[99;5u. They mean what they meant before.
+func TestGateReadsKittyKeys(t *testing.T) {
+	var g Gate
+	t0 := time.Unix(100, 0)
+	g.Keys([]byte("\x1b[27u"), t0) // Esc on an empty line: interrupting the agent
+	if !g.Clear(t0.Add(2 * time.Second)) {
+		t.Fatal("a kitty Esc on an empty line shut the gate")
+	}
+	g.Keys([]byte("abc"), t0.Add(3*time.Second))
+	g.Keys([]byte("\x1b[99;5u"), t0.Add(4*time.Second)) // Ctrl-C clears the line
+	if !g.Clear(t0.Add(6 * time.Second)) {
+		t.Fatal("a kitty Ctrl-C didn't clear the line")
+	}
+}
