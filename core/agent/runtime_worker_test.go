@@ -173,6 +173,12 @@ func TestStartWorkerMakesAWorktreeStartsThePaneAndSendsTheBrief(t *testing.T) {
 		if !strings.HasSuffix(brief, "Your task:\nFix the flaky upload test.") {
 			t.Fatal(brief)
 		}
+		// Started now, it connected to this run's server: no reconnect (#172).
+		for _, p := range r.host.Prompts() {
+			if p.Agent == wName && p.Text == McpReconnect {
+				t.Fatal("a fresh worker was told to reconnect")
+			}
+		}
 		job := r.h.JobStatus()[0]
 		if job.Workers[0].Name != wName || job.Workers[0].Status != WorkerRunning {
 			t.Fatal(job.Workers)

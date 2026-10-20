@@ -176,6 +176,11 @@ type AgentHandle struct {
 	// worktree's git links are re-checked then).
 	known map[string]repoSlug
 
+	reconnectMu sync.Mutex
+	// reconnect: adopted Claude workers whose next prompt is preceded by McpReconnect (#172):
+	// while the app was down, Claude Code may have given up on the pixie server.
+	reconnect map[string]bool
+
 	closingMu sync.Mutex
 	// closing: names of failed starts whose pane is still being closed; taken until it is.
 	closing map[string]bool
@@ -348,6 +353,8 @@ func (h *AgentHandle) adoptKept() {
 		if r := h.stepLocked(AdoptWorkerInput(kw.Plan, kw.Worktree, listed[i].Status)); r == nil || r.Err != "" {
 			h.workers.Tokens.Revoke(name)
 			h.withKnown(func(known map[string]repoSlug) { delete(known, name) })
+		} else if kw.Plan.Kind == Claude {
+			h.setReconnect(name, true)
 		}
 	}
 }
@@ -1600,6 +1607,13 @@ func (h *AgentHandle) runWorkerOp(e Effect) {
 	switch e.Kind {
 	case EfPromptWorker:
 		_, err := within(h.ctx, OpLimit, func(c context.Context) (struct{}, error) {
+			if h.setReconnect(name, false) {
+				if err := ReconnectMcp(c, session, name); err != nil {
+					// Nothing was typed: the next prompt tries again.
+					h.setReconnect(name, true)
+					return struct{}{}, err
+				}
+			}
 			return struct{}{}, session.Prompt(c, name, e.Text)
 		})
 		if err != nil && !h.quitting() {
@@ -1633,6 +1647,7 @@ func (h *AgentHandle) forgetWorker(name string) {
 	}
 	h.workers.Tokens.Revoke(name)
 	h.workers.Recipes.Discard(name)
+	h.setReconnect(name, false)
 	// On quit, Shutdown re-checks every worker still known within its limit.
 	if !h.quitting() {
 		if k, ok := h.takeKnown(name); ok {
@@ -1642,6 +1657,23 @@ func (h *AgentHandle) forgetWorker(name string) {
 }
 
 func (h *AgentHandle) queueOp(op hostOp) { h.ops.push(op) }
+
+// setReconnect sets whether the worker's next prompt is preceded by McpReconnect, and reports
+// whether it was.
+func (h *AgentHandle) setReconnect(name string, on bool) bool {
+	h.reconnectMu.Lock()
+	defer h.reconnectMu.Unlock()
+	was := h.reconnect[name]
+	if on {
+		if h.reconnect == nil {
+			h.reconnect = map[string]bool{}
+		}
+		h.reconnect[name] = true
+	} else {
+		delete(h.reconnect, name)
+	}
+	return was
+}
 
 // apply carries out one effect.
 func (h *AgentHandle) apply(e Effect) {

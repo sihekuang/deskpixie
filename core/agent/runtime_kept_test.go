@@ -80,8 +80,10 @@ func TestTheNextRunAdoptsTheKeptCoordinatorAndWorkers(t *testing.T) {
 		kept := KeptAgents{CoordinatorToken: "kept-c", Workers: []KeptWorker{keptWorker()}}
 		r := rigBuild(t, true, true, openJobStore(), agenttest.FakeWorktreesWithRepo("focus"), host, kept)
 		settle()
-		// The reconnect is typed; the coordinator's prompt waits for its result (#168).
+		// The reconnects are typed; the coordinator's and the worker's prompts wait for their
+		// results (#168, #172).
 		host.SetScreen(Coordinator, "❯ "+McpReconnect+"\n  ⎿  Successfully reconnected to pixie")
+		host.SetScreen(wName, "❯ "+McpReconnect+"\n  ⎿  Successfully reconnected to pixie")
 		time.Sleep(time.Second) // the screen is polled, not watched
 		if r.tokens.Restored()[wName] != "kept-w" {
 			t.Fatal(r.tokens.Restored())
@@ -111,6 +113,37 @@ func TestTheNextRunAdoptsTheKeptCoordinatorAndWorkers(t *testing.T) {
 		}
 		if len(coord) < 2 || coord[0] != McpReconnect || !strings.Contains(coord[1], CoordinatorRestartNote) {
 			t.Fatal("not reconnected first", coord)
+		}
+		// So do the worker's, before it's told to report again (#172).
+		if worker := promptsTo(ps, wName); len(worker) < 2 || worker[0] != McpReconnect || !strings.Contains(worker[1], WorkerRestartNote) {
+			t.Fatal("worker not reconnected first", worker)
+		}
+	})
+}
+
+func promptsTo(ps []agenttest.Prompt, agent string) (out []string) {
+	for _, p := range ps {
+		if p.Agent == agent {
+			out = append(out, p.Text)
+		}
+	}
+	return out
+}
+
+// A kept Codex worker takes the pixie server by -c overrides: it's told the restart note as is.
+func TestAKeptCodexWorkerIsNotToldToReconnect(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		host := agenttest.NewFakeSessionHost().ManualTurns()
+		host.StartAgent(t.Context(), AgentSpec{Name: Coordinator, Kind: Claude, Cwd: "/data/agent/workspace"})
+		host.StartAgent(t.Context(), AgentSpec{Name: wName, Kind: Codex, Cwd: "/projects/focus/.worktrees/upload"})
+		kw := keptWorker()
+		kw.Plan.Kind = Codex
+		rigBuild(t, true, true, openJobStore(), agenttest.FakeWorktreesWithRepo("focus"), host, KeptAgents{CoordinatorToken: "kept-c", Workers: []KeptWorker{kw}})
+		settle()
+		host.SetScreen(Coordinator, "❯ "+McpReconnect+"\n  ⎿  Successfully reconnected to pixie")
+		time.Sleep(time.Second)
+		if worker := promptsTo(host.Prompts(), wName); len(worker) == 0 || slices.Contains(worker, McpReconnect) || !strings.Contains(worker[0], WorkerRestartNote) {
+			t.Fatal(worker)
 		}
 	})
 }
