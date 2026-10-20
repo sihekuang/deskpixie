@@ -23,7 +23,7 @@ func TestRequestNoteListsSessionsThenWorkersThenTheOrder(t *testing.T) {
 		`- focus-claude: "login bug", focus repo, idle, last turn "Fixed the redirect."` + "\n" +
 		"Pixie's workers:\n" +
 		`- focus-upload: focus repo, running, on "fix the upload test"` + "\n" +
-		"Hand this on in this order: a session on the same thing (message_session), else a worker on it (message_worker), else do it yourself."
+		"Hand this on in this order: a session working in the same project or repo, questions about it too (message_session), else a worker on it (message_worker), else do it yourself."
 	if got != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
 	}
