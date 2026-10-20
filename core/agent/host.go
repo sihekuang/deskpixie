@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -61,6 +62,9 @@ type AgentHost struct {
 	recipe   CoordinatorRecipe
 
 	startedBefore atomic.Bool
+	// reconnectMcp: an adopted Claude Code coordinator may have given up on the pixie MCP server
+	// while the app was down; the next prompt is preceded by McpReconnect (#168).
+	reconnectMcp atomic.Bool
 	// resumeEarlierRun: a coordinator from an earlier run was found; starts resume its conversation.
 	resumeEarlierRun atomic.Bool
 	gaveUp           atomic.Bool
@@ -123,6 +127,9 @@ func (h *AgentHost) EnsureCoordinator(ctx context.Context) (Ensured, error) {
 	idx := slices.IndexFunc(agents, func(a AgentInfo) bool { return a.Name == Coordinator })
 	if idx >= 0 && (startedBefore || h.recipe.AdoptEarlier) {
 		// Kept over a quit with this run's (restored) token: it is this run's coordinator now.
+		if !startedBefore && h.recipe.Kind == Claude {
+			h.reconnectMcp.Store(true)
+		}
 		h.startedBefore.Store(true)
 		return Ensured{Status: agents[idx].Status}, nil
 	}
@@ -162,6 +169,8 @@ func (h *AgentHost) EnsureCoordinator(ctx context.Context) (Ensured, error) {
 	// Its tab opens in the background: bring it to the front, so a terminal attached to the
 	// session (the click that started it, or one already open) shows the coordinator.
 	focusQuietly(ctx, h.host, Coordinator)
+	// Launched now, it connected to this run's MCP server.
+	h.reconnectMcp.Store(false)
 	h.startedBefore.Store(true)
 	if startedBefore {
 		h.mu.Lock()
@@ -206,6 +215,67 @@ func (h *AgentHost) launch(ctx context.Context, replace, resume bool) (AgentInfo
 		return AgentInfo{}, HostError{Kind: HostRefused, Detail: err.Error()}
 	}
 	return info, nil
+}
+
+// McpReconnect makes Claude Code connect to the pixie MCP server again. Claude Code gives up on
+// an HTTP server that refuses connections (the app was quit) and drops its tools until then.
+// A local command: it starts no turn and fires no hooks.
+const McpReconnect = "/mcp reconnect " + McpServer
+
+// McpReconnectWait is the longest a prompt waits for McpReconnect's result.
+const McpReconnectWait = 5 * time.Second
+
+// PromptCoordinator types text into the coordinator and submits it, after McpReconnect if the
+// coordinator was adopted from an earlier run and this is its first prompt since (#168).
+func (h *AgentHost) PromptCoordinator(ctx context.Context, text string) error {
+	if h.reconnectMcp.Swap(false) {
+		seen, _ := h.reconnectsOnScreen(ctx)
+		if err := h.host.Prompt(ctx, Coordinator, McpReconnect); err != nil {
+			// Nothing was typed: the next prompt tries again.
+			h.reconnectMcp.Store(true)
+			return err
+		}
+		h.awaitReconnect(ctx, seen)
+	}
+	return h.host.Prompt(ctx, Coordinator, text)
+}
+
+// reconnectsOnScreen is how many McpReconnect commands the coordinator's screen shows, and
+// whether the last one has its result line ("Successfully reconnected to pixie" or "Failed to
+// reconnect to pixie"). The screen is read as one line, however the pane wrapped it.
+func (h *AgentHost) reconnectsOnScreen(ctx context.Context) (int, bool) {
+	screen, err := h.host.Read(ctx, Coordinator, 40)
+	if err != nil {
+		return 0, false
+	}
+	flat := strings.Join(strings.Fields(screen), " ")
+	i := strings.LastIndex(flat, McpReconnect)
+	if i < 0 {
+		return 0, false
+	}
+	return strings.Count(flat, McpReconnect), strings.Contains(flat[i+len(McpReconnect):], " to "+McpServer)
+}
+
+// awaitReconnect waits (McpReconnectWait at most) for the McpReconnect just typed to show its
+// result: Claude Code drops what is typed while the command runs. seen is how many the screen
+// showed before, so an earlier reconnect's result, still there before this one shows, doesn't
+// count.
+func (h *AgentHost) awaitReconnect(ctx context.Context, seen int) {
+	deadline := time.Now().Add(McpReconnectWait)
+	for {
+		if n, done := h.reconnectsOnScreen(ctx); n > seen && done {
+			return
+		}
+		if !time.Now().Before(deadline) {
+			log.Print("agent: no result from the coordinator's MCP reconnect; prompting anyway")
+			return
+		}
+		select {
+		case <-time.After(200 * time.Millisecond):
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 // Reset is tray ▸ Restart coordinator: forget the crash history and stop giving up.

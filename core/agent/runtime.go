@@ -1005,7 +1005,7 @@ func (h *AgentHandle) runOpInner(ctx context.Context, op hostOp) {
 		}
 		h.Input(CoordinatorUpInput(ensured.Status))
 	case opPrompt:
-		if err := host.Session().Prompt(ctx, Coordinator, op.text); err != nil {
+		if err := host.PromptCoordinator(ctx, op.text); err != nil {
 			if ctx.Err() != nil {
 				return
 			}
