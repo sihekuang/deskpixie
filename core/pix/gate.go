@@ -1,6 +1,7 @@
 package pix
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"sync"
@@ -99,6 +100,13 @@ func withoutReports(b []byte) []byte { return terminalReports.ReplaceAll(b, nil)
 // turns on (#181): read as the bytes they were before.
 var kittyKeys = strings.NewReplacer("\x1b[27u", "\x1b", "\x1b[27;1u", "\x1b", "\x1b[99;5u", "\x03",
 	"\x1b[13u", "\r", "\x1b[13;1u", "\r") // and Enter (#185)
+
+// State is the gate as text, for DESKPIXIE_PIX_KEYLOG.
+func (g *Gate) State() string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return fmt.Sprintf("pending=%d unsure=%t awaiting=%t slash=%t", g.pending, g.unsure, g.awaiting, g.slash)
+}
 
 // Clear reports whether typing into the agent now can't mix with your text.
 func (g *Gate) Clear(now time.Time) bool {

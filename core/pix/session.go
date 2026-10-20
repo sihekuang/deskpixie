@@ -128,11 +128,27 @@ func (s *Session) newWork(prompt string) {
 	s.title()
 }
 
+// keylog appends a line to the file DESKPIXIE_PIX_KEYLOG names (unset: nothing), to see what
+// reaches the typing gate and what it makes of it.
+func (s *Session) keylog(format string, args ...any) {
+	path := os.Getenv("DESKPIXIE_PIX_KEYLOG")
+	if path == "" {
+		return
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "%s "+format+"\n", append([]any{time.Now().Format("15:04:05.000")}, args...)...)
+}
+
 func newSession(o sessionOpts) *Session {
 	s := &Session{o: o, status: "idle", afterStop: true, userDesc: o.description, now: time.Now}
 	s.runner = &Runner{Launch: o.agent, Stdin: o.stdin, Stdout: o.stdout,
 		OnInput: func(b []byte) {
 			s.gate.Keys(b, time.Now())
+			s.keylog("keys %q -> %s", b, s.gate.State())
 			if !onlyReports(b) {
 				s.clearQuestion() // you are answering it yourself
 			}
@@ -209,6 +225,7 @@ func (s *Session) Hook(event string, p map[string]any) string {
 		return ""
 	case "UserPromptSubmit":
 		s.clearQuestion()
+		defer func() { s.keylog("UserPromptSubmit -> %s", s.gate.State()) }()
 		// A prompt while not working starts a new turn, even if the last one never ended with
 		// a Stop (an API error, an interrupt pix didn't see): its start doesn't carry over.
 		s.mu.Lock()
@@ -324,9 +341,11 @@ func (s *Session) command(m wire.Msg) wire.Msg {
 		s.title()
 		// Typed at once, or waiting and why (#183).
 		if s.flushNow() {
+			s.keylog("prompt typed")
 			return wire.Msg{Status: "typed"}
 		}
 		s.flushSoon()
+		s.keylog("prompt waiting: status=%s %s", s.currentStatus(), s.gate.State())
 		return wire.Msg{Status: "waiting", Reason: s.waitReason()}
 	case "keys":
 		s.clearQuestion() // an Escape from Pixie dismisses the prompt
