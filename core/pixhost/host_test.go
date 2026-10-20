@@ -687,6 +687,10 @@ func TestAnOlderPixIsMarkedOutdated(t *testing.T) {
 	if err != nil || !d.Outdated {
 		t.Fatalf("%+v %v", d, err)
 	}
+	go po.answer("")
+	if d, err := h.Flush(context.Background(), unknown.Address); err != nil || !d.Outdated {
+		t.Fatalf("flush: %+v %v", d, err)
+	}
 
 	h2, sock2 := newHost(t)
 	_, r := dialPix(t, sock2, wire.Msg{Tool: "claude", GitRoot: "/x/a", Build: "old"})

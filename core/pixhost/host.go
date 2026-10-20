@@ -502,7 +502,13 @@ func (h *Host) Flush(ctx context.Context, name string) (agent.Delivery, error) {
 	if err != nil {
 		return agent.Delivery{}, err
 	}
-	return agent.Delivery{Status: r.Status, Reason: r.Reason}, nil
+	h.mu.Lock()
+	outdated := false
+	if s := h.sessions[name]; s != nil {
+		outdated = h.outdated(s)
+	}
+	h.mu.Unlock()
+	return agent.Delivery{Status: r.Status, Reason: r.Reason, Outdated: outdated}, nil
 }
 func (h *Host) SendKeys(ctx context.Context, name string, keys []string) error {
 	return h.command(ctx, name, wire.Msg{Command: "keys", Keys: keys})
