@@ -595,3 +595,141 @@ func TestListShowsTheLastTurnsGist(t *testing.T) {
 		t.Fatalf("%+v", u)
 	}
 }
+
+// #183: pix's prompt result says typed or waiting (and why); the host counts the waiting ones
+// until pix reports them delivered.
+func TestPromptDeliverySaysTypedOrWaitingAndCountsTheWaiting(t *testing.T) {
+	h, sock := newHost(t)
+	p, r := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api"})
+	reply := func(res wire.Msg) agent.Delivery {
+		t.Helper()
+		go func() {
+			m, _ := p.dec.Next()
+			res.Kind, res.ID = wire.KindResult, m.ID
+			wire.Encode(p.c, res)
+		}()
+		d, err := h.PromptDelivery(context.Background(), r.Address, "hi")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
+	waiting := func() int {
+		l, _ := h.List(context.Background())
+		return l[0].User.Waiting
+	}
+	if d := reply(wire.Msg{Status: "typed"}); d.Status != "typed" || waiting() != 0 {
+		t.Fatalf("%+v %d", d, waiting())
+	}
+	if d := reply(wire.Msg{Status: "waiting", Reason: "working"}); d != (agent.Delivery{Status: "waiting", Reason: "working"}) {
+		t.Fatalf("%+v", d)
+	}
+	reply(wire.Msg{Status: "waiting", Reason: "working"})
+	if waiting() != 2 {
+		t.Fatalf("waiting %d", waiting())
+	}
+	wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "delivered"})
+	for deadline := time.Now().Add(2 * time.Second); waiting() != 0; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("still waiting %d after delivered", waiting())
+		}
+	}
+}
+
+// #187: Flush asks pix to type what waits; an older pix that doesn't know flush says so plainly.
+func TestFlushSaysTypedOrWhyItStillWaits(t *testing.T) {
+	h, sock := newHost(t)
+	p, r := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api"})
+	flush := func(res wire.Msg) (agent.Delivery, error) {
+		t.Helper()
+		go func() {
+			m, _ := p.dec.Next()
+			if m.Command != "flush" {
+				t.Errorf("command %q", m.Command)
+			}
+			res.Kind, res.ID = wire.KindResult, m.ID
+			wire.Encode(p.c, res)
+		}()
+		return h.Flush(context.Background(), r.Address)
+	}
+	if d, err := flush(wire.Msg{Status: "typed"}); err != nil || d.Status != "typed" {
+		t.Fatalf("%+v %v", d, err)
+	}
+	if d, err := flush(wire.Msg{Status: "waiting", Reason: "working"}); err != nil || d != (agent.Delivery{Status: "waiting", Reason: "working"}) {
+		t.Fatalf("%+v %v", d, err)
+	}
+	if _, err := flush(wire.Msg{Err: "unknown command flush"}); err == nil || !strings.Contains(err.Error(), "restart it") {
+		t.Fatalf("old pix: %v", err)
+	}
+}
+
+// #189: pix says which build it is when it registers. One older than the pix the app ships (or
+// from before builds, with none) is registered all the same, marked outdated: in its reply, in
+// List, and in what a message to it returns. With no build of its own, the app marks none.
+func TestAnOlderPixIsMarkedOutdated(t *testing.T) {
+	h, sock := newHost(t)
+	h.SetBuild("new")
+	_, current := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/a", Build: "new"})
+	_, older := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/b", Build: "old"})
+	po, unknown := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/c"})
+	if current.Kind != wire.KindRegistered || current.Outdated || !older.Outdated || !unknown.Outdated {
+		t.Fatalf("%+v %+v %+v", current, older, unknown)
+	}
+	out := map[string]bool{}
+	for _, s := range listed(t, h) {
+		out[s.Name] = s.User.Outdated
+	}
+	if out[current.Address] || !out[older.Address] || !out[unknown.Address] {
+		t.Fatal(out)
+	}
+	go po.answer("")
+	d, err := h.PromptDelivery(context.Background(), unknown.Address, "hi")
+	if err != nil || !d.Outdated {
+		t.Fatalf("%+v %v", d, err)
+	}
+	go po.answer("")
+	if d, err := h.Flush(context.Background(), unknown.Address); err != nil || !d.Outdated {
+		t.Fatalf("flush: %+v %v", d, err)
+	}
+
+	h2, sock2 := newHost(t)
+	_, r := dialPix(t, sock2, wire.Msg{Tool: "claude", GitRoot: "/x/a", Build: "old"})
+	if r.Outdated || listed(t, h2)[0].User.Outdated {
+		t.Fatal("marked outdated by an app that doesn't know its own pix")
+	}
+}
+
+// #191: an outdated session is reported to Pixie once, when it registers; not again when the
+// same session registers after a reconnect, and never for a current one.
+func TestAnOutdatedSessionIsReportedOnce(t *testing.T) {
+	h, sock := newHost(t)
+	h.SetBuild("new")
+	events := h.Subscribe()
+	outdated := func() (got []agent.PaneEvent) {
+		for {
+			select {
+			case ev := <-events:
+				if ev.Kind == agent.PaneEventOutdated {
+					got = append(got, ev)
+				}
+			case <-time.After(200 * time.Millisecond):
+				return got
+			}
+		}
+	}
+	dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/a", Build: "new"})
+	if got := outdated(); len(got) != 0 {
+		t.Fatalf("a current pix: %+v", got)
+	}
+	p, r := dialPix(t, sock, wire.Msg{Tool: "codex", GitRoot: "/x/focus", Build: "old", SessionID: "s1", Description: "login bug", App: "com.jetbrains.WebStorm"})
+	got := outdated()
+	if len(got) != 1 || got[0].Agent != r.Address || *got[0].Outdated != (agent.SessionOutdated{Label: "login bug", Tool: "codex", App: "com.jetbrains.WebStorm"}) {
+		t.Fatalf("%+v", got)
+	}
+	p.c.Close()
+	eventually(t, "unreachable", func() bool { return !listed(t, h)[1].User.Reachable || !listed(t, h)[0].User.Reachable })
+	dialPix(t, sock, wire.Msg{Tool: "codex", GitRoot: "/x/focus", Build: "old", SessionID: "s1", Address: r.Address})
+	if got := outdated(); len(got) != 0 {
+		t.Fatalf("told again after a reconnect: %+v", got)
+	}
+}

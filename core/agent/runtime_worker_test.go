@@ -63,7 +63,7 @@ func rigBuild(t *testing.T, workers, keep bool, store *agenttest.MemStore, wt *a
 	if kept.CoordinatorToken != "" {
 		token = kept.CoordinatorToken
 	}
-	recipe := CoordinatorRecipe{Cwd: "/data/agent/workspace", Env: []EnvVar{{Key: "PIXIE_AGENT_TOKEN", Value: token}}, AdoptEarlier: kept.CoordinatorToken != ""}
+	recipe := CoordinatorRecipe{Cwd: "/data/agent/workspace", Env: []EnvVar{{Key: "PIXIE_AGENT_TOKEN", Value: token}}, AdoptEarlier: kept.CoordinatorToken != "", Stamp: "stamp-1"}
 	notifier := &agenttest.RecordingNotifier{}
 	deps := Deps{
 		Host: NewAgentHost(host, clock, recipe), Voice: &agenttest.RecordingVoiceLink{}, Notifier: notifier,

@@ -311,6 +311,9 @@ const (
 	PaneEventQuestionGone
 	// PaneEventTurn: a session you started with pix finished a turn (Turn set, #114).
 	PaneEventTurn
+	// PaneEventOutdated: a session you started with pix registered on an older pix than the
+	// app's (Outdated set, #191). Once per session per app run.
+	PaneEventOutdated
 )
 
 // PaneEvent is a status change (Status set), an exit of a named agent, a prompt one of your
@@ -321,6 +324,14 @@ type PaneEvent struct {
 	Status   PaneStatus       // PaneEventStatus only
 	Question *SessionQuestion // PaneEventQuestion(Gone) only (a pointer: PaneEvent stays comparable)
 	Turn     *SessionTurn     // PaneEventTurn only
+	Outdated *SessionOutdated // PaneEventOutdated only
+}
+
+// SessionOutdated is a session you started with an older pix than the app's (#191).
+type SessionOutdated struct {
+	Label string // as SessionTurn's
+	Tool  string // claude | codex
+	App   string // bundle id of the app it runs in ("" unknown)
 }
 
 // SessionTurn is a finished turn of a session you started with pix (#114).
@@ -387,6 +398,8 @@ type UserSession struct {
 	LastActive       time.Time // its last hook, status or description
 	LastTurn         string    // the gist of its last finished turn (#146; "" = none, or nothing readable)
 	LastTurnAsks     bool      // that turn ended asking you something
+	Waiting          int       // Pixie's messages pix holds for it, not yet delivered (#183)
+	Outdated         bool      // it runs another pix than the app's: restart it to update (#189)
 }
 
 // EnvVar is one environment entry (Rust's (String, String) pair).
@@ -642,6 +655,7 @@ const (
 	CallCloseSession
 	CallDescribeSession
 	CallSetSessionVerbatim
+	CallFlushSession
 	CallCreateProject
 )
 
@@ -656,6 +670,7 @@ type McpCall struct {
 	Name     string
 	Text     string
 	Verbatim bool // SetSessionVerbatim only (#143): the session's new setting.
+	Force    bool // MessageSession only (#187): send it in now, with what waits, past the typing gate.
 	Summary  string
 	Outcome  Outcome
 	Evidence string

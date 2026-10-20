@@ -10,8 +10,11 @@ type KeptAgents struct {
 	CoordinatorToken string `json:"coordinatorToken,omitempty"`
 	// CoordinatorKind is that coordinator's agent (#87; omitted for Claude, as in every file
 	// from before it). A coordinator of another kind than the one configured is not adopted.
-	CoordinatorKind AgentKind    `json:"coordinatorKind,omitempty"`
-	Workers         []KeptWorker `json:"workers,omitempty"`
+	CoordinatorKind AgentKind `json:"coordinatorKind,omitempty"`
+	// CoordinatorStamp is what that coordinator was started with (CoordinatorRecipe.Stamp,
+	// #189): a run that would start it differently replaces it. "" in files from before it.
+	CoordinatorStamp string       `json:"coordinatorStamp,omitempty"`
+	Workers          []KeptWorker `json:"workers,omitempty"`
 }
 
 // KeptWorker is one worker left running.

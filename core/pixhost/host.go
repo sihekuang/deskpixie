@@ -2,6 +2,7 @@ package pixhost
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -39,6 +40,8 @@ type session struct {
 	active    time.Time // its last message
 	lastTurn  string    // its last turn's gist (#146)
 	asks      bool      // that turn ended asking you something
+	waiting   int       // Pixie's messages pix holds for it, until it reports them delivered (#183)
+	toldOld   bool      // Pixie was told it runs an older pix (#191)
 	conn      net.Conn  // nil while unreachable
 	wmu       sync.Mutex
 	pending   map[string]chan wire.Msg
@@ -56,6 +59,7 @@ type Host struct {
 	mu       sync.Mutex
 	l        net.Listener
 	sessions map[string]*session // by address
+	build    string              // the build of the pix this app ships (SetBuild)
 	subs     []chan agent.PaneEvent
 	changes  chan struct{}
 	seq      atomic.Uint64
@@ -106,6 +110,17 @@ func (h *Host) Listen() error {
 	return nil
 }
 
+// SetBuild sets the build of the pix this app ships (wire.BuildOf; #189): a pix of another
+// build is marked outdated. "" (the default) marks none.
+func (h *Host) SetBuild(build string) {
+	h.mu.Lock()
+	h.build = build
+	h.mu.Unlock()
+}
+
+// outdated: s runs another pix than the app's (h.mu held).
+func (h *Host) outdated(s *session) bool { return h.build != "" && s.hello.Build != h.build }
+
 // Shutdown stops listening. pix sessions keep running and reconnect when the app is back.
 func (h *Host) Shutdown() {
 	h.mu.Lock()
@@ -144,8 +159,17 @@ func (h *Host) serve(c net.Conn) {
 		return
 	}
 	h.changed()
+	h.mu.Lock()
+	outdated := h.outdated(s)
+	tell := outdated && !s.toldOld
+	s.toldOld = s.toldOld || outdated
+	old := agent.SessionOutdated{Label: s.label(), Tool: s.hello.Tool, App: s.hello.App}
+	h.mu.Unlock()
+	if tell {
+		h.broadcast(agent.PaneEvent{Kind: agent.PaneEventOutdated, Agent: s.addr, Outdated: &old})
+	}
 	s.wmu.Lock()
-	err = wire.Encode(c, wire.Msg{Kind: wire.KindRegistered, Address: s.addr})
+	err = wire.Encode(c, wire.Msg{Kind: wire.KindRegistered, Address: s.addr, Outdated: outdated})
 	s.wmu.Unlock()
 	if err == nil {
 		for {
@@ -278,6 +302,11 @@ func (h *Host) onMsg(s *session, m wire.Msg) bool {
 			s.lastTurn, s.asks = agent.SessionGist(m.Text)
 			h.mu.Unlock()
 			h.broadcast(agent.PaneEvent{Kind: agent.PaneEventTurn, Agent: s.addr, Turn: &t})
+		case "delivered":
+			h.mu.Lock()
+			s.waiting = 0
+			h.mu.Unlock()
+			h.changed()
 		case "exited":
 			h.remove(s)
 			return true
@@ -343,11 +372,17 @@ func (h *Host) broadcast(ev agent.PaneEvent) {
 
 // command sends m to name's pix and waits for its result.
 func (h *Host) command(ctx context.Context, name string, m wire.Msg) error {
+	_, err := h.commandResult(ctx, name, m)
+	return err
+}
+
+// commandResult is command with pix's result.
+func (h *Host) commandResult(ctx context.Context, name string, m wire.Msg) (wire.Msg, error) {
 	h.mu.Lock()
 	s := h.sessions[name]
 	if s == nil || s.conn == nil {
 		h.mu.Unlock()
-		return agent.ErrNoAgent(name)
+		return wire.Msg{}, agent.ErrNoAgent(name)
 	}
 	m.Kind, m.ID = wire.KindCommand, strconv.FormatUint(h.seq.Add(1), 10)
 	ch := make(chan wire.Msg, 1)
@@ -359,24 +394,24 @@ func (h *Host) command(ctx context.Context, name string, m wire.Msg) error {
 	err := wire.Encode(conn, m)
 	s.wmu.Unlock()
 	if err != nil {
-		return agent.ErrNoAgent(name)
+		return wire.Msg{}, agent.ErrNoAgent(name)
 	}
 	ctx, cancel := context.WithTimeout(ctx, CommandLimit)
 	defer cancel()
 	select {
 	case r, ok := <-ch:
 		if !ok {
-			return agent.ErrNoAgent(name)
+			return wire.Msg{}, agent.ErrNoAgent(name)
 		}
 		if r.Err != "" {
-			return agent.HostError{Kind: agent.HostOther, Detail: r.Err}
+			return wire.Msg{}, agent.HostError{Kind: agent.HostOther, Detail: r.Err}
 		}
-		return nil
+		return r, nil
 	case <-ctx.Done():
 		h.mu.Lock()
 		delete(s.pending, m.ID)
 		h.mu.Unlock()
-		return agent.HostError{Kind: agent.HostTimeout, Detail: "pix session " + name}
+		return wire.Msg{}, agent.HostError{Kind: agent.HostTimeout, Detail: "pix session " + name}
 	}
 }
 
@@ -439,7 +474,48 @@ func (h *Host) ReplaceAgent(context.Context, agent.AgentSpec) (agent.AgentInfo, 
 	return agent.AgentInfo{}, errUnsupported
 }
 func (h *Host) Prompt(ctx context.Context, name, text string) error {
-	return h.command(ctx, name, wire.Msg{Command: "prompt", Text: text})
+	_, err := h.PromptDelivery(ctx, name, text)
+	return err
+}
+
+// PromptDelivery is Prompt with what became of the message (#183): typed, or waiting and why.
+// A waiting one is counted until pix reports it delivered.
+func (h *Host) PromptDelivery(ctx context.Context, name, text string) (agent.Delivery, error) {
+	r, err := h.commandResult(ctx, name, wire.Msg{Command: "prompt", Text: text})
+	if err != nil {
+		return agent.Delivery{}, err
+	}
+	h.mu.Lock()
+	outdated := false
+	if s := h.sessions[name]; s != nil {
+		outdated = h.outdated(s)
+		if r.Status == "waiting" {
+			s.waiting++
+		}
+	}
+	h.mu.Unlock()
+	if r.Status == "waiting" {
+		h.changed()
+	}
+	return agent.Delivery{Status: r.Status, Reason: r.Reason, Outdated: outdated}, nil
+}
+
+// Flush has pix type session name's waiting messages now, past its typing gate (#187).
+func (h *Host) Flush(ctx context.Context, name string) (agent.Delivery, error) {
+	r, err := h.commandResult(ctx, name, wire.Msg{Command: "flush"})
+	if he, ok := err.(agent.HostError); ok && he.Detail == "unknown command flush" { // a pix from before #187
+		return agent.Delivery{}, errors.New("This session's pix can't send waiting messages in; restart it to update pix.")
+	}
+	if err != nil {
+		return agent.Delivery{}, err
+	}
+	h.mu.Lock()
+	outdated := false
+	if s := h.sessions[name]; s != nil {
+		outdated = h.outdated(s)
+	}
+	h.mu.Unlock()
+	return agent.Delivery{Status: r.Status, Reason: r.Reason, Outdated: outdated}, nil
 }
 func (h *Host) SendKeys(ctx context.Context, name string, keys []string) error {
 	return h.command(ctx, name, wire.Msg{Command: "keys", Keys: keys})
@@ -481,7 +557,8 @@ func (h *Host) List(context.Context) ([]agent.AgentInfo, error) {
 			Name: s.addr, Pane: "pix:" + s.addr, Cwd: s.hello.Cwd, Status: s.status, Origin: agent.OriginUser,
 			User: &agent.UserSession{Tool: s.hello.Tool, Repo: repo, Where: s.hello.Where, App: s.hello.App, Pid: s.hello.Pid,
 				Description: desc, PastDescriptions: s.desc.Past(), Reachable: s.conn != nil, Verbatim: !s.labeled,
-				Started: s.started, LastActive: s.active, LastTurn: s.lastTurn, LastTurnAsks: s.asks},
+				Started: s.started, LastActive: s.active, LastTurn: s.lastTurn, LastTurnAsks: s.asks, Waiting: s.waiting,
+				Outdated: h.outdated(s)},
 		})
 	}
 	return out, nil

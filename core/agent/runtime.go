@@ -370,6 +370,7 @@ func (h *AgentHandle) saveKept() {
 	if running {
 		kept.CoordinatorToken = h.deps.Host.Token()
 		kept.CoordinatorKind = h.deps.Host.Kind()
+		kept.CoordinatorStamp = h.deps.Host.Stamp()
 	}
 	if h.workers != nil {
 		for _, w := range live {
@@ -1159,8 +1160,13 @@ func (h *AgentHandle) mcp(agent string, call McpCall) McpReply {
 		ctx, cancel := context.WithTimeout(h.ctx, OpLimit)
 		defer cancel()
 		r := sessionTool(ctx, h.deps.Host.Session(), call, h.maskPending)
-		if call.Kind == CallMessageSession && r.Err == nil {
-			h.Input(SessionSentInput(call.Name, h.sessionDescription(call.Name)))
+		if (call.Kind == CallMessageSession || call.Kind == CallFlushSession) && r.Err == nil {
+			v, _ := r.Value.(map[string]any)
+			if reason, _ := v["reason"].(string); v["status"] == "waiting" {
+				h.Input(SessionWaitingInput(call.Name, h.sessionDescription(call.Name), reason))
+			} else {
+				h.Input(SessionSentInput(call.Name, h.sessionDescription(call.Name)))
+			}
 		}
 		return r
 	}
@@ -1668,7 +1674,7 @@ func (h *AgentHandle) runWorkerOp(e Effect) {
 	case EfPromptWorker:
 		_, err := within(h.ctx, OpLimit, func(c context.Context) (struct{}, error) {
 			if h.setReconnect(name, false) {
-				if err := ReconnectMcp(c, session, name); err != nil {
+				if _, err := ReconnectMcp(c, session, name); err != nil {
 					// Nothing was typed: the next prompt tries again.
 					h.setReconnect(name, true)
 					return struct{}{}, err

@@ -4,9 +4,12 @@ package wire
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 )
 
@@ -29,7 +32,7 @@ const (
 )
 
 // Msg is one message. Only the fields of its Kind are set: register → Tool…Description;
-// registered → Address; refused → Reason; event → Event (status, description, session,
+// registered → Address, Outdated; refused → Reason; event → Event (status, description, session,
 // exited, hook, turn, question, question-gone) and its fields; command → Command, Text, Keys;
 // result → Text, Err.
 type Msg struct {
@@ -61,6 +64,34 @@ type Msg struct {
 	Text    string   `json:"text,omitempty"`
 	Keys    []string `json:"keys,omitempty"`
 	Err     string   `json:"err,omitempty"`
+	// Build (register) is pix's build, BuildOf its binary (#189); Outdated (registered): it is
+	// not the build of the pix this app ships.
+	Build    string `json:"build,omitempty"`
+	Outdated bool   `json:"outdated,omitempty"`
+}
+
+// BuildOf is the build of the binary at path (symlinks followed): the start of its SHA-256,
+// "" if it can't be read. Any rebuild is another build.
+func BuildOf(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(h.Sum(nil))[:16]
+}
+
+// SelfBuild is BuildOf the running binary.
+func SelfBuild() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	return BuildOf(exe)
 }
 
 // Encode writes m as one line, with V set.

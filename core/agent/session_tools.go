@@ -11,7 +11,7 @@ import (
 
 // SessionTools are the coordinator's tools for the sessions you start yourself with pix
 // (#89). They are available whether or not workers are on.
-var SessionTools = [6]string{"list_sessions", "message_session", "interrupt_session", "close_session", "describe_session", "set_session_verbatim"}
+var SessionTools = [7]string{"list_sessions", "message_session", "flush_session", "interrupt_session", "close_session", "describe_session", "set_session_verbatim"}
 
 // IsSessionTool reports whether name is one of SessionTools.
 func IsSessionTool(name string) bool { return slices.Contains(SessionTools[:], name) }
@@ -29,9 +29,15 @@ func SessionCatalog() []map[string]any {
 			"name":        "message_session",
 			"description": "Send a message to a session the user started, once the session can take it. It's typed in directly, never relayed through Claude Code's own cross-session messaging. A session with verbatim on (the default; list_sessions shows it) gets the text exactly as given, as if the user typed it, so send the user's own words when relaying what they said and never claim they approved something they didn't. With verbatim off it arrives prefixed \"Coordinator says: …\". Only a reply with status \"sent\" means it was delivered.",
 			"inputSchema": objectSchema(map[string]any{
-				"name": map[string]any{"type": "string", "description": name[1]},
-				"text": map[string]any{"type": "string", "description": "The message. Quote the user's own words when relaying what they said."},
+				"name":  map[string]any{"type": "string", "description": name[1]},
+				"text":  map[string]any{"type": "string", "description": "The message. Quote the user's own words when relaying what they said."},
+				"force": map[string]any{"type": "boolean", "description": "Only when the user says to send it anyway: types it in now, with any messages still waiting, even if pix thinks they're typing there. A busy session still gets it with its next step."},
 			}, "name", "text"),
+		},
+		{
+			"name":        "flush_session",
+			"description": "Send a session's waiting messages in now, when the user says to send it anyway (\"push it through\", \"it's stuck\"): pix types them even if it thinks the user is typing there, setting the user's unsent text aside and putting it back. A busy session still gets them with its next step.",
+			"inputSchema": objectSchema(stringProps(name), "name"),
 		},
 		{
 			"name":        "interrupt_session",
@@ -74,6 +80,8 @@ type SessionRow struct {
 	Started          string   `json:"started,omitempty"`     // "1h30m ago"
 	LastActive       string   `json:"last_active,omitempty"` // "3m ago"
 	LastTurn         string   `json:"last_turn,omitempty"`   // its last turn's gist, "Asked: …" for a question (#146)
+	Waiting          int      `json:"waiting,omitempty"`     // messages waiting to be delivered to it (#183)
+	Outdated         bool     `json:"outdated,omitempty"`    // it runs an older pix than the app's (#189)
 }
 
 // ago is how long before now t was, as list_sessions shows it ("" for no time).
@@ -93,6 +101,56 @@ type Describer interface {
 	SetDescription(name, text string) error
 }
 
+// Delivery is what became of a message to your session (#183): Status "typed" (it went in at
+// once) or "waiting" (pix holds it), with Reason why it waits: "working", "blocked" (on a
+// question) or "typing" (you are). Empty from a pix too old to say.
+type Delivery struct {
+	Status string
+	Reason string
+	// Outdated: the session runs another pix than the app's (#189).
+	Outdated bool
+}
+
+// DeliveryPrompter prompts a session and says whether the message was typed or waits.
+type DeliveryPrompter interface {
+	PromptDelivery(ctx context.Context, name, text string) (Delivery, error)
+}
+
+// Flusher sends a session's waiting messages in past the typing gate (#187): "typed", or still
+// "waiting" with why (a busy session gets them with its next step).
+type Flusher interface {
+	Flush(ctx context.Context, name string) (Delivery, error)
+}
+
+// deliveryReply is message_session's or flush_session's reply for d.
+func deliveryReply(name string, d Delivery) McpReply {
+	v := map[string]any{"name": name, "status": "sent"}
+	if d.Status == "waiting" {
+		v = map[string]any{"name": name, "status": "waiting", "reason": d.Reason, "why": WaitingWhy(d.Reason)}
+	}
+	if d.Outdated {
+		v["outdated"], v["update"] = true, OutdatedUpdate
+	}
+	return McpReply{Value: v}
+}
+
+// OutdatedUpdate is what to tell the person about a session on an older pix (#189).
+const OutdatedUpdate = "This session runs an older pix than the app: newer things (like flush_session) may not work there. " +
+	"It updates when the person restarts it with pix and --resume (pix claude --resume, or pix codex resume)."
+
+// WaitingWhy is why a waiting message waits, for the coordinator and Pixie.
+func WaitingWhy(reason string) string {
+	switch reason {
+	case "working":
+		return "The session is busy; it gets the message with its next step, or when it stops."
+	case "blocked":
+		return "The session is waiting on a question; it gets the message once that's answered."
+	case "typing":
+		return "The person is typing in that session; it gets the message once they send or clear what they typed."
+	}
+	return "It gets the message as soon as it can."
+}
+
 // VerbatimSetter keeps each session's verbatim setting (#143): on, the default, a message is
 // typed exactly as given; off, it is prefixed "Coordinator says: ".
 type VerbatimSetter interface {
@@ -102,7 +160,7 @@ type VerbatimSetter interface {
 
 func isSessionCall(k McpCallKind) bool {
 	switch k {
-	case CallListSessions, CallMessageSession, CallInterruptSession, CallCloseSession, CallDescribeSession, CallSetSessionVerbatim:
+	case CallListSessions, CallMessageSession, CallFlushSession, CallInterruptSession, CallCloseSession, CallDescribeSession, CallSetSessionVerbatim:
 		return true
 	}
 	return false
@@ -149,7 +207,29 @@ func sessionTool(ctx context.Context, host SessionHost, call McpCall, mask func(
 				text = CoordinatorSays(call.Text)
 			}
 		}
+		if dp, ok := sec.(DeliveryPrompter); ok {
+			d, derr := dp.PromptDelivery(ctx, call.Name, text)
+			if derr != nil {
+				return McpReply{Err: derr}
+			}
+			if f, ok := sec.(Flusher); ok && call.Force && d.Status == "waiting" {
+				if d, derr = f.Flush(ctx, call.Name); derr != nil {
+					return McpReply{Err: derr}
+				}
+			}
+			return deliveryReply(call.Name, d)
+		}
 		err, status = sec.Prompt(ctx, call.Name, text), "sent"
+	case CallFlushSession:
+		f, ok := sec.(Flusher)
+		if !ok {
+			return McpReply{Err: errors.New("This session's pix can't send waiting messages in; restart it to update pix.")}
+		}
+		d, ferr := f.Flush(ctx, call.Name)
+		if ferr != nil {
+			return McpReply{Err: ferr}
+		}
+		return deliveryReply(call.Name, d)
 	case CallInterruptSession:
 		err, status = sec.SendKeys(ctx, call.Name, []string{"Escape"}), "interrupted"
 	case CallCloseSession:
@@ -204,7 +284,7 @@ func userSessionRows(ctx context.Context, sec SessionHost, mask func(string) str
 		}
 		rows = append(rows, SessionRow{Name: a.Name, Description: mask(u.Description), PastDescriptions: past,
 			Tool: u.Tool, Repo: u.Repo, Cwd: a.Cwd, Where: u.Where, Status: a.Status.String(), Reachable: u.Reachable, Verbatim: u.Verbatim,
-			Started: ago(u.Started, now), LastActive: ago(u.LastActive, now), LastTurn: last})
+			Started: ago(u.Started, now), LastActive: ago(u.LastActive, now), LastTurn: last, Waiting: u.Waiting, Outdated: u.Outdated})
 	}
 	return rows, nil
 }

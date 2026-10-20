@@ -212,6 +212,16 @@ func capGist(s string) string {
 
 // SessionTurnLine is what Pixie says of a finished turn: done with its gist, asking its
 // question, or just finished when the reply had nothing readable.
+// OutdatedLine tells that session label runs an older pix than the app's, and how to update it
+// (#191): restart it with pix, resuming its conversation.
+func OutdatedLine(label, tool string) string {
+	resume := "pix " + tool + " --resume"
+	if tool == "codex" {
+		resume = "pix codex resume"
+	}
+	return label + " runs an older pix than the app: restart it with " + resume + " to update it."
+}
+
 func SessionTurnLine(label, gist string, asking bool) string {
 	switch {
 	case gist == "":

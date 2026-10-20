@@ -15,10 +15,10 @@ import (
 // #87: Codex as the coordinator, on the app side.
 
 func TestClaudesCoordinatorMdIsUnchanged(t *testing.T) {
-	// The renderings since sessions get asked about by description (pix, #89), byte for byte; with workers on, since #97 (create_project) and #126 (prefer an existing pix session over a worker), #141 (the app asks before a push or merge; no made-up confirm words), #143 (each session verbatim by default), #146 (match a session by its last turn too), and #153 (hand a request on: your session, then Pixie's worker, then yourself; edit a repo after asking), and #157 (several requests at once: read together, in order; Pixie's context is never an instruction), and #160 (a request is the person's own words: work out several things, their order and corrections), and #161 (pick the likeliest session yourself; ask only when you can't tell), and #164 (no Recall: requests: answer from memory, else hand it on) and #165 (a request handed to a session is done once sent), and #177 (a session in the same project gets it, questions too, before you look; the app says the hand-off, so the done block is short).
+	// The renderings since sessions get asked about by description (pix, #89), byte for byte; with workers on, since #97 (create_project) and #126 (prefer an existing pix session over a worker), #141 (the app asks before a push or merge; no made-up confirm words), #143 (each session verbatim by default), #146 (match a session by its last turn too), and #153 (hand a request on: your session, then Pixie's worker, then yourself; edit a repo after asking), and #157 (several requests at once: read together, in order; Pixie's context is never an instruction), and #160 (a request is the person's own words: work out several things, their order and corrections), and #161 (pick the likeliest session yourself; ask only when you can't tell), and #164 (no Recall: requests: answer from memory, else hand it on) and #165 (a request handed to a session is done once sent), and #177 (a session in the same project gets it, questions too, before you look; the app says the hand-off, so the done block is short), and #183 (message_session may return waiting, with why), #187 (flush_session, or force, when they say send it anyway) and #189 (a session on an older pix says so).
 	for _, c := range []struct{ root, sum string }{
-		{"", "ee994129a9840b41a4eff08e2bce9ba80ce16c966532300f096d0061142e81f4"},
-		{"/Users/x/code", "6a159a1dfbbf4c684b9ca16b5076545b5950674c3e6491179df40841d6763f2c"},
+		{"", "2354cd3e210febd4edebb3f399ec0f751f4aae89d6f2afd56b2e573441cdce42"},
+		{"/Users/x/code", "7d9b95665b6af9989510d366c6f8f4d1f2e6551b58c423e7c01a89192314dee0"},
 	} {
 		if got := fmt.Sprintf("%x", sha256.Sum256([]byte(RenderClaudeMd("/data/canvas", c.root)))); got != c.sum {
 			t.Fatal(c.root, got)
@@ -67,16 +67,63 @@ func TestTheCoordinatorRecipeFollowsTheKind(t *testing.T) {
 }
 
 func TestAKeptCoordinatorOfAnotherKindIsNotAdopted(t *testing.T) {
-	kept := agent.KeptAgents{CoordinatorToken: "t", Workers: []agent.KeptWorker{{Token: "w"}}}
-	if got := KeptFor(kept, agent.Claude); got.CoordinatorToken != "t" || len(got.Workers) != 1 {
+	kept := agent.KeptAgents{CoordinatorToken: "t", CoordinatorStamp: "s", Workers: []agent.KeptWorker{{Token: "w"}}}
+	if got := KeptFor(kept, agent.Claude, "s"); got.CoordinatorToken != "t" || len(got.Workers) != 1 {
 		t.Fatalf("%+v", got)
 	}
-	if got := KeptFor(kept, agent.Codex); got.CoordinatorToken != "" || len(got.Workers) != 1 {
+	if got := KeptFor(kept, agent.Codex, "s"); got.CoordinatorToken != "" || len(got.Workers) != 1 {
 		t.Fatalf("%+v", got) // the workers are still this run's
 	}
 	kept.CoordinatorKind = agent.Codex
-	if got := KeptFor(kept, agent.Codex); got.CoordinatorToken != "t" {
+	if got := KeptFor(kept, agent.Codex, "s"); got.CoordinatorToken != "t" {
 		t.Fatalf("%+v", got)
+	}
+}
+
+// #189: a kept coordinator started with other instructions, settings or arguments than this run
+// would start it with (or by an app from before stamps) is not adopted: its pane is replaced by a
+// start that resumes its conversation.
+func TestAKeptCoordinatorStartedDifferentlyIsNotAdopted(t *testing.T) {
+	kept := agent.KeptAgents{CoordinatorToken: "t", CoordinatorStamp: "old", Workers: []agent.KeptWorker{{Token: "w"}}}
+	if got := KeptFor(kept, agent.Claude, "new"); got.CoordinatorToken != "" || len(got.Workers) != 1 {
+		t.Fatalf("%+v", got)
+	}
+	kept.CoordinatorStamp = ""
+	if got := KeptFor(kept, agent.Claude, "new"); got.CoordinatorToken != "" {
+		t.Fatalf("a kept file from before stamps: %+v", got)
+	}
+}
+
+// The stamp changes with what the coordinator reads at its start (its instructions, its
+// settings) and how it is started (kind, arguments), and only then.
+func TestTheCoordinatorStampFollowsWhatItStartsWith(t *testing.T) {
+	dir := t.TempDir()
+	md, settings := filepath.Join(dir, "CLAUDE.md"), filepath.Join(dir, "settings.json")
+	os.WriteFile(md, []byte("rules"), 0o644)
+	os.WriteFile(settings, []byte("{}"), 0o644)
+	recipe := agent.CoordinatorRecipe{Kind: agent.Claude, Args: []string{"--model", "opus"}}
+	base := CoordinatorStamp(recipe, md, settings)
+	if base == "" || CoordinatorStamp(recipe, md, settings) != base {
+		t.Fatal("not stable", base)
+	}
+	changed := map[string]func(){
+		"instructions": func() { os.WriteFile(md, []byte("new rules"), 0o644) },
+		"settings":     func() { os.WriteFile(settings, []byte(`{"hooks":1}`), 0o644) },
+		"arguments":    func() { recipe.Args = []string{"--model", "haiku"} },
+		"kind":         func() { recipe.Kind = agent.Codex },
+	}
+	for _, what := range []string{"instructions", "settings", "arguments", "kind"} {
+		changed[what]()
+		if got := CoordinatorStamp(recipe, md, settings); got == base {
+			t.Fatalf("%s changed, the stamp didn't", what)
+		} else {
+			base = got
+		}
+	}
+	// The token isn't part of it: a kept coordinator keeps its token.
+	recipe.Env = []agent.EnvVar{{Key: agent.TokenEnv, Value: "x"}}
+	if CoordinatorStamp(recipe, md, settings) != base {
+		t.Fatal("the env changed the stamp")
 	}
 }
 
@@ -140,5 +187,11 @@ func TestAKeptClaudeCoordinatorIsReplacedByACodexOne(t *testing.T) {
 	}
 	if !slices.Contains(f.host.Closed(), agent.Coordinator) {
 		t.Fatal("the Claude pane was not replaced", f.host.Closed())
+	}
+}
+
+func TestBundledPixIsBesideTheApp(t *testing.T) {
+	if got := BundledPix("/Applications/DeskPixie.app/Contents/MacOS/DeskPixie"); got != "/Applications/DeskPixie.app/Contents/Helpers/pix" {
+		t.Fatal(got)
 	}
 }

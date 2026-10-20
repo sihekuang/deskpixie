@@ -184,10 +184,12 @@ func TestParseSessionTools(t *testing.T) {
 		{"close_session", map[string]any{"name": "focus-claude"}, agent.McpCall{Kind: agent.CallCloseSession, Name: "focus-claude"}},
 		{"describe_session", map[string]any{"name": "focus-claude", "text": " login\nbug "}, agent.McpCall{Kind: agent.CallDescribeSession, Name: "focus-claude", Text: "login bug"}},
 		{"describe_session", map[string]any{"name": "focus-claude"}, agent.McpCall{Kind: agent.CallDescribeSession, Name: "focus-claude"}},
+		{"flush_session", map[string]any{"name": "focus-claude"}, agent.McpCall{Kind: agent.CallFlushSession, Name: "focus-claude"}},
+		{"message_session", map[string]any{"name": "focus-claude", "text": "hi", "force": true}, agent.McpCall{Kind: agent.CallMessageSession, Name: "focus-claude", Text: "hi", Force: true}},
 	}
 	for _, c := range cases {
 		got, err := agent.ParseToolCall(agent.RoleCoordinator, c.name, c.args)
-		if err != nil || got.Kind != c.want.Kind || got.Name != c.want.Name || got.Text != c.want.Text || got.Verbatim != c.want.Verbatim {
+		if err != nil || got.Kind != c.want.Kind || got.Name != c.want.Name || got.Text != c.want.Text || got.Verbatim != c.want.Verbatim || got.Force != c.want.Force {
 			t.Errorf("%s: %+v %v", c.name, got, err)
 		}
 	}
@@ -278,4 +280,122 @@ func sessionRows(t *testing.T, r agent.McpReply) []agent.SessionRow {
 		t.Fatalf("%+v %v", rows, r.Err)
 	}
 	return rows
+}
+
+// deliveringFake is your sessions' host reporting whether a message was typed or waits (#183).
+type deliveringFake struct {
+	*userFake
+	delivery agent.Delivery
+	waiting  int
+	// flush_session (#187)
+	flushResult agent.Delivery
+	flushed     []string
+}
+
+func (d *deliveringFake) PromptDelivery(ctx context.Context, name, text string) (agent.Delivery, error) {
+	if err := d.Prompt(ctx, name, text); err != nil {
+		return agent.Delivery{}, err
+	}
+	return d.delivery, nil
+}
+
+func (d *deliveringFake) List(ctx context.Context) ([]agent.AgentInfo, error) {
+	l, err := d.userFake.List(ctx)
+	for i := range l {
+		l[i].User.Waiting, l[i].User.Outdated = d.waiting, d.delivery.Outdated
+	}
+	return l, err
+}
+
+// #183: message_session says when the message waits, and why; list_sessions shows how many wait.
+func TestMessageSessionSaysWhenTheMessageWaits(t *testing.T) {
+	_, user, primary := newSessionHarness(t)
+	d := &deliveringFake{userFake: user}
+	c := agent.NewCompositeHost(primary, d)
+	ctx := context.Background()
+	send := func() map[string]any {
+		t.Helper()
+		r := agent.SessionToolForTest(ctx, c, agent.McpCall{Kind: agent.CallMessageSession, Name: "focus-claude", Text: "hi"})
+		if r.Err != nil {
+			t.Fatal(r.Err)
+		}
+		return r.Value.(map[string]any)
+	}
+	d.delivery = agent.Delivery{Status: "typed"}
+	if got := send(); got["status"] != "sent" || got["why"] != nil {
+		t.Fatalf("typed: %v", got)
+	}
+	for reason, words := range map[string]string{"working": "busy", "blocked": "question", "typing": "typing"} {
+		d.delivery = agent.Delivery{Status: "waiting", Reason: reason}
+		got := send()
+		if why, _ := got["why"].(string); got["status"] != "waiting" || got["reason"] != reason || !strings.Contains(why, words) {
+			t.Fatalf("%s: %v", reason, got)
+		}
+	}
+	d.delivery = agent.Delivery{} // an older pix says nothing: sent, as before
+	if got := send(); got["status"] != "sent" {
+		t.Fatalf("older pix: %v", got)
+	}
+	d.waiting = 2
+	r := agent.SessionToolForTest(ctx, c, agent.McpCall{Kind: agent.CallListSessions})
+	if rows := r.Value.(map[string]any)["sessions"].([]agent.SessionRow); rows[0].Waiting != 2 {
+		t.Fatalf("%+v", rows)
+	}
+}
+
+func (d *deliveringFake) Flush(ctx context.Context, name string) (agent.Delivery, error) {
+	d.flushed = append(d.flushed, name)
+	return d.flushResult, nil
+}
+
+// #187: "send it anyway": flush_session sends a session's waiting messages in, and
+// message_session with force sends the new one in at once.
+func TestFlushSessionAndForcedMessages(t *testing.T) {
+	_, user, primary := newSessionHarness(t)
+	d := &deliveringFake{userFake: user, delivery: agent.Delivery{Status: "waiting", Reason: "typing"}, flushResult: agent.Delivery{Status: "typed"}}
+	c := agent.NewCompositeHost(primary, d)
+	ctx := context.Background()
+	r := agent.SessionToolForTest(ctx, c, agent.McpCall{Kind: agent.CallFlushSession, Name: "focus-claude"})
+	if v, _ := r.Value.(map[string]any); r.Err != nil || v["status"] != "sent" || len(d.flushed) != 1 {
+		t.Fatalf("flush: %v %v %v", r.Value, r.Err, d.flushed)
+	}
+	r = agent.SessionToolForTest(ctx, c, agent.McpCall{Kind: agent.CallMessageSession, Name: "focus-claude", Text: "hi", Force: true})
+	if v, _ := r.Value.(map[string]any); r.Err != nil || v["status"] != "sent" || len(d.flushed) != 2 {
+		t.Fatalf("forced: %v %v %v", r.Value, r.Err, d.flushed)
+	}
+	// A working session still gets it with its next step: flush says it waits, and why.
+	d.flushResult = agent.Delivery{Status: "waiting", Reason: "working"}
+	r = agent.SessionToolForTest(ctx, c, agent.McpCall{Kind: agent.CallFlushSession, Name: "focus-claude"})
+	if v, _ := r.Value.(map[string]any); v["status"] != "waiting" || v["reason"] != "working" {
+		t.Fatalf("flush while working: %v", r.Value)
+	}
+}
+
+// #189: a session running an older pix than the app's says so, in list_sessions and in what a
+// message to it returns, with what to do; a current one says nothing about it.
+func TestASessionOnAnOlderPixSaysSo(t *testing.T) {
+	_, user, primary := newSessionHarness(t)
+	d := &deliveringFake{userFake: user, delivery: agent.Delivery{Status: "typed"}}
+	c := agent.NewCompositeHost(primary, d)
+	ctx := context.Background()
+	send := func() map[string]any {
+		t.Helper()
+		r := agent.SessionToolForTest(ctx, c, agent.McpCall{Kind: agent.CallMessageSession, Name: "focus-claude", Text: "hi"})
+		if r.Err != nil {
+			t.Fatal(r.Err)
+		}
+		return r.Value.(map[string]any)
+	}
+	if got := send(); got["outdated"] != nil || sessionRows(t, agent.SessionToolForTest(ctx, c, agent.McpCall{Kind: agent.CallListSessions}))[0].Outdated {
+		t.Fatalf("current: %v", got)
+	}
+	for _, d.delivery = range []agent.Delivery{{Status: "typed", Outdated: true}, {Status: "waiting", Reason: "typing", Outdated: true}} {
+		got := send()
+		if update, _ := got["update"].(string); got["outdated"] != true || !strings.Contains(update, "--resume") {
+			t.Fatalf("%+v: %v", d.delivery, got)
+		}
+	}
+	if rows := sessionRows(t, agent.SessionToolForTest(ctx, c, agent.McpCall{Kind: agent.CallListSessions})); !rows[0].Outdated {
+		t.Fatalf("%+v", rows)
+	}
 }

@@ -345,14 +345,18 @@ func ParseToolCall(role Role, name string, args any) (McpCall, error) {
 		if err != nil {
 			return McpCall{}, err
 		}
-		return McpCall{Kind: CallMessageSession, Name: n, Text: t}, nil
-	case "interrupt_session", "close_session":
+		force, _ := obj["force"].(bool)
+		return McpCall{Kind: CallMessageSession, Name: n, Text: t, Force: force}, nil
+	case "interrupt_session", "close_session", "flush_session":
 		n, err := needName("name")
 		if err != nil {
 			return McpCall{}, err
 		}
 		if name == "close_session" {
 			return McpCall{Kind: CallCloseSession, Name: n}, nil
+		}
+		if name == "flush_session" {
+			return McpCall{Kind: CallFlushSession, Name: n}, nil
 		}
 		return McpCall{Kind: CallInterruptSession, Name: n}, nil
 	case "describe_session":

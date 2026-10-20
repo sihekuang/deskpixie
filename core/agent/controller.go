@@ -151,7 +151,7 @@ const (
 	InChoose                               // Token, Option: a tap on a session menu's option in the updates bubble (#105)
 	InSessionAnswerFailed                  // Name, Text: EfAnswerSession could not be typed (#105)
 	InSubmit                               // Agent, Message: a Claude agent took a prompt (its UserPromptSubmit hook); Message is the prompt
-	InSessionSent                          // Name, Text: the coordinator's message_session reached your session Name, described Text (#177)
+	InSessionSent                          // Name, Text, Message: the coordinator's message_session reached your session Name, described Text (#177); Message: why it waits ("" = typed, #183)
 )
 
 // Input is one stimulus for AgentController.Step. Build it with the *Input constructors.
@@ -274,6 +274,12 @@ func SubmitInput(agent, prompt string) Input {
 }
 func SessionSentInput(name, description string) Input {
 	return Input{Kind: InSessionSent, Name: name, Text: description}
+}
+
+// SessionWaitingInput: the message reached pix but waits (#183), for reason "working",
+// "blocked" or "typing".
+func SessionWaitingInput(name, description, reason string) Input {
+	return Input{Kind: InSessionSent, Name: name, Text: description, Message: reason}
 }
 func WorkerScreenInput(name, text string) Input {
 	return Input{Kind: InWorkerScreen, Name: name, Text: text}
@@ -574,6 +580,13 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 			if ev.Turn != nil {
 				c.onSessionTurn(ev.Agent, *ev.Turn, now, &fx)
 			}
+		case ev.Kind == PaneEventOutdated:
+			if ev.Outdated != nil && !c.shutDown {
+				// #191: told like a session update, whatever the session turns setting.
+				o := *ev.Outdated
+				c.deliverUpdate(Line{Kind: LineSession, App: o.App,
+					Text: OutdatedLine(maskPendingTokens(o.Label, c.pendingTokens()), o.Tool)}, now, &fx)
+			}
 		case ev.Kind == PaneEventQuestion || ev.Kind == PaneEventQuestionGone:
 		case ev.Kind == PaneEventStatus:
 			c.onWorkerStatus(ev.Agent, ev.Status, now, &fx)
@@ -588,7 +601,7 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 			c.onSubmit(in.Message, now, &fx)
 		}
 	case InSessionSent:
-		c.onSessionSent(in.Text, now, &fx)
+		c.onSessionSent(in.Text, in.Message, now, &fx)
 	case InStop:
 		if in.Agent == Coordinator {
 			c.onStop(in.Message, now, &fx)
@@ -1516,15 +1529,28 @@ func (c *AgentController) resumeJob(job JobID, now Millis, fx *[]Effect) {
 // onSessionSent: the request in flight went to one of your sessions (#177). Pixie says so now
 // rather than after the coordinator writes its reply; it stays the coordinator's job until then.
 // With several requests in flight, which one it was isn't known: the reply tells.
-func (c *AgentController) onSessionSent(description string, now Millis, fx *[]Effect) {
+func (c *AgentController) onSessionSent(description, waiting string, now Millis, fx *[]Effect) {
 	refs := unique(c.inbox.InFlightRefs())
 	if len(refs) != 1 || !c.jobs.IsOpen(refs[0]) {
 		return
 	}
 	job := refs[0]
-	text := "Passed on to your session."
+	session := "your session"
 	if d := oneLine(description); d != "" {
-		text = "Passed on to your session on " + strings.TrimSuffix(d, ".") + "."
+		session = "your session on " + strings.TrimSuffix(d, ".")
+	}
+	text := "Passed on to " + session + "."
+	if waiting != "" {
+		// #183: pix holds it; say so, and why.
+		why := map[string]string{
+			"working": "it's busy, and gets it with its next step or when it stops",
+			"blocked": "it's waiting on a question, and gets it once that's answered",
+			"typing":  "you're typing there, and it gets it once you send or clear that",
+		}[waiting]
+		if why == "" {
+			why = "it gets it as soon as it can"
+		}
+		text = strings.ToUpper(session[:1]) + session[1:] + " hasn't got your message yet: " + why + "."
 	}
 	c.handedOff[job] = true
 	c.jobs.SetProgress(job, text, now)

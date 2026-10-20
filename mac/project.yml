@@ -95,15 +95,20 @@ targets:
           - "$(BUILT_PRODUCTS_DIR)/$(FRAMEWORKS_FOLDER_PATH)/libdeskpixie.dylib"
       - name: Copy pix into Helpers
         # pix, the terminal wrapper for sessions you start yourself (#89). Settings links
-        # ~/.local/bin/pix here, so it updates with the app.
+        # ~/.local/bin/pix here, so it updates with the app. Sessions run this very file:
+        # writing or signing it in place makes macOS kill them (Code Signature Invalid, #190).
+        # So pix.new is copied and signed, then renamed over pix: a new file, and running
+        # sessions keep the old one until they restart.
         script: |
           set -e
           DST="$BUILT_PRODUCTS_DIR/$CONTENTS_FOLDER_PATH/Helpers"
           mkdir -p "$DST"
-          cp -pf "$SRCROOT/../core/build/pix" "$DST/pix"
+          rm -f "$DST/pix.new"
+          cp -p "$SRCROOT/../core/build/pix" "$DST/pix.new"
           ID="${EXPANDED_CODE_SIGN_IDENTITY:--}"
           if [ "$ID" = "-" ]; then FLAGS=""; else FLAGS="--timestamp --options runtime"; fi
-          codesign --force --sign "$ID" $FLAGS --identifier com.sihekuang.deskpixie.pix "$DST/pix"
+          codesign --force --sign "$ID" $FLAGS --identifier com.sihekuang.deskpixie.pix "$DST/pix.new"
+          mv -f "$DST/pix.new" "$DST/pix"
         inputFiles:
           - "$(SRCROOT)/../core/build/pix"
         outputFiles:

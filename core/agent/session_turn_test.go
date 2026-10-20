@@ -103,3 +103,17 @@ func TestASessionLineKeepsItsAppInTheOutbox(t *testing.T) {
 		t.Fatalf("%s → %+v %v", rec, back, err)
 	}
 }
+
+// #191: a session that registers on an older pix than the app's is told, whatever the session
+// turns setting, with how to update it; nothing is stopped or restarted.
+func TestASessionOnAnOlderPixIsToldOnce(t *testing.T) {
+	ev := func(tool string) PaneEvent {
+		return PaneEvent{Kind: PaneEventOutdated, Agent: "api-claude", Outdated: &SessionOutdated{Label: "deskpixie: fix login", Tool: tool, App: webstorm}}
+	}
+	fx := ctl().Step(PaneInput(ev("claude")), T0)
+	wantContains(t, fx, eNotify("deskpixie: fix login runs an older pix than the app: restart it with pix claude --resume to update it."))
+	if anyKind(fx, EfStopWorker, EfPrompt, EfTellSession, EfStopCoordinator) {
+		t.Fatal(fmtEffects(fx))
+	}
+	wantContains(t, ctl().Step(PaneInput(ev("codex")), T0), eNotify("deskpixie: fix login runs an older pix than the app: restart it with pix codex resume to update it."))
+}

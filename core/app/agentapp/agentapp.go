@@ -108,6 +108,9 @@ type Config struct {
 	IDs       agent.IdSource             // nil = RandomIDs
 	// Listen binds the hook/MCP server; nil = httpserver.Listen (127.0.0.1:port).
 	Listen func(port uint16) (net.Listener, error)
+	// Pix is the pix this app ships, whose build a session's pix must be to be current (#189);
+	// "" = BundledPix of the running app. A path with no file marks no session outdated.
+	Pix string
 	// PixSocket is where sessions you start with pix connect (#89); "" = wire.SocketPath
 	// under AppSupport.
 	PixSocket string
@@ -255,6 +258,11 @@ func Build(c Config) *Agent {
 		c.PixSocket = wire.SocketPath(c.AppSupport, os.Getuid(), os.TempDir())
 	}
 	primary := session
+	if c.Pix == "" {
+		if exe, err := os.Executable(); err == nil {
+			c.Pix = BundledPix(exe)
+		}
+	}
 	ph := pixhost.New(c.PixSocket, func() []string {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -268,6 +276,7 @@ func Build(c Config) *Agent {
 		}
 		return names
 	})
+	ph.SetBuild(wire.BuildOf(c.Pix))
 	if err := ph.Listen(); err != nil {
 		log.Printf("agent: pix: %v", err) // delegation still works without it
 	} else {
@@ -291,7 +300,22 @@ func Build(c Config) *Agent {
 	}
 	// The coordinator's agent (#87): a kept coordinator of the other kind is replaced.
 	kind := CoordinatorKind(s.CoordinatorKind)
-	kept = KeptFor(kept, kind)
+	model, codexModel := "", ""
+	if s.Model != nil {
+		model = *s.Model
+	}
+	if s.CodexModel != nil {
+		codexModel = *s.CodexModel
+	}
+	// tmux detects no agent status: the coordinator reports its own through hooks.
+	recipe := CoordinatorRecipeFor(kind, paths, model, codexModel, s.Port, s.SessionHost == tmux.Name)
+	recipe.Args = append(recipe.Args, EffortArgs(kind, s.CoordinatorEffort)...)
+	if kind == agent.Codex {
+		recipe.Stamp = CoordinatorStamp(recipe, filepath.Join(paths.Workspace, "AGENTS.md"))
+	} else {
+		recipe.Stamp = CoordinatorStamp(recipe, filepath.Join(paths.Workspace, "CLAUDE.md"), paths.Settings)
+	}
+	kept = KeptFor(kept, kind, recipe.Stamp)
 	tokens := httpserver.NewTokens()
 	coordinatorToken := kept.CoordinatorToken
 	if coordinatorToken != "" {
@@ -309,16 +333,6 @@ func Build(c Config) *Agent {
 			setProblem("Coordinator: invalid settings (see log)")
 		}
 	}
-	model, codexModel := "", ""
-	if s.Model != nil {
-		model = *s.Model
-	}
-	if s.CodexModel != nil {
-		codexModel = *s.CodexModel
-	}
-	// tmux detects no agent status: the coordinator reports its own through hooks.
-	recipe := CoordinatorRecipeFor(kind, paths, model, codexModel, s.Port, s.SessionHost == tmux.Name)
-	recipe.Args = append(recipe.Args, EffortArgs(kind, s.CoordinatorEffort)...)
 	recipe.Env = []agent.EnvVar{{Key: agent.TokenEnv, Value: coordinatorToken}}
 	// A coordinator found running is the kept one: adopted as it is.
 	recipe.AdoptEarlier = kept.CoordinatorToken != ""

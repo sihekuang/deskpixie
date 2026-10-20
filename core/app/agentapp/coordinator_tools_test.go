@@ -291,7 +291,7 @@ func TestTheCoordinatorAnswersFromMemoryOrHandsItOn(t *testing.T) {
 // sent; left "working", the app's nudges turned into made-up questions for the person.
 func TestARequestHandedToASessionIsDoneOnceSent(t *testing.T) {
 	for _, md := range []string{RenderClaudeMd("/data/canvas", ""), RenderClaudeMd("/data/canvas", "/Users/x/code")} {
-		if !strings.Contains(md, "once `message_session` returns `\"status\": \"sent\"`, the app tells the person at once") ||
+		if !strings.Contains(md, "once `message_session` returns `\"status\": \"sent\"` or `\"waiting\"`, the app tells the person at once") ||
 			!strings.Contains(md, "End your turn right away with a short `status=\"done\"` block") {
 			t.Error("coordinator.md doesn't close a request handed to a session")
 		}

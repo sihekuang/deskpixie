@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -23,6 +25,8 @@ import (
 type fakeDaemon struct {
 	conn   chan net.Conn
 	events chan wire.Msg
+	// outdated: registered replies say this pix is older than the app's (#189).
+	outdated atomic.Bool
 }
 
 func newFakeDaemon(t *testing.T, refuse string) (*fakeDaemon, string) {
@@ -50,7 +54,7 @@ func newFakeDaemon(t *testing.T, refuse string) (*fakeDaemon, string) {
 							wire.Encode(c, wire.Msg{Kind: wire.KindRefused, Reason: refuse})
 							continue
 						}
-						wire.Encode(c, wire.Msg{Kind: wire.KindRegistered, Address: "repo-claude"})
+						wire.Encode(c, wire.Msg{Kind: wire.KindRegistered, Address: "repo-claude", Outdated: d.outdated.Load()})
 						d.conn <- c
 					}
 					d.events <- m
@@ -83,7 +87,7 @@ func TestClientRegistersAndReconnects(t *testing.T) {
 	defer cancel()
 	got := make(chan string, 2)
 	c := &Client{Sock: sock, Hello: wire.Msg{Kind: wire.KindRegister, Tool: "claude", SessionID: "s1"},
-		OnRegistered: func(a string) { got <- a }, OnCommand: func(wire.Msg) wire.Msg { return wire.Msg{} }}
+		OnRegistered: func(m wire.Msg) { got <- m.Address }, OnCommand: func(wire.Msg) wire.Msg { return wire.Msg{} }}
 	go c.Run(ctx)
 	if a := <-got; a != "repo-claude" {
 		t.Fatal(a)
@@ -136,6 +140,7 @@ func newHarness(t *testing.T, tool string, agent Launch) *harness {
 	d, sock := newFakeDaemon(t, "")
 	inR, inW, outR, outW := pipes(t)
 	s := newSession(sessionOpts{tool: tool, daemonSock: sock, home: t.TempDir(), stdin: inR, stdout: outW, agent: agent, where: "terminal"})
+	s.runner.Tap = func(b []byte) { tapMu.Lock(); tapped[s] = append(tapped[s], b...); tapMu.Unlock() }
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	if err := s.start(ctx); err != nil {
@@ -993,4 +998,159 @@ func TestAToolFinishingAfterAPromptMeansItIsWorkingAgain(t *testing.T) {
 	if st := h.s.currentStatus(); st != "working" {
 		t.Fatalf("got %q, want working", st)
 	}
+}
+
+// Pixie's message, typed at once or waiting (#183): the prompt result says which, and why it
+// waits; a message that waited reports when it reaches the agent.
+func TestAPromptResultSaysTypedOrWaitingAndWhy(t *testing.T) {
+	h := newHarness(t, "codex", Launch{Path: "/bin/sh", Args: []string{"-c", "read x; echo seen:$x; sleep 30"}})
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "right away"})
+	waitEvent(t, h.d.events, "typed", func(m wire.Msg) bool { return m.ID == "1" && m.Status == "typed" })
+
+	h.stdinW.WriteString("half a sent") // no Enter: you're typing
+	time.Sleep(100 * time.Millisecond)
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "2", Command: "prompt", Text: "from pixie"})
+	waitEvent(t, h.d.events, "waiting: typing", func(m wire.Msg) bool {
+		return m.ID == "2" && m.Status == "waiting" && m.Reason == "typing"
+	})
+	h.stdinW.WriteString(strings.Repeat("\x7f", len("half a sent"))) // you delete it: it goes in after the quiet time
+	waitEvent(t, h.d.events, "delivered", func(m wire.Msg) bool { return m.Kind == wire.KindEvent && m.Event == "delivered" })
+	h.s.runner.Hangup()
+	h.s.finish()
+}
+
+func TestAMessageForAWorkingAgentWaitsAndIsDeliveredWithItsNextTool(t *testing.T) {
+	h := newHarness(t, "codex", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}})
+	h.s.setStatus("working")
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "check the tests"})
+	waitEvent(t, h.d.events, "waiting: working", func(m wire.Msg) bool {
+		return m.ID == "1" && m.Status == "waiting" && m.Reason == "working"
+	})
+	h.s.Hook("PostToolUse", map[string]any{})
+	waitEvent(t, h.d.events, "delivered", func(m wire.Msg) bool { return m.Kind == wire.KindEvent && m.Event == "delivered" })
+	h.s.runner.Hangup()
+	h.s.finish()
+}
+
+// #185: Claude Code taking a prompt you typed means your line was sent, however your terminal
+// sent the Enter (Warp with the kitty keyboard protocol: ESC[13u, which the gate can't read).
+// The gate kept counting that text as unsent, and Pixie's messages waited ("you're typing").
+func TestAPromptYouSubmittedOpensTheGateHoweverEnterWasSent(t *testing.T) {
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}})
+	h.stdinW.WriteString("redesign the card\x1b[13;1u")
+	time.Sleep(100 * time.Millisecond)
+	h.s.Hook("UserPromptSubmit", map[string]any{"prompt": "redesign the card"})
+	h.s.Hook("Stop", map[string]any{})
+	h.s.gate.mu.Lock()
+	h.s.gate.last = time.Now().Add(-TypingQuiet) // past the quiet time
+	h.s.gate.mu.Unlock()
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "from pixie"})
+	waitEvent(t, h.d.events, "typed", func(m wire.Msg) bool { return m.ID == "1" && m.Status == "typed" })
+	h.s.runner.Hangup()
+	h.s.finish()
+}
+
+// "Send it anyway" (#187): flush types what waits even while the gate thinks you're typing; a
+// working agent still gets it with its next tool, and a question on screen is never typed into.
+func TestFlushTypesWhatWaitsDespiteTheGate(t *testing.T) {
+	h := newHarness(t, "codex", Launch{Path: "/bin/sh", Args: []string{"-c", "read x; echo seen:$x; sleep 30"}})
+	h.stdinW.WriteString("half a sent") // the gate holds the message
+	time.Sleep(100 * time.Millisecond)
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "from pixie"})
+	waitEvent(t, h.d.events, "waiting", func(m wire.Msg) bool { return m.ID == "1" && m.Status == "waiting" })
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "2", Command: "flush"})
+	waitEvent(t, h.d.events, "flushed", func(m wire.Msg) bool { return m.ID == "2" && m.Status == "typed" })
+	if h.s.queue.Len() != 0 {
+		t.Fatalf("still queued: %d", h.s.queue.Len())
+	}
+	h.s.setStatus("working")
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "3", Command: "prompt", Text: "later"})
+	waitEvent(t, h.d.events, "waiting: working", func(m wire.Msg) bool { return m.ID == "3" && m.Reason == "working" })
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "4", Command: "flush"})
+	waitEvent(t, h.d.events, "still waiting: working", func(m wire.Msg) bool { return m.ID == "4" && m.Status == "waiting" && m.Reason == "working" })
+	h.s.runner.Hangup()
+	h.s.finish()
+}
+
+// #187: a forced message doesn't take your draft with it. Codex: pix deletes what you typed,
+// sends the message, and types your draft back.
+func TestFlushSetsYourDraftAsideAndPutsItBack(t *testing.T) {
+	h := newHarness(t, "codex", Launch{Path: "/bin/sh", Args: []string{"-c", "stty raw -echo; od -An -c; sleep 30"}})
+	h.stdinW.WriteString("my draft")
+	time.Sleep(100 * time.Millisecond)
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "from pixie"})
+	waitEvent(t, h.d.events, "waiting", func(m wire.Msg) bool { return m.ID == "1" && m.Status == "waiting" })
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "2", Command: "flush"})
+	waitEvent(t, h.d.events, "flushed", func(m wire.Msg) bool { return m.ID == "2" && m.Status == "typed" })
+	want := strings.Repeat("\x7f", 8) + "\x1b[200~from pixie\x1b[201~\r\x1b[200~my draft\x1b[201~"
+	if got := h.s.typedForTest(); !strings.HasSuffix(got, want) {
+		t.Fatalf("typed %q\nwant suffix %q", got, want)
+	}
+	if d, ok := h.s.gate.Draft(); !ok || d != "my draft" {
+		t.Fatalf("gate after: %q %t", d, ok)
+	}
+	h.s.runner.Hangup()
+	h.s.finish()
+}
+
+// Claude Code stashes the draft itself (Ctrl-S) and restores it once the message is sent: pix
+// needn't know the text, so it works even after keys pix couldn't follow.
+func TestFlushStashesTheDraftInClaudeCode(t *testing.T) {
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}})
+	h.stdinW.WriteString("draft\x1b[Dx") // an arrow: pix can't follow
+	time.Sleep(100 * time.Millisecond)
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "one"})
+	waitEvent(t, h.d.events, "waiting", func(m wire.Msg) bool { return m.ID == "1" && m.Status == "waiting" })
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "2", Command: "prompt", Text: "two"})
+	waitEvent(t, h.d.events, "waiting 2", func(m wire.Msg) bool { return m.ID == "2" && m.Status == "waiting" })
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "3", Command: "flush"})
+	waitEvent(t, h.d.events, "flushed", func(m wire.Msg) bool { return m.ID == "3" && m.Status == "typed" })
+	want := "\x13\x1b[200~one\n\ntwo\x1b[201~\r" // both in one prompt: the restored draft must not join the second
+	if got := h.s.typedForTest(); !strings.HasSuffix(got, want) {
+		t.Fatalf("typed %q\nwant suffix %q", got, want)
+	}
+	h.s.runner.Hangup()
+	h.s.finish()
+}
+
+// typedForTest is everything pix itself typed into the agent (not your keys), recorded by Tap.
+func (s *Session) typedForTest() string {
+	tapMu.Lock()
+	defer tapMu.Unlock()
+	return string(tapped[s])
+}
+
+var (
+	tapMu  sync.Mutex
+	tapped = map[*Session][]byte{}
+)
+
+// #189: pix tells the app which build it is; told it's older than the app's, it shows that on
+// its tab title until it reconnects to an app that says otherwise.
+func TestSessionSendsItsBuildAndShowsWhenOutdated(t *testing.T) {
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 5"}})
+	hello := waitEvent(t, h.d.events, "register", func(m wire.Msg) bool { return m.Kind == wire.KindRegister })
+	if hello.Build == "" || hello.Build != wire.BuildOf(os.Args[0]) {
+		t.Fatalf("build %q", hello.Build)
+	}
+	if strings.Contains(h.s.titleText(), "restart") {
+		t.Fatal(h.s.titleText())
+	}
+	h.d.outdated.Store(true)
+	h.conn.Close()
+	eventually(t, "the outdated title", func() bool { return strings.Contains(h.s.titleText(), "restart pix") })
+	h.d.outdated.Store(false)
+	(<-h.d.conn).Close()
+	eventually(t, "the title back", func() bool { return !strings.Contains(h.s.titleText(), "restart") })
+}
+
+// eventually retries f until it passes or 5 s have gone by.
+func eventually(t *testing.T, what string, f func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if f() {
+			return
+		}
+	}
+	t.Fatal("timed out waiting for " + what)
 }

@@ -80,11 +80,13 @@ type Session struct {
 	afterStop bool   // the next prompt starts new work (an auto description)
 	sessionID string
 	userDesc  string // --description
+	outdated  bool   // the app says this pix is older than its own (#189)
 	agentDesc string // set_description
 	autoDesc  string // first prompt of the current work
 	flushing  bool
-	posted    []string  // Pixie's messages not yet seen as prompts (normalized)
-	q         *question // the prompt waiting on you that Pixie may answer (#105)
+	flushMu   sync.Mutex // one typing of the queue at a time
+	posted    []string   // Pixie's messages not yet seen as prompts (normalized)
+	q         *question  // the prompt waiting on you that Pixie may answer (#105)
 	qseq      int
 
 	turnStart     time.Time        // when this turn went working (zero: none seen)
@@ -127,11 +129,67 @@ func (s *Session) newWork(prompt string) {
 	s.title()
 }
 
+// forceIn types msgs past the typing gate, as one prompt (#187), without taking your draft
+// with it. Claude Code stashes the draft (Ctrl-S) and puts it back by itself once the prompt is
+// sent, whatever pix knows of it. Elsewhere pix deletes the draft it followed, sends, and types
+// it back; a draft it couldn't follow (after an arrow key) is sent along with the message.
+func (s *Session) forceIn(msgs []string) error {
+	if len(msgs) == 0 {
+		return nil
+	}
+	prompt := Paste(strings.Join(msgs, "\n\n"))
+	draft, known := s.gate.Draft()
+	empty := known && draft == ""
+	switch {
+	case empty:
+		return s.runner.WriteToAgent(prompt)
+	case s.o.tool == "claude":
+		if err := s.runner.WriteToAgent([]byte{0x13}); err != nil { // Ctrl-S: stash
+			return err
+		}
+		time.Sleep(forceSettle)
+		return s.runner.WriteToAgent(prompt)
+	case known:
+		del := []byte(strings.Repeat("\x7f", utf8.RuneCountInString(draft)))
+		if err := s.runner.WriteToAgent(del); err != nil {
+			return err
+		}
+		time.Sleep(forceSettle)
+		if err := s.runner.WriteToAgent(prompt); err != nil {
+			return err
+		}
+		time.Sleep(forceSettle)
+		s.gate.Restore(draft)
+		return s.runner.WriteToAgent([]byte("\x1b[200~" + draft + "\x1b[201~"))
+	}
+	s.gate.Sent() // what it couldn't follow went in with the message
+	return s.runner.WriteToAgent(prompt)
+}
+
+// forceSettle lets the agent take one write before the next when pix sets your draft aside.
+var forceSettle = 300 * time.Millisecond
+
+// keylog appends a line to the file DESKPIXIE_PIX_KEYLOG names (unset: nothing), to see what
+// reaches the typing gate and what it makes of it.
+func (s *Session) keylog(format string, args ...any) {
+	path := os.Getenv("DESKPIXIE_PIX_KEYLOG")
+	if path == "" {
+		return
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "%s "+format+"\n", append([]any{time.Now().Format("15:04:05.000")}, args...)...)
+}
+
 func newSession(o sessionOpts) *Session {
 	s := &Session{o: o, status: "idle", afterStop: true, userDesc: o.description, now: time.Now}
 	s.runner = &Runner{Launch: o.agent, Stdin: o.stdin, Stdout: o.stdout,
 		OnInput: func(b []byte) {
 			s.gate.Keys(b, time.Now())
+			s.keylog("keys %q -> %s", b, s.gate.State())
 			if !onlyReports(b) {
 				s.clearQuestion() // you are answering it yourself
 			}
@@ -208,6 +266,7 @@ func (s *Session) Hook(event string, p map[string]any) string {
 		return ""
 	case "UserPromptSubmit":
 		s.clearQuestion()
+		defer func() { s.keylog("UserPromptSubmit -> %s", s.gate.State()) }()
 		// A prompt while not working starts a new turn, even if the last one never ended with
 		// a Stop (an API error, an interrupt pix didn't see): its start doesn't carry over.
 		s.mu.Lock()
@@ -218,6 +277,9 @@ func (s *Session) Hook(event string, p map[string]any) string {
 		s.setStatus("working")
 		prompt, _ := p["prompt"].(string)
 		pixie := s.fromPixie(prompt)
+		if !pixie {
+			s.gate.Sent() // your prompt went in (#185)
+		}
 		s.mu.Lock()
 		s.turnFromPixie = s.turnFromPixie || pixie
 		first := s.afterStop && prompt != ""
@@ -277,6 +339,7 @@ func (s *Session) Hook(event string, p map[string]any) string {
 		}
 		if msgs := s.queue.Drain(); len(msgs) > 0 {
 			s.title()
+			s.delivered()
 			ctx := "Messages from Pixie:\n- " + strings.Join(msgs, "\n- ")
 			return fmt.Sprintf(`{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":%q}}`, ctx)
 		}
@@ -317,8 +380,33 @@ func (s *Session) command(m wire.Msg) wire.Msg {
 			return wire.Msg{Err: err.Error()}
 		}
 		s.title()
+		// Typed at once, or waiting and why (#183).
+		if s.flushNow() {
+			s.keylog("prompt typed")
+			return wire.Msg{Status: "typed"}
+		}
 		s.flushSoon()
-		return wire.Msg{}
+		s.keylog("prompt waiting: status=%s %s", s.currentStatus(), s.gate.State())
+		return wire.Msg{Status: "waiting", Reason: s.waitReason()}
+	case "flush":
+		// "Send it anyway" (#187): type what waits even if the gate thinks you're typing. A
+		// working agent gets it with its next tool; a question on screen is never typed into.
+		if st := s.currentStatus(); st != "idle" && s.queue.Len() > 0 {
+			return wire.Msg{Status: "waiting", Reason: st}
+		}
+		s.flushMu.Lock()
+		msgs := s.queue.Drain()
+		if err := s.forceIn(msgs); err != nil {
+			s.flushMu.Unlock()
+			return wire.Msg{Err: err.Error()}
+		}
+		s.flushMu.Unlock()
+		s.title()
+		s.keylog("flush: typed %d", len(msgs))
+		if len(msgs) > 0 {
+			s.delivered()
+		}
+		return wire.Msg{Status: "typed"}
 	case "keys":
 		s.clearQuestion() // an Escape from Pixie dismisses the prompt
 		for _, k := range m.Keys {
@@ -345,6 +433,37 @@ func (s *Session) command(m wire.Msg) wire.Msg {
 	return wire.Msg{Err: "unknown command " + m.Command}
 }
 
+// flushNow types the queued messages if the agent is idle and you aren't typing; true if it did.
+func (s *Session) flushNow() bool {
+	s.flushMu.Lock()
+	defer s.flushMu.Unlock()
+	if s.queue.Len() == 0 || s.currentStatus() != "idle" || !s.gate.Clear(time.Now()) {
+		return false
+	}
+	for _, m := range s.queue.Drain() {
+		if s.runner.WriteToAgent(Paste(m)) != nil {
+			return false
+		}
+	}
+	s.title()
+	return true
+}
+
+// waitReason is why a message isn't typed now: the agent is "working" (it gets it with its
+// next tool, or when it stops), "blocked" on a question, or you're "typing" in it.
+func (s *Session) waitReason() string {
+	switch st := s.currentStatus(); st {
+	case "working", "blocked":
+		return st
+	}
+	return "typing"
+}
+
+// delivered tells DeskPixie the messages that waited have reached the agent (#183).
+func (s *Session) delivered() {
+	s.client.Send(wire.Msg{Kind: wire.KindEvent, Event: "delivered"})
+}
+
 // flushSoon types queued messages once the agent is idle and you aren't typing, checking
 // every 500 ms while messages wait. One flusher at a time.
 func (s *Session) flushSoon() {
@@ -358,13 +477,8 @@ func (s *Session) flushSoon() {
 	go func() {
 		defer func() { s.mu.Lock(); s.flushing = false; s.mu.Unlock() }()
 		for s.queue.Len() > 0 {
-			if s.currentStatus() == "idle" && s.gate.Clear(time.Now()) {
-				for _, m := range s.queue.Drain() {
-					if s.runner.WriteToAgent(Paste(m)) != nil {
-						return
-					}
-				}
-				s.title()
+			if s.flushNow() {
+				s.delivered()
 				return
 			}
 			time.Sleep(500 * time.Millisecond)
@@ -469,15 +583,27 @@ func (s *Session) description() string {
 	return ""
 }
 
-// title sets the terminal tab title (OSC 2): the description, with waiting messages first.
+// title sets the terminal tab title (OSC 2): titleText.
 func (s *Session) title() {
+	if t := s.titleText(); t != "" {
+		fmt.Fprintf(s.o.stdout, "\x1b]2;%s\x07", Sanitize(t))
+	}
+}
+
+// titleText is the description, with waiting messages first, and first of all a note when
+// this pix is older than the app's (#189).
+func (s *Session) titleText() string {
 	t := s.description()
 	if n := s.queue.Len(); n > 0 {
 		t = fmt.Sprintf("📨 %d · %s", n, t)
 	}
-	if t != "" {
-		fmt.Fprintf(s.o.stdout, "\x1b]2;%s\x07", Sanitize(t))
+	s.mu.Lock()
+	outdated := s.outdated
+	s.mu.Unlock()
+	if outdated {
+		t = "⟳ restart pix · " + t
 	}
+	return t
 }
 
 // resend is the state DeskPixie needs after (re)registering.
@@ -503,8 +629,17 @@ func (s *Session) start(ctx context.Context) error {
 	s.client = &Client{
 		Sock: s.o.daemonSock,
 		Hello: wire.Msg{Kind: wire.KindRegister, Tool: s.o.tool, Cwd: cwd, GitRoot: gitRoot(cwd),
-			Where: s.o.where, App: s.o.app, Description: s.o.description},
+			Where: s.o.where, App: s.o.app, Description: s.o.description, Build: wire.SelfBuild()},
 		OnCommand: s.command,
+		OnRegistered: func(reply wire.Msg) {
+			s.mu.Lock()
+			changed := s.outdated != reply.Outdated
+			s.outdated = reply.Outdated
+			s.mu.Unlock()
+			if changed {
+				s.title()
+			}
+		},
 		OnRefused: func(r string) {
 			s.mu.Lock()
 			s.userDesc = "pix: " + r

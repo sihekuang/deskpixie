@@ -252,6 +252,7 @@ var startupReplies = []string{
 	"\x1b[?62;22;52c", "\x1b[>1;10;0c", "\x1b[?5u", "\x1b[?0u",
 	"\x1bP>|WarpTerminal(v0.2026.10.14)\x1b\\", "\x1b]7501;1\x07", "\x1b]11;rgb:1e1e/1e1e/1e1e\x1b\\",
 	"\x1b[?2026;2$y", "\x1b[24;1R",
+	"\x1b_Gi=31;OK\x1b\\", // Warp's answer to Claude Code asking whether it can draw images (#185)
 }
 
 // TestGateIgnoresTerminalReplies (#181): the terminal answering Claude Code's startup
@@ -290,5 +291,61 @@ func TestGateReadsKittyKeys(t *testing.T) {
 	g.Keys([]byte("\x1b[99;5u"), t0.Add(4*time.Second)) // Ctrl-C clears the line
 	if !g.Clear(t0.Add(6 * time.Second)) {
 		t.Fatal("a kitty Ctrl-C didn't clear the line")
+	}
+}
+
+// TestGateReadsKittyEnter (#185): Enter as the kitty keyboard protocol may send it.
+func TestGateReadsKittyEnter(t *testing.T) {
+	for _, enter := range []string{"\x1b[13u", "\x1b[13;1u"} {
+		var g Gate
+		t0 := time.Unix(100, 0)
+		g.Keys([]byte("/help"), t0)
+		g.Keys([]byte(enter), t0)
+		if !g.Clear(t0.Add(2 * time.Second)) {
+			t.Fatalf("%q: a /command sent with kitty Enter left the gate shut", enter)
+		}
+	}
+}
+
+// TestGateAfterWarpsStartupReplies (#185): Warp's replies exactly as pix logged them on Oct 20.
+// The image reply ("Gi=31;OK", an APC string) counted as 10 typed characters, and its closing
+// backslash made your next Enter a line continuation; the gate then waited for a turn that
+// never came, and Pixie's message was held.
+func TestGateAfterWarpsStartupReplies(t *testing.T) {
+	var g Gate
+	t0 := time.Unix(100, 0)
+	g.Keys([]byte("\x1bP>|Warp(v0.2026.10.14.08.27.stable_01)\x1b\\\x1b[?5u\x1b[?62c"), t0)
+	g.Keys([]byte("\x1b[?2026;2$y\x1b_Gi=31;OK\x1b\\\x1b[?62c"), t0)
+	if !g.Clear(t0) {
+		t.Fatalf("shut by Warp's replies: %s", g.State())
+	}
+	g.Keys([]byte("\r"), t0.Add(time.Second)) // Enter on an empty box: no turn follows
+	if !g.Clear(t0.Add(3 * time.Second)) {
+		t.Fatalf("an Enter on an empty box shut the gate: %s", g.State())
+	}
+}
+
+// #187: the gate keeps the text of your draft while it can follow it, so a forced message can set
+// it aside and put it back.
+func TestGateKeepsYourDraft(t *testing.T) {
+	var g Gate
+	t0 := time.Unix(100, 0)
+	g.Keys([]byte("fix the héader"), t0)
+	g.Keys([]byte{0x7f, 0x7f}, t0)
+	g.Keys([]byte("\x1b[200~ and\nfooter\x1b[201~"), t0) // a paste
+	if d, ok := g.Draft(); !ok || d != "fix the héad and\nfooter" {
+		t.Fatalf("%q %t", d, ok)
+	}
+	g.Keys([]byte("\x1b[D"), t0) // an arrow: pix can't follow the line any more
+	if _, ok := g.Draft(); ok {
+		t.Fatal("known after an arrow key")
+	}
+	g.Keys([]byte{0x03}, t0)
+	if d, ok := g.Draft(); !ok || d != "" {
+		t.Fatalf("after Ctrl-C: %q %t", d, ok)
+	}
+	g.Restore("put back")
+	if d, ok := g.Draft(); !ok || d != "put back" || g.Clear(t0.Add(time.Hour)) {
+		t.Fatalf("restored: %q %t clear=%t", d, ok, g.Clear(t0.Add(time.Hour)))
 	}
 }
