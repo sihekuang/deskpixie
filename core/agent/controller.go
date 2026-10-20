@@ -86,6 +86,9 @@ type Settings struct {
 	// or failed line, an agent question or a spoken worker report that comes while no
 	// conversation is open makes Pixie open one and say it (opener.go).
 	OpenConversation bool
+	// AlwaysForceSend (`agent.alwaysForceSend`, off by default, #205): every message to a
+	// session you started with pix is sent as message_session's force sends it.
+	AlwaysForceSend bool
 	// CoordinatorKind (`agent.coordinatorKind`, #87): the coordinator's agent, named in the
 	// tray when it can't start.
 	CoordinatorKind AgentKind

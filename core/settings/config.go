@@ -149,9 +149,12 @@ type AgentSettings struct {
 	// OpenConversationForUpdates: a job finishing or failing, an agent question or a spoken
 	// worker report that comes while no conversation is open makes Pixie open one and say it
 	// (off by default: a feature flag).
-	OpenConversationForUpdates bool           `json:"openConversationForUpdates"`
-	ProjectsRoot               string         `json:"projectsRoot"`
-	Workers                    WorkerSettings `json:"workers"`
+	OpenConversationForUpdates bool `json:"openConversationForUpdates"`
+	// AlwaysForceSend (#205): every message Pixie passes to a session you started with pix
+	// goes in at once, as message_session's force would send it (off by default).
+	AlwaysForceSend bool           `json:"alwaysForceSend"`
+	ProjectsRoot    string         `json:"projectsRoot"`
+	Workers         WorkerSettings `json:"workers"`
 }
 
 // WorkerSettings is agent.workers.
