@@ -434,3 +434,32 @@ func TestTheUserTalkingCancelsTheEndAfterAHandOff(t *testing.T) {
 		t.Fatal("ended while the user was saying more")
 	}
 }
+
+// #177: a reply that came in while Pixie said its hand-off line is said at once, instead of
+// closing the conversation and opening a new one for it; the conversation then ends as the
+// hand-off meant it to.
+func TestANoticeWaitingAtAHandOffIsSaidBeforeTheConversationEnds(t *testing.T) {
+	now := t0()
+	c := thinking(now)
+	model(c, evResponseCreated, now)
+	model(c, evToolCall("c1", DelegateTool), now)
+	model(c, evResponseDone, now)
+	c.Step(ToolDoneAfterReplyInput("c1"), now)
+	c.Step(InjectInput(notice("Coordinator reply: I sent it to the landing session.")), ms(now, 50))
+	fx := reply(c, "On it, I'll let you know.", ms(now, 100))
+	fx = append(fx, tick(c, true, ms(now, 200))...)
+	if !c.IsActive() {
+		t.Fatalf("closed with the reply waiting: %q", c.EndReason())
+	}
+	if got := injects(fx); len(got) != 1 || got[0] != "Coordinator reply: I sent it to the landing session." {
+		t.Fatalf("injected %q", got)
+	}
+	reply(c, "The landing session has it.", ms(now, 300))
+	tick(c, true, ms(now, 400))
+	if c.IsActive() {
+		t.Fatal("still open after saying the reply")
+	}
+	if got := c.EndReason(); got != "after a hand-off" {
+		t.Fatalf("%q", got)
+	}
+}
