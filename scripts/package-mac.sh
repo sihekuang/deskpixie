@@ -85,12 +85,26 @@ notarize() {
   fi
 }
 
+# staple FILE: staple the ticket and validate it, retrying: the ticket lookup at Apple
+# (api.apple-cloudkit.com) sometimes drops the connection ("The network connection was lost",
+# exit 68) right after notarization. Three tries, 30 s apart.
+staple() {
+  local file="$1" try
+  for try in 1 2 3; do
+    if xcrun stapler staple "$file" && xcrun stapler validate "$file"; then
+      return 0
+    fi
+    echo "stapling $file failed (try $try of 3)"
+    [ "$try" -lt 3 ] && sleep 30
+  done
+  err "stapling $file"
+}
+
 if [ "$NOTARIZE" = "true" ]; then
   # 1. Notarize the app (as a zip) and staple the ticket to the .app itself.
   ditto -c -k --keepParent "$APP" "$TMP/notarize-app.zip"
   notarize "$TMP/notarize-app.zip"
-  xcrun stapler staple "$APP"
-  xcrun stapler validate "$APP"
+  staple "$APP"
 fi
 
 # 2. The dmg: the (stapled) app plus an /Applications symlink to drag it onto.
@@ -106,8 +120,7 @@ codesign --verify --verbose=2 "$DMG"
 if [ "$NOTARIZE" = "true" ]; then
   # 3. Notarize and staple the dmg, then check both with Gatekeeper.
   notarize "$DMG"
-  xcrun stapler staple "$DMG"
-  xcrun stapler validate "$DMG"
+  staple "$DMG"
   spctl --assess --type open --context context:primary-signature -v "$DMG"
   spctl --assess --type execute -v "$APP"
 fi
