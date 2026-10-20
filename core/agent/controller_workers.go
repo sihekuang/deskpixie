@@ -466,6 +466,10 @@ func (c *AgentController) tickWorkers(now Millis, fx *[]Effect) {
 		}
 		l := NewJobLine(LineInfo, text, w.Plan.Job)
 		l.Worker = name
+		l.Title, l.Brief = "Worker in "+w.Plan.RepoName, "Waiting at a prompt in its terminal."
+		if w.Plan.Kind == Codex {
+			l.Title, l.Brief = "Codex worker in "+w.Plan.RepoName, "Waiting for approval in its terminal."
+		}
 		c.deliver(l, now, fx)
 		*fx = append(*fx, Effect{Kind: EfShowPane, Job: w.Plan.Job, Name: name})
 	}

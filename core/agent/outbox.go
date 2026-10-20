@@ -26,6 +26,12 @@ type OutboxLine struct {
 	Worker string `json:"worker,omitempty"`
 	// App: a session line's app (bundle id, #105, #114).
 	App string `json:"app,omitempty"`
+	// Session: the session a session line is about (a click brings up its tab, #194).
+	Session string `json:"session,omitempty"`
+	// Title, Brief and Asking: the bubble's short form (#197).
+	Title  string `json:"title,omitempty"`
+	Brief  string `json:"brief,omitempty"`
+	Asking bool   `json:"asking,omitempty"`
 	// Note: shown small under a line, never said (a session dialog's command, #105).
 	Note string `json:"note,omitempty"`
 }
@@ -42,6 +48,10 @@ func (l *OutboxLine) UnmarshalJSON(b []byte) error {
 		Job       JobID     `json:"job"`
 		Worker    string    `json:"worker"`
 		App       string    `json:"app"`
+		Session   string    `json:"session"`
+		Title     string    `json:"title"`
+		Brief     string    `json:"brief"`
+		Asking    bool      `json:"asking"`
 		Note      string    `json:"note"`
 	}
 	if err := json.Unmarshal(b, &raw); err != nil {
@@ -50,7 +60,7 @@ func (l *OutboxLine) UnmarshalJSON(b []byte) error {
 	if raw.ID == nil || raw.Text == nil || raw.Kind == nil || raw.At == nil {
 		return errors.New("outbox line: missing field")
 	}
-	*l = OutboxLine{ID: *raw.ID, Text: *raw.Text, Kind: *raw.Kind, Token: raw.Token, At: *raw.At, Delivered: raw.Delivered, Job: raw.Job, Worker: raw.Worker, App: raw.App, Note: raw.Note}
+	*l = OutboxLine{ID: *raw.ID, Text: *raw.Text, Kind: *raw.Kind, Token: raw.Token, At: *raw.At, Delivered: raw.Delivered, Job: raw.Job, Worker: raw.Worker, App: raw.App, Session: raw.Session, Title: raw.Title, Brief: raw.Brief, Asking: raw.Asking, Note: raw.Note}
 	return nil
 }
 
@@ -73,7 +83,7 @@ func NewOutbox() *Outbox { return &Outbox{} }
 // Push adds a line; returns its jsonl record to append.
 func (o *Outbox) Push(line Line, now Millis) string {
 	o.nextID++
-	entry := OutboxLine{ID: o.nextID, Text: line.Text, Kind: line.Kind, Token: line.Token, At: now, Job: line.Job, Worker: line.Worker, App: line.App, Note: line.Note}
+	entry := OutboxLine{ID: o.nextID, Text: line.Text, Kind: line.Kind, Token: line.Token, At: now, Job: line.Job, Worker: line.Worker, App: line.App, Session: line.Session, Title: line.Title, Brief: line.Brief, Asking: line.Asking, Note: line.Note}
 	o.lines = append(o.lines, entry)
 	return entry.record()
 }
@@ -139,6 +149,24 @@ func (o *Outbox) MarkSeen(ids []uint64, keep func(OutboxLine) bool) []string {
 		records = append(records, l.record())
 	}
 	return records
+}
+
+// Repeats marks the undelivered lines saying what line says about the same job, worker and
+// session (same kind and text, no confirm word) delivered: told again, only the newest stays in the bubble (#194). Returns the jsonl
+// records to append.
+func (o *Outbox) Repeats(line Line) []string {
+	if line.Token != nil {
+		return nil
+	}
+	return o.MarkDeliveredWhere(func(l OutboxLine) bool {
+		return l.Token == nil && l.Kind == line.Kind && l.Text == line.Text &&
+			l.Job == line.Job && l.Worker == line.Worker && l.Session == line.Session
+	})
+}
+
+// ToldSince: a line with this text was added after since (heard or not).
+func (o *Outbox) ToldSince(text string, since Millis) bool {
+	return slices.ContainsFunc(o.lines, func(l OutboxLine) bool { return l.At > since && l.Text == text })
 }
 
 // MarkDeliveredWhere marks the undelivered lines match picks delivered (a question decided

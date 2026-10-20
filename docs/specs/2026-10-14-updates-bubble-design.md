@@ -16,7 +16,8 @@ conversation, and jump to the job's pane in one click; nothing pops or speaks wh
 
 - Separate floating window beside Bit (not drawn inside Bit's panel, not macOS notifications).
 - Lifecycle: brief pop (~6 s), then a badge; hover/click expands the bubble.
-- Viewing the bubble counts as interacting: it marks the shown updates seen.
+- Clicking a line marks it seen (and brings up its pane); "Clear all" marks every line seen
+  except questions still waiting on you. Merely viewing the bubble marks nothing (#198).
 - Seen = heard: Bit doesn't replay seen updates at the next conversation. Exception: a question
   still waiting for an answer is still raised.
 - Only active while `agent.openConversationForUpdates` is off (Bit isn't speaking updates itself).
@@ -47,8 +48,8 @@ permission token is no longer pending are left out (the same filter `Replay` use
    │                         │  └── another update: line added, timer restarts
    │       hover / click     ▼                                  │ hover / click
    │                     Expanded ◀─────────────────────────────┘
-   │                         │  open ≥ 1 s → shown lines marked seen
-   └─────────────────────────┘  pointer leaves → Hidden (nothing unseen left)
+   │                         │  click a line / Clear all → those lines marked seen
+   └─────────────────────────┘  pointer leaves → Badge, or Hidden (nothing unseen left)
 ```
 
 | Event | Behaviour |
@@ -129,7 +130,6 @@ It becomes the setting; the constants become defaults.
   0 turns coalescing off (every report goes out as it comes; dedupe still applies). Questions are
   never debounced, as today.
 - `awayAfterMins` is read by the shell's `Presence`; it also gates Bit starting conversations.
-- The 1 s "open long enough to count as seen" stays fixed.
 - `agent.notifyPerMinute` keeps its path (moving it would break saved settings) but is shown in
   the Notifications section next to the others.
 

@@ -23,7 +23,7 @@ func (c *AgentController) onSessionQuestion(session string, q SessionQuestion, n
 	c.confirms.TakeSession(session, "")
 	tokens := c.pendingTokens()
 	label := maskPendingTokens(q.Label, tokens)
-	line := Line{Kind: LineQuestion, App: q.App}
+	line := Line{Kind: LineQuestion, App: q.App, Session: session, Title: label}
 	pending := Pending{Session: session, Question: q.ID, Label: label}
 	var input any
 	if q.Input != "" {
@@ -37,39 +37,45 @@ func (c *AgentController) onSessionQuestion(session string, q SessionQuestion, n
 	}
 	q.Options = options
 	what := func() string { return mask(DescribeWith(q.Tool, input, label, c.settings.SpokenPaths)) }
-	describe := func(token string) string {
+	// describe is the question as said, and its brief for the bubble (#197): without its label
+	// (the title) and without how to answer it, since the bubble's buttons are right there.
+	describe := func(token string) (string, string) {
 		switch {
 		case q.Kind == "menu" && len(q.Options) > 0:
-			return fmt.Sprintf("%s is asking: %s Pick %s in the bubble.", label, mask(q.Text), orList(q.Options))
+			return fmt.Sprintf("%s is asking: %s Pick %s in the bubble.", label, mask(q.Text), orList(q.Options)),
+				upperFirst(mask(q.Text))
 		case q.Kind == "menu":
-			return fmt.Sprintf("%s is asking: %s Answer it in its terminal.", label, mask(q.Text))
+			return fmt.Sprintf("%s is asking: %s Answer it in its terminal.", label, mask(q.Text)),
+				upperFirst(mask(q.Text)) + " Answer it in its terminal."
 		case q.Kind == "notice" && q.Tool != "":
-			return what() + " Answer it in its terminal."
+			return what() + " Answer it in its terminal.", ""
 		case q.Kind == "notice":
-			return fmt.Sprintf("%s %s. Answer it in its terminal.", label, mask(q.Text))
+			return fmt.Sprintf("%s %s. Answer it in its terminal.", label, mask(q.Text)),
+				upperFirst(mask(q.Text)) + ". Answer it in its terminal."
 		case len(q.Options) > 0 && q.Prompt != "":
 			// Its dialog as shown: Claude's summary of a command, Codex's reason, else its question.
-			said := label + ": " + mask(q.Prompt)
+			body := mask(q.Prompt)
 			switch {
 			case q.Tool == "Bash" && q.Text != "":
-				said = fmt.Sprintf("%s: %s. %s", label, strings.TrimSuffix(mask(q.Text), "."), mask(q.Prompt))
+				body = fmt.Sprintf("%s. %s", strings.TrimSuffix(mask(q.Text), "."), mask(q.Prompt))
 			case q.Tool == "" && q.Text != "": // Codex: its reason asks it in full
-				said = label + ": " + mask(q.Text)
+				body = mask(q.Text)
 			}
+			said := label + ": " + body
 			if q.Tool != "" && VoiceConfirmableWith(q.Tool, input, c.settings.SpokenPaths) {
-				return fmt.Sprintf("%s Say confirm %s, or choose in the bubble.", said, token)
+				return fmt.Sprintf("%s Say confirm %s, or choose in the bubble.", said, token), upperFirst(body)
 			}
-			return said + " Choose in the bubble."
+			return said + " Choose in the bubble.", upperFirst(body)
 		case q.Tool != "" && VoiceConfirmableWith(q.Tool, input, c.settings.SpokenPaths):
-			return ConfirmQuestionLine(what(), token)
+			return ConfirmQuestionLine(what(), token), what()
 		case q.Tool != "":
-			return what() + " Allow or deny it in the bubble."
+			return what() + " Allow or deny it in the bubble.", what()
 		}
-		return fmt.Sprintf("%s %s. Allow or deny it in the bubble.", label, mask(q.Text))
+		return fmt.Sprintf("%s %s. Allow or deny it in the bubble.", label, mask(q.Text)), upperFirst(mask(q.Text)) + "."
 	}
 	// Announced only: a menu pix can't answer, or a dialog it mustn't (a notice).
 	if q.Kind == "notice" || (q.Kind == "menu" && len(q.Options) == 0) {
-		line.Text = describe("")
+		line.Text, line.Brief = describe("")
 		c.deliver(line, now, fx)
 		return
 	}
@@ -84,10 +90,12 @@ func (c *AgentController) onSessionQuestion(session string, q SessionQuestion, n
 	token, ok := c.confirms.RequestSession(pending)
 	if !ok {
 		line.Text = fmt.Sprintf("%s is waiting on you in its terminal.", label)
+		line.Brief = "Waiting on you in its terminal."
 		c.deliver(line, now, fx)
 		return
 	}
-	line.Text, line.Token = describe(token), &token
+	line.Token = &token
+	line.Text, line.Brief = describe(token)
 	if q.Kind == "permission" && len(q.Options) > 0 {
 		line.Note = mask(q.Body)
 	}

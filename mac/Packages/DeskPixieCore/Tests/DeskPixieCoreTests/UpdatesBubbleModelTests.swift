@@ -16,7 +16,7 @@ final class UpdatesBubbleModelTests: XCTestCase {
         let ask = UpdateLine(id: 1, text: "api: Do you want to proceed?", kind: "question", at: 1, job: nil, worker: nil,
                              token: "hawk", options: ["Yes", "No"])
         m.apply([ask], now: 10, pop: .allowed)
-        _ = m.tick(now: 60)
+        m.tick(now: 60)
         XCTAssertEqual(m.phase, .popped(until: 16), "still open a minute later")
         m.apply([], now: 61, pop: .allowed)
         XCTAssertEqual(m.phase, .hidden)
@@ -25,7 +25,7 @@ final class UpdatesBubbleModelTests: XCTestCase {
     func testAnUpdateWithoutButtonsStillCollapses() {
         var m = UpdatesBubbleModel(popSecs: 6); m.apply([], now: 0, pop: .allowed)
         m.apply([UpdateLine(id: 1, text: "done", kind: "reply", at: 1, job: nil, worker: nil)], now: 10, pop: .allowed)
-        _ = m.tick(now: 17)
+        m.tick(now: 17)
         XCTAssertEqual(m.phase, .badge)
     }
 
@@ -56,6 +56,77 @@ final class UpdatesBubbleModelTests: XCTestCase {
         XCTAssertFalse(line.offersDecision)
         let reply = try JSONDecoder().decode(UpdateLine.self, from: Data(#"{"id":5,"text":"Done.","kind":"reply","at":5}"#.utf8))
         XCTAssertNil(reply.app)
+    }
+
+    func testASessionLineCarriesItsSession() throws {
+        let line = try JSONDecoder().decode(UpdateLine.self, from: Data(
+            #"{"id":4,"text":"api is done.","kind":"session","at":4,"app":"dev.warp.Warp-Stable","session":"api-claude"}"#.utf8))
+        XCTAssertEqual(line.session, "api-claude")
+    }
+
+    func testAgeIsShort() {
+        XCTAssertEqual(updateAge(seconds: 5), "now")
+        XCTAssertEqual(updateAge(seconds: 63), "1m ago")
+        XCTAssertEqual(updateAge(seconds: 7_300), "2h ago")
+        XCTAssertEqual(updateAge(seconds: 200_000), "2d ago")
+    }
+
+    /// #197: the bubble shows the brief under its title; a line without one shows its text.
+    func testALineShowsItsBriefWhenItHasOne() throws {
+        let line = try JSONDecoder().decode(UpdateLine.self, from: Data(
+            #"{"id":4,"text":"api: fix login is done: tests pass.","kind":"session","at":4,"title":"api: fix login","brief":"Tests pass.","asking":true}"#.utf8))
+        XCTAssertEqual(line.title, "api: fix login")
+        XCTAssertEqual(line.shownText, "Tests pass.")
+        XCTAssertEqual(line.asking, true)
+        let reply = try JSONDecoder().decode(UpdateLine.self, from: Data(#"{"id":5,"text":"Done.","kind":"reply","at":5}"#.utf8))
+        XCTAssertEqual(reply.shownText, "Done.")
+        XCTAssertNil(reply.title)
+    }
+
+    /// #194: a clicked line leaves the open bubble at once; the rest stay.
+    func testAClickedLineIsDismissed() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        m.apply([line(1), line(2)], now: 1, pop: .allowed)
+        m.pointerEntered(now: 2)
+        XCTAssertTrue(m.dismiss(2))
+        XCTAssertEqual(m.shown.map(\.id), [1])
+        XCTAssertEqual(m.count, 1)
+        m.tick(now: 3)
+        XCTAssertEqual(m.shown.map(\.id), [1], "the rest stay")
+    }
+
+    func testDismissingTheLastLineHidesTheBubble() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        m.apply([line(1)], now: 1, pop: .allowed)
+        XCTAssertTrue(m.dismiss(1))
+        XCTAssertEqual(m.phase, .hidden)
+    }
+
+    /// The core's list may still carry it before it handles the seen call: it doesn't come back
+    /// or pop again.
+    func testADismissedLineDoesNotComeBack() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        m.apply([line(1), line(2)], now: 1, pop: .allowed)
+        m.tick(now: 8)
+        XCTAssertTrue(m.dismiss(2))
+        m.apply([line(1), line(2)], now: 9, pop: .allowed)
+        XCTAssertEqual(m.phase, .badge)
+        XCTAssertEqual(m.count, 1)
+    }
+
+    func testAJobsQuestionIsNotDismissedByAClick() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        let ask = UpdateLine(id: 1, text: "Which branch?", kind: "question", at: 1, job: "job_1", worker: nil)
+        m.apply([ask], now: 1, pop: .allowed)
+        XCTAssertFalse(m.dismiss(1))
+        XCTAssertEqual(m.count, 1)
+    }
+
+    func testAQuestionWithButtonsIsNotDismissedByAClick() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        m.apply([question(1, "hawk")], now: 1, pop: .allowed)
+        XCTAssertFalse(m.dismiss(1))
+        XCTAssertEqual(m.count, 1)
     }
 
     func testAPendingQuestionOffersAllowAndDeny() throws {
@@ -108,7 +179,7 @@ final class UpdatesBubbleModelTests: XCTestCase {
         var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
         m.apply([question(1, "hawk")], now: 10, pop: .allowed)
         m.pointerEntered(now: 12); m.pointerLeft()                 // hovered and left: the badge
-        _ = m.tick(now: 17)
+        m.tick(now: 17)
         XCTAssertEqual(m.phase, .badge)
         XCTAssertFalse(m.acceptsDecision(token: "hawk", now: 17.5)) // no buttons on a badge
         m.pointerEntered(now: 20)
@@ -139,8 +210,8 @@ final class UpdatesBubbleModelTests: XCTestCase {
         var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
         m.apply([line(1)], now: 10, pop: .allowed)
         XCTAssertEqual(m.phase, .popped(until: 16))
-        XCTAssertEqual(m.tick(now: 15.9), []); XCTAssertEqual(m.phase, .popped(until: 16))
-        _ = m.tick(now: 16); XCTAssertEqual(m.phase, .badge)
+        m.tick(now: 15.9); XCTAssertEqual(m.phase, .popped(until: 16))
+        m.tick(now: 16); XCTAssertEqual(m.phase, .badge)
     }
 
     func testAnotherLineWhilePoppedRestartsTheTimer() {
@@ -157,35 +228,54 @@ final class UpdatesBubbleModelTests: XCTestCase {
         XCTAssertEqual(m.phase, .badge)
     }
 
-    func testHoverExpandsAndOneSecondMarksSeenOnce() {
+    /// #198: looking marks nothing seen: the lines are all still there after the pointer leaves.
+    func testHoverExpandsAndMarksNothingSeen() {
         var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
         m.apply([line(1), line(2)], now: 1, pop: .allowed)
         m.pointerEntered(now: 2)
         XCTAssertEqual(m.phase, .expanded(since: 2))
-        XCTAssertEqual(m.tick(now: 2.9), [])
-        XCTAssertEqual(Set(m.tick(now: 3)), [1, 2])
-        XCTAssertEqual(m.tick(now: 4), [])
+        m.tick(now: 10)
+        m.pointerLeft()
+        XCTAssertEqual(m.phase, .badge)
+        XCTAssertEqual(m.count, 2)
     }
 
-    func testSeenMarksOnlyTheShownLines() {
-        var m = UpdatesBubbleModel(popSecs: 6, maxLines: 2)
-        m.apply((1...4).map(line), now: 0, pop: .allowed)
-        m.pointerEntered(now: 1)
-        XCTAssertEqual(Set(m.tick(now: 2)), [4, 3], "the +N more lines were not viewed")
+    /// #198: a click dismisses only its line; after the pointer leaves the others remain.
+    func testAClickDismissesOnlyItsLine() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        m.apply([line(1), line(2), line(3)], now: 1, pop: .allowed)
+        m.pointerEntered(now: 2)
+        XCTAssertTrue(m.dismiss(2))
+        m.tick(now: 5)
+        m.pointerLeft()
+        XCTAssertEqual(m.count, 2)
+        m.pointerEntered(now: 6)
+        XCTAssertEqual(m.shown.map(\.id), [3, 1])
+    }
+
+    func testClearAllLeavesQuestionsWaitingOnYou() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        m.apply([line(1), question(2, "hawk"), line(3)], now: 1, pop: .allowed)
+        m.pointerEntered(now: 2)
+        XCTAssertTrue(m.offersClearAll)
+        XCTAssertEqual(Set(m.dismissAll()), [1, 3])
+        XCTAssertEqual(m.shown.map(\.id), [2])
+        XCTAssertFalse(m.offersClearAll)
     }
 
     func testPointerOverAnEmptyHiddenBubbleDoesNothing() {
         var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
         m.pointerEntered(now: 1)
         XCTAssertEqual(m.phase, .hidden)
-        XCTAssertEqual(m.tick(now: 3), [])
+        m.tick(now: 3)
+        XCTAssertEqual(m.phase, .hidden)
     }
 
     func testExpandedListStaysUntilThePointerLeaves() {
         var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
         m.apply([line(1), line(2)], now: 1, pop: .allowed)
-        m.pointerEntered(now: 2); _ = m.tick(now: 3)
-        m.apply([], now: 3.1, pop: .allowed)            // the core cleared what was seen
+        m.pointerEntered(now: 2); m.tick(now: 3)
+        m.apply([], now: 3.1, pop: .allowed)            // heard in a conversation meanwhile
         XCTAssertEqual(m.phase, .expanded(since: 2))
         XCTAssertEqual(m.shown.map(\.id), [2, 1])
         m.pointerLeft()
@@ -204,7 +294,7 @@ final class UpdatesBubbleModelTests: XCTestCase {
     func testPendingQuestionKeepsTheBadgeAfterLeaving() {
         var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
         m.apply([line(1), line(2)], now: 1, pop: .allowed)
-        m.pointerEntered(now: 2); _ = m.tick(now: 3)
+        m.pointerEntered(now: 2); m.tick(now: 3)
         m.apply([line(2)], now: 3.1, pop: .allowed)
         m.pointerLeft()
         XCTAssertEqual(m.phase, .badge); XCTAssertEqual(m.count, 1)
@@ -218,7 +308,7 @@ final class UpdatesBubbleModelTests: XCTestCase {
         XCTAssertEqual(m.phase, .badge)
         m.back(now: 100, pop: .allowed)
         XCTAssertEqual(m.phase, .popped(until: 106))
-        _ = m.tick(now: 106)
+        m.tick(now: 106)
         m.back(now: 200, pop: .allowed)
         XCTAssertEqual(m.phase, .badge)                 // nothing new: no second pop
     }
@@ -252,26 +342,6 @@ final class UpdatesBubbleModelTests: XCTestCase {
     }
 
     // M2: a line added while open, after the first seen call, is reported once shown 1 s.
-    func testALineAddedAfterTheSeenCallIsReportedOnceShownOneSecond() {
-        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
-        m.apply([line(1)], now: 1, pop: .allowed)
-        m.pointerEntered(now: 2)
-        XCTAssertEqual(m.tick(now: 3), [1])
-        m.apply([line(2)], now: 3.5, pop: .allowed)      // the core dropped 1; 2 is new
-        XCTAssertEqual(m.shown.map(\.id), [2, 1])
-        XCTAssertEqual(m.tick(now: 4.4), [], "2 has been shown 0.9 s")
-        XCTAssertEqual(m.tick(now: 4.5), [2])
-        XCTAssertEqual(m.tick(now: 6), [], "each line once")
-    }
-
-    func testANewExpansionReportsAgain() {
-        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
-        m.apply([line(1)], now: 1, pop: .allowed)
-        m.pointerEntered(now: 2); XCTAssertEqual(m.tick(now: 3), [1])
-        m.pointerLeft()                                  // 1 is a kept question, still listed
-        m.pointerEntered(now: 10); XCTAssertEqual(m.tick(now: 11), [1])
-    }
-
     // M1: hover counts only while the bubble can be seen.
     func testHoverCountsOnlyWhenTheBubbleIsVisible() {
         XCTAssertFalse(UpdatesBubbleModel.hoverCounts(pointerOnPanel: true, alpha: 0, alreadyInside: false))

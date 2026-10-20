@@ -18,10 +18,24 @@ public struct UpdateLine: Decodable, Sendable, Equatable, Identifiable {
     public let token: String?
     /// A session line's app (bundle id): a click activates it instead of focusing a pane (#114).
     public let app: String?
+    /// A session line's session (its name): a click brings up the tab it runs in (#194).
+    public let session: String?
+    /// The bubble's short form (#197): who the line is about, on its own line, and the news.
+    /// Either may be missing: the bubble then shows `text`.
+    public let title: String?
+    public let brief: String?
+    /// The line asks you something.
+    public let asking: Bool?
     /// A session menu's choices (#105): one button each, answered with `agent.choose`.
     public let options: [String]?
     /// Shown small under the line, never said: a session dialog's command (#105).
     public let note: String?
+
+    /// What the row says: the brief when there is one, else the full text.
+    public var shownText: String {
+        if let brief, !brief.isEmpty { return brief }
+        return text
+    }
 
     /// Whether the row shows Allow and Deny buttons.
     public var offersDecision: Bool { kind == "question" && token != nil && (options ?? []).isEmpty }
@@ -30,8 +44,9 @@ public struct UpdateLine: Decodable, Sendable, Equatable, Identifiable {
     public var offersOptions: Bool { kind == "question" && token != nil && !(options ?? []).isEmpty }
 
     public init(id: UInt64, text: String, kind: String, at: Int64, job: String?, worker: String?,
-                token: String? = nil, app: String? = nil, options: [String]? = nil,
-                note: String? = nil) {
+                token: String? = nil, app: String? = nil, session: String? = nil,
+                title: String? = nil, brief: String? = nil, asking: Bool? = nil,
+                options: [String]? = nil, note: String? = nil) {
         self.id = id
         self.text = text
         self.kind = kind
@@ -40,8 +55,23 @@ public struct UpdateLine: Decodable, Sendable, Equatable, Identifiable {
         self.worker = worker
         self.token = token
         self.app = app
+        self.session = session
+        self.title = title
+        self.brief = brief
+        self.asking = asking
         self.options = options
         self.note = note
+    }
+}
+
+/// How long ago a line came, as the bubble shows it (#197): "now", "4m ago", "2h ago", "3d ago".
+public func updateAge(seconds: TimeInterval) -> String {
+    let s = Int(max(0, seconds))
+    switch s {
+    case ..<60: return "now"
+    case ..<3600: return "\(s / 60)m ago"
+    case ..<86400: return "\(s / 3600)h ago"
+    default: return "\(s / 86400)d ago"
     }
 }
 
@@ -65,12 +95,10 @@ public struct UpdatesBubbleModel: Sendable {
         case popped(until: TimeInterval)
         /// Only the count.
         case badge
-        /// Open under the pointer since `since` (≥ 1 s marks the shown lines seen).
+        /// Open under the pointer since `since`. Looking marks nothing seen: a line leaves when
+        /// it is clicked or cleared (#198), heard in a conversation, or answered.
         case expanded(since: TimeInterval)
     }
-
-    /// How long the open-under-the-pointer bubble takes to count as seen (fixed, not a setting).
-    public static let seenAfter: TimeInterval = 1
 
     /// How long Allow and Deny ignore taps after a question's buttons appear (#97), so a click
     /// landing as the bubble pops never approves.
@@ -80,7 +108,7 @@ public struct UpdatesBubbleModel: Sendable {
     public static let hoverMinAlpha: CGFloat = 0.1
 
     /// Whether the pointer over the panel counts as hovering the bubble: only while it can be
-    /// seen (a badge faded with Pixie is not opened or marked seen by a passing pointer). Once
+    /// seen (a badge faded with Pixie is not opened by a passing pointer). Once
     /// open under the pointer it is drawn opaque, so it stays open.
     public static func hoverCounts(pointerOnPanel: Bool, alpha: CGFloat, alreadyInside: Bool) -> Bool {
         pointerOnPanel && (alreadyInside || alpha >= hoverMinAlpha)
@@ -96,18 +124,17 @@ public struct UpdatesBubbleModel: Sendable {
     public private(set) var lines: [UpdateLine] = []
 
     /// What the expanded bubble shows, newest first: the list as it was on opening plus lines
-    /// added since. The core drops seen lines after the 1 s call; the open bubble keeps them
-    /// until the pointer leaves.
+    /// added since, so rows don't move under the pointer: a line the core drops (answered or
+    /// heard elsewhere) stays until the pointer leaves.
     private var frozen: [UpdateLine]?
-    /// While expanded: when each shown line was first shown, and which were already reported.
-    private var shownSince: [UInt64: TimeInterval] = [:]
-    private var seenSent: Set<UInt64> = []
     /// Something arrived while away: pop once on return.
     private var heldPop = false
     /// The first list after launch is the restored outbox: badge, never a pop.
     private var applied = false
     /// When each question's Allow and Deny (by token) appeared; only while they are showing.
     private var decisionsSince: [String: TimeInterval] = [:]
+    /// Lines clicked away (#194): left out of the core's lists until it drops them too.
+    private var dismissed: Set<UInt64> = []
 
     public init(popSecs: TimeInterval = 6, maxLines: Int = 5) {
         self.popSecs = popSecs
@@ -141,12 +168,14 @@ public struct UpdatesBubbleModel: Sendable {
     /// The core sent its current list (`updates` event).
     public mutating func apply(_ new: [UpdateLine], now: TimeInterval, pop: PopPermission) {
         defer { noteDecisions(now) }
+        let ids = Set(new.map(\.id))
+        dismissed = dismissed.filter { ids.contains($0) }
+        let new = new.filter { !dismissed.contains($0.id) }
         let old = Set(lines.map(\.id))
         let added = new.filter { !old.contains($0.id) }
         lines = new
         if isExpanded, !added.isEmpty {
             frozen = added.reversed() + (frozen ?? [])
-            noteShown(now)
         }
 
         if !applied {
@@ -179,48 +208,55 @@ public struct UpdatesBubbleModel: Sendable {
         guard !lines.isEmpty || isPopped else { return }
         phase = .expanded(since: now)
         frozen = lines.reversed()
-        shownSince = [:]
-        seenSent = []
-        noteShown(now)
         noteDecisions(now)
     }
 
     /// The pointer left: back to the badge, or hidden when nothing unheard is left.
     public mutating func pointerLeft() {
         frozen = nil
-        shownSince = [:]
-        seenSent = []
         phase = lines.isEmpty ? .hidden : .badge
         decisionsSince = [:]
     }
 
-    /// Advances timers. Returns the ids to send to `agent.updatesSeen`: each shown line once per
-    /// expansion, after it has been shown `seenAfter` (lines added while open count from when
-    /// they appeared).
-    public mutating func tick(now: TimeInterval) -> [UInt64] {
+    /// Advances timers: a pop runs out to the badge (unless a question waits on you).
+    public mutating func tick(now: TimeInterval) {
         defer { noteDecisions(now) }
-        switch phase {
-        case .popped(let until) where now >= until && !waitsOnYou:
+        if case .popped(let until) = phase, now >= until, !waitsOnYou {
             phase = .badge
-        case .expanded:
-            noteShown(now)
-            let due = shown.map(\.id).filter { id in
-                !seenSent.contains(id) && now - (shownSince[id] ?? now) >= Self.seenAfter
-            }
-            seenSent.formUnion(due)
-            return due
-        default:
-            break
         }
-        return []
     }
 
-    /// Stamps the lines shown now that weren't shown before in this expansion.
-    private mutating func noteShown(_ now: TimeInterval) {
-        for l in shown where shownSince[l.id] == nil {
-            shownSince[l.id] = now
+    /// A click on a line (#194): it leaves the bubble and counts as seen, so the caller sends its
+    /// id to `agent.updatesSeen`. A question with buttons, or a job's question (the core keeps it
+    /// while the job waits), stays until it is answered. Returns whether the line was dismissed.
+    public mutating func dismiss(_ id: UInt64) -> Bool {
+        guard let line = display.first(where: { $0.id == id }), Self.dismissable(line) else { return false }
+        dismissed.insert(id)
+        lines.removeAll { $0.id == id }
+        frozen?.removeAll { $0.id == id }
+        if display.isEmpty {
+            frozen = nil
+            phase = .hidden
         }
+        return true
     }
+
+    /// "Clear all" (#198): every line a click would dismiss leaves at once. Returns their ids for
+    /// `agent.updatesSeen`; questions still waiting on you stay.
+    public mutating func dismissAll() -> [UInt64] {
+        let ids = display.filter(Self.dismissable).map(\.id)
+        for id in ids { _ = dismiss(id) }
+        return ids
+    }
+
+    /// Whether a click may dismiss the line: not a question with buttons, nor a job's question
+    /// (the core keeps it while the job waits).
+    private static func dismissable(_ line: UpdateLine) -> Bool {
+        !line.offersDecision && !line.offersOptions && !(line.kind == "question" && line.job != nil)
+    }
+
+    /// The "Clear all" row shows: more than one line could be cleared.
+    public var offersClearAll: Bool { display.filter(Self.dismissable).count > 1 }
 
     /// Presence came back: one pop if anything arrived while away.
     public mutating func back(now: TimeInterval, pop: PopPermission) {

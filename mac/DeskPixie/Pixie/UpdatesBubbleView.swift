@@ -10,8 +10,12 @@ struct UpdatesBubbleView: View {
     let phase: UpdatesBubbleModel.Phase
     let shown: [UpdateLine]
     let more: Int
+    /// Whether the "Clear all" row shows (#198).
+    let clearAll: Bool
     let onLine: (UpdateLine) -> Void
     let onMore: () -> Void
+    /// "Clear all": every line that isn't waiting on an answer leaves the bubble.
+    let onClearAll: () -> Void
     /// Allow or Deny on a permission question (token, allow). The controller ignores a tap that
     /// comes too soon after the buttons appear (`UpdatesBubbleModel.acceptsDecision`).
     let onDecide: (String, Bool) -> Void
@@ -30,11 +34,14 @@ struct UpdatesBubbleView: View {
     static func width(for lines: [UpdateLine]) -> CGFloat {
         let callout = NSFont.preferredFont(forTextStyle: .callout)
         let small = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
-        let mono = NSFont.monospacedSystemFont(ofSize: NSFont.preferredFont(forTextStyle: .caption1).pointSize, weight: .regular)
+        let caption = NSFont.preferredFont(forTextStyle: .caption1).pointSize
+        let title = NSFont.systemFont(ofSize: caption, weight: .semibold)
+        let mono = NSFont.monospacedSystemFont(ofSize: caption, weight: .regular)
         func one(_ s: String, _ f: NSFont) -> CGFloat { (s as NSString).size(withAttributes: [.font: f]).width }
         var need: CGFloat = 0
         for l in lines where l.kind == "question" {
-            need = max(need, one(l.text, callout) + 48)                       // icon, row and bubble padding
+            need = max(need, one(l.shownText, callout) + 48)                       // icon, row and bubble padding
+            if let t = l.title { need = max(need, one(t, title) + 48) }
             for o in l.options ?? [] { need = max(need, one(o, small) + 52) } // button and bubble padding
             for n in (l.note ?? "").split(separator: "\n") { need = max(need, one(String(n), mono) + 48) }
         }
@@ -102,17 +109,30 @@ struct UpdatesBubbleView: View {
                     }
                 }
             }
-            if more > 0 {
-                Button(action: onMore) {
-                    Text("+\(more) more")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .contentShape(Rectangle())
+            if more > 0 || clearAll {
+                HStack {
+                    if more > 0 {
+                        Button(action: onMore) {
+                            Text("+\(more) more")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    Spacer(minLength: 0)
+                    if clearAll {
+                        Button(action: onClearAll) {
+                            Text("Clear all")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
-                .buttonStyle(.plain)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
             }
         }
         .padding(6)
@@ -124,12 +144,19 @@ struct UpdatesBubbleView: View {
 
     private func row(_ line: UpdateLine) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
-            if line.kind == "question" {
+            if line.kind == "question" || line.asking == true {
                 Image(systemName: "questionmark.circle")
                     .foregroundStyle(.orange)
             }
             VStack(alignment: .leading, spacing: 1) {
-                Text(line.text)
+                if let title = line.title, !title.isEmpty {
+                    Text(title)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                Text(line.shownText)
                     .font(.callout)
                     .lineLimit(line.kind == "question" ? nil : 2) // a question is read in full
                     .truncationMode(.tail)
@@ -142,9 +169,11 @@ struct UpdatesBubbleView: View {
                         .truncationMode(.tail)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                (Text(Date(timeIntervalSince1970: Double(line.at) / 1000), style: .relative) + Text(" ago"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                TimelineView(.periodic(from: .now, by: 30)) { context in
+                    Text(updateAge(seconds: context.date.timeIntervalSince1970 - Double(line.at) / 1000))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

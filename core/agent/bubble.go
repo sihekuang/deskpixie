@@ -1,6 +1,9 @@
 package agent
 
-import "reflect"
+import (
+	"reflect"
+	"regexp"
+)
 
 // The updates bubble (spec docs/specs/2026-10-14-updates-bubble-design.md): the outbox's
 // undelivered lines, shown beside Pixie while Pixie isn't opening conversations for them, and
@@ -20,6 +23,13 @@ type UpdateItem struct {
 	Token string `json:"token,omitempty"`
 	// App: a session line's app (bundle id); a click activates it instead of a pane.
 	App string `json:"app,omitempty"`
+	// Session: the session a session line is about; a click brings up its tab (#194).
+	Session string `json:"session,omitempty"`
+	// Title and Brief: the short form the bubble shows instead of Text when set (#197): who the
+	// line is about, on its own line, and the news. Asking: it asks you something.
+	Title  string `json:"title,omitempty"`
+	Brief  string `json:"brief,omitempty"`
+	Asking bool   `json:"asking,omitempty"`
 	// Options: a session menu's choices (#105): the bubble shows one button each instead of
 	// Allow and Deny, answered with agent.choose.
 	Options []string `json:"options,omitempty"`
@@ -40,8 +50,11 @@ func (c *AgentController) bubbleItems() []UpdateItem {
 		if !pending && (l.Token != nil || l.Delivered || c.settings.OpenConversation) {
 			continue
 		}
-		item := UpdateItem{ID: l.ID, Text: l.Text, Kind: l.Kind, At: l.At, Job: l.Job, Worker: l.Worker, App: l.App, Note: l.Note}
+		item := UpdateItem{ID: l.ID, Text: l.Text, Kind: l.Kind, At: l.At, Job: l.Job, Worker: l.Worker, App: l.App, Session: l.Session, Title: l.Title, Brief: l.Brief, Asking: l.Asking, Note: l.Note}
 		if l.Token != nil {
+			if item.Brief == "" {
+				item.Brief = QuestionBrief(l.Text)
+			}
 			item.Token = *l.Token
 			item.Options = c.confirms.OptionsOf(*l.Token)
 		}
@@ -129,4 +142,18 @@ func (c *AgentController) FocusTarget(job JobID, worker string) string {
 		}
 	}
 	return Coordinator
+}
+
+// bubbleHow is how a coordinator question says to answer it aloud or in the bubble: the
+// bubble's own buttons make it noise there (#197).
+var bubbleHow = regexp.MustCompile(`\s*(Say confirm \S+(, or choose in the bubble)?\.|Choose in the bubble\.|Allow or deny it in the bubble\.)\s*$`)
+
+// QuestionBrief is the bubble's short form of a question with buttons (#197): without how to
+// answer it. "" when there is nothing to leave out (the bubble shows the text).
+func QuestionBrief(text string) string {
+	brief := bubbleHow.ReplaceAllString(text, "")
+	if brief == text || brief == "" {
+		return ""
+	}
+	return upperFirst(brief)
 }
