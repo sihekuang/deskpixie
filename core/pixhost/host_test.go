@@ -698,3 +698,38 @@ func TestAnOlderPixIsMarkedOutdated(t *testing.T) {
 		t.Fatal("marked outdated by an app that doesn't know its own pix")
 	}
 }
+
+// #191: an outdated session is reported to Pixie once, when it registers; not again when the
+// same session registers after a reconnect, and never for a current one.
+func TestAnOutdatedSessionIsReportedOnce(t *testing.T) {
+	h, sock := newHost(t)
+	h.SetBuild("new")
+	events := h.Subscribe()
+	outdated := func() (got []agent.PaneEvent) {
+		for {
+			select {
+			case ev := <-events:
+				if ev.Kind == agent.PaneEventOutdated {
+					got = append(got, ev)
+				}
+			case <-time.After(200 * time.Millisecond):
+				return got
+			}
+		}
+	}
+	dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/a", Build: "new"})
+	if got := outdated(); len(got) != 0 {
+		t.Fatalf("a current pix: %+v", got)
+	}
+	p, r := dialPix(t, sock, wire.Msg{Tool: "codex", GitRoot: "/x/focus", Build: "old", SessionID: "s1", Description: "login bug", App: "com.jetbrains.WebStorm"})
+	got := outdated()
+	if len(got) != 1 || got[0].Agent != r.Address || *got[0].Outdated != (agent.SessionOutdated{Label: "login bug", Tool: "codex", App: "com.jetbrains.WebStorm"}) {
+		t.Fatalf("%+v", got)
+	}
+	p.c.Close()
+	eventually(t, "unreachable", func() bool { return !listed(t, h)[1].User.Reachable || !listed(t, h)[0].User.Reachable })
+	dialPix(t, sock, wire.Msg{Tool: "codex", GitRoot: "/x/focus", Build: "old", SessionID: "s1", Address: r.Address})
+	if got := outdated(); len(got) != 0 {
+		t.Fatalf("told again after a reconnect: %+v", got)
+	}
+}

@@ -41,6 +41,7 @@ type session struct {
 	lastTurn  string    // its last turn's gist (#146)
 	asks      bool      // that turn ended asking you something
 	waiting   int       // Pixie's messages pix holds for it, until it reports them delivered (#183)
+	toldOld   bool      // Pixie was told it runs an older pix (#191)
 	conn      net.Conn  // nil while unreachable
 	wmu       sync.Mutex
 	pending   map[string]chan wire.Msg
@@ -160,7 +161,13 @@ func (h *Host) serve(c net.Conn) {
 	h.changed()
 	h.mu.Lock()
 	outdated := h.outdated(s)
+	tell := outdated && !s.toldOld
+	s.toldOld = s.toldOld || outdated
+	old := agent.SessionOutdated{Label: s.label(), Tool: s.hello.Tool, App: s.hello.App}
 	h.mu.Unlock()
+	if tell {
+		h.broadcast(agent.PaneEvent{Kind: agent.PaneEventOutdated, Agent: s.addr, Outdated: &old})
+	}
 	s.wmu.Lock()
 	err = wire.Encode(c, wire.Msg{Kind: wire.KindRegistered, Address: s.addr, Outdated: outdated})
 	s.wmu.Unlock()

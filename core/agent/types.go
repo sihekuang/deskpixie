@@ -311,6 +311,9 @@ const (
 	PaneEventQuestionGone
 	// PaneEventTurn: a session you started with pix finished a turn (Turn set, #114).
 	PaneEventTurn
+	// PaneEventOutdated: a session you started with pix registered on an older pix than the
+	// app's (Outdated set, #191). Once per session per app run.
+	PaneEventOutdated
 )
 
 // PaneEvent is a status change (Status set), an exit of a named agent, a prompt one of your
@@ -321,6 +324,14 @@ type PaneEvent struct {
 	Status   PaneStatus       // PaneEventStatus only
 	Question *SessionQuestion // PaneEventQuestion(Gone) only (a pointer: PaneEvent stays comparable)
 	Turn     *SessionTurn     // PaneEventTurn only
+	Outdated *SessionOutdated // PaneEventOutdated only
+}
+
+// SessionOutdated is a session you started with an older pix than the app's (#191).
+type SessionOutdated struct {
+	Label string // as SessionTurn's
+	Tool  string // claude | codex
+	App   string // bundle id of the app it runs in ("" unknown)
 }
 
 // SessionTurn is a finished turn of a session you started with pix (#114).

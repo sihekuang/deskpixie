@@ -580,6 +580,13 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 			if ev.Turn != nil {
 				c.onSessionTurn(ev.Agent, *ev.Turn, now, &fx)
 			}
+		case ev.Kind == PaneEventOutdated:
+			if ev.Outdated != nil && !c.shutDown {
+				// #191: told like a session update, whatever the session turns setting.
+				o := *ev.Outdated
+				c.deliverUpdate(Line{Kind: LineSession, App: o.App,
+					Text: OutdatedLine(maskPendingTokens(o.Label, c.pendingTokens()), o.Tool)}, now, &fx)
+			}
 		case ev.Kind == PaneEventQuestion || ev.Kind == PaneEventQuestionGone:
 		case ev.Kind == PaneEventStatus:
 			c.onWorkerStatus(ev.Agent, ev.Status, now, &fx)
