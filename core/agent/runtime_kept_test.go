@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 	"testing/synctest"
+	"time"
 
 	. "github.com/sihekuang/deskpixie/core/agent"
 	"github.com/sihekuang/deskpixie/core/agent/agenttest"
@@ -79,6 +80,9 @@ func TestTheNextRunAdoptsTheKeptCoordinatorAndWorkers(t *testing.T) {
 		kept := KeptAgents{CoordinatorToken: "kept-c", Workers: []KeptWorker{keptWorker()}}
 		r := rigBuild(t, true, true, openJobStore(), agenttest.FakeWorktreesWithRepo("focus"), host, kept)
 		settle()
+		// The reconnect is typed; the coordinator's prompt waits for its result (#168).
+		host.SetScreen(Coordinator, "❯ "+McpReconnect+"\n  ⎿  Successfully reconnected to pixie")
+		time.Sleep(time.Second) // the screen is polled, not watched
 		if r.tokens.Restored()[wName] != "kept-w" {
 			t.Fatal(r.tokens.Restored())
 		}
@@ -97,6 +101,16 @@ func TestTheNextRunAdoptsTheKeptCoordinatorAndWorkers(t *testing.T) {
 			return p.Agent == Coordinator && strings.Contains(p.Text, CoordinatorRestartNote)
 		}) {
 			t.Fatal("coordinator not asked again", ps)
+		}
+		// Its pixie tools come back before it's asked (#168).
+		var coord []string
+		for _, p := range ps {
+			if p.Agent == Coordinator {
+				coord = append(coord, p.Text)
+			}
+		}
+		if len(coord) < 2 || coord[0] != McpReconnect || !strings.Contains(coord[1], CoordinatorRestartNote) {
+			t.Fatal("not reconnected first", coord)
 		}
 	})
 }

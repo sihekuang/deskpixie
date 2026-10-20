@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 	"testing/synctest"
+	"time"
 
 	. "github.com/sihekuang/deskpixie/core/agent"
 	"github.com/sihekuang/deskpixie/core/agent/agenttest"
@@ -229,6 +230,124 @@ func TestAKeptCoordinatorIsAdoptedWhenItsTokenWasRestored(t *testing.T) {
 	}
 	if h.Token() != "kept" {
 		t.Fatal(h.Token())
+	}
+}
+
+// adoptedRig: a Claude coordinator kept from an earlier run, adopted.
+func adoptedRig(t *testing.T) (*AgentHost, *agenttest.FakeSessionHost) {
+	t.Helper()
+	fake := agenttest.NewFakeSessionHost()
+	recipe := CoordinatorRecipe{Cwd: "/w", Env: []EnvVar{{Key: "PIXIE_AGENT_TOKEN", Value: "kept"}}, AdoptEarlier: true}
+	h := NewAgentHost(fake, agenttest.ClockAt(1_000_000), recipe)
+	fake.StartAgent(bg, AgentSpec{Name: Coordinator, Kind: Claude, Cwd: "/w", Env: recipe.Env})
+	wantEnsured(t, h, Ensured{Status: PaneIdle})
+	return h, fake
+}
+
+func coordinatorPrompts(fake *agenttest.FakeSessionHost) (out []string) {
+	for _, p := range fake.Prompts() {
+		if p.Agent == Coordinator {
+			out = append(out, p.Text)
+		}
+	}
+	return out
+}
+
+// #168: while the app was down, the kept coordinator's Claude Code gave up on the pixie MCP
+// server (it refused connections) and dropped its tools for good. Adopted, its first prompt is
+// preceded by `/mcp reconnect pixie`; later prompts are typed as they are.
+func TestAnAdoptedCoordinatorReconnectsItsPixieToolsBeforeItsFirstPrompt(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		h, fake := adoptedRig(t)
+		done := make(chan error, 1)
+		go func() { done <- h.PromptCoordinator(t.Context(), "first") }()
+		synctest.Wait()
+		fake.SetScreen(Coordinator, "❯ /mcp reconnect pixie\n  ⎿  Successfully reconnected to pixie\n❯")
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		if err := h.PromptCoordinator(t.Context(), "second"); err != nil {
+			t.Fatal(err)
+		}
+		if got, want := coordinatorPrompts(fake), []string{McpReconnect, "first", "second"}; !slices.Equal(got, want) {
+			t.Fatalf("got %q; want %q", got, want)
+		}
+	})
+}
+
+// Claude Code drops what is typed while /mcp reconnect runs: the prompt waits for its result
+// line, success or not, wrapped or not. An earlier reconnect's result, still on screen before
+// this one shows, doesn't count.
+func TestTheFirstPromptWaitsForTheReconnectToFinish(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		h, fake := adoptedRig(t)
+		earlier := "❯ /mcp reconnect pixie\n  ⎿  Successfully reconnected to pixie\n\n⏺ Done.\n\n"
+		fake.SetScreen(Coordinator, earlier+"❯")
+		done := make(chan error, 1)
+		go func() { done <- h.PromptCoordinator(t.Context(), "first") }()
+		for _, screen := range []string{earlier + "❯", earlier + "❯ /mcp reconnect pixie\n"} {
+			fake.SetScreen(Coordinator, screen)
+			time.Sleep(McpReconnectWait / 3)
+			synctest.Wait()
+			if got := coordinatorPrompts(fake); !slices.Equal(got, []string{McpReconnect}) {
+				t.Fatalf("typed before the reconnect finished: %q", got)
+			}
+		}
+		fake.SetScreen(Coordinator, earlier+"❯ /mcp reconnect pixie\n  ⎿  Failed to reconnect to\n     pixie\n❯")
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		if got := coordinatorPrompts(fake); !slices.Equal(got, []string{McpReconnect, "first"}) {
+			t.Fatal(got)
+		}
+	})
+}
+
+// A reconnect whose result never shows holds the prompt McpReconnectWait at most.
+func TestAReconnectThatNeverAnswersHoldsThePromptOnlySoLong(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		h, fake := adoptedRig(t)
+		fake.SetScreen(Coordinator, "❯ /mcp reconnect pixie\n")
+		began := time.Now()
+		if err := h.PromptCoordinator(t.Context(), "first"); err != nil {
+			t.Fatal(err)
+		}
+		if waited := time.Since(began); waited < McpReconnectWait || waited > McpReconnectWait+time.Second {
+			t.Fatal(waited)
+		}
+		if got := coordinatorPrompts(fake); !slices.Equal(got, []string{McpReconnect, "first"}) {
+			t.Fatal(got)
+		}
+	})
+}
+
+// A coordinator this run launched (fresh, or replacing one from an earlier run) connected to
+// this run's server, and a Codex coordinator takes its MCP server by -c overrides: their
+// prompts are typed as they are.
+func TestOnlyAnAdoptedClaudeCoordinatorIsToldToReconnect(t *testing.T) {
+	fresh, freshFake, _ := hostRig()
+	wantEnsured(t, fresh, started(false))
+
+	replaced, replacedFake, _ := hostRig()
+	replacedFake.StartAgent(bg, AgentSpec{Name: Coordinator, Kind: Claude, Cwd: "/old"})
+	wantEnsured(t, replaced, started(true))
+
+	codexFake := agenttest.NewFakeSessionHost()
+	recipe := CoordinatorRecipe{Cwd: "/w", Kind: Codex, Env: []EnvVar{{Key: "PIXIE_AGENT_TOKEN", Value: "kept"}}, AdoptEarlier: true}
+	codex := NewAgentHost(codexFake, agenttest.ClockAt(1_000_000), recipe)
+	codexFake.StartAgent(bg, AgentSpec{Name: Coordinator, Kind: Codex, Cwd: "/w", Env: recipe.Env})
+	wantEnsured(t, codex, Ensured{Status: PaneIdle})
+
+	for name, c := range map[string]struct {
+		h    *AgentHost
+		fake *agenttest.FakeSessionHost
+	}{"fresh": {fresh, freshFake}, "replaced": {replaced, replacedFake}, "codex": {codex, codexFake}} {
+		if err := c.h.PromptCoordinator(bg, "first"); err != nil {
+			t.Fatal(name, err)
+		}
+		if got, want := c.fake.Prompts(), []agenttest.Prompt{{Agent: Coordinator, Text: "first"}}; !slices.Equal(got, want) {
+			t.Fatalf("%s: got %q; want %q", name, got, want)
+		}
 	}
 }
 
