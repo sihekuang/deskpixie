@@ -157,6 +157,8 @@ type AgentHandle struct {
 	deps      Deps
 	workers   *WorkerDeps
 	keepPanes bool
+	// forceSend (agent.alwaysForceSend, #205): every message to your sessions is forced.
+	forceSend bool
 	ctx       context.Context
 	cancel    context.CancelFunc
 
@@ -219,7 +221,7 @@ func NewRuntime(deps Deps, cfg RuntimeConfig) *AgentHandle {
 func NewRuntimeWithWorkers(deps Deps, cfg RuntimeConfig, workers *WorkerDeps) *AgentHandle {
 	ctx, cancel := context.WithCancel(context.Background())
 	h := &AgentHandle{
-		deps: deps, workers: workers, keepPanes: cfg.Settings.KeepPanesOnQuit,
+		deps: deps, workers: workers, keepPanes: cfg.Settings.KeepPanesOnQuit, forceSend: cfg.Settings.AlwaysForceSend,
 		ctx: ctx, cancel: cancel, rosterPoke: make(chan struct{}, 1),
 		ctl:  NewAgentController(cfg.Settings),
 		main: newQueue[mainItem](), ops: newQueue[hostOp](),
@@ -625,7 +627,7 @@ func (h *AgentHandle) answerSession(name, id, answer string) {
 func (h *AgentHandle) tellSession(name, answer string) {
 	ctx, cancel := context.WithTimeout(h.ctx, OpLimit)
 	defer cancel()
-	if r := sessionTool(ctx, h.deps.Host.Session(), McpCall{Kind: CallMessageSession, Name: name, Text: answer}, h.maskPending); r.Err != nil {
+	if r := sessionTool(ctx, h.deps.Host.Session(), McpCall{Kind: CallMessageSession, Name: name, Text: answer, Force: h.forceSend}, h.maskPending); r.Err != nil {
 		log.Printf("agent: answering %s: %v", name, r.Err)
 		h.Input(SessionAnswerFailedInput(name, r.Err.Error()))
 	}
@@ -1159,6 +1161,9 @@ func (h *AgentHandle) mcp(agent string, call McpCall) McpReply {
 					return McpReply{Err: errors.New(d.Message)}
 				}
 			}
+		}
+		if call.Kind == CallMessageSession && h.forceSend {
+			call.Force = true
 		}
 		ctx, cancel := context.WithTimeout(h.ctx, OpLimit)
 		defer cancel()

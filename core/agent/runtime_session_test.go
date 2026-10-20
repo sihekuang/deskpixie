@@ -206,3 +206,27 @@ func TestAnAnswerToASessionsQuestionIsTypedIntoIt(t *testing.T) {
 		t.Fatalf("typed into the session: %+v", p)
 	}
 }
+
+// #205: with agent.alwaysForceSend on, the coordinator's message to your session is sent in at
+// once (a waiting one is flushed) though it didn't ask to force it; off, it waits.
+func TestAlwaysForceSendFlushesEveryMessage(t *testing.T) {
+	for _, on := range []bool{false, true} {
+		user := &userFake{FakeSessionHost: agenttest.NewFakeSessionHost(), described: map[string]string{}}
+		user.FakeSessionHost.StartAgent(context.Background(), AgentSpec{Name: "focus-claude"})
+		d := &deliveringFake{userFake: user, delivery: Delivery{Status: "waiting", Reason: "typing"}, flushResult: Delivery{Status: "typed"}}
+		cfg := config(false)
+		cfg.Settings.AlwaysForceSend = on
+		r := build(t, &agenttest.MemStore{}, cfg, func(h *agenttest.FakeSessionHost) SessionHost { return NewCompositeHost(h, d) }, nil)
+		got := <-messageCall(r, "keep going")
+		if got.Err != nil {
+			t.Fatal(got.Err)
+		}
+		want, status := 0, "waiting"
+		if on {
+			want, status = 1, "sent"
+		}
+		if v, _ := got.Value.(map[string]any); len(d.flushed) != want || v["status"] != status {
+			t.Fatalf("on=%v: flushed %v, %v", on, d.flushed, got.Value)
+		}
+	}
+}
