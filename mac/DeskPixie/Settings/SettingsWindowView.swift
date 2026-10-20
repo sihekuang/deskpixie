@@ -175,6 +175,8 @@ struct SettingsTabView: View {
     let model: SettingsModel
     /// The pix command row (#89); the login shell's PATH is read once, when Settings opens.
     @State private var pix = PixCommandModel(installer: .forThisApp(path: PixInstaller.loginShellPath()))
+    /// Restart Coordinator… was clicked: ask first (#179).
+    @State private var confirmRestart = false
     let section: SettingsSection
 
     var body: some View {
@@ -197,6 +199,12 @@ struct SettingsTabView: View {
                 SettingsStrip(symbol: nil, text: restart, buttonTitle: "Restart",
                               buttonHelp: "Restarts DeskPixie to apply the changes.") { model.restart() }
             }
+        }
+        .alert(CoordinatorRestart.title, isPresented: $confirmRestart) {
+            Button(CoordinatorRestart.confirm, role: .destructive) { model.restartCoordinator() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(CoordinatorRestart.message)
         }
     }
 
@@ -226,6 +234,7 @@ struct SettingsTabView: View {
                     switch action {
                     case .resetPosition: model.resetPosition()
                     case .openFile: model.openFile()
+                    case .restartCoordinator: confirmRestart = true
                     }
                 }
                 .disabled(!model.enabled)

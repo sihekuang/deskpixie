@@ -131,6 +131,8 @@ public enum TrayMenu {
         /// `app.action {id}`; `focusCanvas` when the user asked for a canvas page, so the
         /// canvas window comes forward (core-initiated opens never take focus).
         case core(String, focusCanvas: Bool = false)
+        /// Ask first (`CoordinatorRestart`), then `app.action {id: "agent:restart"}` (#179).
+        case restartCoordinator
     }
 
     /// Prefix of a copy-only row's id; the rest is the text to copy.
@@ -144,6 +146,7 @@ public enum TrayMenu {
         case settingsID: return .settings
         case micModeID: return .micMode
         case onboardingID: return .onboarding
+        case CoordinatorRestart.actionID: return .restartCoordinator
         default: return .core(id, focusCanvas: id == "canvas:open" || id.hasPrefix("canvas:page:"))
         }
     }
@@ -225,7 +228,7 @@ public enum TrayMenu {
                     .action(Row(id: "agent:cancel:\($0.id)", title: $0.label))
                 }))
                 sub.append(.action(Row(id: "agent:open", title: "Open coordinator terminal")))
-                sub.append(.action(Row(id: "agent:restart", title: "Restart coordinator")))
+                sub.append(.action(Row(id: CoordinatorRestart.actionID, title: "Restart coordinator…")))
                 items.append(.submenu(title: "Coordinator", enabled: true, items: sub))
             }
             items.append(.separator)

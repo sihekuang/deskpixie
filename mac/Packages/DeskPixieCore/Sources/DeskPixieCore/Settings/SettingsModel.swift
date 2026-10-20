@@ -321,6 +321,15 @@ public final class SettingsModel {
         }
     }
 
+    /// Restarts the coordinator (#179); the view has asked the user first.
+    public func restartCoordinator() {
+        do {
+            try client.restartCoordinator()
+        } catch {
+            notice = Self.describe(error)
+        }
+    }
+
     /// Restart: commits any typed text first, and restarts only if that worked, so a typed
     /// value is never lost or half-applied. Returns whether the restart was asked for.
     @discardableResult

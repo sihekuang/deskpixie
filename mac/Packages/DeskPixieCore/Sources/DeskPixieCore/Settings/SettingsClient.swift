@@ -17,6 +17,8 @@ public protocol SettingsClient {
     func openFile() throws
     /// `settings.restart`: quits and relaunches.
     func restart() throws
+    /// `app.action {id: "agent:restart"}`: restarts the coordinator (#179; the view asks first).
+    func restartCoordinator() throws
 }
 
 /// `SettingsClient` over the Go core's `dp_call`.
@@ -60,5 +62,13 @@ public struct EngineSettingsClient: SettingsClient, Sendable {
 
     public func restart() throws {
         _ = try engine.call("settings.restart")
+    }
+
+    private struct ActionArgs: Encodable {
+        let id: String
+    }
+
+    public func restartCoordinator() throws {
+        _ = try engine.call("app.action", ActionArgs(id: CoordinatorRestart.actionID))
     }
 }
