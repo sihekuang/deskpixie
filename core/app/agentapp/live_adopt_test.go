@@ -14,6 +14,11 @@ package agentapp_test
 // server down fails the same way at once, and leaves the server failed and its tools gone. The
 // second run, on the same port and data, adopts that coordinator and asks it to use
 // list_sessions: it must have the tool.
+//
+// The second test (#188) puts it in the state an app restart on Oct 20 left it in: herdr's own
+// session restore relaunched the pane as plain `claude --resume <id>`, without the app's
+// --settings and --mcp-config, so it has no pixie server at all. The second run must replace it
+// with one of its own and still get tools-ok.
 
 import (
 	"context"
@@ -35,6 +40,48 @@ import (
 )
 
 func TestLiveAnAdoptedCoordinatorGetsItsPixieToolsBack(t *testing.T) {
+	liveAdopt(t, func(ctx context.Context, host *herdr.Host) {
+		// With the app down, the coordinator gives up on its pixie server.
+		if err := host.Prompt(ctx, agent.Coordinator, agent.McpReconnect); err != nil {
+			t.Fatal(err)
+		}
+		for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(500 * time.Millisecond) {
+			screen, _ := host.Read(ctx, agent.Coordinator, 40)
+			if strings.Contains(strings.Join(strings.Fields(screen), " "), "Failed to reconnect to "+agent.McpServer) {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("the reconnect with the app down didn't fail:\n%s", screen)
+			}
+		}
+		t.Log("ok   app down: the coordinator's pixie server failed")
+	})
+}
+
+func TestLiveAnAdoptedCoordinatorHerdrRestoredWithoutItsServerIsReplaced(t *testing.T) {
+	liveAdopt(t, func(ctx context.Context, host *herdr.Host) {
+		list, _ := host.List(ctx)
+		i := slices.IndexFunc(list, func(i agent.AgentInfo) bool { return i.Name == agent.Coordinator })
+		// Same pane name, cwd and conversation, none of the app's arguments.
+		if _, err := host.ReplaceAgent(ctx, agent.AgentSpec{Name: agent.Coordinator, Kind: agent.Claude, Cwd: list[i].Cwd, Args: []string{"--continue"}}); err != nil {
+			t.Fatal(err)
+		}
+		for deadline := time.Now().Add(60 * time.Second); ; time.Sleep(time.Second) {
+			screen, _ := host.Read(ctx, agent.Coordinator, 40)
+			if strings.Contains(screen, "❯") {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("the bare coordinator never showed its prompt:\n%s", screen)
+			}
+		}
+		t.Log("ok   app down: the coordinator relaunched without the app's arguments")
+	})
+}
+
+// liveAdopt: a first run starts the coordinator and quits keeping it; breakIt puts it in some
+// state while the app is down; a second run adopts it and must use list_sessions.
+func liveAdopt(t *testing.T, breakIt func(context.Context, *herdr.Host)) {
 	sm := smoketest.Smoke(t)
 	tmp := smoketest.CanonicalTemp(t)
 	data := filepath.Join(tmp, "data")
@@ -117,20 +164,8 @@ func TestLiveAnAdoptedCoordinatorGetsItsPixieToolsBack(t *testing.T) {
 	}
 	t.Log("ok   first run: pong, and the coordinator kept over the quit")
 
-	// 2. With the app down, the coordinator gives up on its pixie server.
-	if err := host.Prompt(ctx, agent.Coordinator, agent.McpReconnect); err != nil {
-		t.Fatal(err)
-	}
-	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(500 * time.Millisecond) {
-		screen, _ := host.Read(ctx, agent.Coordinator, 40)
-		if strings.Contains(strings.Join(strings.Fields(screen), " "), "Failed to reconnect to "+agent.McpServer) {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("the reconnect with the app down didn't fail:\n%s", screen)
-		}
-	}
-	t.Log("ok   app down: the coordinator's pixie server failed")
+	// 2. While the app is down.
+	breakIt(ctx, host)
 
 	// 3. The next run adopts it; its pixie tools must work.
 	ln2, err := net.Listen("tcp", ln.Addr().String())
@@ -140,9 +175,21 @@ func TestLiveAnAdoptedCoordinatorGetsItsPixieToolsBack(t *testing.T) {
 	a2, reply := run("second run", ln2, "Call your list_sessions tool. If the call works, reply with exactly the word tools-ok. "+
 		"If you have no list_sessions tool or it fails, reply with exactly the word no-tools.")
 	t.Cleanup(a2.Shutdown)
-	if got := strings.ToLower(strings.Trim(reply, " .!\"'")); got != "tools-ok" {
+	if !toolsWorked(reply) {
 		screen, _ := host.Read(ctx, agent.Coordinator, 30)
 		t.Fatalf("second run: the adopted coordinator replied %q, not tools-ok; its screen:\n%s", reply, screen)
 	}
 	t.Log("ok   second run: the adopted coordinator used list_sessions")
+}
+
+// toolsWorked: the reply says the tool call worked. Haiku often says it in words, as the
+// coordinator's spoken rules ask ("Tools are working.", "The session list call worked").
+func toolsWorked(reply string) bool {
+	got := strings.ToLower(reply)
+	for _, bad := range []string{"no-tools", "not work", "fail", "don't have", "unavailable", "down"} {
+		if strings.Contains(got, bad) {
+			return false
+		}
+	}
+	return strings.Contains(got, "tools-ok") || strings.Contains(got, "work")
 }

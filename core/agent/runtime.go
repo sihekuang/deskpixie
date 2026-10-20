@@ -1673,7 +1673,7 @@ func (h *AgentHandle) runWorkerOp(e Effect) {
 	case EfPromptWorker:
 		_, err := within(h.ctx, OpLimit, func(c context.Context) (struct{}, error) {
 			if h.setReconnect(name, false) {
-				if err := ReconnectMcp(c, session, name); err != nil {
+				if _, err := ReconnectMcp(c, session, name); err != nil {
 					// Nothing was typed: the next prompt tries again.
 					h.setReconnect(name, true)
 					return struct{}{}, err

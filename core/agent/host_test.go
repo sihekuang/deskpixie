@@ -303,6 +303,40 @@ func TestTheFirstPromptWaitsForTheReconnectToFinish(t *testing.T) {
 	})
 }
 
+// #188: herdr restores a coordinator pane on its own, as plain `claude --resume <id>`, without
+// the app's --mcp-config. Adopted, it has no pixie server to reconnect: it is replaced by one
+// this run starts (same conversation), and the prompt goes to that one, without waiting out
+// McpReconnectWait.
+func TestAnAdoptedCoordinatorWithoutThePixieServerIsReplaced(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		h, fake := adoptedRig(t)
+		began := time.Now()
+		done := make(chan error, 1)
+		go func() { done <- h.PromptCoordinator(t.Context(), "first") }()
+		synctest.Wait()
+		fake.SetScreen(Coordinator, "❯ /mcp reconnect pixie\n  ⎿  MCP server \"pixie\" not found\n❯")
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		if waited := time.Since(began); waited >= McpReconnectWait {
+			t.Fatal("waited out the reconnect", waited)
+		}
+		starts := fake.Starts()
+		if len(starts) != 2 || !slices.Contains(starts[1].Args, "--continue") {
+			t.Fatalf("not replaced with --continue: %+v", starts)
+		}
+		if got, want := coordinatorPrompts(fake), []string{McpReconnect, "first"}; !slices.Equal(got, want) {
+			t.Fatalf("got %q; want %q", got, want)
+		}
+		if err := h.PromptCoordinator(t.Context(), "second"); err != nil {
+			t.Fatal(err)
+		}
+		if len(fake.Starts()) != 2 || coordinatorPrompts(fake)[2] != "second" {
+			t.Fatal(fake.Starts(), coordinatorPrompts(fake))
+		}
+	})
+}
+
 // A reconnect whose result never shows holds the prompt McpReconnectWait at most.
 func TestAReconnectThatNeverAnswersHoldsThePromptOnlySoLong(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {

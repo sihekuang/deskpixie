@@ -229,60 +229,93 @@ const McpReconnectWait = 5 * time.Second
 // coordinator was adopted from an earlier run and this is its first prompt since (#168).
 func (h *AgentHost) PromptCoordinator(ctx context.Context, text string) error {
 	if h.reconnectMcp.Swap(false) {
-		if err := ReconnectMcp(ctx, h.host, Coordinator); err != nil {
+		missing, err := ReconnectMcp(ctx, h.host, Coordinator)
+		if err != nil {
 			// Nothing was typed: the next prompt tries again.
 			h.reconnectMcp.Store(true)
 			return err
+		}
+		if missing {
+			// Not started by an earlier run of the app: herdr restored the pane by itself,
+			// without --mcp-config (#188). Replace it with one of ours, same conversation.
+			log.Print("agent: the adopted coordinator has no pixie MCP server; replacing it")
+			if err := h.replaceAdopted(ctx); err != nil {
+				return err
+			}
 		}
 	}
 	return h.host.Prompt(ctx, Coordinator, text)
 }
 
-// ReconnectMcp types McpReconnect into agent (a Claude Code agent adopted from an earlier run)
-// and waits for its result, McpReconnectWait at most. An error means nothing was typed.
-func ReconnectMcp(ctx context.Context, host SessionHost, agent string) error {
-	seen, _ := reconnectsOnScreen(ctx, host, agent)
-	if err := host.Prompt(ctx, agent, McpReconnect); err != nil {
+// replaceAdopted replaces the adopted coordinator with one this run starts, resuming its
+// conversation (a fresh one if that start fails at once, as in EnsureCoordinator).
+func (h *AgentHost) replaceAdopted(ctx context.Context) error {
+	select {
+	case h.ensuring <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	defer func() { <-h.ensuring }()
+	_, err := h.launch(ctx, true, true)
+	if IsHostError(err, HostExitedAtStart) {
+		_, err = h.launch(ctx, true, false)
+	}
+	if err != nil {
+		h.resumeEarlierRun.Store(false)
 		return err
 	}
-	awaitReconnect(ctx, host, agent, seen)
+	focusQuietly(ctx, h.host, Coordinator)
 	return nil
 }
 
-// reconnectsOnScreen is how many McpReconnect commands agent's screen shows, and whether the
-// last one has its result line ("Successfully reconnected to pixie" or "Failed to reconnect to
-// pixie"). The screen is read as one line, however the pane wrapped it.
-func reconnectsOnScreen(ctx context.Context, host SessionHost, agent string) (int, bool) {
+// ReconnectMcp types McpReconnect into agent (a Claude Code agent adopted from an earlier run)
+// and waits for its result, McpReconnectWait at most. missing: its Claude Code has no pixie
+// server at all (`MCP server "pixie" not found`). An error means nothing was typed.
+func ReconnectMcp(ctx context.Context, host SessionHost, agent string) (missing bool, err error) {
+	seen, _, _ := reconnectsOnScreen(ctx, host, agent)
+	if err := host.Prompt(ctx, agent, McpReconnect); err != nil {
+		return false, err
+	}
+	return awaitReconnect(ctx, host, agent, seen), nil
+}
+
+// reconnectsOnScreen is how many McpReconnect commands agent's screen shows, whether the last
+// one has its result line ("Successfully reconnected to pixie", "Failed to reconnect to pixie"
+// or `MCP server "pixie" not found`), and whether that result is the last. The screen is read
+// as one line, however the pane wrapped it.
+func reconnectsOnScreen(ctx context.Context, host SessionHost, agent string) (n int, done, missing bool) {
 	screen, err := host.Read(ctx, agent, 40)
 	if err != nil {
-		return 0, false
+		return 0, false, false
 	}
 	flat := strings.Join(strings.Fields(screen), " ")
 	i := strings.LastIndex(flat, McpReconnect)
 	if i < 0 {
-		return 0, false
+		return 0, false, false
 	}
-	return strings.Count(flat, McpReconnect), strings.Contains(flat[i+len(McpReconnect):], " to "+McpServer)
+	after := flat[i+len(McpReconnect):]
+	missing = strings.Contains(after, `MCP server "`+McpServer+`" not found`)
+	return strings.Count(flat, McpReconnect), missing || strings.Contains(after, " to "+McpServer), missing
 }
 
 // awaitReconnect waits (McpReconnectWait at most) for the McpReconnect just typed into agent to
 // show its result: Claude Code drops what is typed while the command runs. seen is how many the screen
 // showed before, so an earlier reconnect's result, still there before this one shows, doesn't
-// count.
-func awaitReconnect(ctx context.Context, host SessionHost, agent string, seen int) {
+// count. True when the result says agent has no pixie server.
+func awaitReconnect(ctx context.Context, host SessionHost, agent string, seen int) bool {
 	deadline := time.Now().Add(McpReconnectWait)
 	for {
-		if n, done := reconnectsOnScreen(ctx, host, agent); n > seen && done {
-			return
+		if n, done, missing := reconnectsOnScreen(ctx, host, agent); n > seen && done {
+			return missing
 		}
 		if !time.Now().Before(deadline) {
 			log.Printf("agent: no result from %s's MCP reconnect; prompting anyway", agent)
-			return
+			return false
 		}
 		select {
 		case <-time.After(200 * time.Millisecond):
 		case <-ctx.Done():
-			return
+			return false
 		}
 	}
 }
