@@ -326,7 +326,8 @@ func TestBridgeEmitNeverBlocks(t *testing.T) {
 	for i := 0; i < 100000; i++ {
 		e.emit(voice.UIEvent{Kind: "mouth", Level: i % 4})
 	}
-	if el := time.Since(start); el > 2*time.Second {
+	// Locally ~30ms; the bound catches a block, not a slow shared CI runner (#193).
+	if el := time.Since(start); el > 10*time.Second {
 		t.Errorf("emit took %v", el)
 	}
 }

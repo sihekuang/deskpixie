@@ -1028,7 +1028,10 @@ func TestANewRequestListsPixiesRunningWorker(t *testing.T) {
 		r := withJob(t, true)
 		okValue(t, call(r, Coordinator, startCall("focus")))
 		// The coordinator ends its turn on job 1 while the worker runs; job 2 is typed next.
+		// Stop first, then Idle: an Idle that beats the Stop waits out StopSettleMs, which this
+		// rig's clock never reaches (#193).
 		r.h.Deliver(HookEvent{Kind: HookStop, Agent: Coordinator, Message: `<spoken ref="job_000000000001" status="working">Started a worker.</spoken>`})
+		settle()
 		r.host.SetStatus(Coordinator, PaneIdle)
 		settle()
 		invoke(t, Delegate{H: r.h}, `{"task":"is the upload fix done?"}`)
