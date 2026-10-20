@@ -89,17 +89,18 @@ notarize() {
 # sometimes drops the connection ("The network connection was lost", exit 68) right after
 # notarization. stapler staple checks the ticket it attaches, so there's no separate
 # `stapler validate` (another lookup that can drop); Gatekeeper checks both files at the end.
-# Five tries, 60 s apart.
+# The ticket is already issued, so each try only asks for it again: every 15 s, for up to
+# 20 minutes (one drop lasted over 5 minutes on a runner).
 staple() {
-  local file="$1" try
-  for try in 1 2 3 4 5; do
-    if xcrun stapler staple "$file"; then
-      return 0
+  local file="$1" try=1 deadline=$((SECONDS + 1200))
+  until xcrun stapler staple "$file"; do
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      err "stapling $file: Apple's ticket server kept failing for 20 minutes"
     fi
-    echo "stapling $file failed (try $try of 5)"
-    [ "$try" -lt 5 ] && sleep 60
+    echo "stapling $file failed (try $try), trying again in 15 s"
+    try=$((try + 1))
+    sleep 15
   done
-  err "stapling $file"
 }
 
 # notarized TYPE FILE [ARGS]: Gatekeeper accepts FILE as notarized (not just Developer ID signed).
