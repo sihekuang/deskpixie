@@ -5,7 +5,25 @@ import UserNotifications
 @MainActor
 public protocol NotificationSink: AnyObject {
     func post(title: String, body: String) async
+    /// A notification about a bubble line (#199): clicked, it does what a click on the line does.
+    func post(title: String, body: String, update: UpdateLine) async
     func playGlass()
+}
+
+extension NotificationSink {
+    public func post(title: String, body: String, update: UpdateLine) async {
+        await post(title: title, body: body)
+    }
+}
+
+/// What a notification says (#199): a bubble line's short form when it is about one (its title,
+/// else the event's; its brief, else its text), as the bubble shows it.
+public enum NotificationText {
+    public static func of(title: String, body: String, update: UpdateLine?) -> (title: String, body: String) {
+        guard let update else { return (title, body) }
+        let t = update.title.flatMap { $0.isEmpty ? nil : $0 } ?? title
+        return (t, update.shownText)
+    }
 }
 
 /// Handles the engine's `notify` event: system notification + optional Glass sound.
@@ -20,10 +38,17 @@ public final class Notifier {
     }
 
     public func handle(_ event: EngineEvent) {
-        guard case let .notify(title, body, sound) = event else { return }
+        guard case let .notify(title, body, sound, update) = event else { return }
         if sound == "glass" { sink.playGlass() }
         let sink = self.sink
-        pending.append(Task { await sink.post(title: title, body: body) })
+        let text = NotificationText.of(title: title, body: body, update: update)
+        pending.append(Task {
+            if let update {
+                await sink.post(title: text.title, body: text.body, update: update)
+            } else {
+                await sink.post(title: title, body: body)
+            }
+        })
     }
 
     /// Await all in-flight posts (tests).
@@ -60,6 +85,34 @@ public final class SystemNotificationSink: NotificationSink {
         try? await UNUserNotificationCenter.current().add(req)
     }
 
+    public func post(title: String, body: String, update: UpdateLine) async {
+        guard await authorized() else { return }
+        let content = Self.content(title: title, body: body)
+        if let data = try? JSONEncoder().encode(update), let json = String(data: data, encoding: .utf8) {
+            content.userInfo = [Self.updateKey: json]
+        }
+        let req = UNNotificationRequest(identifier: Self.identifier(update: update.id), content: content, trigger: nil)
+        try? await UNUserNotificationCenter.current().add(req)
+    }
+
+    /// The notification of bubble line `id`: removed when the line is dismissed in the bubble.
+    public nonisolated static func identifier(update id: UInt64) -> String { "update-\(id)" }
+
+    /// userInfo key holding the bubble line (JSON).
+    public nonisolated static let updateKey = "update"
+
+    /// The line a notification carries, if any.
+    public nonisolated static func update(from userInfo: [AnyHashable: Any]) -> UpdateLine? {
+        guard let json = userInfo[updateKey] as? String else { return nil }
+        return try? JSONDecoder().decode(UpdateLine.self, from: Data(json.utf8))
+    }
+
+    /// The lines left the bubble (clicked or cleared): their notifications go too.
+    public nonisolated static func removeNotifications(updates ids: [UInt64]) {
+        guard !ids.isEmpty else { return }
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ids.map { identifier(update: $0) })
+    }
+
     /// The chime for `sound: "glass"` (MacNotifier's `afplay` file).
     public static let glassPath = "/System/Library/Sounds/Glass.aiff"
 
@@ -90,6 +143,33 @@ public final class ForegroundPresenter: NSObject, UNUserNotificationCenterDelega
     @MainActor
     public static func install(on center: UNUserNotificationCenter) {
         center.delegate = shared
+    }
+
+    /// A click on a notification about a bubble line (#199): set by the app to do what a click
+    /// on the line does. A click before it is set (the app still starting) waits for it.
+    @MainActor public static var onOpenUpdate: ((UpdateLine) -> Void)? {
+        didSet {
+            guard let onOpenUpdate, let line = waitingOpen else { return }
+            waitingOpen = nil
+            onOpenUpdate(line)
+        }
+    }
+    @MainActor private static var waitingOpen: UpdateLine?
+
+    @MainActor static func open(_ line: UpdateLine) {
+        if let onOpenUpdate { onOpenUpdate(line) } else { waitingOpen = line }
+    }
+
+    public func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        if response.actionIdentifier == UNNotificationDefaultActionIdentifier,
+           let line = SystemNotificationSink.update(from: response.notification.request.content.userInfo) {
+            Task { @MainActor in Self.open(line) }
+        }
+        completionHandler()
     }
 
     public func userNotificationCenter(

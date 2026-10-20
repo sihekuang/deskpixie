@@ -120,11 +120,21 @@ var (
 	eOpen      = Effect{Kind: EfOpenConversation}
 )
 
+// plain drops a notification's bubble line (#199): tests that care check it on its own.
+func plain(fx []Effect) []Effect {
+	out := make([]Effect, len(fx))
+	for i, e := range fx {
+		e.Update = nil
+		out[i] = e
+	}
+	return out
+}
+
 func effectsEqual(a, b []Effect) bool {
 	if len(a) == 0 && len(b) == 0 {
 		return true
 	}
-	return reflect.DeepEqual(a, b)
+	return reflect.DeepEqual(plain(a), plain(b))
 }
 
 func wantEffects(t *testing.T, got []Effect, want ...Effect) {
@@ -142,8 +152,8 @@ func wantNone(t *testing.T, got []Effect, why ...string) {
 }
 
 func contains(fx []Effect, e Effect) bool {
-	for _, f := range fx {
-		if reflect.DeepEqual(f, e) {
+	for _, f := range plain(fx) {
+		if reflect.DeepEqual(f, plain([]Effect{e})[0]) {
 			return true
 		}
 	}

@@ -135,10 +135,17 @@ final class UpdatesBubbleController {
     /// A click on a line: it is dismissed (counts as seen, #194), and its pane comes up — your
     /// session's own tab, else its app, else the job's pane.
     private func clicked(_ line: UpdateLine) {
-        if model.dismiss(line.id) {
-            call("agent.updatesSeen", SeenArgs(ids: [line.id]))
-            render()
+        // Sent even when the bubble no longer lists it (a notification clicked later, #199).
+        if model.dismiss(line.id) { render() }
+        if !line.offersDecision, !line.offersOptions {
+            call("agent.updatesSeen", SeenArgs(ids: [line.id], clicked: true))
         }
+        SystemNotificationSink.removeNotifications(updates: [line.id])
+        focus(line)
+    }
+
+    /// Brings up the line's pane: your session's own tab, else its app, else the job's pane.
+    private func focus(_ line: UpdateLine) {
         if let session = line.session, !session.isEmpty {
             call("agent.focusSession", FocusSessionArgs(name: session))
         } else if let app = line.app {
@@ -146,6 +153,13 @@ final class UpdatesBubbleController {
         } else {
             call("agent.focusJob", FocusJobArgs(job: line.job ?? "", worker: line.worker ?? ""))
         }
+    }
+
+    /// A click on a line's Mac notification (#199): as a click on the line. An old notification
+    /// whose id now names another line (ids can repeat across restarts) only brings up its pane.
+    func openFromNotification(_ line: UpdateLine) {
+        guard model.isStale(line) else { return clicked(line) }
+        focus(line)
     }
 
     // MARK: Poll
@@ -210,7 +224,8 @@ final class UpdatesBubbleController {
             onClearAll: { [weak self] in
                 guard let self else { return }
                 let ids = self.model.dismissAll()
-                if !ids.isEmpty { self.call("agent.updatesSeen", SeenArgs(ids: ids)) }
+                if !ids.isEmpty { self.call("agent.updatesSeen", SeenArgs(ids: ids, clicked: true)) }
+                SystemNotificationSink.removeNotifications(updates: ids)
                 self.render()
             },
             onDecide: { [weak self] token, allow in
@@ -280,7 +295,7 @@ final class UpdatesBubbleController {
     private static var now: TimeInterval { ProcessInfo.processInfo.systemUptime }
 
     private struct UpdatesReply: Decodable { var lines: [UpdateLine] }
-    private struct SeenArgs: Encodable, Sendable { let ids: [UInt64] }
+    private struct SeenArgs: Encodable, Sendable { let ids: [UInt64]; var clicked = false }
     private struct DecideArgs: Encodable, Sendable { let token: String; let allow: Bool }
     private struct ChooseArgs: Encodable, Sendable { let token: String; let option: Int }
     private struct FocusJobArgs: Encodable, Sendable { let job: String; let worker: String }

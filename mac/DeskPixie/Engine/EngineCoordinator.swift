@@ -531,6 +531,8 @@ final class EngineCoordinator {
         let b = UpdatesBubbleController(engine: engine, worker: worker, pixie: m)
         b.onTalk = { [weak self] in self?.talk() }
         bubble = b
+        // A click on an update's Mac notification does what a click on its bubble line does (#199).
+        ForegroundPresenter.onOpenUpdate = { [weak self] line in self?.bubble?.openFromNotification(line) }
         let p = PresenceMonitor()
         presence = p
         applyBubbleSettings(settings)

@@ -34,10 +34,18 @@ const Chime = "/System/Library/Sounds/Glass.aiff"
 type Notifier struct {
 	runner agent.CommandRunner
 	notify func(title, body string)
+	// notifyUpdate: a notification about a bubble line (#199); nil falls back to notify.
+	notifyUpdate func(title, body string, update any)
 }
 
 func NewNotifier(runner agent.CommandRunner, notify func(title, body string)) *Notifier {
 	return &Notifier{runner: runner, notify: notify}
+}
+
+// WithUpdates sets the notification about a bubble line (#199).
+func (n *Notifier) WithUpdates(notifyUpdate func(title, body string, update any)) *Notifier {
+	n.notifyUpdate = notifyUpdate
+	return n
 }
 
 func (n *Notifier) Chime() {
@@ -51,6 +59,14 @@ func (n *Notifier) Notify(title, body string) {
 	if n.notify != nil {
 		n.notify(title, body)
 	}
+}
+
+func (n *Notifier) NotifyUpdate(title, body string, update agent.UpdateItem) {
+	if n.notifyUpdate == nil {
+		n.Notify(title, body)
+		return
+	}
+	n.notifyUpdate(title, body, update)
 }
 
 // pixieCue: Happy → Pixie celebrates, Error → Pixie flashes the error state.

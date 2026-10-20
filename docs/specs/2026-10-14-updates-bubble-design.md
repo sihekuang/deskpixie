@@ -17,7 +17,10 @@ conversation, and jump to the job's pane in one click; nothing pops or speaks wh
 - Separate floating window beside Bit (not drawn inside Bit's panel, not macOS notifications).
 - Lifecycle: brief pop (~6 s), then a badge; hover/click expands the bubble.
 - Clicking a line marks it seen (and brings up its pane); "Clear all" marks every line seen
-  except questions still waiting on you. Merely viewing the bubble marks nothing (#198).
+  except questions. Merely viewing the bubble marks nothing (#198). A job's question goes when
+  clicked (its job still waits); only Allow/Deny or option questions stay until answered (#199).
+- A Mac notification about a line shows its short form; clicking it does what clicking the
+  line does, and dismissing the line removes its notification (#199).
 - Seen = heard: Bit doesn't replay seen updates at the next conversation. Exception: a question
   still waiting for an answer is still raised.
 - Only active while `agent.openConversationForUpdates` is off (Bit isn't speaking updates itself).

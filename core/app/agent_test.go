@@ -29,6 +29,7 @@ type fakeAgent struct {
 	hooks           AgentHooks
 	cfg             settings.Config
 	seen            [][]uint64
+	dismissed       [][]uint64
 	decided         []string
 	away            []bool
 	focused         [][2]string
@@ -67,6 +68,11 @@ func (f *fakeAgent) Shutdown() { f.mu.Lock(); f.shut++; f.mu.Unlock() }
 func (f *fakeAgent) UpdatesSeen(ids []uint64) {
 	f.mu.Lock()
 	f.seen = append(f.seen, ids)
+	f.mu.Unlock()
+}
+func (f *fakeAgent) UpdatesDismissed(ids []uint64) {
+	f.mu.Lock()
+	f.dismissed = append(f.dismissed, ids)
 	f.mu.Unlock()
 }
 func (f *fakeAgent) Choose(token string, option int) {
@@ -257,6 +263,7 @@ func TestTheUpdatesBubbleCallsReachTheAgent(t *testing.T) {
 	f := &fakeAgent{}
 	h := newHarness(t, withAgent(f))
 	h.call("agent.updatesSeen", map[string]any{"ids": []uint64{1, 2}})
+	h.call("agent.updatesSeen", map[string]any{"ids": []uint64{3}, "clicked": true})
 	h.call("presence.set", map[string]any{"away": true})
 	h.call("presence.set", map[string]any{"away": false})
 	h.call("agent.focusJob", map[string]any{"job": "job_000000000001", "worker": "focus-upload"})
@@ -265,6 +272,9 @@ func TestTheUpdatesBubbleCallsReachTheAgent(t *testing.T) {
 	defer f.mu.Unlock()
 	if len(f.seen) != 1 || !slices.Equal(f.seen[0], []uint64{1, 2}) {
 		t.Fatal(f.seen)
+	}
+	if len(f.dismissed) != 1 || !slices.Equal(f.dismissed[0], []uint64{3}) {
+		t.Fatal(f.dismissed, "a click (#199) dismisses")
 	}
 	if !slices.Equal(f.away, []bool{true, false}) {
 		t.Fatal(f.away)

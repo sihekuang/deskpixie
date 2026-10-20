@@ -229,10 +229,13 @@ func New(d Deps) (*App, error) {
 			// Action emits settings.changed after the menu id that calls this.
 			ClearModel: func() { a.save(func(c *settings.Config) { c.Agent.Model = nil }) },
 			Notify:     func(title, body string) { a.emit("notify", map[string]any{"title": title, "body": body}) },
-			Updates:    func(items any) { a.emit("updates", map[string]any{"lines": items}) },
-			Roster:     func(view any) { a.emit("agents", map[string]any{"roster": view}) },
-			ShowPane:   func(job, worker string) { a.emit("showPane", map[string]any{"job": job, "worker": worker}) },
-			Focus:      func(plan any) { a.emit("focusPlan", map[string]any{"plan": plan}) },
+			NotifyUpdate: func(title, body string, update any) {
+				a.emit("notify", map[string]any{"title": title, "body": body, "update": update})
+			},
+			Updates:  func(items any) { a.emit("updates", map[string]any{"lines": items}) },
+			Roster:   func(view any) { a.emit("agents", map[string]any{"roster": view}) },
+			ShowPane: func(job, worker string) { a.emit("showPane", map[string]any{"job": job, "worker": worker}) },
+			Focus:    func(plan any) { a.emit("focusPlan", map[string]any{"plan": plan}) },
 		})
 	}
 	a.buildVoice(cfg)
@@ -1136,11 +1139,17 @@ func (a *App) Register(r Registrar) {
 	r.Register("agent.updatesSeen", func(args json.RawMessage) (any, error) {
 		var in struct {
 			IDs []uint64 `json:"ids"`
+			// Clicked: the user clicked them away (a line or its notification, #199).
+			Clicked bool `json:"clicked"`
 		}
 		if err := decodeArgs("agent.updatesSeen", args, &in); err != nil {
 			return nil, err
 		}
-		if a.agent != nil {
+		switch {
+		case a.agent == nil:
+		case in.Clicked:
+			a.agent.UpdatesDismissed(in.IDs)
+		default:
 			a.agent.UpdatesSeen(in.IDs)
 		}
 		return struct{}{}, nil

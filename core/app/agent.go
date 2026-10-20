@@ -29,6 +29,9 @@ type AgentHooks struct {
 	ClearModel func()
 	// Notify shows a macOS notification (no sound: the agent chimes on its own).
 	Notify func(title, body string)
+	// NotifyUpdate is Notify for a bubble line (#199): the shell's click on it does what a click
+	// on the line does. update is the line (agent.UpdateItem).
+	NotifyUpdate func(title, body string, update any)
 	// Updates is the updates bubble's list (the `updates` event's lines; never nil).
 	Updates func(items any)
 	// Roster is the roster beside Pixie (the `agents` event's roster), on every change (#91).
@@ -64,6 +67,8 @@ type Agent interface {
 	Choose(token string, option int)
 	// UpdatesSeen: the updates bubble showed these lines long enough to count as heard.
 	UpdatesSeen(ids []uint64)
+	// UpdatesDismissed: the user clicked these lines away (#199): a job's question goes too.
+	UpdatesDismissed(ids []uint64)
 	// Updates is the bubble's current list (the `updates` event's lines), for the shell's first
 	// read: the event may go out before the shell's bubble exists. An empty list, never nil.
 	Updates() any

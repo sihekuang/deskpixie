@@ -50,7 +50,7 @@ func (c *AgentController) bubbleItems() []UpdateItem {
 		if !pending && (l.Token != nil || l.Delivered || c.settings.OpenConversation) {
 			continue
 		}
-		item := UpdateItem{ID: l.ID, Text: l.Text, Kind: l.Kind, At: l.At, Job: l.Job, Worker: l.Worker, App: l.App, Session: l.Session, Title: l.Title, Brief: l.Brief, Asking: l.Asking, Note: l.Note}
+		item := updateItem(l)
 		if l.Token != nil {
 			if item.Brief == "" {
 				item.Brief = QuestionBrief(l.Text)
@@ -61,6 +61,29 @@ func (c *AgentController) bubbleItems() []UpdateItem {
 		items = append(items, item)
 	}
 	return items
+}
+
+func updateItem(l OutboxLine) UpdateItem {
+	return UpdateItem{ID: l.ID, Text: l.Text, Kind: l.Kind, At: l.At, Job: l.Job, Worker: l.Worker, App: l.App,
+		Session: l.Session, Title: l.Title, Brief: l.Brief, Asking: l.Asking, Note: l.Note}
+}
+
+// attachNotification: line was just added to the outbox; the notification Route sent for it
+// in this step gets its bubble line, so a click on it does what a click on the line does
+// (#199). It relies on Route's order: the Notify comes before the Outbox delivery of the same
+// line, and each earlier one was attached at its own push (Update set).
+func (c *AgentController) attachNotification(fx []Effect, line Line) {
+	n := len(c.outbox.lines)
+	if n == 0 {
+		return
+	}
+	for i := len(fx) - 1; i >= 0; i-- {
+		if fx[i].Kind == EfNotify && fx[i].Update == nil && fx[i].Text == line.Text {
+			item := updateItem(c.outbox.lines[n-1])
+			fx[i].Update = &item
+			return
+		}
+	}
 }
 
 // Updates is the bubble's current list, for a shell that missed the last `updates` event (it
@@ -81,15 +104,19 @@ func (c *AgentController) syncUpdates(fx *[]Effect) {
 	*fx = append(*fx, Effect{Kind: EfUpdates, Value: items})
 }
 
-// updatesSeen: the bubble was looked at: those lines count as heard, except a question still
-// waiting for its answer (a pending permission, or a job still in question).
-func (c *AgentController) updatesSeen(ids []uint64, fx *[]Effect) {
+// updatesSeen: lines were seen in the bubble: they count as heard, except a question still
+// waiting for its answer (a pending permission, or a job still in question). Clicked away by
+// the user (#199), a job's question goes too: only a pending permission keeps its buttons.
+func (c *AgentController) updatesSeen(ids []uint64, clicked bool, fx *[]Effect) {
 	keep := func(l OutboxLine) bool {
 		if l.Kind != LineQuestion {
 			return false
 		}
 		if l.Token != nil {
 			return c.confirms.IsPendingToken(*l.Token)
+		}
+		if clicked {
+			return false
 		}
 		j, ok := c.jobs.Get(l.Job)
 		return ok && j.Status == JobQuestion

@@ -285,3 +285,35 @@ func TestAPermissionQuestionAskedDuringAConversationIsListed(t *testing.T) {
 		t.Fatalf("%+v", got)
 	}
 }
+
+// #199: a job's question, clicked away, leaves the bubble while its job still waits; only seen,
+// it stays.
+func TestAJobsQuestionClickedAwayLeavesTheBubble(t *testing.T) {
+	c := workingOnJob1()
+	items, _ := lastUpdates(t, stop(c, questionStop, T0))
+	c.Step(UpdatesSeenInput([]uint64{items[0].ID}), T0+1000)
+	if len(c.Updates()) != 1 {
+		t.Fatal("seen only: it stays")
+	}
+	c.Step(UpdatesDismissedInput([]uint64{items[0].ID}), T0+2000)
+	if got := c.Updates(); len(got) != 0 {
+		t.Fatalf("%+v", got)
+	}
+}
+
+// #199: the notification for a line carries that line, so a click on it can do what a click
+// on the line does.
+func TestANotificationCarriesItsBubbleLine(t *testing.T) {
+	c := workingOnJob1()
+	fx := stop(c, doneStop, T0)
+	items, _ := lastUpdates(t, fx)
+	var notes []Effect
+	for _, e := range fx {
+		if e.Kind == EfNotify {
+			notes = append(notes, e)
+		}
+	}
+	if len(notes) != 1 || notes[0].Update == nil || notes[0].Update.ID != items[0].ID || notes[0].Update.Job != job(1) {
+		t.Fatalf("%+v", notes)
+	}
+}
