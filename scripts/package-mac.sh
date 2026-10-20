@@ -14,7 +14,7 @@
 #
 # Flow (Apple's): check every Mach-O has Developer ID + hardened runtime + timestamp, notarize the
 # zipped .app and staple it, build the .dmg (app + /Applications symlink) from the stapled app,
-# sign the dmg, notarize and staple it, then stapler validate + spctl assess both. A rejected
+# sign the dmg, notarize and staple it, then spctl assess both as notarized. A rejected
 # submission prints Apple's `notarytool log` and fails.
 #
 # Outputs: prints dmg=<path> and zip=<path>; also appended to $GITHUB_OUTPUT when set.
@@ -85,19 +85,30 @@ notarize() {
   fi
 }
 
-# staple FILE: staple the ticket and validate it, retrying: the ticket lookup at Apple
-# (api.apple-cloudkit.com) sometimes drops the connection ("The network connection was lost",
-# exit 68) right after notarization. Three tries, 30 s apart.
+# staple FILE: staple the ticket, retrying: the ticket lookup at Apple (api.apple-cloudkit.com)
+# sometimes drops the connection ("The network connection was lost", exit 68) right after
+# notarization. stapler staple checks the ticket it attaches, so there's no separate
+# `stapler validate` (another lookup that can drop); Gatekeeper checks both files at the end.
+# Five tries, 60 s apart.
 staple() {
   local file="$1" try
-  for try in 1 2 3; do
-    if xcrun stapler staple "$file" && xcrun stapler validate "$file"; then
+  for try in 1 2 3 4 5; do
+    if xcrun stapler staple "$file"; then
       return 0
     fi
-    echo "stapling $file failed (try $try of 3)"
-    [ "$try" -lt 3 ] && sleep 30
+    echo "stapling $file failed (try $try of 5)"
+    [ "$try" -lt 5 ] && sleep 60
   done
   err "stapling $file"
+}
+
+# notarized TYPE FILE [ARGS]: Gatekeeper accepts FILE as notarized (not just Developer ID signed).
+notarized() {
+  local type="$1" file="$2" out
+  shift 2
+  out=$(spctl --assess --type "$type" -v "$@" "$file" 2>&1) || err "Gatekeeper rejected $file: $out"
+  echo "$out"
+  echo "$out" | grep -q "source=Notarized Developer ID" || err "$file isn't notarized: $out"
 }
 
 if [ "$NOTARIZE" = "true" ]; then
@@ -121,8 +132,8 @@ if [ "$NOTARIZE" = "true" ]; then
   # 3. Notarize and staple the dmg, then check both with Gatekeeper.
   notarize "$DMG"
   staple "$DMG"
-  spctl --assess --type open --context context:primary-signature -v "$DMG"
-  spctl --assess --type execute -v "$APP"
+  notarized open "$DMG" --context context:primary-signature
+  notarized execute "$APP"
 fi
 
 ditto -c -k --keepParent --sequesterRsrc "$APP" "$ZIP"
