@@ -3,7 +3,6 @@ package agent
 import (
 	"reflect"
 	"regexp"
-	"strings"
 )
 
 // The updates bubble (spec docs/specs/2026-10-14-updates-bubble-design.md): the outbox's
@@ -54,7 +53,7 @@ func (c *AgentController) bubbleItems() []UpdateItem {
 		item := UpdateItem{ID: l.ID, Text: l.Text, Kind: l.Kind, At: l.At, Job: l.Job, Worker: l.Worker, App: l.App, Session: l.Session, Title: l.Title, Brief: l.Brief, Asking: l.Asking, Note: l.Note}
 		if l.Token != nil {
 			if item.Brief == "" {
-				item.Brief = QuestionBrief(l.Text, "")
+				item.Brief = QuestionBrief(l.Text)
 			}
 			item.Token = *l.Token
 			item.Options = c.confirms.OptionsOf(*l.Token)
@@ -145,22 +144,14 @@ func (c *AgentController) FocusTarget(job JobID, worker string) string {
 	return Coordinator
 }
 
-// bubbleHow is how a question says to answer it aloud or in the bubble: the bubble's own
-// buttons make it noise there (#197).
-var bubbleHow = regexp.MustCompile(`\s*(Say confirm \S+(, or choose in the bubble)?\.|Choose in the bubble\.|Allow or deny it in the bubble\.|Pick .+ in the bubble\.)\s*$`)
+// bubbleHow is how a coordinator question says to answer it aloud or in the bubble: the
+// bubble's own buttons make it noise there (#197).
+var bubbleHow = regexp.MustCompile(`\s*(Say confirm \S+(, or choose in the bubble)?\.|Choose in the bubble\.|Allow or deny it in the bubble\.)\s*$`)
 
-// QuestionBrief is the bubble's short form of a question (#197): without how to answer it, and
-// without its asker's label (shown as the title) when label is given.
-func QuestionBrief(text, label string) string {
+// QuestionBrief is the bubble's short form of a question with buttons (#197): without how to
+// answer it. "" when there is nothing to leave out (the bubble shows the text).
+func QuestionBrief(text string) string {
 	brief := bubbleHow.ReplaceAllString(text, "")
-	if label != "" {
-		for _, p := range []string{label + " is asking: ", label + ": ", label + " "} {
-			if rest, ok := strings.CutPrefix(brief, p); ok {
-				brief = strings.TrimPrefix(rest, "is ")
-				break
-			}
-		}
-	}
 	if brief == text || brief == "" {
 		return ""
 	}

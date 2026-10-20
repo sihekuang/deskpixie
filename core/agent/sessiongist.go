@@ -210,8 +210,6 @@ func capGist(s string) string {
 	return strings.TrimRight(cut, " ,;:") + "…"
 }
 
-// SessionTurnLine is what Pixie says of a finished turn: done with its gist, asking its
-// question, or just finished when the reply had nothing readable.
 // OutdatedRetellMs: a session's older pix is told again only after this long, across app runs.
 const OutdatedRetellMs Millis = 6 * 60 * 60 * 1000
 
@@ -245,6 +243,8 @@ func OutdatedBrief(tool string) string {
 	return "Older pix: restart with pix " + tool + " --resume."
 }
 
+// SessionTurnLine is what Pixie says of a finished turn: done with its gist, asking its
+// question, or just finished when the reply had nothing readable.
 func SessionTurnLine(label, gist string, asking bool) string {
 	switch {
 	case gist == "":

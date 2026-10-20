@@ -30,11 +30,14 @@ struct UpdatesBubbleView: View {
     static func width(for lines: [UpdateLine]) -> CGFloat {
         let callout = NSFont.preferredFont(forTextStyle: .callout)
         let small = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
-        let mono = NSFont.monospacedSystemFont(ofSize: NSFont.preferredFont(forTextStyle: .caption1).pointSize, weight: .regular)
+        let caption = NSFont.preferredFont(forTextStyle: .caption1).pointSize
+        let title = NSFont.systemFont(ofSize: caption, weight: .semibold)
+        let mono = NSFont.monospacedSystemFont(ofSize: caption, weight: .regular)
         func one(_ s: String, _ f: NSFont) -> CGFloat { (s as NSString).size(withAttributes: [.font: f]).width }
         var need: CGFloat = 0
         for l in lines where l.kind == "question" {
             need = max(need, one(l.shownText, callout) + 48)                       // icon, row and bubble padding
+            if let t = l.title { need = max(need, one(t, title) + 48) }
             for o in l.options ?? [] { need = max(need, one(o, small) + 52) } // button and bubble padding
             for n in (l.note ?? "").split(separator: "\n") { need = max(need, one(String(n), mono) + 48) }
         }

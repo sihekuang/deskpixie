@@ -151,15 +151,16 @@ func (o *Outbox) MarkSeen(ids []uint64, keep func(OutboxLine) bool) []string {
 	return records
 }
 
-// Repeats marks the undelivered lines saying what line says (same kind and text, no confirm
-// word) delivered: told again, only the newest stays in the bubble (#194). Returns the jsonl
+// Repeats marks the undelivered lines saying what line says about the same job, worker and
+// session (same kind and text, no confirm word) delivered: told again, only the newest stays in the bubble (#194). Returns the jsonl
 // records to append.
 func (o *Outbox) Repeats(line Line) []string {
 	if line.Token != nil {
 		return nil
 	}
 	return o.MarkDeliveredWhere(func(l OutboxLine) bool {
-		return l.Token == nil && l.Kind == line.Kind && l.Text == line.Text
+		return l.Token == nil && l.Kind == line.Kind && l.Text == line.Text &&
+			l.Job == line.Job && l.Worker == line.Worker && l.Session == line.Session
 	})
 }
 

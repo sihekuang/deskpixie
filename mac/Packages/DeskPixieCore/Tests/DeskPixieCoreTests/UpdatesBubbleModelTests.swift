@@ -113,6 +113,14 @@ final class UpdatesBubbleModelTests: XCTestCase {
         XCTAssertEqual(m.count, 1)
     }
 
+    func testAJobsQuestionIsNotDismissedByAClick() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        let ask = UpdateLine(id: 1, text: "Which branch?", kind: "question", at: 1, job: "job_1", worker: nil)
+        m.apply([ask], now: 1, pop: .allowed)
+        XCTAssertFalse(m.dismiss(1))
+        XCTAssertEqual(m.count, 1)
+    }
+
     func testAQuestionWithButtonsIsNotDismissedByAClick() {
         var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
         m.apply([question(1, "hawk")], now: 1, pop: .allowed)

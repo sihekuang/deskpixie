@@ -258,11 +258,12 @@ public struct UpdatesBubbleModel: Sendable {
     }
 
     /// A click on a line (#194): it leaves the bubble and counts as seen, so the caller sends its
-    /// id to `agent.updatesSeen`. A question with buttons stays until it is answered. Returns
-    /// whether the line was dismissed.
+    /// id to `agent.updatesSeen`. A question with buttons, or a job's question (the core keeps it
+    /// while the job waits), stays until it is answered. Returns whether the line was dismissed.
     public mutating func dismiss(_ id: UInt64) -> Bool {
         guard let line = display.first(where: { $0.id == id }),
-              !line.offersDecision, !line.offersOptions else { return false }
+              !line.offersDecision, !line.offersOptions,
+              !(line.kind == "question" && line.job != nil) else { return false }
         dismissed.insert(id)
         lines.removeAll { $0.id == id }
         frozen?.removeAll { $0.id == id }

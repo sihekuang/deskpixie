@@ -589,8 +589,15 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 				label := maskPendingTokens(o.Label, c.pendingTokens())
 				text := OutdatedLine(label, o.Tool)
 				if !c.outbox.ToldSince(text, satSub(now, OutdatedRetellMs)) {
-					c.deliverUpdate(Line{Kind: LineSession, App: o.App, Session: ev.Agent, Text: text,
-						Title: label, Brief: OutdatedBrief(o.Tool)}, now, &fx)
+					line := Line{Kind: LineSession, App: o.App, Session: ev.Agent, Text: text,
+						Title: label, Brief: OutdatedBrief(o.Tool)}
+					before := c.outbox.Len()
+					c.deliverUpdate(line, now, &fx)
+					// Said in a conversation or held by the cap, it never reached the outbox: kept
+					// there as heard, so the next run knows it was told.
+					if c.outbox.Len() == before {
+						fx = append(fx, Effect{Kind: EfAppend, File: OutboxFile, Line: c.outbox.PushHeard(line, now)})
+					}
 				}
 			}
 		case ev.Kind == PaneEventQuestion || ev.Kind == PaneEventQuestionGone:
