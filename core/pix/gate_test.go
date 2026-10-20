@@ -252,6 +252,7 @@ var startupReplies = []string{
 	"\x1b[?62;22;52c", "\x1b[>1;10;0c", "\x1b[?5u", "\x1b[?0u",
 	"\x1bP>|WarpTerminal(v0.2026.10.14)\x1b\\", "\x1b]7501;1\x07", "\x1b]11;rgb:1e1e/1e1e/1e1e\x1b\\",
 	"\x1b[?2026;2$y", "\x1b[24;1R",
+	"\x1b_Gi=31;OK\x1b\\", // Warp's answer to Claude Code asking whether it can draw images (#185)
 }
 
 // TestGateIgnoresTerminalReplies (#181): the terminal answering Claude Code's startup
@@ -303,5 +304,23 @@ func TestGateReadsKittyEnter(t *testing.T) {
 		if !g.Clear(t0.Add(2 * time.Second)) {
 			t.Fatalf("%q: a /command sent with kitty Enter left the gate shut", enter)
 		}
+	}
+}
+
+// TestGateAfterWarpsStartupReplies (#185): Warp's replies exactly as pix logged them on Oct 20.
+// The image reply ("Gi=31;OK", an APC string) counted as 10 typed characters, and its closing
+// backslash made your next Enter a line continuation; the gate then waited for a turn that
+// never came, and Pixie's message was held.
+func TestGateAfterWarpsStartupReplies(t *testing.T) {
+	var g Gate
+	t0 := time.Unix(100, 0)
+	g.Keys([]byte("\x1bP>|Warp(v0.2026.10.14.08.27.stable_01)\x1b\\\x1b[?5u\x1b[?62c"), t0)
+	g.Keys([]byte("\x1b[?2026;2$y\x1b_Gi=31;OK\x1b\\\x1b[?62c"), t0)
+	if !g.Clear(t0) {
+		t.Fatalf("shut by Warp's replies: %s", g.State())
+	}
+	g.Keys([]byte("\r"), t0.Add(time.Second)) // Enter on an empty box: no turn follows
+	if !g.Clear(t0.Add(3 * time.Second)) {
+		t.Fatalf("an Enter on an empty box shut the gate: %s", g.State())
 	}
 }

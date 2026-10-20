@@ -88,11 +88,12 @@ func (g *Gate) Keys(b []byte, now time.Time) {
 // losing focus (ESC[I, ESC[O), and SGR mouse reports (ESC[<b;x;yM or m), which fullscreen
 // Claude Code asks for on every mouse move. And its answers to what an agent asks it at
 // startup (#181): device attributes (ESC[?…c, ESC[>…c), keyboard protocol flags (ESC[?…u), a
-// mode report (ESC[?…$y), the cursor position (ESC[row;colR), and DCS and OSC strings (its
-// version, colors, Warp's own queries).
+// mode report (ESC[?…$y), the cursor position (ESC[row;colR), DCS and OSC strings (its
+// version, colors, Warp's own queries), and APC, PM and SOS strings (whether it can draw
+// images, #185).
 var terminalReports = regexp.MustCompile(`\x1b\[[IO]|\x1b\[<\d+;\d+;\d+[Mm]` +
 	`|\x1b\[[?>][\d;]*c|\x1b\[\?\d*u|\x1b\[\?[\d;]*\$y|\x1b\[\d+;\d+R` +
-	`|\x1bP[^\x1b]*\x1b\\|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)`)
+	`|\x1b[P_^X][^\x1b]*\x1b\\|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)`)
 
 func withoutReports(b []byte) []byte { return terminalReports.ReplaceAll(b, nil) }
 
