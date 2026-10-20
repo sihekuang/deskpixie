@@ -151,6 +151,7 @@ const (
 	InChoose                               // Token, Option: a tap on a session menu's option in the updates bubble (#105)
 	InSessionAnswerFailed                  // Name, Text: EfAnswerSession could not be typed (#105)
 	InSubmit                               // Agent, Message: a Claude agent took a prompt (its UserPromptSubmit hook); Message is the prompt
+	InSessionSent                          // Name, Text: the coordinator's message_session reached your session Name, described Text (#177)
 )
 
 // Input is one stimulus for AgentController.Step. Build it with the *Input constructors.
@@ -270,6 +271,9 @@ func PresenceInput(away bool) Input       { return Input{Kind: InPresence, Away:
 func ModeInput(agent, mode string) Input  { return Input{Kind: InMode, Agent: agent, Mode: mode} }
 func SubmitInput(agent, prompt string) Input {
 	return Input{Kind: InSubmit, Agent: agent, Message: prompt}
+}
+func SessionSentInput(name, description string) Input {
+	return Input{Kind: InSessionSent, Name: name, Text: description}
 }
 func WorkerScreenInput(name, text string) Input {
 	return Input{Kind: InWorkerScreen, Name: name, Text: text}
@@ -416,6 +420,9 @@ type AgentController struct {
 	// which is dropped rather than notified if it bounces).
 	injected []injectedNotice
 	shutDown bool
+	// handedOff: jobs whose request the coordinator passed to one of your sessions, which Pixie
+	// has already told you (#177); true while it has done nothing else since.
+	handedOff map[JobID]bool
 	// sessionSeq numbers session prompts' request ids (#105).
 	sessionSeq uint64
 	// restartAt: when the coordinator is started again after an exit or a failed start (#118);
@@ -442,18 +449,19 @@ type AgentController struct {
 
 func NewAgentController(settings Settings) *AgentController {
 	return &AgentController{
-		router:   NewRouter(settings.NotifyPerMinute),
-		confirms: NewConfirmations(settings.PermissionTimeoutMs),
-		narrator: NewNarrator(NarrateIntervalMs),
-		updates:  NewUpdatesWith(settings.UpdateQuietMs),
-		settings: settings,
-		jobs:     NewJobTable(),
-		inbox:    NewInbox(),
-		outbox:   NewOutbox(),
-		memories: NewMemoryLog(),
-		workers:  NewWorkers(),
-		opener:   newOpener(settings.NotifyPerMinute),
-		modes:    map[string]bool{},
+		router:    NewRouter(settings.NotifyPerMinute),
+		confirms:  NewConfirmations(settings.PermissionTimeoutMs),
+		narrator:  NewNarrator(NarrateIntervalMs),
+		updates:   NewUpdatesWith(settings.UpdateQuietMs),
+		settings:  settings,
+		jobs:      NewJobTable(),
+		inbox:     NewInbox(),
+		outbox:    NewOutbox(),
+		memories:  NewMemoryLog(),
+		workers:   NewWorkers(),
+		handedOff: map[JobID]bool{},
+		opener:    newOpener(settings.NotifyPerMinute),
+		modes:     map[string]bool{},
 	}
 }
 
@@ -579,6 +587,8 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 		if in.Agent == Coordinator {
 			c.onSubmit(in.Message, now, &fx)
 		}
+	case InSessionSent:
+		c.onSessionSent(in.Text, now, &fx)
 	case InStop:
 		if in.Agent == Coordinator {
 			c.onStop(in.Message, now, &fx)
@@ -1339,9 +1349,13 @@ func (c *AgentController) onReply(id JobID, status SpokenStatus, text string, no
 		_, _ = c.jobs.Transition(id, JobDone, now)
 		c.jobs.SetReply(id, text, now)
 		c.saveJob(id, fx)
+		repeats := c.handedOff[id]
 		c.forgetUpdates(id)
 		c.denyPendingFor(id, "The job ended.", fx)
 		c.stopJobWorkers(id, fx)
+		if repeats {
+			break // #177: Pixie said the hand-off already; this only repeats it
+		}
 		if c.deliverOpening(NewJobLine(LineReply, text, id), now, fx) {
 			*fx = append(*fx, Effect{Kind: EfCue, Cue: CueHappy})
 		}
@@ -1499,7 +1513,31 @@ func (c *AgentController) resumeJob(job JobID, now Millis, fx *[]Effect) {
 
 // ---------- narration, ticks ----------
 
+// onSessionSent: the request in flight went to one of your sessions (#177). Pixie says so now
+// rather than after the coordinator writes its reply; it stays the coordinator's job until then.
+// With several requests in flight, which one it was isn't known: the reply tells.
+func (c *AgentController) onSessionSent(description string, now Millis, fx *[]Effect) {
+	refs := unique(c.inbox.InFlightRefs())
+	if len(refs) != 1 || !c.jobs.IsOpen(refs[0]) {
+		return
+	}
+	job := refs[0]
+	text := "Passed on to your session."
+	if d := oneLine(description); d != "" {
+		text = "Passed on to your session on " + strings.TrimSuffix(d, ".") + "."
+	}
+	c.handedOff[job] = true
+	c.jobs.SetProgress(job, text, now)
+	c.saveJob(job, fx)
+	c.deliverOpening(NewJobLine(LineReply, maskPendingTokens(text, c.pendingTokens()), job), now, fx)
+}
+
 func (c *AgentController) onPostTool(toolName string, toolInput any, now Millis, fx *[]Effect) {
+	for _, job := range c.inbox.InFlightRefs() {
+		if c.handedOff[job] {
+			c.handedOff[job] = false // more work since: its reply is news
+		}
+	}
 	phrase, ok := Phrase(toolName, toolInput)
 	if !ok {
 		return
@@ -1590,6 +1628,7 @@ func (c *AgentController) deliverUpdate(line Line, now Millis, fx *[]Effect) {
 }
 
 func (c *AgentController) forgetUpdates(job JobID) {
+	delete(c.handedOff, job)
 	c.narrator.Forget(job)
 	c.updates.Supersede(job)
 }

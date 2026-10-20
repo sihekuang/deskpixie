@@ -470,3 +470,17 @@ func TestCoordinatorAsksWhichSessionAndOnlyClaimsSentMessages(t *testing.T) {
 		}
 	}
 }
+
+// #177: the coordinator's effort setting becomes Claude Code's --effort or Codex's
+// model_reasoning_effort; "" passes nothing (the agent decides).
+func TestEffortArgsFollowTheCoordinatorAgent(t *testing.T) {
+	if got := EffortArgs(agent.Claude, "low"); !reflect.DeepEqual(got, []string{"--effort", "low"}) {
+		t.Fatal(got)
+	}
+	if got := EffortArgs(agent.Codex, "medium"); !reflect.DeepEqual(got, []string{"-c", `model_reasoning_effort="medium"`}) {
+		t.Fatal(got)
+	}
+	if got := EffortArgs(agent.Claude, " "); got != nil {
+		t.Fatal("blank is none:", got)
+	}
+}

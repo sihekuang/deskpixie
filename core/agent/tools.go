@@ -168,7 +168,7 @@ func (FocusSessionTool) Description() string {
 
 func (FocusSessionTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{` +
-		`"name":{"type":"string","description":"The session's name exactly as listed, e.g. the part before the colon."}},` +
+		`"name":{"type":"string","description":"The session's name as listed (the part before the first colon); its project or a few words of its description also work when only one session fits."}},` +
 		`"required":["name"],"additionalProperties":false}`)
 }
 
@@ -176,8 +176,9 @@ func (f FocusSessionTool) Invoke(ctx context.Context, raw json.RawMessage) voice
 	name := textArg(decodeArgs(raw), "name")
 	var err error = LaunchError("name is required")
 	if name != "" {
-		if err = f.H.FocusSession(ctx, name); err == nil {
-			return toolReply(map[string]any{"name": name, "status": "shown"})
+		var shown string
+		if shown, err = f.H.ShowSession(ctx, name); err == nil {
+			return toolReply(map[string]any{"name": shown, "status": "shown"})
 		}
 	}
 	// The sessions as they are now, so Pixie can ask which one.

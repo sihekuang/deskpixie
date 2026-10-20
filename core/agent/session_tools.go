@@ -235,7 +235,7 @@ func RequestNote(sessions []SessionRow, workers []WorkerRow, task func(JobID) st
 		}
 		b.WriteString("\n")
 	}
-	b.WriteString("Hand this on in this order: a session on the same thing (message_session), else a worker on it (message_worker), else do it yourself.")
+	b.WriteString("Hand this on in this order: a session working in the same project or repo, questions about it too (message_session), else a worker on it (message_worker), else do it yourself.")
 	return b.String()
 }
 

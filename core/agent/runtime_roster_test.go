@@ -22,12 +22,15 @@ type rosterRig struct {
 	launcher *agenttest.FakePlanner
 	focus    *agenttest.FakeFocusSink
 	sessions *agenttest.FakeSessionPlanner
+	voice    *agenttest.RecordingVoiceLink
 }
 
 type pixFake struct {
 	*agenttest.FakeSessionHost
 	ch  chan struct{}
 	ctx context.Context
+	// about: a session's repo and description, by name (none: repo "api", no description).
+	about map[string][2]string
 }
 
 // endingSubscribe is the fake's event stream that closes when ctx ends: the fake never closes
@@ -68,6 +71,9 @@ func (p *pixFake) List(ctx context.Context) ([]AgentInfo, error) {
 	for i := range l {
 		l[i].Origin = OriginUser
 		l[i].User = &UserSession{Tool: "claude", Repo: "api", Where: "iTerm", App: "com.googlecode.iterm2", Reachable: true, Pid: 4242}
+		if a, ok := p.about[l[i].Name]; ok {
+			l[i].User.Repo, l[i].User.Description = a[0], a[1]
+		}
 	}
 	return l, err
 }
@@ -111,13 +117,13 @@ func newRosterRig(t *testing.T, warm bool) *rosterRig {
 // newRosterRigWith is the rig with the primary wrapped by wrap.
 func newRosterRigWith(t *testing.T, warm bool, wrap func(*primaryFake) SessionHost) *rosterRig {
 	host := agenttest.NewFakeSessionHost().ManualTurns()
-	user := &pixFake{agenttest.NewFakeSessionHost(), make(chan struct{}, 1), t.Context()}
+	user := &pixFake{FakeSessionHost: agenttest.NewFakeSessionHost(), ch: make(chan struct{}, 1), ctx: t.Context()}
 	r := &rosterRig{host: host, user: user, roster: &agenttest.RecordingRoster{}, launcher: &agenttest.FakePlanner{}, focus: &agenttest.FakeFocusSink{},
-		sessions: &agenttest.FakeSessionPlanner{Plan: FocusPlan{FocusURLs: []string{"warp://session/abc"}}}}
+		sessions: &agenttest.FakeSessionPlanner{Plan: FocusPlan{FocusURLs: []string{"warp://session/abc"}}}, voice: &agenttest.RecordingVoiceLink{}}
 	clock := agenttest.ClockAt(1_000_000)
 	deps := Deps{
 		Host:  NewAgentHost(NewCompositeHost(wrap(&primaryFake{host, t.Context()}), user), clock, CoordinatorRecipe{Cwd: "/data/agent/workspace"}),
-		Voice: &agenttest.RecordingVoiceLink{}, Notifier: &agenttest.RecordingNotifier{}, Pixie: &agenttest.RecordingNotifier{},
+		Voice: r.voice, Notifier: &agenttest.RecordingNotifier{}, Pixie: &agenttest.RecordingNotifier{},
 		Status: &agenttest.RecordingStatus{}, Planner: r.launcher, Sessions: r.sessions, Focus: r.focus, TerminalDir: "/home/me/Projects",
 		Store: &agenttest.MemStore{}, Clock: clock, IDs: &agenttest.SeqIds{}, Updates: &agenttest.RecordingUpdates{},
 		Roster: r.roster,

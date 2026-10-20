@@ -242,8 +242,9 @@ type Conversation struct {
 	hoRepliedAt time.Time       // Pixie's reply to this turn finished
 	hoPending   int             // hand-offs running (counted in pendingTools too)
 	hoTurn      uint64          // the user turn the last hand-off was for
-	// endAfterNotice: a hand-off asked to end the conversation once Pixie has said its notice.
-	endAfterNotice bool
+	// endAfterNotice: why the conversation ends once Pixie has said the next notice ("" = it
+	// doesn't): an app hand-off with its notice, or a hand-off a notice came in during (#177).
+	endAfterNotice string
 	hoHistory      []string // earlier turns, "User: …" / "Pixie: …", for the delegate's context
 
 	// The claim check (#72) shares the per-turn state and the once-per-turn guard above.
@@ -453,7 +454,7 @@ func (c *Conversation) Step(in Input, now time.Time) []Effect {
 			// Ends like a delegate call, unless the user has started a new turn or is talking.
 			if in.EndAfter && c.turn == c.hoTurn && !(c.phase == PhaseListening && c.silenceSince.IsZero()) {
 				if in.Notice.Text != "" {
-					c.endAfterNotice = true
+					c.endAfterNotice = "after the app's hand-off"
 				} else {
 					c.ending, c.endWhy = true, "after the app's hand-off"
 				}
@@ -674,6 +675,14 @@ func (c *Conversation) checkTurnEnd(now time.Time, fx []Effect) []Effect {
 		c.ending, c.endWhy = false, ""
 		c.followUpUntil = now.Add(FollowUpWindow)
 	}
+	if c.ending && c.endWhy == "after a hand-off" && len(c.injects) > 0 {
+		// #177: a reply came in while Pixie said its hand-off line: say it now, then end,
+		// rather than close and open a new conversation for it.
+		c.ending, c.endWhy, c.endAfterNotice = false, "", "after a hand-off"
+		c.thinkingSince = time.Time{}
+		c.listen(now)
+		return c.tryInject(now, append(fx, pixieFx(StateListening)))
+	}
 	if c.ending {
 		return c.end(fx, false, c.endingWhy())
 	}
@@ -697,9 +706,9 @@ func (c *Conversation) tryInject(now time.Time, fx []Effect) []Effect {
 	if asksQuestion(n.Text) {
 		c.questionAsked = true
 	}
-	if c.endAfterNotice {
-		c.endAfterNotice = false
-		c.ending, c.endWhy = true, "after the app's hand-off" // once Pixie has said it
+	if c.endAfterNotice != "" {
+		c.ending, c.endWhy = true, c.endAfterNotice // once Pixie has said it
+		c.endAfterNotice = ""
 	}
 	if strings.HasPrefix(n.Text, coordinatorReplyPrefix) && c.checksOpen > 0 {
 		c.checksOpen--
@@ -805,7 +814,7 @@ const (
 
 // newHandOffTurn starts a user turn: the last turn's words become history.
 func (c *Conversation) newHandOffTurn() {
-	c.endAfterNotice = false
+	c.endAfterNotice = ""
 	if c.hoUser != "" {
 		c.hoHistory = append(c.hoHistory, "User: "+clip(c.hoUser))
 	}

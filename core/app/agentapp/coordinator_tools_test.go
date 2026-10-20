@@ -224,7 +224,8 @@ func TestTheCoordinatorPromptHandsARequestOnInTheOrderGiven(t *testing.T) {
 			last = at
 		}
 		for _, rule := range []string{"lists your open pix sessions and Pixie's running workers", "DeskPixie or yourself",
-			"committed, pushed or built", "or whether a change", "without warnings they didn't give",
+			"committed, merged, pushed, released, built or deployed", "or whether a change", "over first, without looking yourself",
+			"even when its description is about another task", "without warnings they didn't give",
 			"ask the person first", "already allowed you to change", "with no list under it, call `list_sessions`"} {
 			if !strings.Contains(md, rule) {
 				t.Errorf("coordinator.md does not mention %q", rule)
@@ -290,7 +291,8 @@ func TestTheCoordinatorAnswersFromMemoryOrHandsItOn(t *testing.T) {
 // sent; left "working", the app's nudges turned into made-up questions for the person.
 func TestARequestHandedToASessionIsDoneOnceSent(t *testing.T) {
 	for _, md := range []string{RenderClaudeMd("/data/canvas", ""), RenderClaudeMd("/data/canvas", "/Users/x/code")} {
-		if !strings.Contains(md, "once `message_session` returns `\"status\": \"sent\"`, reply `status=\"done\"`") {
+		if !strings.Contains(md, "once `message_session` returns `\"status\": \"sent\"`, the app tells the person at once") ||
+			!strings.Contains(md, "End your turn right away with a short `status=\"done\"` block") {
 			t.Error("coordinator.md doesn't close a request handed to a session")
 		}
 	}
