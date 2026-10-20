@@ -347,6 +347,28 @@ func (s *Session) command(m wire.Msg) wire.Msg {
 		s.flushSoon()
 		s.keylog("prompt waiting: status=%s %s", s.currentStatus(), s.gate.State())
 		return wire.Msg{Status: "waiting", Reason: s.waitReason()}
+	case "flush":
+		// "Send it anyway" (#187): type what waits even if the gate thinks you're typing. A
+		// working agent gets it with its next tool; a question on screen is never typed into.
+		if st := s.currentStatus(); st != "idle" && s.queue.Len() > 0 {
+			return wire.Msg{Status: "waiting", Reason: st}
+		}
+		s.flushMu.Lock()
+		msgs := s.queue.Drain()
+		for _, m := range msgs {
+			if err := s.runner.WriteToAgent(Paste(m)); err != nil {
+				s.flushMu.Unlock()
+				return wire.Msg{Err: err.Error()}
+			}
+		}
+		s.flushMu.Unlock()
+		s.gate.Sent() // whatever it counted went in with the message
+		s.title()
+		s.keylog("flush: typed %d", len(msgs))
+		if len(msgs) > 0 {
+			s.delivered()
+		}
+		return wire.Msg{Status: "typed"}
 	case "keys":
 		s.clearQuestion() // an Escape from Pixie dismisses the prompt
 		for _, k := range m.Keys {

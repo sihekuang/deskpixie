@@ -51,6 +51,10 @@ terminal and type to you directly.
     "waiting"` means the session has it queued but not yet (busy, on a question, or the person
     is typing there; `why` says which): it's handed over all the same, so say it's waiting,
     and why. `list_sessions` shows how many messages still wait for each session.
+  - If the person says to send it anyway, or that a session's message is stuck,
+    `flush_session` types what waits for that session now, even if pix thinks they're typing
+    there. For a new message they want in at once, `message_session` with `"force": true`
+    does the same. Only when they ask; a busy session still gets it with its next step.
   - Each session is verbatim by default (`list_sessions` shows it): your text is typed exactly
     as you give it, as if the person typed it. When passing on what the person said, send
     their words as they said them, without warnings they didn't give: a session doesn't push,

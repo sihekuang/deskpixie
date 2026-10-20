@@ -184,10 +184,12 @@ func TestParseSessionTools(t *testing.T) {
 		{"close_session", map[string]any{"name": "focus-claude"}, agent.McpCall{Kind: agent.CallCloseSession, Name: "focus-claude"}},
 		{"describe_session", map[string]any{"name": "focus-claude", "text": " login\nbug "}, agent.McpCall{Kind: agent.CallDescribeSession, Name: "focus-claude", Text: "login bug"}},
 		{"describe_session", map[string]any{"name": "focus-claude"}, agent.McpCall{Kind: agent.CallDescribeSession, Name: "focus-claude"}},
+		{"flush_session", map[string]any{"name": "focus-claude"}, agent.McpCall{Kind: agent.CallFlushSession, Name: "focus-claude"}},
+		{"message_session", map[string]any{"name": "focus-claude", "text": "hi", "force": true}, agent.McpCall{Kind: agent.CallMessageSession, Name: "focus-claude", Text: "hi", Force: true}},
 	}
 	for _, c := range cases {
 		got, err := agent.ParseToolCall(agent.RoleCoordinator, c.name, c.args)
-		if err != nil || got.Kind != c.want.Kind || got.Name != c.want.Name || got.Text != c.want.Text || got.Verbatim != c.want.Verbatim {
+		if err != nil || got.Kind != c.want.Kind || got.Name != c.want.Name || got.Text != c.want.Text || got.Verbatim != c.want.Verbatim || got.Force != c.want.Force {
 			t.Errorf("%s: %+v %v", c.name, got, err)
 		}
 	}
@@ -285,6 +287,9 @@ type deliveringFake struct {
 	*userFake
 	delivery agent.Delivery
 	waiting  int
+	// flush_session (#187)
+	flushResult agent.Delivery
+	flushed     []string
 }
 
 func (d *deliveringFake) PromptDelivery(ctx context.Context, name, text string) (agent.Delivery, error) {
@@ -335,5 +340,33 @@ func TestMessageSessionSaysWhenTheMessageWaits(t *testing.T) {
 	r := agent.SessionToolForTest(ctx, c, agent.McpCall{Kind: agent.CallListSessions})
 	if rows := r.Value.(map[string]any)["sessions"].([]agent.SessionRow); rows[0].Waiting != 2 {
 		t.Fatalf("%+v", rows)
+	}
+}
+
+func (d *deliveringFake) Flush(ctx context.Context, name string) (agent.Delivery, error) {
+	d.flushed = append(d.flushed, name)
+	return d.flushResult, nil
+}
+
+// #187: "send it anyway": flush_session sends a session's waiting messages in, and
+// message_session with force sends the new one in at once.
+func TestFlushSessionAndForcedMessages(t *testing.T) {
+	_, user, primary := newSessionHarness(t)
+	d := &deliveringFake{userFake: user, delivery: agent.Delivery{Status: "waiting", Reason: "typing"}, flushResult: agent.Delivery{Status: "typed"}}
+	c := agent.NewCompositeHost(primary, d)
+	ctx := context.Background()
+	r := agent.SessionToolForTest(ctx, c, agent.McpCall{Kind: agent.CallFlushSession, Name: "focus-claude"})
+	if v, _ := r.Value.(map[string]any); r.Err != nil || v["status"] != "sent" || len(d.flushed) != 1 {
+		t.Fatalf("flush: %v %v %v", r.Value, r.Err, d.flushed)
+	}
+	r = agent.SessionToolForTest(ctx, c, agent.McpCall{Kind: agent.CallMessageSession, Name: "focus-claude", Text: "hi", Force: true})
+	if v, _ := r.Value.(map[string]any); r.Err != nil || v["status"] != "sent" || len(d.flushed) != 2 {
+		t.Fatalf("forced: %v %v %v", r.Value, r.Err, d.flushed)
+	}
+	// A working session still gets it with its next step: flush says it waits, and why.
+	d.flushResult = agent.Delivery{Status: "waiting", Reason: "working"}
+	r = agent.SessionToolForTest(ctx, c, agent.McpCall{Kind: agent.CallFlushSession, Name: "focus-claude"})
+	if v, _ := r.Value.(map[string]any); v["status"] != "waiting" || v["reason"] != "working" {
+		t.Fatalf("flush while working: %v", r.Value)
 	}
 }

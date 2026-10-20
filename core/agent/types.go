@@ -643,6 +643,7 @@ const (
 	CallCloseSession
 	CallDescribeSession
 	CallSetSessionVerbatim
+	CallFlushSession
 	CallCreateProject
 )
 
@@ -657,6 +658,7 @@ type McpCall struct {
 	Name     string
 	Text     string
 	Verbatim bool // SetSessionVerbatim only (#143): the session's new setting.
+	Force    bool // MessageSession only (#187): send it in now, with what waits, past the typing gate.
 	Summary  string
 	Outcome  Outcome
 	Evidence string

@@ -1044,3 +1044,25 @@ func TestAPromptYouSubmittedOpensTheGateHoweverEnterWasSent(t *testing.T) {
 	h.s.runner.Hangup()
 	h.s.finish()
 }
+
+// "Send it anyway" (#187): flush types what waits even while the gate thinks you're typing; a
+// working agent still gets it with its next tool, and a question on screen is never typed into.
+func TestFlushTypesWhatWaitsDespiteTheGate(t *testing.T) {
+	h := newHarness(t, "codex", Launch{Path: "/bin/sh", Args: []string{"-c", "read x; echo seen:$x; sleep 30"}})
+	h.stdinW.WriteString("half a sent") // the gate holds the message
+	time.Sleep(100 * time.Millisecond)
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "from pixie"})
+	waitEvent(t, h.d.events, "waiting", func(m wire.Msg) bool { return m.ID == "1" && m.Status == "waiting" })
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "2", Command: "flush"})
+	waitEvent(t, h.d.events, "flushed", func(m wire.Msg) bool { return m.ID == "2" && m.Status == "typed" })
+	if h.s.queue.Len() != 0 {
+		t.Fatalf("still queued: %d", h.s.queue.Len())
+	}
+	h.s.setStatus("working")
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "3", Command: "prompt", Text: "later"})
+	waitEvent(t, h.d.events, "waiting: working", func(m wire.Msg) bool { return m.ID == "3" && m.Reason == "working" })
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "4", Command: "flush"})
+	waitEvent(t, h.d.events, "still waiting: working", func(m wire.Msg) bool { return m.ID == "4" && m.Status == "waiting" && m.Reason == "working" })
+	h.s.runner.Hangup()
+	h.s.finish()
+}

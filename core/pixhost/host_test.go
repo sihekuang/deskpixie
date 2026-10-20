@@ -635,3 +635,30 @@ func TestPromptDeliverySaysTypedOrWaitingAndCountsTheWaiting(t *testing.T) {
 		}
 	}
 }
+
+// #187: Flush asks pix to type what waits; an older pix that doesn't know flush says so plainly.
+func TestFlushSaysTypedOrWhyItStillWaits(t *testing.T) {
+	h, sock := newHost(t)
+	p, r := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api"})
+	flush := func(res wire.Msg) (agent.Delivery, error) {
+		t.Helper()
+		go func() {
+			m, _ := p.dec.Next()
+			if m.Command != "flush" {
+				t.Errorf("command %q", m.Command)
+			}
+			res.Kind, res.ID = wire.KindResult, m.ID
+			wire.Encode(p.c, res)
+		}()
+		return h.Flush(context.Background(), r.Address)
+	}
+	if d, err := flush(wire.Msg{Status: "typed"}); err != nil || d.Status != "typed" {
+		t.Fatalf("%+v %v", d, err)
+	}
+	if d, err := flush(wire.Msg{Status: "waiting", Reason: "working"}); err != nil || d != (agent.Delivery{Status: "waiting", Reason: "working"}) {
+		t.Fatalf("%+v %v", d, err)
+	}
+	if _, err := flush(wire.Msg{Err: "unknown command flush"}); err == nil || !strings.Contains(err.Error(), "restart it") {
+		t.Fatalf("old pix: %v", err)
+	}
+}

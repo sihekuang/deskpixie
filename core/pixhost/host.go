@@ -2,6 +2,7 @@ package pixhost
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -469,6 +470,18 @@ func (h *Host) PromptDelivery(ctx context.Context, name, text string) (agent.Del
 		}
 		h.mu.Unlock()
 		h.changed()
+	}
+	return agent.Delivery{Status: r.Status, Reason: r.Reason}, nil
+}
+
+// Flush has pix type session name's waiting messages now, past its typing gate (#187).
+func (h *Host) Flush(ctx context.Context, name string) (agent.Delivery, error) {
+	r, err := h.commandResult(ctx, name, wire.Msg{Command: "flush"})
+	if he, ok := err.(agent.HostError); ok && he.Detail == "unknown command flush" { // a pix from before #187
+		return agent.Delivery{}, errors.New("This session's pix can't send waiting messages in; restart it to update pix.")
+	}
+	if err != nil {
+		return agent.Delivery{}, err
 	}
 	return agent.Delivery{Status: r.Status, Reason: r.Reason}, nil
 }
