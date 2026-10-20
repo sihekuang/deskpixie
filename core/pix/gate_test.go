@@ -324,3 +324,28 @@ func TestGateAfterWarpsStartupReplies(t *testing.T) {
 		t.Fatalf("an Enter on an empty box shut the gate: %s", g.State())
 	}
 }
+
+// #187: the gate keeps the text of your draft while it can follow it, so a forced message can set
+// it aside and put it back.
+func TestGateKeepsYourDraft(t *testing.T) {
+	var g Gate
+	t0 := time.Unix(100, 0)
+	g.Keys([]byte("fix the héader"), t0)
+	g.Keys([]byte{0x7f, 0x7f}, t0)
+	g.Keys([]byte("\x1b[200~ and\nfooter\x1b[201~"), t0) // a paste
+	if d, ok := g.Draft(); !ok || d != "fix the héad and\nfooter" {
+		t.Fatalf("%q %t", d, ok)
+	}
+	g.Keys([]byte("\x1b[D"), t0) // an arrow: pix can't follow the line any more
+	if _, ok := g.Draft(); ok {
+		t.Fatal("known after an arrow key")
+	}
+	g.Keys([]byte{0x03}, t0)
+	if d, ok := g.Draft(); !ok || d != "" {
+		t.Fatalf("after Ctrl-C: %q %t", d, ok)
+	}
+	g.Restore("put back")
+	if d, ok := g.Draft(); !ok || d != "put back" || g.Clear(t0.Add(time.Hour)) {
+		t.Fatalf("restored: %q %t clear=%t", d, ok, g.Clear(t0.Add(time.Hour)))
+	}
+}

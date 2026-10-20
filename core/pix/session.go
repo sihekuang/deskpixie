@@ -128,6 +128,46 @@ func (s *Session) newWork(prompt string) {
 	s.title()
 }
 
+// forceIn types msgs past the typing gate, as one prompt (#187), without taking your draft
+// with it. Claude Code stashes the draft (Ctrl-S) and puts it back by itself once the prompt is
+// sent, whatever pix knows of it. Elsewhere pix deletes the draft it followed, sends, and types
+// it back; a draft it couldn't follow (after an arrow key) is sent along with the message.
+func (s *Session) forceIn(msgs []string) error {
+	if len(msgs) == 0 {
+		return nil
+	}
+	prompt := Paste(strings.Join(msgs, "\n\n"))
+	draft, known := s.gate.Draft()
+	empty := known && draft == ""
+	switch {
+	case empty:
+		return s.runner.WriteToAgent(prompt)
+	case s.o.tool == "claude":
+		if err := s.runner.WriteToAgent([]byte{0x13}); err != nil { // Ctrl-S: stash
+			return err
+		}
+		time.Sleep(forceSettle)
+		return s.runner.WriteToAgent(prompt)
+	case known:
+		del := []byte(strings.Repeat("\x7f", utf8.RuneCountInString(draft)))
+		if err := s.runner.WriteToAgent(del); err != nil {
+			return err
+		}
+		time.Sleep(forceSettle)
+		if err := s.runner.WriteToAgent(prompt); err != nil {
+			return err
+		}
+		time.Sleep(forceSettle)
+		s.gate.Restore(draft)
+		return s.runner.WriteToAgent([]byte("\x1b[200~" + draft + "\x1b[201~"))
+	}
+	s.gate.Sent() // what it couldn't follow went in with the message
+	return s.runner.WriteToAgent(prompt)
+}
+
+// forceSettle lets the agent take one write before the next when pix sets your draft aside.
+var forceSettle = 300 * time.Millisecond
+
 // keylog appends a line to the file DESKPIXIE_PIX_KEYLOG names (unset: nothing), to see what
 // reaches the typing gate and what it makes of it.
 func (s *Session) keylog(format string, args ...any) {
@@ -355,14 +395,11 @@ func (s *Session) command(m wire.Msg) wire.Msg {
 		}
 		s.flushMu.Lock()
 		msgs := s.queue.Drain()
-		for _, m := range msgs {
-			if err := s.runner.WriteToAgent(Paste(m)); err != nil {
-				s.flushMu.Unlock()
-				return wire.Msg{Err: err.Error()}
-			}
+		if err := s.forceIn(msgs); err != nil {
+			s.flushMu.Unlock()
+			return wire.Msg{Err: err.Error()}
 		}
 		s.flushMu.Unlock()
-		s.gate.Sent() // whatever it counted went in with the message
 		s.title()
 		s.keylog("flush: typed %d", len(msgs))
 		if len(msgs) > 0 {

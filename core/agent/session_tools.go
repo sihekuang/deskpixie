@@ -36,7 +36,7 @@ func SessionCatalog() []map[string]any {
 		},
 		{
 			"name":        "flush_session",
-			"description": "Send a session's waiting messages in now, when the user says to send it anyway (\"push it through\", \"it's stuck\"): pix types them even if it thinks the user is typing there. A busy session still gets them with its next step.",
+			"description": "Send a session's waiting messages in now, when the user says to send it anyway (\"push it through\", \"it's stuck\"): pix types them even if it thinks the user is typing there, setting the user's unsent text aside and putting it back. A busy session still gets them with its next step.",
 			"inputSchema": objectSchema(stringProps(name), "name"),
 		},
 		{

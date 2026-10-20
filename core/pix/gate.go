@@ -21,10 +21,11 @@ const TypingQuiet = 1500 * time.Millisecond
 // agent starts the turn (Started); a /command or an empty line needs no turn.
 type Gate struct {
 	mu       sync.Mutex
-	pending  int  // runes typed since the last Enter (backspace takes one off)
-	unsure   bool // a key we can't follow (arrows, other controls): wait for Enter or Ctrl-C
-	awaiting bool // Enter on a line with text: shut until the turn starts
-	slash    bool // the line began with /
+	pending  int    // runes typed since the last Enter (backspace takes one off)
+	draft    []rune // what they are, while the gate can follow them (not unsure; #187)
+	unsure   bool   // a key we can't follow (arrows, other controls): wait for Enter or Ctrl-C
+	awaiting bool   // Enter on a line with text: shut until the turn starts
+	slash    bool   // the line began with /
 	lastByte byte
 	last     time.Time
 }
@@ -40,7 +41,23 @@ func (g *Gate) Started() {
 // Enter (#185): nothing of yours is left to mix with.
 func (g *Gate) Sent() {
 	g.mu.Lock()
-	g.pending, g.unsure, g.awaiting, g.slash = 0, false, false, false
+	g.pending, g.unsure, g.awaiting, g.slash, g.draft = 0, false, false, false, nil
+	g.mu.Unlock()
+}
+
+// Draft is the text you've typed since your last Enter, and whether the gate could follow it
+// (not after an arrow or other key it can't read).
+func (g *Gate) Draft() (string, bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return string(g.draft), !g.unsure
+}
+
+// Restore: pix typed your draft back after a forced message (#187); it's yours again.
+func (g *Gate) Restore(text string) {
+	g.mu.Lock()
+	g.draft = []rune(text)
+	g.pending, g.unsure, g.awaiting, g.slash = len(g.draft), false, false, strings.HasPrefix(text, "/")
 	g.mu.Unlock()
 }
 
@@ -50,6 +67,7 @@ func (g *Gate) Keys(b []byte, now time.Time) {
 		return
 	}
 	b = []byte(kittyKeys.Replace(string(b)))
+	b = []byte(pasteMarks.Replace(string(b))) // a paste's text is typed text
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.last = now
@@ -58,31 +76,38 @@ func (g *Gate) Keys(b []byte, now time.Time) {
 	}
 	if len(b) == 1 && b[0] == '\r' && g.lastByte != '\\' { // Enter
 		g.awaiting = g.awaiting || ((g.pending > 0 || g.unsure) && !g.slash)
-		g.pending, g.unsure, g.slash, g.lastByte = 0, false, false, '\r'
+		g.pending, g.unsure, g.slash, g.lastByte, g.draft = 0, false, false, '\r', nil
 		return
 	}
-	for _, c := range b {
+	g.lastByte = b[len(b)-1]
+	for _, c := range string(b) {
 		if g.pending == 0 && !g.unsure && c == '/' {
 			g.slash = true
 		}
-		g.lastByte = c
 		switch {
 		case c == 0x03: // Ctrl-C clears the line
-			g.pending, g.unsure, g.awaiting, g.slash = 0, false, false, false
+			g.pending, g.unsure, g.awaiting, g.slash, g.draft = 0, false, false, false, nil
 		case c == '\r' || c == '\n': // a line added to the draft
 			g.pending++
+			g.draft = append(g.draft, '\n')
 		case c == 0x7f || c == 0x08: // backspace
 			if g.pending > 0 {
 				g.pending--
 			}
+			if len(g.draft) > 0 {
+				g.draft = g.draft[:len(g.draft)-1]
+			}
 		case c < 0x20: // escape sequences and other controls
 			g.unsure = true
-		case c&0xC0 == 0x80: // UTF-8 continuation byte: same rune
 		default:
 			g.pending++
+			g.draft = append(g.draft, c)
 		}
 	}
 }
+
+// pasteMarks start and end a bracketed paste.
+var pasteMarks = strings.NewReplacer("\x1b[200~", "", "\x1b[201~", "")
 
 // terminalReports is what a terminal sends that you didn't type (#138): its window gaining or
 // losing focus (ESC[I, ESC[O), and SGR mouse reports (ESC[<b;x;yM or m), which fullscreen

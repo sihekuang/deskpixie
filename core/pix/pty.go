@@ -25,6 +25,7 @@ type Runner struct {
 	// they are forwarded.
 	OnOutput func([]byte)
 	OnInput  func([]byte)
+	Tap      func([]byte) // sees what is written to the agent (tests)
 
 	cmd     *exec.Cmd
 	ptmx    *os.File
@@ -120,6 +121,9 @@ func (r *Runner) copyOut() {
 func (r *Runner) WriteToAgent(b []byte) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.Tap != nil {
+		r.Tap(b)
+	}
 	_, err := r.ptmx.Write(b)
 	return err
 }

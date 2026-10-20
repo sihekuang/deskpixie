@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -136,6 +137,7 @@ func newHarness(t *testing.T, tool string, agent Launch) *harness {
 	d, sock := newFakeDaemon(t, "")
 	inR, inW, outR, outW := pipes(t)
 	s := newSession(sessionOpts{tool: tool, daemonSock: sock, home: t.TempDir(), stdin: inR, stdout: outW, agent: agent, where: "terminal"})
+	s.runner.Tap = func(b []byte) { tapMu.Lock(); tapped[s] = append(tapped[s], b...); tapMu.Unlock() }
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	if err := s.start(ctx); err != nil {
@@ -1066,3 +1068,56 @@ func TestFlushTypesWhatWaitsDespiteTheGate(t *testing.T) {
 	h.s.runner.Hangup()
 	h.s.finish()
 }
+
+// #187: a forced message doesn't take your draft with it. Codex: pix deletes what you typed,
+// sends the message, and types your draft back.
+func TestFlushSetsYourDraftAsideAndPutsItBack(t *testing.T) {
+	h := newHarness(t, "codex", Launch{Path: "/bin/sh", Args: []string{"-c", "stty raw -echo; od -An -c; sleep 30"}})
+	h.stdinW.WriteString("my draft")
+	time.Sleep(100 * time.Millisecond)
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "from pixie"})
+	waitEvent(t, h.d.events, "waiting", func(m wire.Msg) bool { return m.ID == "1" && m.Status == "waiting" })
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "2", Command: "flush"})
+	waitEvent(t, h.d.events, "flushed", func(m wire.Msg) bool { return m.ID == "2" && m.Status == "typed" })
+	want := strings.Repeat("\x7f", 8) + "\x1b[200~from pixie\x1b[201~\r\x1b[200~my draft\x1b[201~"
+	if got := h.s.typedForTest(); !strings.HasSuffix(got, want) {
+		t.Fatalf("typed %q\nwant suffix %q", got, want)
+	}
+	if d, ok := h.s.gate.Draft(); !ok || d != "my draft" {
+		t.Fatalf("gate after: %q %t", d, ok)
+	}
+	h.s.runner.Hangup()
+	h.s.finish()
+}
+
+// Claude Code stashes the draft itself (Ctrl-S) and restores it once the message is sent: pix
+// needn't know the text, so it works even after keys pix couldn't follow.
+func TestFlushStashesTheDraftInClaudeCode(t *testing.T) {
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}})
+	h.stdinW.WriteString("draft\x1b[Dx") // an arrow: pix can't follow
+	time.Sleep(100 * time.Millisecond)
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "one"})
+	waitEvent(t, h.d.events, "waiting", func(m wire.Msg) bool { return m.ID == "1" && m.Status == "waiting" })
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "2", Command: "prompt", Text: "two"})
+	waitEvent(t, h.d.events, "waiting 2", func(m wire.Msg) bool { return m.ID == "2" && m.Status == "waiting" })
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "3", Command: "flush"})
+	waitEvent(t, h.d.events, "flushed", func(m wire.Msg) bool { return m.ID == "3" && m.Status == "typed" })
+	want := "\x13\x1b[200~one\n\ntwo\x1b[201~\r" // both in one prompt: the restored draft must not join the second
+	if got := h.s.typedForTest(); !strings.HasSuffix(got, want) {
+		t.Fatalf("typed %q\nwant suffix %q", got, want)
+	}
+	h.s.runner.Hangup()
+	h.s.finish()
+}
+
+// typedForTest is everything pix itself typed into the agent (not your keys), recorded by Tap.
+func (s *Session) typedForTest() string {
+	tapMu.Lock()
+	defer tapMu.Unlock()
+	return string(tapped[s])
+}
+
+var (
+	tapMu  sync.Mutex
+	tapped = map[*Session][]byte{}
+)
