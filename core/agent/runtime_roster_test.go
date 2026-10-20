@@ -22,6 +22,7 @@ type rosterRig struct {
 	launcher *agenttest.FakePlanner
 	focus    *agenttest.FakeFocusSink
 	sessions *agenttest.FakeSessionPlanner
+	voice    *agenttest.RecordingVoiceLink
 }
 
 type pixFake struct {
@@ -118,11 +119,11 @@ func newRosterRigWith(t *testing.T, warm bool, wrap func(*primaryFake) SessionHo
 	host := agenttest.NewFakeSessionHost().ManualTurns()
 	user := &pixFake{FakeSessionHost: agenttest.NewFakeSessionHost(), ch: make(chan struct{}, 1), ctx: t.Context()}
 	r := &rosterRig{host: host, user: user, roster: &agenttest.RecordingRoster{}, launcher: &agenttest.FakePlanner{}, focus: &agenttest.FakeFocusSink{},
-		sessions: &agenttest.FakeSessionPlanner{Plan: FocusPlan{FocusURLs: []string{"warp://session/abc"}}}}
+		sessions: &agenttest.FakeSessionPlanner{Plan: FocusPlan{FocusURLs: []string{"warp://session/abc"}}}, voice: &agenttest.RecordingVoiceLink{}}
 	clock := agenttest.ClockAt(1_000_000)
 	deps := Deps{
 		Host:  NewAgentHost(NewCompositeHost(wrap(&primaryFake{host, t.Context()}), user), clock, CoordinatorRecipe{Cwd: "/data/agent/workspace"}),
-		Voice: &agenttest.RecordingVoiceLink{}, Notifier: &agenttest.RecordingNotifier{}, Pixie: &agenttest.RecordingNotifier{},
+		Voice: r.voice, Notifier: &agenttest.RecordingNotifier{}, Pixie: &agenttest.RecordingNotifier{},
 		Status: &agenttest.RecordingStatus{}, Planner: r.launcher, Sessions: r.sessions, Focus: r.focus, TerminalDir: "/home/me/Projects",
 		Store: &agenttest.MemStore{}, Clock: clock, IDs: &agenttest.SeqIds{}, Updates: &agenttest.RecordingUpdates{},
 		Roster: r.roster,

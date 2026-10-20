@@ -1158,7 +1158,11 @@ func (h *AgentHandle) mcp(agent string, call McpCall) McpReply {
 		}
 		ctx, cancel := context.WithTimeout(h.ctx, OpLimit)
 		defer cancel()
-		return sessionTool(ctx, h.deps.Host.Session(), call, h.maskPending)
+		r := sessionTool(ctx, h.deps.Host.Session(), call, h.maskPending)
+		if call.Kind == CallMessageSession && r.Err == nil {
+			h.Input(SessionSentInput(call.Name, h.sessionDescription(call.Name)))
+		}
+		return r
 	}
 	r := h.stepLocked(McpInput(agent, call))
 	if r == nil || r.Kind != EfToolResult {
@@ -1168,6 +1172,16 @@ func (h *AgentHandle) mcp(agent string, call McpCall) McpReply {
 		return McpReply{Err: errors.New(r.Err)}
 	}
 	return McpReply{Value: r.Value}
+}
+
+// sessionDescription is how the roster describes your session name ("" = not listed).
+func (h *AgentHandle) sessionDescription(name string) string {
+	for _, row := range h.Roster().Yours {
+		if row.Name == name {
+			return row.Label
+		}
+	}
+	return ""
 }
 
 // maskPending removes the pending confirm words from text a session wrote, so the coordinator
