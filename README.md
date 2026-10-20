@@ -3,16 +3,19 @@
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Latest release](https://img.shields.io/github/v/release/sihekuang/deskpixie?label=release)](https://github.com/sihekuang/deskpixie/releases/latest)
 
-A desktop voice pixie for macOS: you talk with **Pixie**, and Pixie hands real work to **the
-coordinator**, a Claude Code agent (or OpenAI Codex: Settings ▸ Coordinator ▸ Coordinator agent)
-working in the background. A Go core (`core/`, built as the C-ABI dylib `libdeskpixie`) hosted by
-a Swift macOS app (`mac/`).
+**DeskPixie is a voice layer on top of your coding agents**, for macOS. You talk with **Pixie**, a
+small character on your desktop, and Pixie hands real work to **the coordinator**, a Claude Code
+agent (or OpenAI Codex: Settings ▸ Coordinator ▸ Coordinator agent) working in the background. It
+also keeps you in touch with the Claude Code and Codex sessions you start yourself: their news,
+their questions and their windows, by voice.
+
+Under the hood: a Go core (`core/`, built as the C-ABI dylib `libdeskpixie`) hosted by a Swift
+macOS app (`mac/`).
 
 ## What it does
 
-- **Talk to Pixie.** A small character on your desktop that listens and answers, through Gemini
-  Live or OpenAI Realtime, with your own API key. It does quick things itself: the time, the
-  weather, timers, arithmetic, music.
+- **Talk to Pixie.** Pixie listens and answers through Gemini Live or OpenAI Realtime, with your
+  own API key. It does quick things itself: the time, the weather, timers, arithmetic, music.
 - **Hand off real work.** Everything else goes to the coordinator, which runs in a
   [Herdr](https://herdr.dev) (or tmux) session and can start worker agents in git worktrees of
   your projects. Results, questions and permission requests come back by voice.
