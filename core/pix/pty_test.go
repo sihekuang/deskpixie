@@ -103,7 +103,10 @@ func TestWaitReturnsWhenADescendantKeepsTheTerminal(t *testing.T) {
 	inR, _, _, outW := pipes(t)
 	pidFile := filepath.Join(t.TempDir(), "orphan")
 	r := &Runner{Launch: Launch{Path: "/bin/sh", Args: []string{"-c",
-		`perl -MPOSIX -e 'exit 0 if fork; POSIX::setsid(); open(F, ">` + pidFile + `"); print F $$; close F; sleep 4' & sleep 0.2; exit 5`}}, Stdin: inR, Stdout: outW}
+		// The shell exits once the leftover child has written its pid (not after a fixed sleep:
+		// on a slow runner perl hadn't written it yet, and the test read pid 0).
+		`perl -MPOSIX -e 'exit 0 if fork; POSIX::setsid(); open(F, ">` + pidFile + `.tmp"); print F $$; close F; rename("` + pidFile + `.tmp", "` + pidFile + `"); sleep 4' & ` +
+			`while [ ! -s ` + pidFile + ` ]; do sleep 0.02; done; exit 5`}}, Stdin: inR, Stdout: outW}
 	if err := r.Start(); err != nil {
 		t.Fatal(err)
 	}
