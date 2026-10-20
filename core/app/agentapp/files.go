@@ -389,6 +389,19 @@ func KeptFor(kept agent.KeptAgents, kind agent.AgentKind) agent.KeptAgents {
 	return kept
 }
 
+// EffortArgs set the coordinator's reasoning effort (#177): Claude Code's --effort, or Codex's
+// model_reasoning_effort. A blank effort is none: the agent decides.
+func EffortArgs(kind agent.AgentKind, effort string) []string {
+	e := strings.TrimSpace(effort)
+	switch {
+	case e == "":
+		return nil
+	case kind == agent.Codex:
+		return []string{"-c", fmt.Sprintf("model_reasoning_effort=%q", e)}
+	}
+	return []string{"--effort", e}
+}
+
 // CoordinatorArgs are Claude Code's arguments for the coordinator (AgentHost adds --continue
 // on re-creation). With mcp it also gets the pixie MCP server (--mcp-config; the app always
 // passes it: worker tools when workers are on, Pixie's local tools always). A blank

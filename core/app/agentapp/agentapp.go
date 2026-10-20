@@ -318,6 +318,7 @@ func Build(c Config) *Agent {
 	}
 	// tmux detects no agent status: the coordinator reports its own through hooks.
 	recipe := CoordinatorRecipeFor(kind, paths, model, codexModel, s.Port, s.SessionHost == tmux.Name)
+	recipe.Args = append(recipe.Args, EffortArgs(kind, s.CoordinatorEffort)...)
 	recipe.Env = []agent.EnvVar{{Key: agent.TokenEnv, Value: coordinatorToken}}
 	// A coordinator found running is the kept one: adopted as it is.
 	recipe.AdoptEarlier = kept.CoordinatorToken != ""

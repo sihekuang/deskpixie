@@ -290,6 +290,15 @@ var CoordinatorKinds = []Opt{
 	{CoordinatorCodex, "Codex", AllPlatforms},
 }
 
+// CoordinatorEfforts are the coordinator's reasoning efforts (#177), the levels Claude Code's
+// --effort and Codex's model_reasoning_effort share.
+var CoordinatorEfforts = []Opt{
+	{"", "Default (the agent decides)", AllPlatforms},
+	{"low", "Low (fastest)", AllPlatforms},
+	{"medium", "Medium", AllPlatforms},
+	{"high", "High", AllPlatforms},
+}
+
 // CodexModels are suggested values of Codex's -m for the coordinator: "" (null) leaves it to
 // Codex, then the GPT models Codex 0.162 lists.
 var CodexModels = []Opt{
@@ -375,6 +384,7 @@ var Fields = []FieldSpec{
 	// The model list follows the coordinator agent. agent.model also applies to Claude workers.
 	visibleWhen(spec("agent.model", SectionAgent, "Coordinator model", "Claude Code's --model for the coordinator (and Claude workers). Default lets Claude Code decide.", openChoice(Choices{Source: SourceStatic, Static: AgentModels, Null: true}), ApplyRestart), claudeCoordinator),
 	visibleWhen(spec("agent.codexModel", SectionAgent, "Coordinator model", "Codex's model for the coordinator. Default lets Codex decide.", openChoice(Choices{Source: SourceStatic, Static: CodexModels, Null: true}), ApplyRestart), codexCoordinator),
+	spec("agent.coordinatorEffort", SectionAgent, "Coordinator effort", "How hard the coordinator thinks before it acts. Low hands work off and answers soonest; higher thinks longer. Takes effect when the coordinator restarts.", staticChoice(CoordinatorEfforts), ApplyRestart),
 	spec("agent.warm", SectionAgent, "Start at launch", "Start the coordinator when the app starts, not on first use.", boolKind, ApplyRestart),
 	spec("agent.narration", SectionAgent, "Narration", "Pixie says what the coordinator is doing.", boolKind, ApplyRestart),
 	spec("agent.openConversationForUpdates", SectionAgent, "Open a conversation for updates", "When a job finishes or fails, or the coordinator asks you something, while you're not talking to Pixie, Pixie starts a conversation to tell you and then listens for your answer.", boolKind, ApplyRestart),

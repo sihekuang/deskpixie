@@ -135,14 +135,17 @@ type AgentSettings struct {
 	// Model is Claude Code's --model (the coordinator when it is Claude Code, and Claude workers).
 	Model *string `json:"model"`
 	// CodexModel is Codex's -m for a Codex coordinator (nil: Codex decides).
-	CodexModel            *string `json:"codexModel"`
-	Warm                  bool    `json:"warm"`
-	Port                  uint16  `json:"port"`
-	KeepPanesOnQuit       bool    `json:"keepPanesOnQuit"`
-	HoldOpenSecs          uint64  `json:"holdOpenSecs"`
-	PermissionTimeoutSecs uint64  `json:"permissionTimeoutSecs"`
-	NotifyPerMinute       uint64  `json:"notifyPerMinute"`
-	Narration             bool    `json:"narration"`
+	CodexModel *string `json:"codexModel"`
+	// CoordinatorEffort is the coordinator's reasoning effort (#177): "low", "medium", "high",
+	// or "" to leave it to the agent. Lower answers and hands off sooner.
+	CoordinatorEffort     string `json:"coordinatorEffort"`
+	Warm                  bool   `json:"warm"`
+	Port                  uint16 `json:"port"`
+	KeepPanesOnQuit       bool   `json:"keepPanesOnQuit"`
+	HoldOpenSecs          uint64 `json:"holdOpenSecs"`
+	PermissionTimeoutSecs uint64 `json:"permissionTimeoutSecs"`
+	NotifyPerMinute       uint64 `json:"notifyPerMinute"`
+	Narration             bool   `json:"narration"`
 	// OpenConversationForUpdates: a job finishing or failing, an agent question or a spoken
 	// worker report that comes while no conversation is open makes Pixie open one and say it
 	// (off by default: a feature flag).
@@ -178,8 +181,8 @@ func Default() Config {
 		Notifications: NotificationSettings{DebounceSecs: 20, Bubble: BubbleSettings{Enabled: true, PopSecs: 6, Lines: 5}, AwayAfterMins: 5, SessionTurnsMinSeconds: 30},
 		Agent: AgentSettings{
 			Enabled: true, SessionHost: "herdr", Session: "deskpixie", Terminal: "warp",
-			CoordinatorKind: CoordinatorClaude,
-			Port:            48217, HoldOpenSecs: 180, PermissionTimeoutSecs: 120, NotifyPerMinute: 4,
+			CoordinatorKind: CoordinatorClaude, CoordinatorEffort: "low",
+			Port: 48217, HoldOpenSecs: 180, PermissionTimeoutSecs: 120, NotifyPerMinute: 4,
 			Narration: true, ProjectsRoot: "~/Documents/Projects",
 			// Handed-off work keeps running when the app quits; the next start adopts it.
 			KeepPanesOnQuit: true,
