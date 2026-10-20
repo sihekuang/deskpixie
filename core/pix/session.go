@@ -219,6 +219,9 @@ func (s *Session) Hook(event string, p map[string]any) string {
 		s.setStatus("working")
 		prompt, _ := p["prompt"].(string)
 		pixie := s.fromPixie(prompt)
+		if !pixie {
+			s.gate.Sent() // your prompt went in (#185)
+		}
 		s.mu.Lock()
 		s.turnFromPixie = s.turnFromPixie || pixie
 		first := s.afterStop && prompt != ""

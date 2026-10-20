@@ -292,3 +292,16 @@ func TestGateReadsKittyKeys(t *testing.T) {
 		t.Fatal("a kitty Ctrl-C didn't clear the line")
 	}
 }
+
+// TestGateReadsKittyEnter (#185): Enter as the kitty keyboard protocol may send it.
+func TestGateReadsKittyEnter(t *testing.T) {
+	for _, enter := range []string{"\x1b[13u", "\x1b[13;1u"} {
+		var g Gate
+		t0 := time.Unix(100, 0)
+		g.Keys([]byte("/help"), t0)
+		g.Keys([]byte(enter), t0)
+		if !g.Clear(t0.Add(2 * time.Second)) {
+			t.Fatalf("%q: a /command sent with kitty Enter left the gate shut", enter)
+		}
+	}
+}

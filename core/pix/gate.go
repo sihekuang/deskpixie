@@ -35,6 +35,14 @@ func (g *Gate) Started() {
 	g.mu.Unlock()
 }
 
+// Sent: the agent took a prompt you typed, so your line was sent however your terminal sent the
+// Enter (#185): nothing of yours is left to mix with.
+func (g *Gate) Sent() {
+	g.mu.Lock()
+	g.pending, g.unsure, g.awaiting, g.slash = 0, false, false, false
+	g.mu.Unlock()
+}
+
 // Keys takes every byte you type. The terminal's own reports (focus, mouse) aren't keys (#138).
 func (g *Gate) Keys(b []byte, now time.Time) {
 	if b = withoutReports(b); len(b) == 0 {
@@ -89,7 +97,8 @@ func withoutReports(b []byte) []byte { return terminalReports.ReplaceAll(b, nil)
 
 // kittyKeys are Esc and Ctrl-C as the kitty keyboard protocol sends them, which Claude Code
 // turns on (#181): read as the bytes they were before.
-var kittyKeys = strings.NewReplacer("\x1b[27u", "\x1b", "\x1b[27;1u", "\x1b", "\x1b[99;5u", "\x03")
+var kittyKeys = strings.NewReplacer("\x1b[27u", "\x1b", "\x1b[27;1u", "\x1b", "\x1b[99;5u", "\x03",
+	"\x1b[13u", "\r", "\x1b[13;1u", "\r") // and Enter (#185)
 
 // Clear reports whether typing into the agent now can't mix with your text.
 func (g *Gate) Clear(now time.Time) bool {

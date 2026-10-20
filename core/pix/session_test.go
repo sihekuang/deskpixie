@@ -1026,3 +1026,21 @@ func TestAMessageForAWorkingAgentWaitsAndIsDeliveredWithItsNextTool(t *testing.T
 	h.s.runner.Hangup()
 	h.s.finish()
 }
+
+// #185: Claude Code taking a prompt you typed means your line was sent, however your terminal
+// sent the Enter (Warp with the kitty keyboard protocol: ESC[13u, which the gate can't read).
+// The gate kept counting that text as unsent, and Pixie's messages waited ("you're typing").
+func TestAPromptYouSubmittedOpensTheGateHoweverEnterWasSent(t *testing.T) {
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}})
+	h.stdinW.WriteString("redesign the card\x1b[13;1u")
+	time.Sleep(100 * time.Millisecond)
+	h.s.Hook("UserPromptSubmit", map[string]any{"prompt": "redesign the card"})
+	h.s.Hook("Stop", map[string]any{})
+	h.s.gate.mu.Lock()
+	h.s.gate.last = time.Now().Add(-TypingQuiet) // past the quiet time
+	h.s.gate.mu.Unlock()
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "from pixie"})
+	waitEvent(t, h.d.events, "typed", func(m wire.Msg) bool { return m.ID == "1" && m.Status == "typed" })
+	h.s.runner.Hangup()
+	h.s.finish()
+}
