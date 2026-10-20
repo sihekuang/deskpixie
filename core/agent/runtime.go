@@ -370,6 +370,7 @@ func (h *AgentHandle) saveKept() {
 	if running {
 		kept.CoordinatorToken = h.deps.Host.Token()
 		kept.CoordinatorKind = h.deps.Host.Kind()
+		kept.CoordinatorStamp = h.deps.Host.Stamp()
 	}
 	if h.workers != nil {
 		for _, w := range live {

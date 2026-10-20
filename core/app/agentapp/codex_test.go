@@ -67,16 +67,63 @@ func TestTheCoordinatorRecipeFollowsTheKind(t *testing.T) {
 }
 
 func TestAKeptCoordinatorOfAnotherKindIsNotAdopted(t *testing.T) {
-	kept := agent.KeptAgents{CoordinatorToken: "t", Workers: []agent.KeptWorker{{Token: "w"}}}
-	if got := KeptFor(kept, agent.Claude); got.CoordinatorToken != "t" || len(got.Workers) != 1 {
+	kept := agent.KeptAgents{CoordinatorToken: "t", CoordinatorStamp: "s", Workers: []agent.KeptWorker{{Token: "w"}}}
+	if got := KeptFor(kept, agent.Claude, "s"); got.CoordinatorToken != "t" || len(got.Workers) != 1 {
 		t.Fatalf("%+v", got)
 	}
-	if got := KeptFor(kept, agent.Codex); got.CoordinatorToken != "" || len(got.Workers) != 1 {
+	if got := KeptFor(kept, agent.Codex, "s"); got.CoordinatorToken != "" || len(got.Workers) != 1 {
 		t.Fatalf("%+v", got) // the workers are still this run's
 	}
 	kept.CoordinatorKind = agent.Codex
-	if got := KeptFor(kept, agent.Codex); got.CoordinatorToken != "t" {
+	if got := KeptFor(kept, agent.Codex, "s"); got.CoordinatorToken != "t" {
 		t.Fatalf("%+v", got)
+	}
+}
+
+// #189: a kept coordinator started with other instructions, settings or arguments than this run
+// would start it with (or by an app from before stamps) is not adopted: its pane is replaced by a
+// start that resumes its conversation.
+func TestAKeptCoordinatorStartedDifferentlyIsNotAdopted(t *testing.T) {
+	kept := agent.KeptAgents{CoordinatorToken: "t", CoordinatorStamp: "old", Workers: []agent.KeptWorker{{Token: "w"}}}
+	if got := KeptFor(kept, agent.Claude, "new"); got.CoordinatorToken != "" || len(got.Workers) != 1 {
+		t.Fatalf("%+v", got)
+	}
+	kept.CoordinatorStamp = ""
+	if got := KeptFor(kept, agent.Claude, "new"); got.CoordinatorToken != "" {
+		t.Fatalf("a kept file from before stamps: %+v", got)
+	}
+}
+
+// The stamp changes with what the coordinator reads at its start (its instructions, its
+// settings) and how it is started (kind, arguments), and only then.
+func TestTheCoordinatorStampFollowsWhatItStartsWith(t *testing.T) {
+	dir := t.TempDir()
+	md, settings := filepath.Join(dir, "CLAUDE.md"), filepath.Join(dir, "settings.json")
+	os.WriteFile(md, []byte("rules"), 0o644)
+	os.WriteFile(settings, []byte("{}"), 0o644)
+	recipe := agent.CoordinatorRecipe{Kind: agent.Claude, Args: []string{"--model", "opus"}}
+	base := CoordinatorStamp(recipe, md, settings)
+	if base == "" || CoordinatorStamp(recipe, md, settings) != base {
+		t.Fatal("not stable", base)
+	}
+	changed := map[string]func(){
+		"instructions": func() { os.WriteFile(md, []byte("new rules"), 0o644) },
+		"settings":     func() { os.WriteFile(settings, []byte(`{"hooks":1}`), 0o644) },
+		"arguments":    func() { recipe.Args = []string{"--model", "haiku"} },
+		"kind":         func() { recipe.Kind = agent.Codex },
+	}
+	for _, what := range []string{"instructions", "settings", "arguments", "kind"} {
+		changed[what]()
+		if got := CoordinatorStamp(recipe, md, settings); got == base {
+			t.Fatalf("%s changed, the stamp didn't", what)
+		} else {
+			base = got
+		}
+	}
+	// The token isn't part of it: a kept coordinator keeps its token.
+	recipe.Env = []agent.EnvVar{{Key: agent.TokenEnv, Value: "x"}}
+	if CoordinatorStamp(recipe, md, settings) != base {
+		t.Fatal("the env changed the stamp")
 	}
 }
 

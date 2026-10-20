@@ -19,6 +19,11 @@ package agentapp_test
 // session restore relaunched the pane as plain `claude --resume <id>`, without the app's
 // --settings and --mcp-config, so it has no pixie server at all. The second run must replace it
 // with one of its own and still get tools-ok.
+//
+// The third (#189): between the runs the coordinator's model changes (from haiku to sonnet),
+// which Claude Code takes only at its start. The second run must replace the kept coordinator
+// with one started on sonnet. (A change to its instructions alone needs no restart: Claude Code
+// rereads a CLAUDE.md that changed, which a run of this test with the stamp check off showed.)
 
 import (
 	"context"
@@ -40,7 +45,7 @@ import (
 )
 
 func TestLiveAnAdoptedCoordinatorGetsItsPixieToolsBack(t *testing.T) {
-	liveAdopt(t, func(ctx context.Context, host *herdr.Host) {
+	liveAdopt(t, toolsTask, toolsWorked, func(ctx context.Context, host *herdr.Host, _ *settings.AgentSettings) {
 		// With the app down, the coordinator gives up on its pixie server.
 		if err := host.Prompt(ctx, agent.Coordinator, agent.McpReconnect); err != nil {
 			t.Fatal(err)
@@ -59,7 +64,7 @@ func TestLiveAnAdoptedCoordinatorGetsItsPixieToolsBack(t *testing.T) {
 }
 
 func TestLiveAnAdoptedCoordinatorHerdrRestoredWithoutItsServerIsReplaced(t *testing.T) {
-	liveAdopt(t, func(ctx context.Context, host *herdr.Host) {
+	liveAdopt(t, toolsTask, toolsWorked, func(ctx context.Context, host *herdr.Host, _ *settings.AgentSettings) {
 		list, _ := host.List(ctx)
 		i := slices.IndexFunc(list, func(i agent.AgentInfo) bool { return i.Name == agent.Coordinator })
 		// Same pane name, cwd and conversation, none of the app's arguments.
@@ -79,9 +84,22 @@ func TestLiveAnAdoptedCoordinatorHerdrRestoredWithoutItsServerIsReplaced(t *test
 	})
 }
 
-// liveAdopt: a first run starts the coordinator and quits keeping it; breakIt puts it in some
-// state while the app is down; a second run adopts it and must use list_sessions.
-func liveAdopt(t *testing.T, breakIt func(context.Context, *herdr.Host)) {
+func TestLiveAKeptCoordinatorStartedOnAnotherModelIsReplaced(t *testing.T) {
+	liveAdopt(t, "Which model family are you: Haiku, Sonnet or Opus? Reply with only the one word.",
+		func(reply string) bool { return strings.Contains(strings.ToLower(reply), "sonnet") },
+		func(_ context.Context, _ *herdr.Host, s *settings.AgentSettings) {
+			sonnet := "sonnet"
+			s.Model = &sonnet
+			t.Log("ok   app down: the coordinator's model changed to sonnet")
+		})
+}
+
+const toolsTask = "Call your list_sessions tool. If the call works, reply with exactly the word tools-ok. " +
+	"If you have no list_sessions tool or it fails, reply with exactly the word no-tools."
+
+// liveAdopt: a first run starts the coordinator and quits keeping it; breakIt changes something
+// while the app is down; a second run, given task, must reply what ok accepts.
+func liveAdopt(t *testing.T, task string, ok func(string) bool, breakIt func(context.Context, *herdr.Host, *settings.AgentSettings)) {
 	sm := smoketest.Smoke(t)
 	tmp := smoketest.CanonicalTemp(t)
 	data := filepath.Join(tmp, "data")
@@ -165,21 +183,20 @@ func liveAdopt(t *testing.T, breakIt func(context.Context, *herdr.Host)) {
 	t.Log("ok   first run: pong, and the coordinator kept over the quit")
 
 	// 2. While the app is down.
-	breakIt(ctx, host)
+	breakIt(ctx, host, &s)
 
 	// 3. The next run adopts it; its pixie tools must work.
 	ln2, err := net.Listen("tcp", ln.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
-	a2, reply := run("second run", ln2, "Call your list_sessions tool. If the call works, reply with exactly the word tools-ok. "+
-		"If you have no list_sessions tool or it fails, reply with exactly the word no-tools.")
+	a2, reply := run("second run", ln2, task)
 	t.Cleanup(a2.Shutdown)
-	if !toolsWorked(reply) {
+	if !ok(reply) {
 		screen, _ := host.Read(ctx, agent.Coordinator, 30)
-		t.Fatalf("second run: the adopted coordinator replied %q, not tools-ok; its screen:\n%s", reply, screen)
+		t.Fatalf("second run: the coordinator replied %q; its screen:\n%s", reply, screen)
 	}
-	t.Log("ok   second run: the adopted coordinator used list_sessions")
+	t.Log("ok   second run: the coordinator replied", reply)
 }
 
 // toolsWorked: the reply says the tool call worked. Haiku often says it in words, as the

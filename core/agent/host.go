@@ -36,6 +36,10 @@ type CoordinatorRecipe struct {
 	// AdoptEarlier: Env's token was kept from the run before (agent.keepPanesOnQuit), so a
 	// coordinator found running from that run still holds it and is adopted as it is.
 	AdoptEarlier bool
+	// Stamp sums up what the coordinator starts with (its instructions, settings and
+	// arguments; #189). Saved with a kept coordinator, so the next run can tell whether it
+	// would start it the same way.
+	Stamp string
 	// ResumeLast: with no coordinator running, the first start resumes the workspace's last
 	// conversation (--continue) instead of starting a blank one.
 	ResumeLast bool
@@ -92,6 +96,9 @@ func (h *AgentHost) Token() string {
 	}
 	return ""
 }
+
+// Stamp is the recipe's Stamp.
+func (h *AgentHost) Stamp() string { return h.recipe.Stamp }
 
 // Kind is the coordinator's agent kind.
 func (h *AgentHost) Kind() AgentKind { return h.recipe.Kind }

@@ -23,7 +23,8 @@ func TestAQuitThatKeepsPanesSavesTheCoordinatorAndItsLiveWorkers(t *testing.T) {
 		settle()
 		r.h.Shutdown()
 		saved := r.kept.Saved()
-		if len(saved) != 1 || saved[0].CoordinatorToken != "tok-coordinator" || len(saved[0].Workers) != 1 {
+		// #189: with the stamp of what it was started with.
+		if len(saved) != 1 || saved[0].CoordinatorToken != "tok-coordinator" || saved[0].CoordinatorStamp != "stamp-1" || len(saved[0].Workers) != 1 {
 			t.Fatalf("%+v", saved)
 		}
 		w := saved[0].Workers[0]

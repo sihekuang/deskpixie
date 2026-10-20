@@ -8,7 +8,9 @@ package agentapp
 
 import (
 	"bytes"
+	"crypto/sha256"
 	_ "embed"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -381,12 +383,26 @@ func CoordinatorRecipeFor(kind agent.AgentKind, paths Paths, claudeModel, codexM
 }
 
 // KeptFor is what the last quit left running that this run adopts: a kept coordinator of
-// another kind than kind is not (its pane is replaced by a start of kind); workers are.
-func KeptFor(kept agent.KeptAgents, kind agent.AgentKind) agent.KeptAgents {
-	if kept.CoordinatorKind != kind {
+// another kind than kind, or started with another stamp than this run would start it with
+// (#189), is not (its pane is replaced by a start that resumes its conversation); workers are.
+func KeptFor(kept agent.KeptAgents, kind agent.AgentKind, stamp string) agent.KeptAgents {
+	if kept.CoordinatorKind != kind || kept.CoordinatorStamp != stamp {
 		kept.CoordinatorToken, kept.CoordinatorKind = "", 0
 	}
 	return kept
+}
+
+// CoordinatorStamp sums up what a coordinator started from recipe starts with: its kind and
+// arguments, and the files it reads at its start (its instructions and settings; a missing one
+// counts as empty). Not its env: a kept coordinator keeps its token.
+func CoordinatorStamp(recipe agent.CoordinatorRecipe, files ...string) string {
+	h := sha256.New()
+	fmt.Fprintf(h, "%d\x00%s\x00", recipe.Kind, strings.Join(recipe.Args, "\x00"))
+	for _, f := range files {
+		b, _ := os.ReadFile(f)
+		fmt.Fprintf(h, "%d\x00%s", len(b), b)
+	}
+	return hex.EncodeToString(h.Sum(nil))[:16]
 }
 
 // EffortArgs set the coordinator's reasoning effort (#177): Claude Code's --effort, or Codex's

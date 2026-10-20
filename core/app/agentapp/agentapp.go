@@ -291,7 +291,22 @@ func Build(c Config) *Agent {
 	}
 	// The coordinator's agent (#87): a kept coordinator of the other kind is replaced.
 	kind := CoordinatorKind(s.CoordinatorKind)
-	kept = KeptFor(kept, kind)
+	model, codexModel := "", ""
+	if s.Model != nil {
+		model = *s.Model
+	}
+	if s.CodexModel != nil {
+		codexModel = *s.CodexModel
+	}
+	// tmux detects no agent status: the coordinator reports its own through hooks.
+	recipe := CoordinatorRecipeFor(kind, paths, model, codexModel, s.Port, s.SessionHost == tmux.Name)
+	recipe.Args = append(recipe.Args, EffortArgs(kind, s.CoordinatorEffort)...)
+	if kind == agent.Codex {
+		recipe.Stamp = CoordinatorStamp(recipe, filepath.Join(paths.Workspace, "AGENTS.md"))
+	} else {
+		recipe.Stamp = CoordinatorStamp(recipe, filepath.Join(paths.Workspace, "CLAUDE.md"), paths.Settings)
+	}
+	kept = KeptFor(kept, kind, recipe.Stamp)
 	tokens := httpserver.NewTokens()
 	coordinatorToken := kept.CoordinatorToken
 	if coordinatorToken != "" {
@@ -309,16 +324,6 @@ func Build(c Config) *Agent {
 			setProblem("Coordinator: invalid settings (see log)")
 		}
 	}
-	model, codexModel := "", ""
-	if s.Model != nil {
-		model = *s.Model
-	}
-	if s.CodexModel != nil {
-		codexModel = *s.CodexModel
-	}
-	// tmux detects no agent status: the coordinator reports its own through hooks.
-	recipe := CoordinatorRecipeFor(kind, paths, model, codexModel, s.Port, s.SessionHost == tmux.Name)
-	recipe.Args = append(recipe.Args, EffortArgs(kind, s.CoordinatorEffort)...)
 	recipe.Env = []agent.EnvVar{{Key: agent.TokenEnv, Value: coordinatorToken}}
 	// A coordinator found running is the kept one: adopted as it is.
 	recipe.AdoptEarlier = kept.CoordinatorToken != ""
