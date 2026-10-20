@@ -127,8 +127,10 @@ final class AgentRosterController {
         let screen = NSScreen.screens.first { $0.frame.contains(NSPoint(x: bit.midX, y: bit.midY)) }
             ?? pixie.panel.screen ?? NSScreen.main
         let area = DesktopSpace.desktopRect(screen?.visibleFrame ?? bit, primaryMaxY: top)
-        let openHeight = CGFloat(min(model.view.agents.count, AgentRosterModel.maxRows + 1)
-                                 + min(model.view.yours.count, AgentRosterModel.maxRows + 1) + 3) * 22 + chipHeight
+        // Split up: as one expression it takes CI's type checker too long (#192).
+        let agentRows: Int = min(model.view.agents.count, AgentRosterModel.maxRows + 1)
+        let yourRows: Int = min(model.view.yours.count, AgentRosterModel.maxRows + 1)
+        let openHeight: CGFloat = CGFloat(agentRows + yourRows + 3) * 22 + chipHeight
         // While open the side stays put: only a closed chip decides it (the real list can be
         // taller than the estimate, and flipping would move it from under the pointer).
         let (rect0, b) = ChipPlacement.frame(pixie: DesktopSpace.desktopRect(bit, primaryMaxY: top),
