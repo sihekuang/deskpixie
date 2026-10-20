@@ -90,6 +90,15 @@ services (voice providers, Claude Code, Herdr) are opt-in with `-tags live`.
 
 This repo is the port of ai-mascot (Rust/Tauri). See `docs/specs/2026-10-13-deskpixie-port-design.md`.
 
+## Roadmap
+
+- **More coding agents.** DeskPixie works with Claude Code and OpenAI Codex today; support for
+  other coding agents is coming.
+- **More platforms.** DeskPixie runs on macOS today; support for other platforms, such as Windows
+  and Linux, is planned.
+
+Ideas and requests are welcome as [issues](https://github.com/sihekuang/deskpixie/issues).
+
 ## Contributing
 
 Issues and pull requests are welcome. Please open an issue first for anything large. Unless you
