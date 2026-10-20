@@ -18,6 +18,8 @@ public struct UpdateLine: Decodable, Sendable, Equatable, Identifiable {
     public let token: String?
     /// A session line's app (bundle id): a click activates it instead of focusing a pane (#114).
     public let app: String?
+    /// A session line's session (its name): a click brings up the tab it runs in (#194).
+    public let session: String?
     /// A session menu's choices (#105): one button each, answered with `agent.choose`.
     public let options: [String]?
     /// Shown small under the line, never said: a session dialog's command (#105).
@@ -30,8 +32,8 @@ public struct UpdateLine: Decodable, Sendable, Equatable, Identifiable {
     public var offersOptions: Bool { kind == "question" && token != nil && !(options ?? []).isEmpty }
 
     public init(id: UInt64, text: String, kind: String, at: Int64, job: String?, worker: String?,
-                token: String? = nil, app: String? = nil, options: [String]? = nil,
-                note: String? = nil) {
+                token: String? = nil, app: String? = nil, session: String? = nil,
+                options: [String]? = nil, note: String? = nil) {
         self.id = id
         self.text = text
         self.kind = kind
@@ -40,6 +42,7 @@ public struct UpdateLine: Decodable, Sendable, Equatable, Identifiable {
         self.worker = worker
         self.token = token
         self.app = app
+        self.session = session
         self.options = options
         self.note = note
     }
@@ -108,6 +111,8 @@ public struct UpdatesBubbleModel: Sendable {
     private var applied = false
     /// When each question's Allow and Deny (by token) appeared; only while they are showing.
     private var decisionsSince: [String: TimeInterval] = [:]
+    /// Lines clicked away (#194): left out of the core's lists until it drops them too.
+    private var dismissed: Set<UInt64> = []
 
     public init(popSecs: TimeInterval = 6, maxLines: Int = 5) {
         self.popSecs = popSecs
@@ -141,6 +146,9 @@ public struct UpdatesBubbleModel: Sendable {
     /// The core sent its current list (`updates` event).
     public mutating func apply(_ new: [UpdateLine], now: TimeInterval, pop: PopPermission) {
         defer { noteDecisions(now) }
+        let ids = Set(new.map(\.id))
+        dismissed = dismissed.filter { ids.contains($0) }
+        let new = new.filter { !dismissed.contains($0.id) }
         let old = Set(lines.map(\.id))
         let added = new.filter { !old.contains($0.id) }
         lines = new
@@ -220,6 +228,23 @@ public struct UpdatesBubbleModel: Sendable {
         for l in shown where shownSince[l.id] == nil {
             shownSince[l.id] = now
         }
+    }
+
+    /// A click on a line (#194): it leaves the bubble and counts as seen, so the caller sends its
+    /// id to `agent.updatesSeen`. A question with buttons stays until it is answered. Returns
+    /// whether the line was dismissed.
+    public mutating func dismiss(_ id: UInt64) -> Bool {
+        guard let line = display.first(where: { $0.id == id }),
+              !line.offersDecision, !line.offersOptions else { return false }
+        dismissed.insert(id)
+        lines.removeAll { $0.id == id }
+        frozen?.removeAll { $0.id == id }
+        seenSent.insert(id)
+        if display.isEmpty {
+            frozen = nil
+            phase = .hidden
+        }
+        return true
     }
 
     /// Presence came back: one pop if anything arrived while away.

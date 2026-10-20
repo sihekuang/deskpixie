@@ -58,6 +58,49 @@ final class UpdatesBubbleModelTests: XCTestCase {
         XCTAssertNil(reply.app)
     }
 
+    func testASessionLineCarriesItsSession() throws {
+        let line = try JSONDecoder().decode(UpdateLine.self, from: Data(
+            #"{"id":4,"text":"api is done.","kind":"session","at":4,"app":"dev.warp.Warp-Stable","session":"api-claude"}"#.utf8))
+        XCTAssertEqual(line.session, "api-claude")
+    }
+
+    /// #194: a clicked line leaves the open bubble at once; the rest stay.
+    func testAClickedLineIsDismissed() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        m.apply([line(1), line(2)], now: 1, pop: .allowed)
+        m.pointerEntered(now: 2)
+        XCTAssertTrue(m.dismiss(2))
+        XCTAssertEqual(m.shown.map(\.id), [1])
+        XCTAssertEqual(m.count, 1)
+        XCTAssertEqual(m.tick(now: 3), [1], "the dismissed line is reported by the click, not again")
+    }
+
+    func testDismissingTheLastLineHidesTheBubble() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        m.apply([line(1)], now: 1, pop: .allowed)
+        XCTAssertTrue(m.dismiss(1))
+        XCTAssertEqual(m.phase, .hidden)
+    }
+
+    /// The core's list may still carry it before it handles the seen call: it doesn't come back
+    /// or pop again.
+    func testADismissedLineDoesNotComeBack() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        m.apply([line(1), line(2)], now: 1, pop: .allowed)
+        _ = m.tick(now: 8)
+        XCTAssertTrue(m.dismiss(2))
+        m.apply([line(1), line(2)], now: 9, pop: .allowed)
+        XCTAssertEqual(m.phase, .badge)
+        XCTAssertEqual(m.count, 1)
+    }
+
+    func testAQuestionWithButtonsIsNotDismissedByAClick() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        m.apply([question(1, "hawk")], now: 1, pop: .allowed)
+        XCTAssertFalse(m.dismiss(1))
+        XCTAssertEqual(m.count, 1)
+    }
+
     func testAPendingQuestionOffersAllowAndDeny() throws {
         let decode = { (json: String) throws -> UpdateLine in
             try JSONDecoder().decode(UpdateLine.self, from: Data(json.utf8))

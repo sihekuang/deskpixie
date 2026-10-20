@@ -132,12 +132,20 @@ final class UpdatesBubbleController {
         CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown)
     }
 
+    /// A click on a line: it is dismissed (counts as seen, #194), and its pane comes up — your
+    /// session's own tab, else its app, else the job's pane.
     private func clicked(_ line: UpdateLine) {
-        if let app = line.app {
-            AppActivation.activate(bundleID: app)
-            return
+        if model.dismiss(line.id) {
+            call("agent.updatesSeen", SeenArgs(ids: [line.id]))
+            render()
         }
-        call("agent.focusJob", FocusJobArgs(job: line.job ?? "", worker: line.worker ?? ""))
+        if let session = line.session, !session.isEmpty {
+            call("agent.focusSession", FocusSessionArgs(name: session))
+        } else if let app = line.app {
+            AppActivation.activate(bundleID: app)
+        } else {
+            call("agent.focusJob", FocusJobArgs(job: line.job ?? "", worker: line.worker ?? ""))
+        }
     }
 
     // MARK: Poll
@@ -271,6 +279,7 @@ final class UpdatesBubbleController {
     private struct DecideArgs: Encodable, Sendable { let token: String; let allow: Bool }
     private struct ChooseArgs: Encodable, Sendable { let token: String; let option: Int }
     private struct FocusJobArgs: Encodable, Sendable { let job: String; let worker: String }
+    private struct FocusSessionArgs: Encodable, Sendable { let name: String }
 }
 
 /// Takes the first click even though the panel never becomes key (non-activating).

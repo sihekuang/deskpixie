@@ -20,6 +20,8 @@ type UpdateItem struct {
 	Token string `json:"token,omitempty"`
 	// App: a session line's app (bundle id); a click activates it instead of a pane.
 	App string `json:"app,omitempty"`
+	// Session: the session a session line is about; a click brings up its tab (#194).
+	Session string `json:"session,omitempty"`
 	// Options: a session menu's choices (#105): the bubble shows one button each instead of
 	// Allow and Deny, answered with agent.choose.
 	Options []string `json:"options,omitempty"`
@@ -40,7 +42,7 @@ func (c *AgentController) bubbleItems() []UpdateItem {
 		if !pending && (l.Token != nil || l.Delivered || c.settings.OpenConversation) {
 			continue
 		}
-		item := UpdateItem{ID: l.ID, Text: l.Text, Kind: l.Kind, At: l.At, Job: l.Job, Worker: l.Worker, App: l.App, Note: l.Note}
+		item := UpdateItem{ID: l.ID, Text: l.Text, Kind: l.Kind, At: l.At, Job: l.Job, Worker: l.Worker, App: l.App, Session: l.Session, Note: l.Note}
 		if l.Token != nil {
 			item.Token = *l.Token
 			item.Options = c.confirms.OptionsOf(*l.Token)

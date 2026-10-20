@@ -583,9 +583,13 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 		case ev.Kind == PaneEventOutdated:
 			if ev.Outdated != nil && !c.shutDown {
 				// #191: told like a session update, whatever the session turns setting.
+				// Each app run tells it once: not again when a run in the last OutdatedRetellMs
+				// already did (a rebuild restarts the app, #194).
 				o := *ev.Outdated
-				c.deliverUpdate(Line{Kind: LineSession, App: o.App,
-					Text: OutdatedLine(maskPendingTokens(o.Label, c.pendingTokens()), o.Tool)}, now, &fx)
+				text := OutdatedLine(maskPendingTokens(o.Label, c.pendingTokens()), o.Tool)
+				if !c.outbox.ToldSince(text, satSub(now, OutdatedRetellMs)) {
+					c.deliverUpdate(Line{Kind: LineSession, App: o.App, Session: ev.Agent, Text: text}, now, &fx)
+				}
 			}
 		case ev.Kind == PaneEventQuestion || ev.Kind == PaneEventQuestionGone:
 		case ev.Kind == PaneEventStatus:
@@ -1635,11 +1639,12 @@ func (c *AgentController) onSessionTurn(name string, t SessionTurn, now Millis, 
 		c.asked = asker{} // it moved on: its question is gone
 	}
 	c.deliverUpdate(Line{
-		Kind:   LineSession,
-		Text:   SessionTurnLine(maskPendingTokens(t.Label, tokens), gist, asking),
-		Asking: asking,
-		App:    t.App,
-		Detail: truncateBytes(strings.Join(strings.Fields(reply), " "), MaxSessionDetailBytes),
+		Kind:    LineSession,
+		Text:    SessionTurnLine(maskPendingTokens(t.Label, tokens), gist, asking),
+		Asking:  asking,
+		App:     t.App,
+		Session: name,
+		Detail:  truncateBytes(strings.Join(strings.Fields(reply), " "), MaxSessionDetailBytes),
 	}, now, fx)
 }
 
@@ -1846,6 +1851,9 @@ func (c *AgentController) applyDelivery(d RouteDelivery, now Millis, fx *[]Effec
 	case DeliverNotify:
 		*fx = append(*fx, Effect{Kind: EfNotify, Text: d.Text})
 	case DeliverOutbox:
+		for _, r := range c.outbox.Repeats(d.Line) {
+			*fx = append(*fx, Effect{Kind: EfAppend, File: OutboxFile, Line: r})
+		}
 		record := c.outbox.Push(d.Line, now)
 		*fx = append(*fx, Effect{Kind: EfAppend, File: OutboxFile, Line: record})
 	}

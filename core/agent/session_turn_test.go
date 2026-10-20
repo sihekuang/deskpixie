@@ -52,8 +52,9 @@ func TestYourOwnLongTurnIsAnnouncedWithItsGist(t *testing.T) {
 	for _, e := range effectsOfKind(fx, EfUpdates) {
 		bubble = e.Value.([]UpdateItem)
 	}
-	if len(bubble) != 1 || bubble[0].Kind != LineSession || bubble[0].App != webstorm || bubble[0].Text != longTurnLine {
-		t.Fatalf("the bubble line activates its app: %+v", bubble)
+	if len(bubble) != 1 || bubble[0].Kind != LineSession || bubble[0].App != webstorm || bubble[0].Text != longTurnLine ||
+		bubble[0].Session != "api-claude" {
+		t.Fatalf("the bubble line brings up its session: %+v", bubble)
 	}
 }
 
@@ -97,9 +98,10 @@ func TestASessionTurnNeverSpeaksAPendingConfirmWord(t *testing.T) {
 
 func TestASessionLineKeepsItsAppInTheOutbox(t *testing.T) {
 	o := NewOutbox()
-	rec := o.Push(Line{Kind: LineSession, Text: "api finished.", App: webstorm}, T0)
+	rec := o.Push(Line{Kind: LineSession, Text: "api finished.", App: webstorm, Session: "api-claude"}, T0)
 	var back OutboxLine
-	if err := back.UnmarshalJSON([]byte(rec)); err != nil || back.App != webstorm || back.Kind != LineSession {
+	if err := back.UnmarshalJSON([]byte(rec)); err != nil || back.App != webstorm || back.Kind != LineSession ||
+		back.Session != "api-claude" {
 		t.Fatalf("%s → %+v %v", rec, back, err)
 	}
 }
@@ -116,4 +118,40 @@ func TestASessionOnAnOlderPixIsToldOnce(t *testing.T) {
 		t.Fatal(fmtEffects(fx))
 	}
 	wantContains(t, ctl().Step(PaneInput(ev("codex")), T0), eNotify("deskpixie: fix login runs an older pix than the app: restart it with pix codex resume to update it."))
+}
+
+// #194: told again, a line replaces the unheard one saying the same: the bubble lists it once.
+func TestALineToldAgainIsListedOnce(t *testing.T) {
+	c := turnCtl(nil)
+	sessionTurn(c, longTurn, T0)
+	fx := sessionTurn(c, longTurn, T0+120_000)
+	items, ok := lastUpdates(t, fx)
+	if !ok || len(items) != 1 || items[0].At != T0+120_000 {
+		t.Fatalf("%+v", items)
+	}
+	if n := len(effectsOfKind(fx, EfAppend)); n != 2 {
+		t.Fatalf("the older line is saved as delivered too: %s", fmtEffects(fx))
+	}
+}
+
+// #194: a rebuild restarts the app and the session registers again: its older pix isn't told
+// again until OutdatedRetellMs has passed.
+func TestAnOlderPixIsNotToldAgainAfterARestart(t *testing.T) {
+	ev := PaneEvent{Kind: PaneEventOutdated, Agent: "api-claude", Outdated: &SessionOutdated{Label: "landing", Tool: "claude", App: webstorm}}
+	first := ctl()
+	fx := first.Step(PaneInput(ev), T0)
+	items, _ := lastUpdates(t, fx)
+	if len(items) != 1 || items[0].Session != "api-claude" {
+		t.Fatalf("%+v", items)
+	}
+	restarted := func(now Millis) *AgentController {
+		c := ctl()
+		c.outbox = RestoreOutbox(first.outbox.Lines(), now)
+		return c
+	}
+	if fx := restarted(T0+300_000).Step(PaneInput(ev), T0+300_000); anyKind(fx, EfNotify, EfAppend) {
+		t.Fatal(fmtEffects(fx))
+	}
+	later := T0 + OutdatedRetellMs
+	wantContains(t, restarted(later).Step(PaneInput(ev), later), eNotify("landing runs an older pix than the app: restart it with pix claude --resume to update it."))
 }

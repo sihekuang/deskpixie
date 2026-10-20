@@ -23,7 +23,7 @@ func (c *AgentController) onSessionQuestion(session string, q SessionQuestion, n
 	c.confirms.TakeSession(session, "")
 	tokens := c.pendingTokens()
 	label := maskPendingTokens(q.Label, tokens)
-	line := Line{Kind: LineQuestion, App: q.App}
+	line := Line{Kind: LineQuestion, App: q.App, Session: session}
 	pending := Pending{Session: session, Question: q.ID, Label: label}
 	var input any
 	if q.Input != "" {
