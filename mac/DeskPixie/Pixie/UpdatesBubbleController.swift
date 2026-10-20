@@ -151,8 +151,7 @@ final class UpdatesBubbleController {
     // MARK: Poll
 
     private func poll() {
-        // A badge faded with Pixie is not looked at: a passing pointer neither opens it nor marks
-        // it seen.
+        // A badge faded with Pixie is not looked at: a passing pointer doesn't open it.
         let inside = UpdatesBubbleModel.hoverCounts(
             pointerOnPanel: panel.isVisible && panel.frame.contains(NSEvent.mouseLocation),
             alpha: panel.alphaValue, alreadyInside: pointerInside)
@@ -166,8 +165,7 @@ final class UpdatesBubbleController {
             call("agent.focusJob", FocusJobArgs(job: r.job, worker: r.worker))
         }
         let before = model.phase
-        let seen = model.tick(now: Self.now)
-        if !seen.isEmpty { call("agent.updatesSeen", SeenArgs(ids: seen)) }
+        model.tick(now: Self.now)
         if changed || model.phase != before { render() } else { updateAlpha() }
     }
 
@@ -206,8 +204,15 @@ final class UpdatesBubbleController {
     private func render() {
         hosting.rootView = AnyView(UpdatesBubbleView(
             count: model.count, phase: model.phase, shown: model.shown, more: model.more,
+            clearAll: model.offersClearAll,
             onLine: { [weak self] in self?.clicked($0) },
             onMore: { [weak self] in self?.onTalk?() },
+            onClearAll: { [weak self] in
+                guard let self else { return }
+                let ids = self.model.dismissAll()
+                if !ids.isEmpty { self.call("agent.updatesSeen", SeenArgs(ids: ids)) }
+                self.render()
+            },
             onDecide: { [weak self] token, allow in
                 // A tap within decisionGuard of the buttons appearing is a stray click: ignored.
                 guard let self, self.model.acceptsDecision(token: token, now: Self.now) else { return }

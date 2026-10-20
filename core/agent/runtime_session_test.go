@@ -163,7 +163,7 @@ func coordinatorText(r *rtRig) string {
 // already working on it without having to remember to look.
 func TestANewRequestListsYourOpenSessions(t *testing.T) {
 	r, user := pixRig(t)
-	user.lastTurn = "Fixed the redirect after sign-in."
+	user.setTurn("Fixed the redirect after sign-in.", false)
 	delegate(t, r, "is the login fix pushed?")
 	settle()
 	got := coordinatorText(r)

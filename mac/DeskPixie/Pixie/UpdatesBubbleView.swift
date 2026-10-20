@@ -10,8 +10,12 @@ struct UpdatesBubbleView: View {
     let phase: UpdatesBubbleModel.Phase
     let shown: [UpdateLine]
     let more: Int
+    /// Whether the "Clear all" row shows (#198).
+    let clearAll: Bool
     let onLine: (UpdateLine) -> Void
     let onMore: () -> Void
+    /// "Clear all": every line that isn't waiting on an answer leaves the bubble.
+    let onClearAll: () -> Void
     /// Allow or Deny on a permission question (token, allow). The controller ignores a tap that
     /// comes too soon after the buttons appear (`UpdatesBubbleModel.acceptsDecision`).
     let onDecide: (String, Bool) -> Void
@@ -105,17 +109,30 @@ struct UpdatesBubbleView: View {
                     }
                 }
             }
-            if more > 0 {
-                Button(action: onMore) {
-                    Text("+\(more) more")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .contentShape(Rectangle())
+            if more > 0 || clearAll {
+                HStack {
+                    if more > 0 {
+                        Button(action: onMore) {
+                            Text("+\(more) more")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    Spacer(minLength: 0)
+                    if clearAll {
+                        Button(action: onClearAll) {
+                            Text("Clear all")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
-                .buttonStyle(.plain)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
             }
         }
         .padding(6)
