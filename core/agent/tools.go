@@ -8,7 +8,7 @@ import (
 	"github.com/sihekuang/deskpixie/core/voice"
 )
 
-// The voice tools (spec §5.1): delegate, jobs, answer_job. Registered in the voice loop's
+// The voice tools (spec §5.1): delegate, jobs, answer_job, focus_session. Registered in the voice loop's
 // ToolRegistry by the composition root, with DelegationPersona appended to the persona. Each
 // returns at once and never ends the conversation.
 // Port of ai-mascot crates/agent-core/src/tools.rs.
@@ -154,8 +154,39 @@ func (a AnswerJob) Invoke(_ context.Context, raw json.RawMessage) voice.ToolOutc
 	return toolReply(map[string]any{"job_id": id.String(), "status": "answered"})
 }
 
+// FocusSessionTool is the `focus_session` tool (#170): bring one of the user's own sessions to
+// the front, as a click on its roster row does.
+type FocusSessionTool struct{ H *AgentHandle }
+
+func (FocusSessionTool) Name() string { return "focus_session" }
+
+func (FocusSessionTool) Description() string {
+	return "Bring one of the user's own sessions (listed under \"The user's own sessions\") to the front of the screen, " +
+		"when they ask to see, show, pull up, switch to or focus it. Only for showing it: anything else about a session " +
+		"is delegated."
+}
+
+func (FocusSessionTool) Parameters() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{` +
+		`"name":{"type":"string","description":"The session's name exactly as listed, e.g. the part before the colon."}},` +
+		`"required":["name"],"additionalProperties":false}`)
+}
+
+func (f FocusSessionTool) Invoke(ctx context.Context, raw json.RawMessage) voice.ToolOutcome {
+	name := textArg(decodeArgs(raw), "name")
+	var err error = LaunchError("name is required")
+	if name != "" {
+		if err = f.H.FocusSession(ctx, name); err == nil {
+			return toolReply(map[string]any{"name": name, "status": "shown"})
+		}
+	}
+	// The sessions as they are now, so Pixie can ask which one.
+	return toolReply(map[string]any{"error": err.Error(), "your_sessions": f.H.YourSessionLines()})
+}
+
 var (
 	_ voice.Tool = Delegate{}
 	_ voice.Tool = Jobs{}
 	_ voice.Tool = AnswerJob{}
+	_ voice.Tool = FocusSessionTool{}
 )

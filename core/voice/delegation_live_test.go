@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -418,5 +419,73 @@ func TestLiveNoMadeUpConfirmWord(t *testing.T) {
 				t.Errorf("after the correction Pixie asks for a confirm word or reads the correction out: %q", last)
 			}
 		})
+	}
+}
+
+// recordingFocus is focus_session with its real description and schema, recording each name and
+// replying as the app does when it shows the session.
+type recordingFocus struct {
+	agent.FocusSessionTool
+	mu    *sync.Mutex
+	names *[]string
+}
+
+func (f recordingFocus) Invoke(_ context.Context, raw json.RawMessage) voice.ToolOutcome {
+	var v struct{ Name string }
+	_ = json.Unmarshal(raw, &v)
+	f.mu.Lock()
+	*f.names = append(*f.names, v.Name)
+	f.mu.Unlock()
+	out, _ := json.Marshal(map[string]any{"name": v.Name, "status": "shown"})
+	return voice.ToolOutcome{Output: out}
+}
+
+// TestLiveFocusingASession (#170): "show me the arbitrage trader session", with the user's
+// sessions in Pixie's memory as the app lists them, is one focus_session call with that
+// session's name, and no hand-off. Gemini only: this is the voice model's own behavior.
+//
+//	go test -count=1 -tags live -run TestLiveFocusingASession -v ./voice/
+func TestLiveFocusingASession(t *testing.T) {
+	secrets := liveSecrets(t)
+	if _, ok := secrets.APIKey(gemini.Name); !ok {
+		t.Skip("no Gemini key")
+	}
+	var p liveProvider
+	for _, lp := range liveProviders() {
+		if lp.name == gemini.Name {
+			p = lp
+		}
+	}
+	sessions := agent.YourSessionsFacts([]string{
+		"deskpixie-claude: deskpixie: design focus-a-window feature (Warp)",
+		"arbitrage-trader-claude: arbitrage pair families (Warp)",
+		"api-claude: claude in api (iTerm)",
+	})
+	var mu sync.Mutex
+	var calls []handOff
+	var names, own []string
+	reg := voice.NewToolRegistry()
+	reg.Register(recordingDelegate{mu: &mu, calls: &calls})
+	reg.Register(recordingFocus{mu: &mu, names: &names})
+	for _, o := range ownTools(&mu, &own) {
+		reg.Register(o)
+	}
+	cfg := p.cfg
+	cfg.Instructions = app.Instructions(voice.DefaultPersona(), agent.DelegationPersona) + "\n\n" + sessions
+	speech := liveSpeech(t, "Can you show me the arbitrage trader session?")
+	r := newLiveRigWith(t, p.model(&liveWireLog{}, t), cfg, secrets, reg)
+	r.rt.Hotkey()
+	if !r.waitFor("Ready", 10*time.Second, func() bool { return r.liveSpy.count(voice.EvReady) > 0 }) {
+		return
+	}
+	r.say(append(make([]int16, audio.SampleRate/2), speech...))
+	r.waitFor("a focus_session call", 30*time.Second, func() bool { mu.Lock(); defer mu.Unlock(); return len(names) > 0 })
+	time.Sleep(3 * time.Second)
+	r.rt.Hotkey()
+	mu.Lock()
+	defer mu.Unlock()
+	t.Logf("%s; focus %q; delegate calls %+v", r.liveSpy.summary(), names, calls)
+	if !slices.Equal(names, []string{"arbitrage-trader-claude"}) || len(calls) != 0 {
+		t.Errorf("want one focus_session(arbitrage-trader-claude) and no delegate: focus %q, delegate %+v", names, calls)
 	}
 }

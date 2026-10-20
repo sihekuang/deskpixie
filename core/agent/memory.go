@@ -27,6 +27,8 @@ const (
 	MemoryJobsBudgetChars = 1500
 	// MemoryMaxNotes: at most this many of the coordinator's memories follow the jobs.
 	MemoryMaxNotes = 10
+	// MemoryMaxSessions: at most this many of the user's own sessions are listed.
+	MemoryMaxSessions = 12
 	// MemoryBudgetChars bounds the whole block (~4 characters a token, so ~650 tokens).
 	MemoryBudgetChars = 2600
 	// RecallPrefix marked a recall question in the job's task (#164 retired the recall tool;
@@ -162,7 +164,44 @@ func (h *AgentHandle) Facts() string {
 	jobs := h.ctl.RecentJobs(since)
 	memories := h.ctl.RecentMemories(MemoryMaxNotes + MemoryMaxJobs)
 	h.ctlMu.Unlock()
-	return MemoryFacts(jobs, memories, now, time.Local)
+	facts := MemoryFacts(jobs, memories, now, time.Local)
+	if sessions := YourSessionsFacts(h.YourSessionLines()); sessions != "" {
+		facts = strings.TrimPrefix(facts+"\n\n"+sessions, "\n\n")
+	}
+	return facts
+}
+
+// yourSessionsHeader leads the user's own sessions in Pixie's memory (#170).
+const yourSessionsHeader = "The user's own sessions (started with pix; focus_session brings one to the front, " +
+	"anything else about them goes to delegate):"
+
+// YourSessionsFacts is the memory's part listing the user's sessions (YourSessionLines), ""
+// when there are none.
+func YourSessionsFacts(lines []string) string {
+	if len(lines) == 0 {
+		return ""
+	}
+	return yourSessionsHeader + "\n- " + strings.Join(lines, "\n- ")
+}
+
+// YourSessionLines is "<name>: <label> (<where>)" for each of the user's reachable sessions,
+// from the last roster (at most MemoryMaxSessions).
+func (h *AgentHandle) YourSessionLines() []string {
+	lines := []string{}
+	for _, row := range h.Roster().Yours {
+		if !row.Reachable || len(lines) == MemoryMaxSessions {
+			continue
+		}
+		line := row.Name + ": " + oneLine(row.Label)
+		if row.Detail != "" {
+			line += " (" + row.Detail + ")"
+		}
+		if utf8.RuneCountInString(line) > MemoryEntryChars {
+			line = string([]rune(line)[:MemoryEntryChars-1]) + "…"
+		}
+		lines = append(lines, line)
+	}
+	return lines
 }
 
 var _ voice.SessionFacts = (*AgentHandle)(nil)

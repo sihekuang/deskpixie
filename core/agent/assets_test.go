@@ -237,3 +237,19 @@ func TestToolSchemasGiveNoExampleJobID(t *testing.T) {
 		}
 	}
 }
+
+// #170: Pixie brings one of the user's sessions to the front itself, asks when the name could be
+// more than one, and still hands off everything else about sessions.
+func TestPixieShowsASessionItself(t *testing.T) {
+	for _, phrase := range []string{
+		"the jobs, answer_job and focus_session tools",
+		"Keep: \"how are you\", \"show me the api session\"",
+		"call focus_session with its name from \"The user's own sessions\"",
+		"If more than one session could be meant, ask which one first",
+		"a question about their sessions (how many are open, which ones, what one is doing) is handed off with delegate",
+	} {
+		if !strings.Contains(DelegationPersona, phrase) {
+			t.Error(phrase)
+		}
+	}
+}
