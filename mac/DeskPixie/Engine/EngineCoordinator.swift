@@ -129,6 +129,12 @@ final class EngineCoordinator {
             if let m = PixieController.load(engine: engine, settings: pixieSettings) {
                 pixie = m
                 m.onDoubleClick = { [weak self] in self?.talk() }
+                m.onSecondaryClick = { [weak self] event, view in
+                    guard let self else { return }
+                    TrayContextMenu.popUp(self.appState.menuItems, with: event, for: view) { [weak self] id in
+                        if TrayMenu.route(id) == .settings { SettingsOpener.open?() } else { self?.perform(id) }
+                    }
+                }
                 m.show()
                 roster = AgentRosterController(engine: engine, worker: worker, pixie: m)
                 startBubble(pixie: m, settings: snapshot.flatMap(BubbleSettingsValues.fromSnapshot) ?? .defaults)

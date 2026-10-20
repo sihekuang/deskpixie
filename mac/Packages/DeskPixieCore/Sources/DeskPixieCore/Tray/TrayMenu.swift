@@ -104,8 +104,6 @@ public enum TrayMenu {
         }
     }
 
-    /// Pixie states in display order (mascot-pack `STATE_NAMES`).
-    public static let stateNames = ["idle", "listening", "thinking", "delegating", "happy", "error"]
     /// Size presets: label, integer scale.
     public static let sizes: [(label: String, scale: Int)] = [("Small", 4), ("Medium", 6), ("Large", 8), ("Huge", 12)]
     /// Scale assumed when app.state has none (Rust default).
@@ -200,25 +198,20 @@ public enum TrayMenu {
         }
 
         if let s {
-            items.append(.submenu(title: "State", enabled: true, items: stateNames.map {
-                .action(Row(id: "state:\($0)", title: $0, checked: s.state == $0))
-            }))
-            items.append(.action(Row(id: "talk", title: "Simulate talking", checked: s.talking)))
+            // Everyday rows only (#207): debugging rows (State, Simulate talking, Reload packs)
+            // and settings already in Settings (Proximity fade) are gone.
             items.append(.submenu(title: "Size", enabled: true,
                                   items: sizeItems(scale: s.scale ?? defaultScale).map { .action($0) }))
             items.append(.action(Row(id: "reset-position", title: "Reset position")))
-            items.append(.action(Row(id: "fade", title: "Proximity fade", checked: s.fade)))
             if !s.packs.isEmpty {
                 items.append(.submenu(title: "Pixie", enabled: true, items: s.packs.map {
                     .action(Row(id: "pack:\($0.id)", title: $0.name, checked: $0.id == s.pack))
                 }))
             }
-            items.append(.action(Row(id: "reload", title: "Reload packs")))
             items.append(.submenu(title: "Canvas", enabled: true, items: [
                 .action(Row(id: "canvas:open", title: "Open canvas")),
                 .submenu(title: "Recent", enabled: !s.canvasRecent.isEmpty,
                          items: recentItems(s.canvasRecent).map { .action($0) }),
-                .action(Row(id: "canvas:folder", title: "Open pages folder")),
             ]))
             if let agent = s.agent, agent.enabled {
                 var sub: [TrayItem] = agent.jobs.map {

@@ -10,6 +10,8 @@ final class PixieView: NSView {
     var onMouseDown: ((NSEvent) -> Void)?
     var onMouseDragged: ((NSEvent) -> Void)?
     var onMouseUp: ((NSEvent) -> Void)?
+    /// A secondary click (right-click, or control-click).
+    var onSecondaryClick: ((NSEvent) -> Void)?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -53,7 +55,12 @@ final class PixieView: NSView {
         CATransaction.commit()
     }
 
-    override func mouseDown(with event: NSEvent) { onMouseDown?(event) }
+    override func mouseDown(with event: NSEvent) {
+        if event.modifierFlags.contains(.control) { onSecondaryClick?(event) } else { onMouseDown?(event) }
+    }
+    override func rightMouseDown(with event: NSEvent) { onSecondaryClick?(event) }
     override func mouseDragged(with event: NSEvent) { onMouseDragged?(event) }
-    override func mouseUp(with event: NSEvent) { onMouseUp?(event) }
+    override func mouseUp(with event: NSEvent) {
+        if !event.modifierFlags.contains(.control) { onMouseUp?(event) }
+    }
 }
