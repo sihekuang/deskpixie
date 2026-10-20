@@ -89,6 +89,8 @@ final class PixieController {
         view.onMouseUp = { [weak self] in self?.mouseUp($0) }
         view.onSecondaryClick = { [weak self] e in
             guard let self else { return }
+            // A click just before it isn't a single click (which would open the terminal).
+            self.expireTimer?.invalidate()
             self.onSecondaryClick?(e, self.view)
         }
         moveObserver = NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification, object: panel,
