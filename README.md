@@ -1,8 +1,42 @@
 # DeskPixie
 
-A desktop voice pixie: you talk with **Pixie**, and Pixie hands real work to **the coordinator**, a Claude Code agent (or OpenAI Codex: Settings ▸ Coordinator ▸ Coordinator agent) working in the background. A Go core (`core/`, built as the C-ABI dylib `libdeskpixie`) hosted by a Swift macOS app (`mac/`).
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/sihekuang/deskpixie?label=release)](https://github.com/sihekuang/deskpixie/releases/latest)
 
-This repo is the port of [ai-mascot](https://github.com/sihekuang/ai-mascot) (Rust/Tauri). See `docs/specs/2026-10-13-deskpixie-port-design.md`.
+**DeskPixie is a voice layer on top of your coding agents**, for macOS. You talk with **Pixie**, a
+small character on your desktop, and Pixie hands real work to **the coordinator**, a Claude Code
+agent (or OpenAI Codex: Settings ▸ Coordinator ▸ Coordinator agent) working in the background. It
+also keeps you in touch with the Claude Code and Codex sessions you start yourself: their news,
+their questions and their windows, by voice.
+
+Under the hood: a Go core (`core/`, built as the C-ABI dylib `libdeskpixie`) hosted by a Swift
+macOS app (`mac/`).
+
+## What it does
+
+- **Talk to Pixie.** Pixie listens and answers through Gemini Live or OpenAI Realtime, with your
+  own API key. It does quick things itself: the time, the weather, timers, arithmetic, music.
+- **Hand off real work.** Everything else goes to the coordinator, which runs in a
+  [Herdr](https://herdr.dev) (or tmux) session and can start worker agents in git worktrees of
+  your projects. Results, questions and permission requests come back by voice.
+- **Watch the agents you start yourself.** Run `pix claude` or `pix codex` in any terminal, and
+  Pixie can see, message and interrupt those sessions, pass on their questions, and bring one to
+  the front ("show me the deskpixie session").
+- **Show, not just tell.** The coordinator can open canvas pages (charts, diagrams, comparisons)
+  next to Pixie.
+
+## Requirements
+
+- macOS 14 or later, Apple silicon.
+- A Gemini or OpenAI API key for the voice.
+- For handing off work: [Claude Code](https://docs.anthropic.com/en/docs/claude-code) or
+  [Codex](https://github.com/openai/codex), and [Herdr](https://herdr.dev) (or tmux).
+
+## Install
+
+Download the `.dmg` from [Releases](https://github.com/sihekuang/deskpixie/releases/latest), open
+it and drag DeskPixie to `/Applications`. Releases are signed with a Developer ID and notarized
+by Apple. DeskPixie lives in the menu bar and asks for microphone access the first time you talk.
 
 ## First run
 
@@ -27,3 +61,46 @@ version; otherwise the tray shows "Coordinator: herdr version mismatch: …" wit
 After updating herdr, restart DeskPixie's session (`herdr session stop deskpixie`, which closes
 its panes) so a new server starts. Herdr also warns when its Claude Code hook is outdated:
 `herdr integration status` should say `claude: current`; DeskPixie never installs it for you.
+
+## Build from source
+
+You need Xcode, [XcodeGen](https://github.com/yonaskolb/XcodeGen) and Go 1.26 or later.
+
+```sh
+make -C mac build         # the app (Debug), with the Go core built and bundled
+make -C mac run           # launch the built app
+make -C mac test          # Swift tests
+(cd core && go test ./...)  # Go tests
+```
+
+A plain `make -C mac build` is ad-hoc signed, so macOS asks for the microphone again after every
+rebuild; `SIGNING_IDENTITY="Developer ID Application: …"` keeps the permission. Release builds:
+`make -C mac release VERSION=x.y.z` (see [docs/release.md](docs/release.md)). Tests against real
+services (voice providers, Claude Code, Herdr) are opt-in with `-tags live`.
+
+## Project layout
+
+| Path | What's there |
+|---|---|
+| `core/` | The Go core: voice providers and conversation (`voice/`), the coordinator and workers (`agent/`), Herdr and tmux hosts, the `pix` command (`pix/`, `cmd/pix`), Pixie's own tools, audio. |
+| `mac/` | The Swift macOS app: Pixie's window, the menu bar, Settings, onboarding, audio I/O. |
+| `design-system/` | The canvas pages' styles, scripts and examples. |
+| `pixies/` | Pixie's character sprite sheets. |
+| `docs/` | Specs, plans and decisions (`docs/decisions.md`). |
+
+This repo is the port of ai-mascot (Rust/Tauri). See `docs/specs/2026-10-13-deskpixie-port-design.md`.
+
+## Contributing
+
+Issues and pull requests are welcome. Please open an issue first for anything large. Unless you
+say otherwise, contributions are licensed under the Apache License 2.0, as section 5 of the
+license says.
+
+## License
+
+DeskPixie is licensed under the [Apache License 2.0](LICENSE). Copyright 2026 Daniel Lee; see
+[NOTICE](NOTICE).
+
+The license doesn't grant rights to use the DeskPixie name or marks (section 6). DeskPixie bundles
+third-party components under their own licenses; see
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
