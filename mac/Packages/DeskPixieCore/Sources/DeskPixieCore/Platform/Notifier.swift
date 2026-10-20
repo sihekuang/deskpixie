@@ -146,8 +146,19 @@ public final class ForegroundPresenter: NSObject, UNUserNotificationCenterDelega
     }
 
     /// A click on a notification about a bubble line (#199): set by the app to do what a click
-    /// on the line does.
-    @MainActor public static var onOpenUpdate: ((UpdateLine) -> Void)?
+    /// on the line does. A click before it is set (the app still starting) waits for it.
+    @MainActor public static var onOpenUpdate: ((UpdateLine) -> Void)? {
+        didSet {
+            guard let onOpenUpdate, let line = waitingOpen else { return }
+            waitingOpen = nil
+            onOpenUpdate(line)
+        }
+    }
+    @MainActor private static var waitingOpen: UpdateLine?
+
+    @MainActor static func open(_ line: UpdateLine) {
+        if let onOpenUpdate { onOpenUpdate(line) } else { waitingOpen = line }
+    }
 
     public func userNotificationCenter(
         _ center: UNUserNotificationCenter,
@@ -156,7 +167,7 @@ public final class ForegroundPresenter: NSObject, UNUserNotificationCenterDelega
     ) {
         if response.actionIdentifier == UNNotificationDefaultActionIdentifier,
            let line = SystemNotificationSink.update(from: response.notification.request.content.userInfo) {
-            Task { @MainActor in Self.onOpenUpdate?(line) }
+            Task { @MainActor in Self.open(line) }
         }
         completionHandler()
     }

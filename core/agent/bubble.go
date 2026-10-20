@@ -69,8 +69,9 @@ func updateItem(l OutboxLine) UpdateItem {
 }
 
 // attachNotification: line was just added to the outbox; the notification Route sent for it
-// in this step (before the outbox, as routed) gets its bubble line, so a click on it does what
-// a click on the line does (#199).
+// in this step gets its bubble line, so a click on it does what a click on the line does
+// (#199). It relies on Route's order: the Notify comes before the Outbox delivery of the same
+// line, and each earlier one was attached at its own push (Update set).
 func (c *AgentController) attachNotification(fx []Effect, line Line) {
 	n := len(c.outbox.lines)
 	if n == 0 {

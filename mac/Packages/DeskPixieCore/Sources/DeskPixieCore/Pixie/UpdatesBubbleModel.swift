@@ -243,6 +243,13 @@ public struct UpdatesBubbleModel: Sendable {
         return true
     }
 
+    /// A notification's line (#199) that no longer matches the line listed under its id: ids can
+    /// repeat across restarts, so an old notification must not dismiss a newer line.
+    public func isStale(_ line: UpdateLine) -> Bool {
+        guard let listed = (display + lines).first(where: { $0.id == line.id }) else { return false }
+        return listed.at != line.at || listed.text != line.text
+    }
+
     /// "Clear all" (#198): every line but the questions leaves at once (a question waiting on
     /// you is clicked away on its own). Returns their ids for `agent.updatesSeen`.
     public mutating func dismissAll() -> [UInt64] {

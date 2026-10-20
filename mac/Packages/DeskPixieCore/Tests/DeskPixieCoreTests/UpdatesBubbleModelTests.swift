@@ -125,6 +125,15 @@ final class UpdatesBubbleModelTests: XCTestCase {
         XCTAssertEqual(m.count, 0)
     }
 
+    /// #199 review: an old notification whose id now names another line is stale.
+    func testAnOldNotificationsLineIsStale() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        m.apply([line(5)], now: 1, pop: .allowed)
+        XCTAssertFalse(m.isStale(line(5)))
+        XCTAssertTrue(m.isStale(UpdateLine(id: 5, text: "older", kind: "reply", at: 1, job: nil, worker: nil)))
+        XCTAssertFalse(m.isStale(line(9)), "a line no longer listed: dismissing it is harmless")
+    }
+
     func testAQuestionWithButtonsIsNotDismissedByAClick() {
         var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
         m.apply([question(1, "hawk")], now: 1, pop: .allowed)

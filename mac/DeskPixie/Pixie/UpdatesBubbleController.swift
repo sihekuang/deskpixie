@@ -141,6 +141,11 @@ final class UpdatesBubbleController {
             call("agent.updatesSeen", SeenArgs(ids: [line.id], clicked: true))
         }
         SystemNotificationSink.removeNotifications(updates: [line.id])
+        focus(line)
+    }
+
+    /// Brings up the line's pane: your session's own tab, else its app, else the job's pane.
+    private func focus(_ line: UpdateLine) {
         if let session = line.session, !session.isEmpty {
             call("agent.focusSession", FocusSessionArgs(name: session))
         } else if let app = line.app {
@@ -150,8 +155,12 @@ final class UpdatesBubbleController {
         }
     }
 
-    /// A click on a line's Mac notification (#199): as a click on the line.
-    func openFromNotification(_ line: UpdateLine) { clicked(line) }
+    /// A click on a line's Mac notification (#199): as a click on the line. An old notification
+    /// whose id now names another line (ids can repeat across restarts) only brings up its pane.
+    func openFromNotification(_ line: UpdateLine) {
+        guard model.isStale(line) else { return clicked(line) }
+        focus(line)
+    }
 
     // MARK: Poll
 
