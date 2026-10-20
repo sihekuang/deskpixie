@@ -83,8 +83,9 @@ type Session struct {
 	agentDesc string // set_description
 	autoDesc  string // first prompt of the current work
 	flushing  bool
-	posted    []string  // Pixie's messages not yet seen as prompts (normalized)
-	q         *question // the prompt waiting on you that Pixie may answer (#105)
+	flushMu   sync.Mutex // one typing of the queue at a time
+	posted    []string   // Pixie's messages not yet seen as prompts (normalized)
+	q         *question  // the prompt waiting on you that Pixie may answer (#105)
 	qseq      int
 
 	turnStart     time.Time        // when this turn went working (zero: none seen)
@@ -277,6 +278,7 @@ func (s *Session) Hook(event string, p map[string]any) string {
 		}
 		if msgs := s.queue.Drain(); len(msgs) > 0 {
 			s.title()
+			s.delivered()
 			ctx := "Messages from Pixie:\n- " + strings.Join(msgs, "\n- ")
 			return fmt.Sprintf(`{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":%q}}`, ctx)
 		}
@@ -317,8 +319,12 @@ func (s *Session) command(m wire.Msg) wire.Msg {
 			return wire.Msg{Err: err.Error()}
 		}
 		s.title()
+		// Typed at once, or waiting and why (#183).
+		if s.flushNow() {
+			return wire.Msg{Status: "typed"}
+		}
 		s.flushSoon()
-		return wire.Msg{}
+		return wire.Msg{Status: "waiting", Reason: s.waitReason()}
 	case "keys":
 		s.clearQuestion() // an Escape from Pixie dismisses the prompt
 		for _, k := range m.Keys {
@@ -345,6 +351,37 @@ func (s *Session) command(m wire.Msg) wire.Msg {
 	return wire.Msg{Err: "unknown command " + m.Command}
 }
 
+// flushNow types the queued messages if the agent is idle and you aren't typing; true if it did.
+func (s *Session) flushNow() bool {
+	s.flushMu.Lock()
+	defer s.flushMu.Unlock()
+	if s.queue.Len() == 0 || s.currentStatus() != "idle" || !s.gate.Clear(time.Now()) {
+		return false
+	}
+	for _, m := range s.queue.Drain() {
+		if s.runner.WriteToAgent(Paste(m)) != nil {
+			return false
+		}
+	}
+	s.title()
+	return true
+}
+
+// waitReason is why a message isn't typed now: the agent is "working" (it gets it with its
+// next tool, or when it stops), "blocked" on a question, or you're "typing" in it.
+func (s *Session) waitReason() string {
+	switch st := s.currentStatus(); st {
+	case "working", "blocked":
+		return st
+	}
+	return "typing"
+}
+
+// delivered tells DeskPixie the messages that waited have reached the agent (#183).
+func (s *Session) delivered() {
+	s.client.Send(wire.Msg{Kind: wire.KindEvent, Event: "delivered"})
+}
+
 // flushSoon types queued messages once the agent is idle and you aren't typing, checking
 // every 500 ms while messages wait. One flusher at a time.
 func (s *Session) flushSoon() {
@@ -358,13 +395,8 @@ func (s *Session) flushSoon() {
 	go func() {
 		defer func() { s.mu.Lock(); s.flushing = false; s.mu.Unlock() }()
 		for s.queue.Len() > 0 {
-			if s.currentStatus() == "idle" && s.gate.Clear(time.Now()) {
-				for _, m := range s.queue.Drain() {
-					if s.runner.WriteToAgent(Paste(m)) != nil {
-						return
-					}
-				}
-				s.title()
+			if s.flushNow() {
+				s.delivered()
 				return
 			}
 			time.Sleep(500 * time.Millisecond)

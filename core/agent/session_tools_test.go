@@ -279,3 +279,61 @@ func sessionRows(t *testing.T, r agent.McpReply) []agent.SessionRow {
 	}
 	return rows
 }
+
+// deliveringFake is your sessions' host reporting whether a message was typed or waits (#183).
+type deliveringFake struct {
+	*userFake
+	delivery agent.Delivery
+	waiting  int
+}
+
+func (d *deliveringFake) PromptDelivery(ctx context.Context, name, text string) (agent.Delivery, error) {
+	if err := d.Prompt(ctx, name, text); err != nil {
+		return agent.Delivery{}, err
+	}
+	return d.delivery, nil
+}
+
+func (d *deliveringFake) List(ctx context.Context) ([]agent.AgentInfo, error) {
+	l, err := d.userFake.List(ctx)
+	for i := range l {
+		l[i].User.Waiting = d.waiting
+	}
+	return l, err
+}
+
+// #183: message_session says when the message waits, and why; list_sessions shows how many wait.
+func TestMessageSessionSaysWhenTheMessageWaits(t *testing.T) {
+	_, user, primary := newSessionHarness(t)
+	d := &deliveringFake{userFake: user}
+	c := agent.NewCompositeHost(primary, d)
+	ctx := context.Background()
+	send := func() map[string]any {
+		t.Helper()
+		r := agent.SessionToolForTest(ctx, c, agent.McpCall{Kind: agent.CallMessageSession, Name: "focus-claude", Text: "hi"})
+		if r.Err != nil {
+			t.Fatal(r.Err)
+		}
+		return r.Value.(map[string]any)
+	}
+	d.delivery = agent.Delivery{Status: "typed"}
+	if got := send(); got["status"] != "sent" || got["why"] != nil {
+		t.Fatalf("typed: %v", got)
+	}
+	for reason, words := range map[string]string{"working": "busy", "blocked": "question", "typing": "typing"} {
+		d.delivery = agent.Delivery{Status: "waiting", Reason: reason}
+		got := send()
+		if why, _ := got["why"].(string); got["status"] != "waiting" || got["reason"] != reason || !strings.Contains(why, words) {
+			t.Fatalf("%s: %v", reason, got)
+		}
+	}
+	d.delivery = agent.Delivery{} // an older pix says nothing: sent, as before
+	if got := send(); got["status"] != "sent" {
+		t.Fatalf("older pix: %v", got)
+	}
+	d.waiting = 2
+	r := agent.SessionToolForTest(ctx, c, agent.McpCall{Kind: agent.CallListSessions})
+	if rows := r.Value.(map[string]any)["sessions"].([]agent.SessionRow); rows[0].Waiting != 2 {
+		t.Fatalf("%+v", rows)
+	}
+}

@@ -1160,7 +1160,12 @@ func (h *AgentHandle) mcp(agent string, call McpCall) McpReply {
 		defer cancel()
 		r := sessionTool(ctx, h.deps.Host.Session(), call, h.maskPending)
 		if call.Kind == CallMessageSession && r.Err == nil {
-			h.Input(SessionSentInput(call.Name, h.sessionDescription(call.Name)))
+			v, _ := r.Value.(map[string]any)
+			if reason, _ := v["reason"].(string); v["status"] == "waiting" {
+				h.Input(SessionWaitingInput(call.Name, h.sessionDescription(call.Name), reason))
+			} else {
+				h.Input(SessionSentInput(call.Name, h.sessionDescription(call.Name)))
+			}
 		}
 		return r
 	}

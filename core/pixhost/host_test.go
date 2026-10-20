@@ -595,3 +595,43 @@ func TestListShowsTheLastTurnsGist(t *testing.T) {
 		t.Fatalf("%+v", u)
 	}
 }
+
+// #183: pix's prompt result says typed or waiting (and why); the host counts the waiting ones
+// until pix reports them delivered.
+func TestPromptDeliverySaysTypedOrWaitingAndCountsTheWaiting(t *testing.T) {
+	h, sock := newHost(t)
+	p, r := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api"})
+	reply := func(res wire.Msg) agent.Delivery {
+		t.Helper()
+		go func() {
+			m, _ := p.dec.Next()
+			res.Kind, res.ID = wire.KindResult, m.ID
+			wire.Encode(p.c, res)
+		}()
+		d, err := h.PromptDelivery(context.Background(), r.Address, "hi")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
+	waiting := func() int {
+		l, _ := h.List(context.Background())
+		return l[0].User.Waiting
+	}
+	if d := reply(wire.Msg{Status: "typed"}); d.Status != "typed" || waiting() != 0 {
+		t.Fatalf("%+v %d", d, waiting())
+	}
+	if d := reply(wire.Msg{Status: "waiting", Reason: "working"}); d != (agent.Delivery{Status: "waiting", Reason: "working"}) {
+		t.Fatalf("%+v", d)
+	}
+	reply(wire.Msg{Status: "waiting", Reason: "working"})
+	if waiting() != 2 {
+		t.Fatalf("waiting %d", waiting())
+	}
+	wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "delivered"})
+	for deadline := time.Now().Add(2 * time.Second); waiting() != 0; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("still waiting %d after delivered", waiting())
+		}
+	}
+}

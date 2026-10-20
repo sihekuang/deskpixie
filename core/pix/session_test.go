@@ -994,3 +994,35 @@ func TestAToolFinishingAfterAPromptMeansItIsWorkingAgain(t *testing.T) {
 		t.Fatalf("got %q, want working", st)
 	}
 }
+
+// Pixie's message, typed at once or waiting (#183): the prompt result says which, and why it
+// waits; a message that waited reports when it reaches the agent.
+func TestAPromptResultSaysTypedOrWaitingAndWhy(t *testing.T) {
+	h := newHarness(t, "codex", Launch{Path: "/bin/sh", Args: []string{"-c", "read x; echo seen:$x; sleep 30"}})
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "right away"})
+	waitEvent(t, h.d.events, "typed", func(m wire.Msg) bool { return m.ID == "1" && m.Status == "typed" })
+
+	h.stdinW.WriteString("half a sent") // no Enter: you're typing
+	time.Sleep(100 * time.Millisecond)
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "2", Command: "prompt", Text: "from pixie"})
+	waitEvent(t, h.d.events, "waiting: typing", func(m wire.Msg) bool {
+		return m.ID == "2" && m.Status == "waiting" && m.Reason == "typing"
+	})
+	h.stdinW.WriteString(strings.Repeat("\x7f", len("half a sent"))) // you delete it: it goes in after the quiet time
+	waitEvent(t, h.d.events, "delivered", func(m wire.Msg) bool { return m.Kind == wire.KindEvent && m.Event == "delivered" })
+	h.s.runner.Hangup()
+	h.s.finish()
+}
+
+func TestAMessageForAWorkingAgentWaitsAndIsDeliveredWithItsNextTool(t *testing.T) {
+	h := newHarness(t, "codex", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}})
+	h.s.setStatus("working")
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "check the tests"})
+	waitEvent(t, h.d.events, "waiting: working", func(m wire.Msg) bool {
+		return m.ID == "1" && m.Status == "waiting" && m.Reason == "working"
+	})
+	h.s.Hook("PostToolUse", map[string]any{})
+	waitEvent(t, h.d.events, "delivered", func(m wire.Msg) bool { return m.Kind == wire.KindEvent && m.Event == "delivered" })
+	h.s.runner.Hangup()
+	h.s.finish()
+}

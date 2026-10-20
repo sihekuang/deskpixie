@@ -74,6 +74,7 @@ type SessionRow struct {
 	Started          string   `json:"started,omitempty"`     // "1h30m ago"
 	LastActive       string   `json:"last_active,omitempty"` // "3m ago"
 	LastTurn         string   `json:"last_turn,omitempty"`   // its last turn's gist, "Asked: …" for a question (#146)
+	Waiting          int      `json:"waiting,omitempty"`     // messages waiting to be delivered to it (#183)
 }
 
 // ago is how long before now t was, as list_sessions shows it ("" for no time).
@@ -91,6 +92,32 @@ func ago(t, now time.Time) string {
 // Describer sets your own description of a session.
 type Describer interface {
 	SetDescription(name, text string) error
+}
+
+// Delivery is what became of a message to your session (#183): Status "typed" (it went in at
+// once) or "waiting" (pix holds it), with Reason why it waits: "working", "blocked" (on a
+// question) or "typing" (you are). Empty from a pix too old to say.
+type Delivery struct {
+	Status string
+	Reason string
+}
+
+// DeliveryPrompter prompts a session and says whether the message was typed or waits.
+type DeliveryPrompter interface {
+	PromptDelivery(ctx context.Context, name, text string) (Delivery, error)
+}
+
+// WaitingWhy is why a waiting message waits, for the coordinator and Pixie.
+func WaitingWhy(reason string) string {
+	switch reason {
+	case "working":
+		return "The session is busy; it gets the message with its next step, or when it stops."
+	case "blocked":
+		return "The session is waiting on a question; it gets the message once that's answered."
+	case "typing":
+		return "The person is typing in that session; it gets the message once they send or clear what they typed."
+	}
+	return "It gets the message as soon as it can."
 }
 
 // VerbatimSetter keeps each session's verbatim setting (#143): on, the default, a message is
@@ -149,6 +176,14 @@ func sessionTool(ctx context.Context, host SessionHost, call McpCall, mask func(
 				text = CoordinatorSays(call.Text)
 			}
 		}
+		if dp, ok := sec.(DeliveryPrompter); ok {
+			d, derr := dp.PromptDelivery(ctx, call.Name, text)
+			if derr == nil && d.Status == "waiting" {
+				return McpReply{Value: map[string]any{"name": call.Name, "status": "waiting", "reason": d.Reason, "why": WaitingWhy(d.Reason)}}
+			}
+			err, status = derr, "sent"
+			break
+		}
 		err, status = sec.Prompt(ctx, call.Name, text), "sent"
 	case CallInterruptSession:
 		err, status = sec.SendKeys(ctx, call.Name, []string{"Escape"}), "interrupted"
@@ -204,7 +239,7 @@ func userSessionRows(ctx context.Context, sec SessionHost, mask func(string) str
 		}
 		rows = append(rows, SessionRow{Name: a.Name, Description: mask(u.Description), PastDescriptions: past,
 			Tool: u.Tool, Repo: u.Repo, Cwd: a.Cwd, Where: u.Where, Status: a.Status.String(), Reachable: u.Reachable, Verbatim: u.Verbatim,
-			Started: ago(u.Started, now), LastActive: ago(u.LastActive, now), LastTurn: last})
+			Started: ago(u.Started, now), LastActive: ago(u.LastActive, now), LastTurn: last, Waiting: u.Waiting})
 	}
 	return rows, nil
 }

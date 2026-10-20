@@ -15,10 +15,10 @@ import (
 // #87: Codex as the coordinator, on the app side.
 
 func TestClaudesCoordinatorMdIsUnchanged(t *testing.T) {
-	// The renderings since sessions get asked about by description (pix, #89), byte for byte; with workers on, since #97 (create_project) and #126 (prefer an existing pix session over a worker), #141 (the app asks before a push or merge; no made-up confirm words), #143 (each session verbatim by default), #146 (match a session by its last turn too), and #153 (hand a request on: your session, then Pixie's worker, then yourself; edit a repo after asking), and #157 (several requests at once: read together, in order; Pixie's context is never an instruction), and #160 (a request is the person's own words: work out several things, their order and corrections), and #161 (pick the likeliest session yourself; ask only when you can't tell), and #164 (no Recall: requests: answer from memory, else hand it on) and #165 (a request handed to a session is done once sent), and #177 (a session in the same project gets it, questions too, before you look; the app says the hand-off, so the done block is short).
+	// The renderings since sessions get asked about by description (pix, #89), byte for byte; with workers on, since #97 (create_project) and #126 (prefer an existing pix session over a worker), #141 (the app asks before a push or merge; no made-up confirm words), #143 (each session verbatim by default), #146 (match a session by its last turn too), and #153 (hand a request on: your session, then Pixie's worker, then yourself; edit a repo after asking), and #157 (several requests at once: read together, in order; Pixie's context is never an instruction), and #160 (a request is the person's own words: work out several things, their order and corrections), and #161 (pick the likeliest session yourself; ask only when you can't tell), and #164 (no Recall: requests: answer from memory, else hand it on) and #165 (a request handed to a session is done once sent), and #177 (a session in the same project gets it, questions too, before you look; the app says the hand-off, so the done block is short), and #183 (message_session may return waiting, with why).
 	for _, c := range []struct{ root, sum string }{
-		{"", "ee994129a9840b41a4eff08e2bce9ba80ce16c966532300f096d0061142e81f4"},
-		{"/Users/x/code", "6a159a1dfbbf4c684b9ca16b5076545b5950674c3e6491179df40841d6763f2c"},
+		{"", "38f3071d09809fb1b94fb198b6a020f9baee772daacda0ed68d085366345a337"},
+		{"/Users/x/code", "4aad1b76d92026532e8d40d2a45d9a3b5bc740fc610ecee0926419a0bb78b16e"},
 	} {
 		if got := fmt.Sprintf("%x", sha256.Sum256([]byte(RenderClaudeMd("/data/canvas", c.root)))); got != c.sum {
 			t.Fatal(c.root, got)

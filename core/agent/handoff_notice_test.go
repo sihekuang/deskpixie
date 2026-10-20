@@ -65,3 +65,16 @@ func TestAHandOffWithTwoRequestsInFlightWaitsForTheReply(t *testing.T) {
 	openVoice(c)
 	wantNone(t, visible(c.Step(SessionSentInput("repo-claude", landing), T0)))
 }
+
+// #183: a message pix holds is said as waiting, with why, not as passed on.
+func TestAHandOffThatWaitsIsSaidAsWaiting(t *testing.T) {
+	for reason, want := range map[string]string{
+		"working": "Your session on " + landing + " hasn't got your message yet: it's busy, and gets it with its next step or when it stops.",
+		"blocked": "Your session on " + landing + " hasn't got your message yet: it's waiting on a question, and gets it once that's answered.",
+		"typing":  "Your session on " + landing + " hasn't got your message yet: you're typing there, and it gets it once you send or clear that.",
+	} {
+		c := workingOnJob1()
+		openVoice(c)
+		wantEffects(t, visible(c.Step(SessionWaitingInput("repo-claude", landing, reason), T0)), eInject("Coordinator reply: "+want))
+	}
+}
