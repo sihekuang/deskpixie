@@ -135,6 +135,12 @@ type Notifier interface {
 	Notify(title, body string)
 }
 
+// UpdateNotifier is a Notifier whose notifications can be about a bubble line (#199): clicked,
+// the shell dismisses that line and brings up its pane.
+type UpdateNotifier interface {
+	NotifyUpdate(title, body string, update UpdateItem)
+}
+
 type PixieCue interface {
 	Cue(cue Cue)
 }

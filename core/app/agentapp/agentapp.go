@@ -340,7 +340,7 @@ func Build(c Config) *Agent {
 	deps := agent.Deps{
 		Host:        agent.NewAgentHost(session, c.Clock, recipe),
 		Voice:       a.link,
-		Notifier:    NewNotifier(c.Runner, c.Hooks.Notify),
+		Notifier:    NewNotifier(c.Runner, c.Hooks.Notify).WithUpdates(c.Hooks.NotifyUpdate),
 		Pixie:       pixieCue{c.Hooks},
 		Status:      statusSink{a},
 		Planner:     termFactory(c.Runner, c.Home),
@@ -622,6 +622,9 @@ func (a *Agent) Choose(token string, option int) { a.handle.Choose(token, option
 
 // UpdatesSeen: the updates bubble showed these lines long enough to count as heard.
 func (a *Agent) UpdatesSeen(ids []uint64) { a.handle.UpdatesSeen(ids) }
+
+// UpdatesDismissed: the user clicked these lines away (#199).
+func (a *Agent) UpdatesDismissed(ids []uint64) { a.handle.UpdatesDismissed(ids) }
 
 // Updates is the bubble's current list ([]agent.UpdateItem, never nil).
 func (a *Agent) Updates() any { return a.handle.Updates() }

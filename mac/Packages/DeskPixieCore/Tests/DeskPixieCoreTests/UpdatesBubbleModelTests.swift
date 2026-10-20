@@ -114,12 +114,15 @@ final class UpdatesBubbleModelTests: XCTestCase {
         XCTAssertEqual(m.count, 1)
     }
 
-    func testAJobsQuestionIsNotDismissedByAClick() {
+    /// #199: a job's question (no buttons) is clicked away like any line; Clear all leaves it.
+    func testAJobsQuestionIsDismissedByAClickButNotByClearAll() {
         var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
         let ask = UpdateLine(id: 1, text: "Which branch?", kind: "question", at: 1, job: "job_1", worker: nil)
-        m.apply([ask], now: 1, pop: .allowed)
-        XCTAssertFalse(m.dismiss(1))
+        m.apply([ask, line(2), line(3)], now: 1, pop: .allowed)
+        XCTAssertEqual(Set(m.dismissAll()), [2, 3])
         XCTAssertEqual(m.count, 1)
+        XCTAssertTrue(m.dismiss(1))
+        XCTAssertEqual(m.count, 0)
     }
 
     func testAQuestionWithButtonsIsNotDismissedByAClick() {

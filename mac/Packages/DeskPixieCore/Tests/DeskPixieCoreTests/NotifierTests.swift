@@ -50,6 +50,26 @@ final class NotifierTests: XCTestCase {
         XCTAssertEqual(SystemNotificationSink.glassPath, "/System/Library/Sounds/Glass.aiff")
     }
 
+    /// #199: a notification about a bubble line carries it, and says its short form.
+    func testANotificationAboutALineCarriesItAndItsShortForm() async throws {
+        let sink = FakeSink()
+        let n = Notifier(sink: sink)
+        let json = #"{"kind":"notify","title":"Pixie","body":"api is done: tests pass.","update":{"id":7,"text":"api is done: tests pass.","kind":"session","at":7,"session":"api-claude","title":"api","brief":"Tests pass."}}"#
+        n.handle(try XCTUnwrap(EngineEvent.decode(Data(json.utf8))))
+        await n.drain()
+        XCTAssertEqual(sink.posted, ["api|Tests pass.|7"])
+        XCTAssertEqual(NotificationText.of(title: "Pixie", body: "Done.", update: nil).title, "Pixie")
+    }
+
+    func testANotificationsLineRoundTripsThroughUserInfo() throws {
+        let line = UpdateLine(id: 9, text: "t", kind: "session", at: 9, job: nil, worker: nil, session: "api-claude",
+                              title: "api", brief: "b")
+        let json = String(data: try JSONEncoder().encode(line), encoding: .utf8)!
+        XCTAssertEqual(SystemNotificationSink.update(from: [SystemNotificationSink.updateKey: json]), line)
+        XCTAssertNil(SystemNotificationSink.update(from: [:]))
+        XCTAssertEqual(SystemNotificationSink.identifier(update: 9), "update-9")
+    }
+
     func testIgnoresOtherEvents() async {
         let sink = FakeSink()
         let n = Notifier(sink: sink)
@@ -64,5 +84,6 @@ private final class FakeSink: NotificationSink {
     var posted: [String] = []
     var played = 0
     func post(title: String, body: String) async { posted.append("\(title)|\(body)") }
+    func post(title: String, body: String, update: UpdateLine) async { posted.append("\(title)|\(body)|\(update.id)") }
     func playGlass() { played += 1 }
 }

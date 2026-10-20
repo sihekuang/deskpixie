@@ -74,7 +74,9 @@ public enum EngineEvent: Sendable, Equatable {
     case hotkey(combo: String)
     /// Audio device UIDs to pin for the next start (nil = system default).
     case devices(input: String?, output: String?)
-    case notify(title: String, body: String, sound: String?)
+    /// `update`: the bubble line the notification is about (#199); a click on the notification
+    /// does what a click on the line does.
+    case notify(title: String, body: String, sound: String?, update: UpdateLine? = nil)
     case canvasOpen(url: String, title: String)
     case settingsChanged
     case restart
@@ -99,7 +101,7 @@ public enum EngineEvent: Sendable, Equatable {
     private struct Position: Decodable { var x: Double?, y: Double? }
     private struct Hotkey: Decodable { var combo: String }
     private struct Devices: Decodable { var input: String?, output: String? }
-    private struct Notify: Decodable { var title: String, body: String, sound: String? }
+    private struct Notify: Decodable { var title: String, body: String, sound: String?, update: UpdateLine? }
     private struct CanvasOpen: Decodable { var url: String, title: String }
     private struct Updates: Decodable { var lines: [UpdateLine] }
     private struct Agents: Decodable { var roster: RosterView }
@@ -130,7 +132,8 @@ public enum EngineEvent: Sendable, Equatable {
         case "position": return get(Position.self).map { .position(x: $0.x, y: $0.y) }
         case "hotkey": return get(Hotkey.self).map { .hotkey(combo: $0.combo) }
         case "devices": return get(Devices.self).map { .devices(input: $0.input, output: $0.output) }
-        case "notify": return get(Notify.self).map { .notify(title: $0.title, body: $0.body, sound: $0.sound) }
+        case "notify":
+            return get(Notify.self).map { .notify(title: $0.title, body: $0.body, sound: $0.sound, update: $0.update) }
         case "canvas.open": return get(CanvasOpen.self).map { .canvasOpen(url: $0.url, title: $0.title) }
         case "updates": return get(Updates.self).map { .updates($0.lines) }
         case "agents": return get(Agents.self).map { .agents($0.roster) }

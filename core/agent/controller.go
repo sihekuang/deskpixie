@@ -187,8 +187,10 @@ type Input struct {
 	Plan WorkerPlan
 	// Memories (InRestored): memories.jsonl's lines.
 	Memories []string
-	// IDs (InUpdatesSeen): outbox line ids.
-	IDs []uint64
+	// IDs (InUpdatesSeen): outbox line ids. Clicked: the user dismissed them (a click on the line
+	// or its notification, #199): a job's question goes too.
+	IDs     []uint64
+	Clicked bool
 	// Away (InPresence).
 	Away bool
 	// Token and Allow (InDecide): the confirm word tapped on, and the answer.
@@ -267,8 +269,13 @@ func SessionAnswerFailedInput(name, why string) Input {
 	return Input{Kind: InSessionAnswerFailed, Name: name, Text: why}
 }
 func UpdatesSeenInput(ids []uint64) Input { return Input{Kind: InUpdatesSeen, IDs: ids} }
-func PresenceInput(away bool) Input       { return Input{Kind: InPresence, Away: away} }
-func ModeInput(agent, mode string) Input  { return Input{Kind: InMode, Agent: agent, Mode: mode} }
+
+// UpdatesDismissedInput: the user clicked these lines away (#199).
+func UpdatesDismissedInput(ids []uint64) Input {
+	return Input{Kind: InUpdatesSeen, IDs: ids, Clicked: true}
+}
+func PresenceInput(away bool) Input      { return Input{Kind: InPresence, Away: away} }
+func ModeInput(agent, mode string) Input { return Input{Kind: InMode, Agent: agent, Mode: mode} }
 func SubmitInput(agent, prompt string) Input {
 	return Input{Kind: InSubmit, Agent: agent, Message: prompt}
 }
@@ -347,6 +354,9 @@ type Effect struct {
 	Manual   bool
 	// Answer (EfAnswerSession): "yes", "no" or a menu option's number.
 	Answer string
+	// Update (EfNotify): the bubble line the notification is about, nil when none (#199): a
+	// click on the notification does what a click on the line does.
+	Update *UpdateItem
 }
 
 type coordinatorState int
@@ -709,7 +719,7 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 	case InOpenRefused:
 		c.openRefused(now, &fx)
 	case InUpdatesSeen:
-		c.updatesSeen(in.IDs, &fx)
+		c.updatesSeen(in.IDs, in.Clicked, &fx)
 	case InDecide:
 		// A token already decided (by voice or an earlier tap) or expired settles nothing.
 		if d, ok := c.confirms.DecideToken(in.Token, in.Allow); ok {
@@ -1882,6 +1892,7 @@ func (c *AgentController) applyDelivery(d RouteDelivery, now Millis, fx *[]Effec
 		}
 		record := c.outbox.Push(d.Line, now)
 		*fx = append(*fx, Effect{Kind: EfAppend, File: OutboxFile, Line: record})
+		c.attachNotification(*fx, d.Line)
 	}
 }
 

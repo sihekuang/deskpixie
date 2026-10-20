@@ -583,6 +583,9 @@ func (h *AgentHandle) OpenTerminal(ctx context.Context) error {
 // UpdatesSeen: the bubble showed these lines long enough to count as heard.
 func (h *AgentHandle) UpdatesSeen(ids []uint64) { h.Input(UpdatesSeenInput(ids)) }
 
+// UpdatesDismissed: the user clicked these lines away, in the bubble or as notifications (#199).
+func (h *AgentHandle) UpdatesDismissed(ids []uint64) { h.Input(UpdatesDismissedInput(ids)) }
+
 // Decide is a tap on Allow or Deny in the bubble for the question with this confirm word.
 func (h *AgentHandle) Decide(token string, allow bool) { h.Input(DecideInput(token, allow)) }
 
@@ -1774,7 +1777,11 @@ func (h *AgentHandle) apply(e Effect) {
 	case EfChime:
 		d.Notifier.Chime()
 	case EfNotify:
-		d.Notifier.Notify("Pixie", e.Text)
+		if un, ok := d.Notifier.(UpdateNotifier); ok && e.Update != nil {
+			un.NotifyUpdate("Pixie", e.Text, *e.Update)
+		} else {
+			d.Notifier.Notify("Pixie", e.Text)
+		}
 	case EfCue:
 		d.Pixie.Cue(e.Cue)
 	case EfDecide:

@@ -2,7 +2,7 @@ import CoreGraphics
 import Foundation
 
 /// One unheard agent update, as the core's `updates` event lists it (outbox order, oldest first).
-public struct UpdateLine: Decodable, Sendable, Equatable, Identifiable {
+public struct UpdateLine: Codable, Sendable, Equatable, Identifiable {
     /// The outbox id `agent.updatesSeen` takes back.
     public let id: UInt64
     public let text: String
@@ -226,11 +226,13 @@ public struct UpdatesBubbleModel: Sendable {
         }
     }
 
-    /// A click on a line (#194): it leaves the bubble and counts as seen, so the caller sends its
-    /// id to `agent.updatesSeen`. A question with buttons, or a job's question (the core keeps it
-    /// while the job waits), stays until it is answered. Returns whether the line was dismissed.
+    /// A click on a line (#194), or on its notification (#199): it leaves the bubble, so the
+    /// caller sends its id to `agent.updatesSeen` as clicked. A question with buttons stays until
+    /// it is answered; a job's question goes (#199: the job still waits for its answer). Returns
+    /// whether the line was dismissed.
     public mutating func dismiss(_ id: UInt64) -> Bool {
-        guard let line = display.first(where: { $0.id == id }), Self.dismissable(line) else { return false }
+        guard let line = display.first(where: { $0.id == id }),
+              !line.offersDecision, !line.offersOptions else { return false }
         dismissed.insert(id)
         lines.removeAll { $0.id == id }
         frozen?.removeAll { $0.id == id }
@@ -241,22 +243,18 @@ public struct UpdatesBubbleModel: Sendable {
         return true
     }
 
-    /// "Clear all" (#198): every line a click would dismiss leaves at once. Returns their ids for
-    /// `agent.updatesSeen`; questions still waiting on you stay.
+    /// "Clear all" (#198): every line but the questions leaves at once (a question waiting on
+    /// you is clicked away on its own). Returns their ids for `agent.updatesSeen`.
     public mutating func dismissAll() -> [UInt64] {
-        let ids = display.filter(Self.dismissable).map(\.id)
+        let ids = display.filter(Self.clearable).map(\.id)
         for id in ids { _ = dismiss(id) }
         return ids
     }
 
-    /// Whether a click may dismiss the line: not a question with buttons, nor a job's question
-    /// (the core keeps it while the job waits).
-    private static func dismissable(_ line: UpdateLine) -> Bool {
-        !line.offersDecision && !line.offersOptions && !(line.kind == "question" && line.job != nil)
-    }
+    private static func clearable(_ line: UpdateLine) -> Bool { line.kind != "question" }
 
     /// The "Clear all" row shows: more than one line could be cleared.
-    public var offersClearAll: Bool { display.filter(Self.dismissable).count > 1 }
+    public var offersClearAll: Bool { display.filter(Self.clearable).count > 1 }
 
     /// Presence came back: one pop if anything arrived while away.
     public mutating func back(now: TimeInterval, pop: PopPermission) {
