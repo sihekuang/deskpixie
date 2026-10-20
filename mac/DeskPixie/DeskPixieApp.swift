@@ -16,9 +16,7 @@ struct DeskPixieApp: App {
         } label: {
             // Pixie's face as a template image (tinted for light/dark menu bars); sparkles if
             // the bundled pack cannot be read.
-            Image(nsImage: Self.menuBarIcon)
-                .help(MenuBarIcon.tooltip)
-                .accessibilityLabel(MenuBarIcon.tooltip)
+            MenuBarLabel(image: Self.menuBarIcon, tooltip: MenuBarIcon.tooltip)
         }
         .menuBarExtraStyle(.menu)
 

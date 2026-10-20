@@ -74,14 +74,9 @@ final class TrayMenuTests: XCTestCase {
             "label:Hotkey unavailable: ⌃⌥Space", "--",
             "label:Voice: connection lost", "--",
             "label:Coordinator: herdr not found", "--",
-            "menu:State", "talk", "menu:Size", "reset-position", "fade", "menu:Pixie", "reload", "menu:Canvas",
+            "menu:Size", "reset-position", "menu:Pixie", "menu:Canvas",
             "menu:Coordinator", "--", "mic-mode", "onboarding", "settings", "--", "quit",
         ])
-        let st = try XCTUnwrap(submenu(items, "State"))
-        XCTAssertEqual(titles(st.items), TrayMenu.stateNames.map { "state:\($0)" })
-        XCTAssertTrue(st.items.contains(.action(.init(id: "state:thinking", title: "thinking", checked: true))))
-        XCTAssertTrue(items.contains(.action(.init(id: "fade", title: "Proximity fade", checked: true))))
-        XCTAssertTrue(items.contains(.action(.init(id: "talk", title: "Simulate talking", checked: false))))
         XCTAssertTrue(items.contains(.action(.init(id: "settings", title: "Settings…", shortcut: ","))))
         let pixie = try XCTUnwrap(submenu(items, "Pixie"))
         XCTAssertEqual(pixie.items, [.action(.init(id: "pack:bit", title: "Bit", checked: true)),
@@ -89,7 +84,7 @@ final class TrayMenuTests: XCTestCase {
         let size = try XCTUnwrap(submenu(items, "Size"))
         XCTAssertTrue(size.items.contains(.action(.init(id: "size:6", title: "Medium (×6)", checked: true))))
         let canvas = try XCTUnwrap(submenu(items, "Canvas"))
-        XCTAssertEqual(titles(canvas.items), ["canvas:open", "menu:Recent", "canvas:folder"])
+        XCTAssertEqual(titles(canvas.items), ["canvas:open", "menu:Recent"])
         let recent = try XCTUnwrap(submenu(canvas.items, "Recent"))
         XCTAssertTrue(recent.enabled)
         XCTAssertEqual(titles(recent.items), ["canvas:page:q3"])
@@ -110,7 +105,7 @@ final class TrayMenuTests: XCTestCase {
         XCTAssertFalse(titles(items).contains("mic-mode"))
         let recent = try XCTUnwrap(submenu(try XCTUnwrap(submenu(items, "Canvas")).items, "Recent"))
         XCTAssertFalse(recent.enabled)
-        XCTAssertEqual(titles(items).first, "menu:State")
+        XCTAssertEqual(titles(items).first, "menu:Size")
     }
 
     func testNoAppStateShowsOnlyAppItems() {

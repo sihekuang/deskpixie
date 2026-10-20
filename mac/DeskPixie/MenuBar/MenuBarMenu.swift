@@ -12,14 +12,37 @@ struct MenuBarMenu: View {
     var body: some View {
         TrayItemsView(items: appState.menuItems) { id in
             if TrayMenu.route(id) == .settings {
-                // From a menu-bar app the window would open behind other apps' windows.
-                WindowFocus.openSettings(app: NSApp, open: { openSettings() },
-                                         findWindow: { NSApp.windows.first { $0.identifier?.rawValue == "settings" } },
-                                         defer: { work in DispatchQueue.main.async { MainActor.assumeIsolated(work) } })
+                Self.showSettings(openSettings)
             } else {
                 perform(id)
             }
         }
+    }
+
+    /// From a menu-bar app the window would open behind other apps' windows.
+    static func showSettings(_ open: OpenSettingsAction) {
+        WindowFocus.openSettings(app: NSApp, open: { open() },
+                                 findWindow: { NSApp.windows.first { $0.identifier?.rawValue == "settings" } },
+                                 defer: { work in DispatchQueue.main.async { MainActor.assumeIsolated(work) } })
+    }
+}
+
+/// The menu bar icon. It is drawn at launch (the menu's own view only when the menu opens), so
+/// it is where Pixie's menu (#207) gets SwiftUI's openSettings from.
+struct MenuBarLabel: View {
+    let image: NSImage
+    let tooltip: String
+
+    @Environment(\.openSettings) private var openSettings
+
+    var body: some View {
+        let open = openSettings
+        Image(nsImage: image)
+            .help(tooltip)
+            .accessibilityLabel(tooltip)
+            .onAppear {
+                SettingsOpener.open = { MenuBarMenu.showSettings(open) }
+            }
     }
 }
 

@@ -58,6 +58,8 @@ final class PixieController {
     func observeFrame(_ f: @escaping (NSRect) -> Void) { frameObservers.append(f) }
     /// The opacity the proximity fade just applied to Pixie (the updates bubble follows it).
     var onOpacityChange: ((CGFloat) -> Void)?
+    /// A secondary click on Pixie: shows the tray menu there (#207).
+    var onSecondaryClick: ((NSEvent, NSView) -> Void)?
     /// Whether Pixie is on screen.
     var isShown: Bool { panel.isVisible }
 
@@ -85,6 +87,10 @@ final class PixieController {
         view.onMouseDown = { [weak self] in self?.mouseDown($0) }
         view.onMouseDragged = { [weak self] in self?.mouseDragged($0) }
         view.onMouseUp = { [weak self] in self?.mouseUp($0) }
+        view.onSecondaryClick = { [weak self] e in
+            guard let self else { return }
+            self.onSecondaryClick?(e, self.view)
+        }
         moveObserver = NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification, object: panel,
                                                               queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.panelMoved() }
