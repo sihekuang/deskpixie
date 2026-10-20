@@ -170,7 +170,7 @@ func Default() Config {
 		Hotkey:        "ctrl+alt+Space",
 		Pack:          "bit",
 		Scale:         8,
-		ProximityFade: Fade{Enabled: true, Radius: 150},
+		ProximityFade: Fade{Enabled: false, Radius: 150},
 		Voice: VoiceSettings{
 			Provider: "openai-realtime", Audio: "macos-vpio", Model: "gpt-realtime", Voice: "marin",
 			Chimes: true, IdleTimeoutSecs: 7, NoiseModel: "hush", LiveBackendModel: "gpt-6-luna",

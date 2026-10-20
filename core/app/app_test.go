@@ -520,12 +520,12 @@ func TestSizeActionSavesAndResendsThePack(t *testing.T) {
 func TestFadeActionTogglesTheSavedSetting(t *testing.T) {
 	h := newHarness(t)
 	h.action("fade")
-	if h.saved().ProximityFade.Enabled || h.state().Fade {
-		t.Fatal("fade still on")
+	if !h.saved().ProximityFade.Enabled || !h.state().Fade {
+		t.Fatal("fade still off")
 	}
 	h.action("fade")
-	if !h.saved().ProximityFade.Enabled {
-		t.Fatal("fade still off")
+	if h.saved().ProximityFade.Enabled {
+		t.Fatal("fade still on")
 	}
 }
 

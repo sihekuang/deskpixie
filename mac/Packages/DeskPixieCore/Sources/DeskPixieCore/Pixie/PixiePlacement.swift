@@ -56,7 +56,7 @@ public struct PixieSettings: Equatable, Sendable {
     }
 
     /// config.rs defaults: no position, fade on, radius 150.
-    public static let defaults = PixieSettings(position: nil, scale: nil, fadeEnabled: true, fadeRadius: 150)
+    public static let defaults = PixieSettings(position: nil, scale: nil, fadeEnabled: false, fadeRadius: 150)
 
     private struct Snapshot: Decodable {
         struct Fade: Decodable {
