@@ -1,0 +1,47 @@
+package settings
+
+import (
+	"reflect"
+	"testing"
+)
+
+// #221: text mode is a Pixie setting, voice by default.
+func TestReplyModeDefaultsToVoice(t *testing.T) {
+	if got := Default().ReplyMode; got != ReplyVoice || ReplyVoice != "voice" || ReplyText != "text" {
+		t.Fatal(got)
+	}
+	c, err := ParseConfig([]byte(`{"hotkey":"ctrl+alt+Space"}`))
+	if err != nil || c.ReplyMode != ReplyVoice {
+		t.Fatal("an old settings.json without the key is voice:", c.ReplyMode, err)
+	}
+}
+
+func TestReplyModeIsALivePixieChoice(t *testing.T) {
+	f := FieldByPath("replyMode")
+	if f.Section != SectionPixie || f.Apply != ApplyLive {
+		t.Fatalf("%+v", f)
+	}
+	var vals []string
+	for _, o := range ReplyModes {
+		vals = append(vals, o.Value)
+	}
+	if !reflect.DeepEqual(vals, []string{"voice", "text"}) {
+		t.Fatal(vals)
+	}
+	if r, ok := RouteFor("replyMode"); !ok || r != RouteReplyMode {
+		t.Fatal(r, ok)
+	}
+}
+
+func TestReplyModeMustBeVoiceOrText(t *testing.T) {
+	env := testEnv(t)
+	for mode, ok := range map[string]bool{"voice": true, "text": true, "chat": false, "": false} {
+		c := Default()
+		c.ReplyMode = mode
+		got := problems(c, env)
+		bad := len(got) == 1 && got[0][0] == "replyMode"
+		if ok && len(got) != 0 || !ok && !bad {
+			t.Errorf("%q: %v", mode, got)
+		}
+	}
+}

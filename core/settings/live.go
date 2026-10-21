@@ -25,6 +25,8 @@ const (
 	// RouteNotifications: the updates bubble and presence monitor read these when they next
 	// decide (the settings snapshot the app already holds).
 	RouteNotifications
+	// RouteReplyMode: the agent and the shell switch between voice and text (#221).
+	RouteReplyMode
 )
 
 // RouteFor is the route for a Live field (or "position" for Reset position); ok is false for
@@ -48,6 +50,8 @@ func RouteFor(path string) (Route, bool) {
 	case "notifications.bubble.enabled", "notifications.bubble.popSecs", "notifications.bubble.lines",
 		"notifications.awayAfterMins":
 		return RouteNotifications, true
+	case "replyMode":
+		return RouteReplyMode, true
 	case "position":
 		return RouteResetPosition, true
 	}

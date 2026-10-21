@@ -35,6 +35,9 @@ type Config struct {
 	Hotkey string `json:"hotkey"`
 	Pack   string `json:"pack"`
 	Scale  uint32 `json:"scale"`
+	// ReplyMode is how you talk to Pixie: "voice" (as always) or "text" (a quick message box
+	// under Pixie that goes straight to the coordinator, #221).
+	ReplyMode string `json:"replyMode"`
 	// Position is the logical top-left of the pixie window; nil = bottom-right of the primary
 	// display. Managed: written by the app.
 	Position      *[2]float64          `json:"position"`
@@ -173,6 +176,7 @@ func Default() Config {
 		Hotkey:        "ctrl+alt+Space",
 		Pack:          "bit",
 		Scale:         8,
+		ReplyMode:     ReplyVoice,
 		ProximityFade: Fade{Enabled: false, Radius: 150},
 		Voice: VoiceSettings{
 			Provider: "openai-realtime", Audio: "macos-vpio", Model: "gpt-realtime", Voice: "marin",
@@ -237,6 +241,7 @@ type configFields struct {
 	Hotkey        string               `json:"hotkey"`
 	Pack          string               `json:"pack"`
 	Scale         uint32               `json:"scale"`
+	ReplyMode     string               `json:"replyMode"`
 	Position      *[2]float64          `json:"position"`
 	ProximityFade Fade                 `json:"proximityFade"`
 	Voice         VoiceSettings        `json:"voice"`
@@ -246,7 +251,7 @@ type configFields struct {
 }
 
 var knownKeys = map[string]bool{
-	"hotkey": true, "pack": true, "scale": true, "position": true, "proximityFade": true,
+	"hotkey": true, "pack": true, "scale": true, "replyMode": true, "position": true, "proximityFade": true,
 	"voice": true, "canvas": true, "agent": true, "notifications": true,
 }
 
@@ -256,7 +261,7 @@ func (c Config) MarshalJSON() ([]byte, error) {
 	if kinds == nil {
 		kinds = []string{}
 	}
-	f := configFields{c.Hotkey, c.Pack, c.Scale, c.Position, c.ProximityFade, c.Voice, c.Canvas, c.Agent, c.Notifications}
+	f := configFields{c.Hotkey, c.Pack, c.Scale, c.ReplyMode, c.Position, c.ProximityFade, c.Voice, c.Canvas, c.Agent, c.Notifications}
 	f.Agent.Workers.Kinds = kinds
 	b, err := json.Marshal(f)
 	if err != nil || len(c.Extra) == 0 {
@@ -297,7 +302,7 @@ func (c *Config) UnmarshalJSON(b []byte) error {
 		return errors.New("invalid type: null, expected struct Config")
 	}
 	targets := map[string]any{
-		"hotkey": &c.Hotkey, "pack": &c.Pack, "scale": &c.Scale, "position": &c.Position,
+		"hotkey": &c.Hotkey, "pack": &c.Pack, "scale": &c.Scale, "replyMode": &c.ReplyMode, "position": &c.Position,
 		"proximityFade": &c.ProximityFade, "voice": &c.Voice, "canvas": &c.Canvas, "agent": &c.Agent,
 		"notifications": &c.Notifications,
 	}
