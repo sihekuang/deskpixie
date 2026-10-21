@@ -23,7 +23,7 @@ struct AgentRosterView: View {
     var body: some View {
         VStack(spacing: 4) {
             if model.open && !below { list }
-            if chatOpen && !below { card }
+            if showsCard && !below { card }
             HStack(spacing: 6) {
                 if model.visible { chip }
                 ReplyModeToggle(mode: chat.mode, onPick: onMode)
@@ -32,15 +32,21 @@ struct AgentRosterView: View {
                     })
             }
             if model.open && below { list }
-            if chatOpen && below { card }
+            if showsCard && below { card }
         }
         .fixedSize()
     }
 
     private var chatOpen: Bool { chat.open && chat.mode == "text" }
+    /// Text mode: the box when open. Voice mode: the caption alone while there is one (#224),
+    /// never together with the list.
+    private var showsCard: Bool {
+        chatOpen || (chat.mode != "text" && chat.showsCaption && !model.open)
+    }
 
     private var card: some View {
-        QuickChatCard(model: chat, state: chatState, onSend: onSend, onStop: onStop, onClose: onCloseChat)
+        QuickChatCard(model: chat, state: chatState, showsInput: chatOpen,
+                      onSend: onSend, onStop: onStop, onClose: onCloseChat)
     }
 
     private var chip: some View {

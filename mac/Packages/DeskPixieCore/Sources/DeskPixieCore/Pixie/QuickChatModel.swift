@@ -16,7 +16,9 @@ public struct ChatLine: Decodable, Sendable, Equatable {
 
 /// The text box under Pixie (#221, spec docs/superpowers/specs/2026-10-21-text-mode-design.md
 /// §4.3): one message at a time, and only the coordinator's spoken answer to it, typed out word
-/// by word. The controller feeds it events and a timer (`tick`); the view draws it.
+/// by word. The controller feeds it events and a timer (`tick`); the view draws it. It also
+/// carries captions (#224): what Pixie says aloud, shown in the same place (voice mode: without
+/// the input box).
 public struct QuickChatModel: Equatable, Sendable {
     public enum Phase: Equatable, Sendable { case ready, thinking, answering, done, stopped }
 
@@ -36,12 +38,18 @@ public struct QuickChatModel: Equatable, Sendable {
     private var pending = false
     /// Stop came while pending: the job is cancelled as soon as it is known.
     private var stopPending = false
+    /// What is shown is a caption (Pixie's spoken words), not a typed message's answer.
+    public private(set) var isCaption = false
 
     public init() {}
 
-    public var showsStop: Bool { phase == .thinking || phase == .answering }
+    public var showsStop: Bool { phase == .thinking || (phase == .answering && !isCaption) }
+
+    /// A caption is up (voice mode draws the card for it alone).
+    public var showsCaption: Bool { isCaption && phase != .ready }
 
     public var statusText: String? {
+        if isCaption { return nil }
         switch phase {
         case .thinking: return "Thinking…"
         case .answering: return "Answering…"
@@ -56,6 +64,7 @@ public struct QuickChatModel: Equatable, Sendable {
     /// The message is on its way (before chat.send answers): thinking, and lines that come
     /// meanwhile are kept until the job is known.
     public mutating func sending() {
+        isCaption = false
         job = nil
         pending = true
         stopPending = false
@@ -70,6 +79,7 @@ public struct QuickChatModel: Equatable, Sendable {
     @discardableResult
     public mutating func sent(job: String) -> Bool {
         self.job = job
+        isCaption = false
         if stopPending {
             stopPending = false
             pending = false
@@ -88,6 +98,7 @@ public struct QuickChatModel: Equatable, Sendable {
 
     /// The message couldn't go: the reason is the answer.
     public mutating func failedToSend(_ reason: String) {
+        isCaption = false
         job = nil
         pending = false
         stopPending = false
@@ -102,7 +113,7 @@ public struct QuickChatModel: Equatable, Sendable {
             early[line.job] = line
             return
         }
-        guard line.job == job, phase == .thinking || phase == .answering || phase == .done else { return }
+        guard !isCaption, line.job == job, phase == .thinking || phase == .answering || phase == .done else { return }
         if line.status == "working" {
             full = line.text
             shown = line.text
@@ -112,6 +123,33 @@ public struct QuickChatModel: Equatable, Sendable {
             shown = ""
             phase = .answering
         }
+    }
+
+    /// What Pixie said aloud (the voice model's transcript). Only Pixie's side; a new caption
+    /// replaces the last. In text mode it never covers a typed message still at work. True when
+    /// it shows.
+    @discardableResult
+    public mutating func caption(role: String, text: String) -> Bool {
+        let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard role == "assistant", !words.isEmpty else { return false }
+        if mode == "text" && !isCaption && (pending || phase == .thinking || phase == .answering) {
+            return false
+        }
+        isCaption = true
+        job = nil
+        full = words
+        shown = ""
+        phase = .answering
+        return true
+    }
+
+    /// The voice conversation ended: a caption goes away (voice mode; text mode keeps the box).
+    public mutating func conversationEnded() {
+        guard isCaption, mode != "text" else { return }
+        isCaption = false
+        full = ""
+        shown = ""
+        phase = .ready
     }
 
     /// Shows the next word of the answer; false when nothing changed. The last word ends it.

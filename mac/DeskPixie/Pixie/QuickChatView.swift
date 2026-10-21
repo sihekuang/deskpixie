@@ -43,10 +43,12 @@ struct ReplyModeToggle: View {
 }
 
 /// The text box (text mode): the coordinator's spoken answer, Stop while it works, and one line
-/// to type in. Built like the session list (spec §5).
+/// to type in. Built like the session list (spec §5). In voice mode it is the caption alone
+/// (#224): what Pixie said, with no input line.
 struct QuickChatCard: View {
     let model: QuickChatModel
     @Bindable var state: QuickChatState
+    let showsInput: Bool
     let onSend: () -> Void
     let onStop: () -> Void
     let onClose: () -> Void
@@ -96,32 +98,34 @@ struct QuickChatCard: View {
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 8)
                 }
-                Divider().padding(.top, 2)
+                if showsInput { Divider().padding(.top, 2) }
             }
-            HStack(spacing: 6) {
-                TextField("Message Pixie", text: $state.draft)
-                    .textFieldStyle(.plain)
-                    .font(.callout)
-                    .focused($focused)
-                    .onSubmit(onSend)
-                    .onExitCommand(perform: onClose)
-                Button(action: onSend) {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.title3)
-                        .foregroundStyle(model.canSend(state.draft) ? .primary : .tertiary)
+            if showsInput {
+                HStack(spacing: 6) {
+                    TextField("Message Pixie", text: $state.draft)
+                        .textFieldStyle(.plain)
+                        .font(.callout)
+                        .focused($focused)
+                        .onSubmit(onSend)
+                        .onExitCommand(perform: onClose)
+                    Button(action: onSend) {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.title3)
+                            .foregroundStyle(model.canSend(state.draft) ? .primary : .tertiary)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!model.canSend(state.draft))
+                    .help("Send")
                 }
-                .buttonStyle(.plain)
-                .disabled(!model.canSend(state.draft))
-                .help("Send")
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
         }
         .padding(6)
         .frame(width: Self.width, alignment: .leading)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.separator))
-        .onAppear { focused = true }
+        .onAppear { if showsInput { focused = true } }
         .onChange(of: state.focusRequests) { focused = true }
     }
 }

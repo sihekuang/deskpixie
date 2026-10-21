@@ -142,3 +142,17 @@ ends an open voice conversation (call 7).
   the toggle, card/list exclusivity.
 - End to end: an isolated Release build with its own herdr session; text mode on; send a
   message, see the coordinator's spoken answer appear in the card with no sound; Stop a slow one.
+
+## Captions (#224)
+
+Added after review with the maintainer: what Pixie says aloud also shows as text, in the card's
+top half (the "Pixie" label and the words), where the text box goes.
+
+- Voice mode: the card shows alone, without the input line, while there is a caption. It types
+  out at about speaking pace, a new reply replaces the last, and it goes away 3 seconds after the
+  voice conversation ends (the mic stops). Hovering doesn't open the session list meanwhile.
+- Text mode: a caption shows in the same top half above the input, but never over a typed
+  message still at work.
+- Only Pixie's side (the voice model's `transcript` event with role `assistant`). No Stop: the
+  hotkey still ends the conversation. The transcript arrives when a reply closes, so the text can
+  trail the audio.

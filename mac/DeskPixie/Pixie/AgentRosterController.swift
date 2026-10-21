@@ -33,6 +33,10 @@ final class AgentRosterController {
     private var typeTimer: Timer?
     private var clickAway: Any?
     static let typeInterval: TimeInterval = 0.12
+    /// Captions type at about speaking pace (#224); they stay this long after the conversation.
+    static let captionInterval: TimeInterval = 0.3
+    static let captionLinger: TimeInterval = 3
+    private var captionHide: Timer?
     static let cardHeight: CGFloat = 170
 
     init(engine: CoreEngine, worker: CoreWorker, pixie: PixieController) {
@@ -56,6 +60,8 @@ final class AgentRosterController {
         timer = nil
         typeTimer?.invalidate()
         typeTimer = nil
+        captionHide?.invalidate()
+        captionHide = nil
         closeChat()
         hide()
     }
@@ -74,6 +80,32 @@ final class AgentRosterController {
         chat.apply(chatLine)
         if chat.phase == .answering { startTyping() }
         render()
+    }
+
+    /// What Pixie said aloud (#224): a caption where the text box goes (voice mode: on its own).
+    func caption(role: String, text: String) {
+        guard chat.caption(role: role, text: text) else { return }
+        captionHide?.invalidate()
+        captionHide = nil
+        typeTimer?.invalidate()
+        typeTimer = nil
+        startTyping()
+        render()
+    }
+
+    /// The voice conversation opened or ended (the mic): an ended one's caption goes a moment later.
+    func conversation(open: Bool) {
+        captionHide?.invalidate()
+        captionHide = nil
+        guard !open else { return }
+        captionHide = Timer.scheduledTimer(withTimeInterval: Self.captionLinger, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.captionHide = nil
+                self.chat.conversationEnded()
+                self.render()
+            }
+        }
     }
 
     /// The hotkey in text mode: open the box and put the cursor in it.
@@ -176,7 +208,8 @@ final class AgentRosterController {
 
     private func startTyping() {
         guard typeTimer == nil else { return }
-        typeTimer = Timer.scheduledTimer(withTimeInterval: Self.typeInterval, repeats: true) { [weak self] _ in
+        let pace = chat.isCaption ? Self.captionInterval : Self.typeInterval
+        typeTimer = Timer.scheduledTimer(withTimeInterval: pace, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 if !self.chat.tick() {
@@ -234,8 +267,8 @@ final class AgentRosterController {
 
     private func poll() {
         // Opens under the pointer; closes when it leaves the chip and the list. Not over the
-        // toggle, and never while the text box is open.
-        var inside = panel.isVisible && panel.frame.contains(NSEvent.mouseLocation) && model.visible && !chat.open
+        // toggle, and never while the text box or a caption is up.
+        var inside = panel.isVisible && panel.frame.contains(NSEvent.mouseLocation) && model.visible && !cardUp
         if inside {
             let p = panel.convertPoint(fromScreen: NSEvent.mouseLocation)
             let flipped = CGPoint(x: p.x, y: hosting.bounds.height - p.y)
@@ -285,7 +318,7 @@ final class AgentRosterController {
             hide()
             return
         }
-        if !model.open && !chat.open { chipHeight = size.height }
+        if !model.open && !cardUp { chipHeight = size.height }
         let top = ScreenDisplays.primaryMaxY
         let bit = pixie.panel.frame
         let screen = NSScreen.screens.first { $0.frame.contains(NSPoint(x: bit.midX, y: bit.midY)) }
@@ -300,7 +333,7 @@ final class AgentRosterController {
         // taller than the estimate, and flipping would move it from under the pointer).
         let (rect0, b) = ChipPlacement.frame(pixie: DesktopSpace.desktopRect(bit, primaryMaxY: top),
                                             panel: size, screen: area, openHeight: openHeight,
-                                            keeping: model.open || chat.open ? below : nil)
+                                            keeping: model.open || cardUp ? below : nil)
         var rect = rect0
         if b != below {
             // Redraw with the list on the other side and place once more with the new size. Not
@@ -313,7 +346,7 @@ final class AgentRosterController {
             if !(s.width > 0 && s.height > 0) { hide(); return }
         }
         panel.setFrame(ScreenDisplays.appKitFrame(topLeft: rect.origin, size: rect.size), display: true)
-        if (model.open || chat.open) && panel.parent != nil {
+        if (model.open || cardUp) && panel.parent != nil {
             // Above the updates bubble (a sibling child panel): re-adding puts it last.
             pixie.panel.removeChildWindow(panel)
         }
@@ -321,6 +354,9 @@ final class AgentRosterController {
         if !panel.isVisible { panel.orderFrontRegardless() }
         if panel.alphaValue != 1 { panel.alphaValue = 1 }
     }
+
+    /// The card is drawn: the text box, or a caption on its own in voice mode (#224).
+    private var cardUp: Bool { chat.open || (chat.mode != "text" && chat.showsCaption) }
 
     private func hide() {
         if panel.parent != nil { pixie.panel.removeChildWindow(panel) }

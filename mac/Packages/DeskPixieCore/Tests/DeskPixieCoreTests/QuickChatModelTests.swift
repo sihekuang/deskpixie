@@ -173,4 +173,70 @@ final class QuickChatModelTests: XCTestCase {
         n.sending()
         XCTAssertFalse(n.sent(job: "job_4"))
     }
+
+    // MARK: - captions (#224)
+
+    /// Voice mode: what Pixie says shows as a caption, typed out, with no Stop or status.
+    func test_voice_caption_types_out_without_stop() {
+        var m = QuickChatModel()
+        XCTAssertTrue(m.caption(role: "assistant", text: "It is sunny today."))
+        XCTAssertTrue(m.showsCaption)
+        XCTAssertFalse(m.showsStop)
+        XCTAssertNil(m.statusText)
+        XCTAssertEqual(m.phase, .answering)
+        while m.tick() {}
+        XCTAssertEqual(m.shown, "It is sunny today.")
+        XCTAssertEqual(m.phase, .done)
+    }
+
+    /// Only Pixie's side, and only words.
+    func test_caption_ignores_the_user_and_empty_text() {
+        var m = QuickChatModel()
+        XCTAssertFalse(m.caption(role: "user", text: "what's the weather"))
+        XCTAssertFalse(m.caption(role: "assistant", text: "   "))
+        XCTAssertFalse(m.showsCaption)
+    }
+
+    /// A new reply replaces the last; the conversation ending puts the caption away.
+    func test_a_new_caption_replaces_and_the_end_clears_it() {
+        var m = QuickChatModel()
+        m.caption(role: "assistant", text: "First.")
+        while m.tick() {}
+        m.caption(role: "assistant", text: "Second one.")
+        XCTAssertEqual(m.shown, "")
+        while m.tick() {}
+        XCTAssertEqual(m.shown, "Second one.")
+        m.conversationEnded()
+        XCTAssertFalse(m.showsCaption)
+        XCTAssertEqual(m.shown, "")
+        XCTAssertEqual(m.phase, .ready)
+    }
+
+    /// Text mode: captions show in the same place, but never over a typed message at work.
+    func test_text_mode_caption_waits_for_a_typed_message() {
+        var m = QuickChatModel()
+        m.mode = "text"
+        XCTAssertTrue(m.caption(role: "assistant", text: "Hello."))
+        XCTAssertTrue(m.showsCaption)
+        m.sending()
+        XCTAssertFalse(m.showsCaption)
+        XCTAssertTrue(m.showsStop)
+        XCTAssertFalse(m.caption(role: "assistant", text: "Not now."))
+        XCTAssertEqual(m.phase, .thinking)
+        m.sent(job: "job_1")
+        m.apply(line("done", "Done it."))
+        XCTAssertFalse(m.caption(role: "assistant", text: "Still typing."))
+        while m.tick() {}
+        XCTAssertTrue(m.caption(role: "assistant", text: "Now fine."))
+    }
+
+    /// In text mode the conversation ending leaves the box as it is.
+    func test_text_mode_keeps_the_caption_when_the_conversation_ends() {
+        var m = QuickChatModel()
+        m.mode = "text"
+        m.caption(role: "assistant", text: "Kept.")
+        while m.tick() {}
+        m.conversationEnded()
+        XCTAssertEqual(m.shown, "Kept.")
+    }
 }
