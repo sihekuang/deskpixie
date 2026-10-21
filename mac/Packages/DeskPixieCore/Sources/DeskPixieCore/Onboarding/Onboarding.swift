@@ -338,7 +338,7 @@ public enum OnboardingChecks {
             return OnboardingCheck(title: p.title, ok: true, detail: "Allowed")
         case .notDetermined where p == .accessibility && asked:
             return OnboardingCheck(title: p.title, ok: false,
-                                   detail: "Not on yet. Open Settings and turn DeskPixie on in the list.",
+                                   detail: "Not on yet. Open Settings and turn DeskPixie on in the list; if it already is, switch it off and on again.",
                                    fix: .openSettings(p))
         case .notDetermined:
             return OnboardingCheck(title: p.title, ok: false, detail: "Not asked yet. \(p.purpose)", fix: .allow(p))

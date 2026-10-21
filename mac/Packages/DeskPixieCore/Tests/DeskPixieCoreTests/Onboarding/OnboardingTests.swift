@@ -226,6 +226,8 @@ final class OnboardingTests: XCTestCase {
         // Accessibility can't say no: once asked, the way on is System Settings.
         XCTAssertEqual(OnboardingChecks.permission(.accessibility, .notDetermined, asked: false).fix, .allow(.accessibility))
         XCTAssertEqual(OnboardingChecks.permission(.accessibility, .notDetermined, asked: true).fix, .openSettings(.accessibility))
+        // A build signed differently leaves the old switch on but not counting: the fix is off and on.
+        XCTAssertTrue(OnboardingChecks.permission(.accessibility, .notDetermined, asked: true).detail.contains("off and on"))
     }
 
     func testThePermissionsDoneLineCountsWhatIsLeft() {
