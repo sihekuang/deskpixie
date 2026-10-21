@@ -98,11 +98,11 @@ func SetupWorkers(w settings.WorkerSettings, folder UsedFolder) WorkersSetup {
 	return WorkersSetup{Policy: policy, Root: folder.Root, Notice: notice}
 }
 
-// TerminalDir is where the agent terminal starts: the projects folder when it is usable
-// (see ProjectsRoot), else the home folder.
-func TerminalDir(projectsRootRaw, home string) string {
-	if root, err := ProjectsRoot(projectsRootRaw, home); err == nil {
-		return root
+// TerminalDir is where the agent terminal starts: the projects folder in use (UseProjectsFolder),
+// else the home folder. DeskPixie's own fallback folder is no place for a person's terminal.
+func TerminalDir(folder UsedFolder, home string) string {
+	if folder.Root != "" && !folder.Fallback {
+		return folder.Root
 	}
 	return home
 }

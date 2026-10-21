@@ -72,10 +72,17 @@ public final class SettingsModel {
 
     /// The path that holds the projects folder setting.
     public static let projectsRootPath = "agent.projectsRoot"
+    /// Workers' switch: the projects folder only matters while it is on.
+    public static let workersPath = "agent.workers.enabled"
 
-    /// Reads the projects folder again (window shown, the setting saved, Check Again).
+    /// Workers are on (the projects folder is in use).
+    public var workersOn: Bool { snapshot?.values.at(Self.workersPath)?.boolValue ?? false }
+
+    /// Reads the projects folder again (window shown, the setting saved, Check Again). Only
+    /// while workers are on: with them off DeskPixie never looks at it, since a folder in
+    /// ~/Documents can bring up a macOS privacy prompt (#216).
     public func refreshProjectsFolder() {
-        projectsFolder = try? client.projectsFolder()
+        projectsFolder = workersOn ? try? client.projectsFolder() : nil
     }
 
     /// Create: makes the missing projects folder; a failure is the notice.
@@ -252,7 +259,7 @@ public final class SettingsModel {
             errors[path] = nil
             drafts[path] = nil
             notice = nil
-            if path == Self.projectsRootPath { refreshProjectsFolder() }
+            if path == Self.projectsRootPath || path == Self.workersPath { refreshProjectsFolder() }
             return true
         case .invalid(let list)?:
             for placed in SettingsLayout.placeErrors(path, list, fields: snapshot?.fields ?? []) {

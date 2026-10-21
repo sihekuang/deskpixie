@@ -84,7 +84,7 @@ func Validate(c Config, env Env) []FieldError {
 	if CheckHotkey(c.Hotkey) != nil {
 		add("hotkey", BadHotkey)
 	}
-	if !ProjectsRootUsable(c.Agent.ProjectsRoot, env.Home) {
+	if !projectsRootOK(c.Agent, env.Home) {
 		add("agent.projectsRoot", BadProjectsRoot)
 	}
 	if CheckSession(c.Agent.Session) != nil {
@@ -158,6 +158,18 @@ func CheckSession(session string) error {
 	return nil
 }
 
+// projectsRootOK: with workers on, the folder is checked on disk (ProjectsRootUsable); with
+// them off only its name, so saving settings never looks into a privacy-protected folder such
+// as ~/Documents (#216). Workers turned on later get the full check, and the agent falls back
+// at start whatever happens.
+func projectsRootOK(a AgentSettings, home string) bool {
+	if a.Workers.Enabled {
+		return ProjectsRootUsable(a.ProjectsRoot, home)
+	}
+	p, err := ExpandProjectsRoot(a.ProjectsRoot, home)
+	return err == nil && BelowHome(p, home)
+}
+
 // ProjectsRootUsable: the projects folder exists below home, or doesn't exist yet at a path
 // below home, where the agent creates it at start (#216).
 func ProjectsRootUsable(raw, home string) bool {
@@ -165,11 +177,42 @@ func ProjectsRootUsable(raw, home string) bool {
 		return true
 	}
 	joined, err := ExpandProjectsRoot(raw, home)
-	if err != nil || !BelowHome(joined, home) {
+	return err == nil && CreatableBelowHome(joined, home)
+}
+
+// CreatableBelowHome: p doesn't exist yet, and creating it would land below home: its deepest
+// existing parent, with symlinks resolved, is home or below it (a link out of home doesn't
+// count).
+func CreatableBelowHome(p, home string) bool {
+	if !BelowHome(p, home) {
 		return false
 	}
-	_, err = os.Lstat(joined)
-	return errors.Is(err, fs.ErrNotExist)
+	if _, err := os.Lstat(p); !errors.Is(err, fs.ErrNotExist) {
+		return false
+	}
+	parent := filepath.Dir(p)
+	for {
+		if _, err := os.Lstat(parent); err == nil {
+			break
+		}
+		next := filepath.Dir(parent)
+		if next == parent {
+			return false
+		}
+		parent = next
+	}
+	real, err := filepath.EvalSymlinks(parent)
+	if err != nil {
+		return false
+	}
+	if st, err := os.Stat(real); err != nil || !st.IsDir() {
+		return false
+	}
+	h, err := filepath.EvalSymlinks(home)
+	if err != nil {
+		h = filepath.Clean(home)
+	}
+	return real == h || BelowHome(real, h)
 }
 
 // ExpandProjectsRoot is the projects folder setting as a full path: ~ and ~/… expand to home

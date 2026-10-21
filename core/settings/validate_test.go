@@ -170,15 +170,56 @@ func TestTheProjectsRootIsAFolderBelowHomeExistingOrNot(t *testing.T) {
 	}{{"~/Documents/Projects", true}, {"~/Documents/deskpixie", true}, {"~/missing/deeper", true}, {"~", false},
 		{outside, false}, {filepath.Join(outside, "new-folder"), false}, {"", false}, {"~other/code", false}} {
 		c := Default()
+		c.Agent.Workers.Enabled = true // the on-disk check
 		c.Agent.ProjectsRoot = tc.root
 		if valid(c, env) != tc.ok {
 			t.Fatalf("projectsRoot %q", tc.root)
 		}
 	}
 	c := Default()
+	c.Agent.Workers.Enabled = true // the on-disk check
 	c.Agent.ProjectsRoot = outside
 	if p := problems(c, env); !reflect.DeepEqual(p, [][2]string{{"agent.projectsRoot", BadProjectsRoot}}) {
 		t.Fatal(p)
+	}
+}
+
+// With workers off only the name is checked: nothing on disk is looked at.
+func TestWithWorkersOffOnlyTheProjectsRootsNameIsChecked(t *testing.T) {
+	env := testEnv(t)
+	if err := os.WriteFile(filepath.Join(env.Home, "notes.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for raw, ok := range map[string]bool{"~/notes.txt": true, "~/anything/new": true, "~": false, "/elsewhere": false, "": false} {
+		c := Default()
+		c.Agent.Workers.Enabled = false
+		c.Agent.ProjectsRoot = raw
+		if valid(c, env) != ok {
+			t.Errorf("projectsRoot %q: want valid=%v", raw, ok)
+		}
+	}
+}
+
+// A missing folder behind a link out of home isn't below home, whatever its name says.
+func TestAMissingProjectsRootBehindALinkOutOfHomeIsRefused(t *testing.T) {
+	env := testEnv(t)
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(env.Home, "away")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(env.Home, "inside"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(env.Home, "inside"), filepath.Join(env.Home, "near")); err != nil {
+		t.Fatal(err)
+	}
+	for raw, ok := range map[string]bool{"~/away/sub": false, "~/away/a/b": false, "~/near/sub": true} {
+		c := Default()
+		c.Agent.Workers.Enabled = true // the on-disk check
+		c.Agent.ProjectsRoot = raw
+		if valid(c, env) != ok {
+			t.Errorf("projectsRoot %q: want valid=%v", raw, ok)
+		}
 	}
 }
 
@@ -186,6 +227,7 @@ func TestAFileIsNotAProjectsRoot(t *testing.T) {
 	env := testEnv(t)
 	os.WriteFile(filepath.Join(env.Home, "notes.txt"), []byte("x"), 0o644)
 	c := Default()
+	c.Agent.Workers.Enabled = true // the on-disk check
 	c.Agent.ProjectsRoot = "~/notes.txt"
 	if p := problems(c, env); !reflect.DeepEqual(p, [][2]string{{"agent.projectsRoot", BadProjectsRoot}}) {
 		t.Fatal(p)
@@ -199,6 +241,7 @@ func TestAProjectsRootSymlinkThatLeavesHomeIsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := Default()
+	c.Agent.Workers.Enabled = true // the on-disk check
 	c.Agent.ProjectsRoot = "~/elsewhere"
 	found := problems(c, env)
 	if !reflect.DeepEqual(found, [][2]string{{"agent.projectsRoot", BadProjectsRoot}}) {

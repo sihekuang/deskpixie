@@ -150,7 +150,7 @@ final class OnboardingState {
                     OnboardingChecks.microphone(mic)]
         case .agents:
             return OnboardingChecks.agents(values: values, programs: programs, home: home, checkFailed: programsFailed)
-                + [OnboardingChecks.projectsFolder(settings.projectsFolder, home: home)]
+                + (settings.workersOn ? [OnboardingChecks.projectsFolder(settings.projectsFolder, home: home)] : [])
         case .sessions:
             guard let pix else { return [OnboardingCheck(title: "pix command", ok: false, detail: "Checking…")] }
             return [OnboardingChecks.pix(state: pix.state, onPath: pix.onPath)]

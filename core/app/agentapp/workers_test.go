@@ -167,17 +167,19 @@ func TestTheCoordinatorMcpConfigIsPrivateAndCarriesItsBearer(t *testing.T) {
 	}
 }
 
-// TerminalDir is the projects folder when usable, else home.
+// TerminalDir is the projects folder in use, else home (never DeskPixie's own fallback).
 func TestTheTerminalDirIsTheProjectsFolderOrHome(t *testing.T) {
-	home, _ := filepath.EvalSymlinks(t.TempDir())
-	if err := os.MkdirAll(filepath.Join(home, "code"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	for raw, want := range map[string]string{
-		"~/code": filepath.Join(home, "code"), "~/missing": home, "": home, "/etc": home, "~": home,
+	home := "/Users/u"
+	for _, tc := range []struct {
+		folder UsedFolder
+		want   string
+	}{
+		{UsedFolder{Root: "/Users/u/code"}, "/Users/u/code"},
+		{UsedFolder{}, home},
+		{UsedFolder{Root: "/data/agent/projects", Fallback: true}, home},
 	} {
-		if got := TerminalDir(raw, home); got != want {
-			t.Fatalf("%q: %q, want %q", raw, got, want)
+		if got := TerminalDir(tc.folder, home); got != tc.want {
+			t.Fatalf("%+v: %q, want %q", tc.folder, got, tc.want)
 		}
 	}
 }

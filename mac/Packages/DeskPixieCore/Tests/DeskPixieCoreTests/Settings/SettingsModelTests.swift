@@ -92,7 +92,7 @@ final class FakeSettingsClient: SettingsClient {
         keychainPushes.append(values)
     }
 
-    private static func setting(_ tree: JSONValue, _ keys: [String], _ value: JSONValue) -> JSONValue {
+    static func setting(_ tree: JSONValue, _ keys: [String], _ value: JSONValue) -> JSONValue {
         guard let key = keys.first else { return value }
         guard case .object(var o) = tree else { return tree }
         o[key] = setting(o[key] ?? [:], Array(keys.dropFirst()), value)
@@ -327,8 +327,31 @@ final class SettingsModelTests: XCTestCase {
 
     // MARK: Projects folder (#216)
 
-    func test_the_projects_folder_is_read_with_the_window_and_after_its_setting_is_saved() {
+    /// A fake with workers on: the projects folder is only read then.
+    private func workersOnFake() -> FakeSettingsClient {
         let fake = FakeSettingsClient()
+        fake.values = FakeSettingsClient.setting(fake.values, ["agent", "workers", "enabled"], .bool(true))
+        return fake
+    }
+
+    func test_with_workers_off_the_projects_folder_is_never_read() {
+        let fake = FakeSettingsClient()
+        let m = SettingsModel(client: fake)
+        m.load()
+        m.focusGained()
+        XCTAssertFalse(m.workersOn)
+        XCTAssertNil(m.projectsFolder)
+        XCTAssertEqual(fake.folderReads, 0, "no look into ~/Documents")
+        XCTAssertTrue(m.commit(SettingsModel.workersPath, .switch(true)))
+        XCTAssertEqual(fake.folderReads, 1, "turning workers on reads it")
+        XCTAssertNotNil(m.projectsFolder)
+        XCTAssertTrue(m.commit(SettingsModel.workersPath, .switch(false)))
+        XCTAssertNil(m.projectsFolder, "and off hides it again")
+        XCTAssertEqual(fake.folderReads, 1)
+    }
+
+    func test_the_projects_folder_is_read_with_the_window_and_after_its_setting_is_saved() {
+        let fake = workersOnFake()
         let m = SettingsModel(client: fake)
         m.load()
         XCTAssertEqual(m.projectsFolder?.state, .missing)
@@ -342,7 +365,7 @@ final class SettingsModelTests: XCTestCase {
     }
 
     func test_create_makes_the_folder_and_shows_the_check_after() {
-        let fake = FakeSettingsClient()
+        let fake = workersOnFake()
         let m = SettingsModel(client: fake)
         m.load()
         m.createProjectsFolder()
@@ -356,7 +379,7 @@ final class SettingsModelTests: XCTestCase {
     }
 
     func test_an_unreadable_projects_folder_shows_nothing() {
-        let fake = FakeSettingsClient()
+        let fake = workersOnFake()
         fake.folder = nil
         let m = SettingsModel(client: fake)
         m.load()

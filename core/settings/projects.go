@@ -62,6 +62,8 @@ func CheckProjectsFolder(raw, home, fallback string) ProjectsFolder {
 	switch _, lerr := os.Lstat(joined); {
 	case !BelowHome(joined, home):
 		out.State, out.Detail = FolderUnusable, unusableDetail("It must be inside your home folder.")
+	case errors.Is(lerr, fs.ErrNotExist) && !CreatableBelowHome(joined, home):
+		out.State, out.Detail = FolderUnusable, unusableDetail("It leads outside your home folder.")
 	case errors.Is(lerr, fs.ErrNotExist):
 		out.State, out.Detail = FolderMissing, "Doesn't exist yet. DeskPixie creates it when it starts, or create it now."
 	default:

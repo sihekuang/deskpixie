@@ -78,6 +78,7 @@ func TestAnUnusableProjectsFolderFallsBackToDeskPixiesOwn(t *testing.T) {
 		"~/notes.txt/sub",             // a file where a parent should be
 		"~/locked/sub",                // no permission to create it
 		"~/away",                      // a link that leads outside home
+		"~/away/sub",                  // a missing folder behind a link out of home
 	} {
 		t.Run(raw, func(t *testing.T) {
 			fallback := filepath.Join(tmpDir(t, "data"), "agent", "projects")
@@ -95,6 +96,9 @@ func TestAnUnusableProjectsFolderFallsBackToDeskPixiesOwn(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(locked, "sub")); err == nil {
 		t.Fatal("created inside a locked folder")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "sub")); err == nil {
+		t.Fatal("created a folder outside home through a link")
 	}
 }
 
