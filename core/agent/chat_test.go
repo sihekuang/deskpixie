@@ -197,3 +197,69 @@ func TestATypedHandOffsDoneLineKeepsPendingConfirmWordsMasked(t *testing.T) {
 		t.Fatalf("working %v, done %v", working, done)
 	}
 }
+
+// #241: a typed message handed to one of your sessions gets that session's reply in the box,
+// while the box still shows it; it is not spoken, notified or put in the outbox.
+
+// handedOffTyped: job 1, typed in text mode, was passed to the session api-claude and closed.
+func handedOffTyped(t *testing.T) *AgentController {
+	t.Helper()
+	c := typedOnJob1()
+	c.Step(TextModeInput(true), T0)
+	c.Step(SessionSentInput("api-claude", landing), T0+5)
+	stop(c, `<spoken ref="job_000000000001" status="done">Passed it on.</spoken>`, T0+10)
+	wantJobStatus(t, c, 1, JobDone)
+	return c
+}
+
+func pixieTurn(reply string) SessionTurn {
+	return SessionTurn{Label: "deskpixie: fix login redirect", Reply: reply, App: webstorm, Duration: 45_000, FromPixie: true}
+}
+
+func TestASessionsReplyToATypedMessageGoesToTheBox(t *testing.T) {
+	c := handedOffTyped(t)
+	fx := sessionTurn(c, pixieTurn("The redirect loop is fixed and all 412 tests pass."), T0+20)
+	wantChat(t, fx, ChatLine{Job: job(1), Status: "done", Text: "The redirect loop is fixed and all 412 tests pass."})
+	noUsualRoute(t, fx)
+	// Only that one reply: the session's next turn takes the usual route.
+	fx = sessionTurn(c, pixieTurn("Also pushed the branch."), T0+30)
+	wantChat(t, fx)
+}
+
+func TestASessionsQuestionAboutATypedMessageAsksInTheBox(t *testing.T) {
+	c := handedOffTyped(t)
+	fx := sessionTurn(c, pixieTurn("Should I also fix the logout page?"), T0+20)
+	wantChat(t, fx, ChatLine{Job: job(1), Status: "question", Text: "Should I also fix the logout page?"})
+	noUsualRoute(t, fx)
+}
+
+// When the box no longer shows that message (voice mode, or a newer typed one), the reply
+// takes the usual route, so it is never lost.
+func TestASessionsReplyTheBoxDoesntShowTakesTheUsualRoute(t *testing.T) {
+	for name, after := range map[string]func(c *AgentController){
+		"voice mode": func(c *AgentController) { c.Step(TextModeInput(false), T0+15) },
+		"newer typed": func(c *AgentController) {
+			c.Step(TypedDelegateInput(job(2), "and the docs?", ""), T0+15)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := handedOffTyped(t)
+			after(c)
+			fx := sessionTurn(c, pixieTurn("The redirect loop is fixed."), T0+20)
+			for _, l := range chats(fx) {
+				if l.Job == job(1) {
+					t.Fatalf("went to the box: %s", fmtEffects(fx))
+				}
+			}
+			if !anyKind(fx, EfInject, EfNotify, EfAppend) {
+				t.Fatalf("lost: %s", fmtEffects(fx))
+			}
+		})
+	}
+}
+
+func TestAnotherSessionsReplyIsNotTakenForTheTypedMessage(t *testing.T) {
+	c := handedOffTyped(t)
+	fx := c.Step(PaneInput(PaneEvent{Kind: PaneEventTurn, Agent: "web-claude", Turn: &SessionTurn{Label: "web", Reply: "Done.", Duration: 45_000, FromPixie: true}}), T0+20)
+	wantChat(t, fx)
+}
