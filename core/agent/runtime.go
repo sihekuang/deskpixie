@@ -524,7 +524,8 @@ func (h *AgentHandle) CancelAsked(jobID string) (JobID, string, error) {
 		id, err := h.Cancel(jobID)
 		return id, "", err
 	}
-	if _, _, err := h.AnswerAsked(string(id), stopAnswer); err != nil {
+	// A stop isn't a message: the waiting attachments stay for the next one.
+	if _, _, err := h.answerAsked(string(id), stopAnswer, false); err != nil {
 		return "", "", err
 	}
 	return id, "the coordinator, to work out what to stop", nil
@@ -541,6 +542,12 @@ func (h *AgentHandle) Answer(jobID, text string) (JobID, error) {
 // session whose turn asked the question Pixie relayed last, or the coordinator, to work out
 // which of several waiting questions it answers.
 func (h *AgentHandle) AnswerAsked(jobID, text string) (JobID, string, error) {
+	return h.answerAsked(jobID, text, true)
+}
+
+// answerAsked is AnswerAsked; withAttachments: the waiting attachments go with the answer
+// (given back if it can't go).
+func (h *AgentHandle) answerAsked(jobID, text string, withAttachments bool) (_ JobID, _ string, err error) {
 	var id JobID
 	if raw := strings.TrimSpace(jobID); raw != "" {
 		// A malformed id is ignored like an unknown one: the answer goes to whoever asked.
@@ -551,7 +558,15 @@ func (h *AgentHandle) AnswerAsked(jobID, text string) (JobID, string, error) {
 	if h.quitting() {
 		return "", "", errQuitting
 	}
-	text += h.attached()
+	if withAttachments {
+		paths := h.take()
+		defer func() {
+			if err != nil {
+				h.giveBack(paths)
+			}
+		}()
+		text += attachedLines(paths)
+	}
 	r := h.stepLocked(AnswerInput(id, text))
 	if r == nil || r.Kind != EfAnswerResult {
 		return "", "", errors.New("The answer was not processed.")

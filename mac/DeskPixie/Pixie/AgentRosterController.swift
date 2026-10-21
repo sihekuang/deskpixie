@@ -237,8 +237,8 @@ final class AgentRosterController {
         if pasteMonitor == nil {
             // Cmd-V with only an image or files on the clipboard attaches them; text pastes.
             pasteMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-                let isPaste = event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command
-                    && event.charactersIgnoringModifiers == "v"
+                let isPaste = ClipboardRules.isPasteShortcut(flags: event.modifierFlags.rawValue,
+                                                             key: event.charactersIgnoringModifiers)
                 guard isPaste else { return event }
                 let took = MainActor.assumeIsolated { self?.pasteAttaches() ?? false }
                 return took ? nil : event

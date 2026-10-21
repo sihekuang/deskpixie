@@ -46,6 +46,12 @@ func (f *fakeAttach) ForWorker(text, dir string) string {
 	return strings.ReplaceAll(text, "/a/", dir+"/.deskpixie/attachments/")
 }
 
+func (f *fakeAttach) Restore(paths []string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.paths = append(f.paths, paths...)
+}
+
 func (f *fakeAttach) Takes() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -165,6 +171,45 @@ func TestAWorkerPromptGetsLocalPaths(t *testing.T) {
 		defer r.attach.mu.Unlock()
 		if len(r.attach.workers) == 0 || r.attach.workers[0][1] != wt {
 			t.Fatal(r.attach.workers)
+		}
+	})
+}
+
+// A stop said to the job that asked isn't a message: the waiting attachments stay (#240 review).
+func TestAStopLeavesTheAttachmentsWaiting(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRig(t)
+		delegate(t, r, "how is the suite going?")
+		settle()
+		stopHook(r, `<spoken ref="job_000000000001" status="question">Keep waiting?</spoken>`)
+		settle()
+		r.host.SetStatus(Coordinator, PaneIdle)
+		settle()
+		r.attach.set("/a/1.png")
+		invoke(t, Jobs{H: r.h}, `{"action":"cancel"}`)
+		settle()
+		if r.attach.Len() != 1 {
+			t.Fatal("the stop took them")
+		}
+		if got := lastPrompt(t, r); strings.Contains(got, "Attached:") {
+			t.Fatal(got)
+		}
+	})
+}
+
+// An answer with no question waiting becomes a request; with delegation off it can't go, and
+// its attachments go back to waiting.
+func TestAnAnswerThatCantGoGivesThemBack(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRig(t)
+		r.h.Input(CoordinatorFailedInput(HostError{Kind: HostGaveUp}))
+		settle()
+		r.attach.set("/a/1.png")
+		if _, _, err := r.h.AnswerAsked("", "this one"); err == nil {
+			t.Fatal("went")
+		}
+		if r.attach.Len() != 1 {
+			t.Fatal("lost")
 		}
 	})
 }

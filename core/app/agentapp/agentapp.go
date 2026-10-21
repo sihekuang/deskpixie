@@ -367,7 +367,7 @@ func Build(c Config) *Agent {
 		Roster:      rosterSink{c.Hooks},
 		Modes:       a,
 	}
-	a.attach = attach.New(paths.Attachments, time.Now)
+	a.attach = attach.New(paths.Attachments, filepath.Join(paths.Root, "attachment-copies.jsonl"), time.Now)
 	a.attach.Sweep()
 	deps.Attachments = a.attach
 	if c.Hooks.Chat != nil {

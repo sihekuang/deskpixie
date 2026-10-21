@@ -41,6 +41,13 @@ public enum ClipboardRules {
         }
     }
 
+    /// The paste shortcut: ⌘V with no other modifier that changes it (Caps Lock and fn don't).
+    /// `flags` are NSEvent.ModifierFlags' raw value.
+    public static func isPasteShortcut(flags: UInt, key: String?) -> Bool {
+        let shift: UInt = 1 << 17, control: UInt = 1 << 18, option: UInt = 1 << 19, command: UInt = 1 << 20
+        return flags & (shift | control | option | command) == command && key?.lowercased() == "v"
+    }
+
     /// Cmd-V in the text box attaches when the clipboard holds an image or files and no text
     /// to paste; otherwise it pastes as usual.
     public static func pasteAttaches(_ types: Set<String>) -> Bool {

@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -13,8 +15,9 @@ var png = []byte("\x89PNG\r\n\x1a\nfake image bytes")
 
 func newStore(t *testing.T) (*Store, string, *[][]Item) {
 	t.Helper()
-	root := filepath.Join(t.TempDir(), "attachments")
-	s := New(root, time.Now)
+	tmp := t.TempDir()
+	root := filepath.Join(tmp, "workspace", "attachments")
+	s := New(root, filepath.Join(tmp, "copies.jsonl"), time.Now)
 	var seen [][]Item
 	s.OnChange(func(items []Item) { seen = append(seen, items) })
 	return s, root, &seen
@@ -184,7 +187,7 @@ func TestSweep(t *testing.T) {
 	}
 	long := time.Now().Add(-15 * 24 * time.Hour)
 	_ = os.Chtimes(old, long, long)
-	fresh := New(root, time.Now) // a new start
+	fresh := New(root, s.copiesLog, time.Now) // a new start
 	fresh.Sweep()
 	if _, err := os.Stat(filepath.Join(root, "pending")); !os.IsNotExist(err) {
 		t.Fatal("pending kept")
@@ -207,7 +210,7 @@ func sentFile(t *testing.T, s *Store, name string) string {
 }
 
 func TestForWorkerCopiesAndRewrites(t *testing.T) {
-	s, root, _ := newStore(t)
+	s, _, _ := newStore(t)
 	p := sentFile(t, s, "x.png")
 	dir := t.TempDir()
 	got := s.ForWorker("Fix it.\nAttached: "+p+"\nthanks", dir)
@@ -221,13 +224,13 @@ func TestForWorkerCopiesAndRewrites(t *testing.T) {
 	if b, _ := os.ReadFile(filepath.Join(dir, ".deskpixie", ".gitignore")); string(b) != "*\n" {
 		t.Fatalf("%q", b)
 	}
-	if b, _ := os.ReadFile(filepath.Join(root, "copies.jsonl")); !strings.Contains(string(b), local) {
+	if b, _ := os.ReadFile(s.copiesLog); !strings.Contains(string(b), local) {
 		t.Fatalf("%q", b)
 	}
 }
 
 func TestForWorkerIsIdempotent(t *testing.T) {
-	s, root, _ := newStore(t)
+	s, _, _ := newStore(t)
 	p := sentFile(t, s, "x.png")
 	dir := t.TempDir()
 	once := s.ForWorker("Attached: "+p, dir)
@@ -237,7 +240,7 @@ func TestForWorkerIsIdempotent(t *testing.T) {
 	if again := s.ForWorker("Attached: "+p, dir); again != once {
 		t.Fatal(again)
 	}
-	b, _ := os.ReadFile(filepath.Join(root, "copies.jsonl"))
+	b, _ := os.ReadFile(s.copiesLog)
 	if n := strings.Count(string(b), "\n"); n != 1 {
 		t.Fatalf("%d records: %q", n, b)
 	}
@@ -268,7 +271,7 @@ func TestSweepRemovesOldCopies(t *testing.T) {
 	s.ForWorker("Attached: "+p, oldDir)
 	s.now = time.Now
 	s.ForWorker("Attached: "+p, newDir)
-	fresh := New(root, time.Now)
+	fresh := New(root, s.copiesLog, time.Now)
 	fresh.Sweep()
 	if _, err := os.Stat(filepath.Join(oldDir, ".deskpixie", "attachments", filepath.Base(filepath.Dir(p)), "x.png")); !os.IsNotExist(err) {
 		t.Fatal("old copy kept")
@@ -276,7 +279,128 @@ func TestSweepRemovesOldCopies(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(newDir, ".deskpixie", "attachments", filepath.Base(filepath.Dir(p)), "x.png")); err != nil {
 		t.Fatal("new copy removed")
 	}
-	if b, _ := os.ReadFile(filepath.Join(root, "copies.jsonl")); strings.Contains(string(b), oldDir) {
+	if b, _ := os.ReadFile(s.copiesLog); strings.Contains(string(b), oldDir) {
 		t.Fatal("old record kept")
+	}
+}
+
+// The coordinator can write in its workspace: the copies log isn't there, and Sweep deletes only
+// what has a worker copy's shape, never through a link.
+func TestSweepOnlyDeletesWorkerCopies(t *testing.T) {
+	s, root, _ := newStore(t)
+	p := sentFile(t, s, "x.png")
+	s.ForWorker("Attached: "+p, t.TempDir())
+	if _, err := os.Stat(filepath.Join(root, "copies.jsonl")); !os.IsNotExist(err) {
+		t.Fatal("the copies log is in the workspace")
+	}
+	victim := filepath.Join(t.TempDir(), "thesis.docx")
+	_ = os.WriteFile(victim, []byte("mine"), 0o600)
+	linked := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(linked, ".deskpixie"), 0o700)
+	_ = os.Symlink(filepath.Dir(victim), filepath.Join(linked, ".deskpixie", "attachments"))
+	f, _ := os.OpenFile(s.copiesLog, os.O_APPEND|os.O_WRONLY, 0o600)
+	for _, path := range []string{victim, filepath.Join(linked, ".deskpixie", "attachments", "thesis.docx")} {
+		_, _ = f.WriteString(`{"path":"` + path + `","at":"2000-01-01T00:00:00Z"}` + "\n")
+	}
+	_ = f.Close()
+	New(root, s.copiesLog, time.Now).Sweep()
+	if _, err := os.Stat(victim); err != nil {
+		t.Fatal("deleted a file that isn't a worker copy")
+	}
+}
+
+func TestForWorkerRefusesLinksInTheWorktree(t *testing.T) {
+	s, _, _ := newStore(t)
+	p := sentFile(t, s, "x.png")
+	elsewhere := t.TempDir()
+	dir := t.TempDir()
+	_ = os.Symlink(elsewhere, filepath.Join(dir, ".deskpixie"))
+	if got := s.ForWorker("Attached: "+p, dir); got != "Attached: "+p {
+		t.Fatal(got)
+	}
+	if es, _ := os.ReadDir(elsewhere); len(es) != 0 {
+		t.Fatal("wrote through the link")
+	}
+	victim := filepath.Join(t.TempDir(), ".zshrc")
+	_ = os.WriteFile(victim, []byte("export X=1\n"), 0o600)
+	dir2 := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir2, ".deskpixie"), 0o700)
+	_ = os.Symlink(victim, filepath.Join(dir2, ".deskpixie", ".gitignore"))
+	s.ForWorker("Attached: "+p, dir2)
+	if b, _ := os.ReadFile(victim); string(b) != "export X=1\n" {
+		t.Fatalf("overwrote %q", b)
+	}
+}
+
+func TestForWorkerRefusesALinkInSent(t *testing.T) {
+	s, root, _ := newStore(t)
+	secret := filepath.Join(t.TempDir(), "id_ed25519")
+	_ = os.WriteFile(secret, []byte("key"), 0o600)
+	_ = os.MkdirAll(filepath.Join(root, "sent", "x"), 0o700)
+	link := filepath.Join(root, "sent", "x", "y")
+	_ = os.Symlink(secret, link)
+	if got := s.ForWorker("Attached: "+link, t.TempDir()); got != "Attached: "+link {
+		t.Fatal(got)
+	}
+}
+
+func TestAddFileRefusesAFIFO(t *testing.T) {
+	s, _, _ := newStore(t)
+	fifo := filepath.Join(t.TempDir(), "pipe")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Skip(err)
+	}
+	done := make(chan error, 1)
+	go func() { _, err := s.AddFile(fifo); done <- err }()
+	select {
+	case err := <-done:
+		if err == nil || err.Error() != "Couldn't read that file." {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("hung on a FIFO")
+	}
+}
+
+// Each change is reported after the last: the shell never ends on a set that is gone.
+func TestChangesAreReportedInOrder(t *testing.T) {
+	for i := 0; i < 50; i++ {
+		s, _, _ := newStore(t)
+		var mu sync.Mutex
+		var last []Item
+		s.OnChange(func(items []Item) { mu.Lock(); last = items; mu.Unlock() })
+		var wg sync.WaitGroup
+		for j := 0; j < 4; j++ {
+			wg.Add(2)
+			go func() { defer wg.Done(); _, _ = s.Add("a.png", png) }()
+			go func() { defer wg.Done(); s.Take() }()
+		}
+		wg.Wait()
+		mu.Lock()
+		if len(last) != s.Len() {
+			t.Fatalf("reported %d, holds %d", len(last), s.Len())
+		}
+		mu.Unlock()
+	}
+}
+
+func TestRestoreBringsThemBack(t *testing.T) {
+	s, _, seen := newStore(t)
+	_, _ = s.Add("a.png", png)
+	paths := s.Take()
+	s.Restore(paths)
+	items := s.Pending()
+	if len(items) != 1 || items[0].Name != "a.png" {
+		t.Fatal(items)
+	}
+	if b, _ := os.ReadFile(items[0].Path); !bytes.Equal(b, png) {
+		t.Fatal("content")
+	}
+	if last := (*seen)[len(*seen)-1]; len(last) != 1 {
+		t.Fatal(last)
+	}
+	s.Restore([]string{"/etc/hosts"}) // not ours: ignored
+	if s.Len() != 1 {
+		t.Fatal(s.Len())
 	}
 }

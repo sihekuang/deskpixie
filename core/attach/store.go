@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 	"unicode"
 )
@@ -48,15 +49,77 @@ type Item struct {
 
 // Store is the set of waiting attachments. Safe for concurrent use.
 type Store struct {
-	root     string
-	now      func() time.Time
-	mu       sync.Mutex
+	root string
+	// copiesLog records workers' copies; outside the workspace, which the coordinator can write.
+	copiesLog string
+	now       func() time.Time
+	mu        sync.Mutex
+	// emitMu keeps OnChange calls in the order of the changes they report.
+	emitMu   sync.Mutex
 	items    []Item
 	onChange func([]Item)
 }
 
-// New is a store under root (created on the first Add).
-func New(root string, now func() time.Time) *Store { return &Store{root: root, now: now} }
+// New is a store under root (created on the first Add), recording workers' copies in copiesLog.
+func New(root, copiesLog string, now func() time.Time) *Store {
+	return &Store{root: root, copiesLog: copiesLog, now: now}
+}
+
+// Restore puts handed-over attachments back in the waiting set (the request couldn't go).
+// Paths that aren't ones Take returned are ignored.
+func (s *Store) Restore(paths []string) {
+	s.mu.Lock()
+	n := len(s.items)
+	for _, p := range paths {
+		dir, ok := s.sentDir(p)
+		if !ok {
+			continue
+		}
+		stampID := filepath.Base(dir)
+		id := stampID[strings.LastIndexByte(stampID, '-')+1:]
+		back := filepath.Join(s.root, "pending", id)
+		if os.MkdirAll(filepath.Dir(back), 0o700) != nil || os.Rename(dir, back) != nil {
+			continue
+		}
+		name := filepath.Base(p)
+		size := int64(0)
+		if fi, err := os.Lstat(filepath.Join(back, name)); err == nil {
+			size = fi.Size()
+		}
+		s.items = append(s.items, Item{ID: id, Name: name, Kind: kindOf(name), Path: filepath.Join(back, name), Size: size})
+	}
+	if len(s.items) == n {
+		s.mu.Unlock()
+		return
+	}
+	s.changedLocked()
+}
+
+// sentDir is the sent/<stamp-id> folder of a handed-over attachment's path, if p is one: a
+// regular file (not a link) directly in a real folder under sent/.
+func (s *Store) sentDir(p string) (string, bool) {
+	sent := filepath.Join(s.root, "sent")
+	rel, err := filepath.Rel(sent, filepath.Clean(p))
+	if err != nil || strings.HasPrefix(rel, "..") || strings.Count(rel, string(filepath.Separator)) != 1 {
+		return "", false
+	}
+	dir := filepath.Dir(filepath.Join(sent, rel))
+	if !isDir(dir) || !isFile(filepath.Join(sent, rel)) {
+		return "", false
+	}
+	return dir, true
+}
+
+// isDir / isFile: a real folder or a regular file at path, never through a link.
+func isDir(path string) bool {
+	fi, err := os.Lstat(path)
+	return err == nil && fi.IsDir()
+}
+
+func isFile(path string) bool {
+	fi, err := os.Lstat(path)
+	return err == nil && fi.Mode().IsRegular()
+}
 
 // OnChange is called after every change, with Pending().
 func (s *Store) OnChange(f func([]Item)) {
@@ -78,7 +141,11 @@ func (s *Store) Add(name string, data []byte) (Item, error) {
 
 // AddFile copies a dropped or picked file in; the original is left as it is.
 func (s *Store) AddFile(path string) (Item, error) {
-	src, err := os.Open(path)
+	// Only a regular file: a pipe or a device would never finish reading.
+	if fi, err := os.Stat(path); err != nil || !fi.Mode().IsRegular() {
+		return Item{}, errUnreadable
+	}
+	src, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return Item{}, errUnreadable
 	}
@@ -204,10 +271,13 @@ func (s *Store) Sweep() {
 	}
 }
 
-// changedLocked reports the set to OnChange; it unlocks s.mu.
+// changedLocked reports the set to OnChange; it unlocks s.mu. Reports go out in the order of
+// the changes (emitMu is taken before s.mu is let go).
 func (s *Store) changedLocked() {
 	f, items := s.onChange, append([]Item(nil), s.items...)
+	s.emitMu.Lock()
 	s.mu.Unlock()
+	defer s.emitMu.Unlock()
 	if f != nil {
 		f(items)
 	}
@@ -258,18 +328,17 @@ func (s *Store) ForWorker(text, dir string) string {
 	if dir == "" || !strings.Contains(text, attachedPrefix) {
 		return text
 	}
-	sent := filepath.Join(s.root, "sent")
 	lines := strings.Split(text, "\n")
 	for i, l := range lines {
 		path, ok := strings.CutPrefix(l, attachedPrefix)
 		if !ok {
 			continue
 		}
-		rel, err := filepath.Rel(sent, filepath.Clean(path))
-		if err != nil || strings.HasPrefix(rel, "..") || strings.Count(rel, string(filepath.Separator)) != 1 {
+		src, ok := s.sentDir(path)
+		if !ok {
 			continue
 		}
-		dest := filepath.Join(dir, ".deskpixie", "attachments", rel)
+		dest := filepath.Join(dir, ".deskpixie", "attachments", filepath.Base(src), filepath.Base(path))
 		if s.copyFor(path, dest, dir) {
 			lines[i] = attachedPrefix + dest
 		}
@@ -281,20 +350,35 @@ func (s *Store) ForWorker(text, dir string) string {
 func (s *Store) copyFor(src, dest, dir string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, err := os.Stat(dest); err == nil {
-		return true
+	// The worktree is the repo's and the worker's: never follow a link they put there.
+	folder := filepath.Join(dir, ".deskpixie")
+	for _, d := range []string{folder, filepath.Join(folder, "attachments"), filepath.Dir(dest)} {
+		if err := os.Mkdir(d, 0o700); err != nil && !(os.IsExist(err) && isDir(d)) {
+			return false
+		}
+	}
+	if fi, err := os.Lstat(dest); err == nil {
+		return fi.Mode().IsRegular()
 	}
 	data, err := os.ReadFile(src)
 	if err != nil {
 		return false
 	}
-	ignore := filepath.Join(dir, ".deskpixie", ".gitignore")
-	if os.MkdirAll(filepath.Dir(dest), 0o700) != nil || os.WriteFile(ignore, []byte("*\n"), 0o600) != nil ||
-		os.WriteFile(dest, data, 0o600) != nil {
+	if f, err := os.OpenFile(filepath.Join(folder, ".gitignore"), os.O_CREATE|os.O_EXCL|os.O_WRONLY|syscall.O_NOFOLLOW, 0o600); err == nil {
+		_, _ = f.WriteString("*\n")
+		_ = f.Close()
+	}
+	f, err := os.OpenFile(dest, os.O_CREATE|os.O_EXCL|os.O_WRONLY|syscall.O_NOFOLLOW, 0o600)
+	if err != nil {
+		return false
+	}
+	_, err = f.Write(data)
+	if cerr := f.Close(); err != nil || cerr != nil {
+		_ = os.Remove(dest)
 		return false
 	}
 	rec, _ := json.Marshal(copyRecord{Path: dest, At: s.now()})
-	if f, err := os.OpenFile(filepath.Join(s.root, "copies.jsonl"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600); err == nil {
+	if f, err := os.OpenFile(s.copiesLog, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600); err == nil {
 		_, _ = f.Write(append(rec, '\n'))
 		_ = f.Close()
 	}
@@ -305,7 +389,7 @@ func (s *Store) copyFor(src, dest, dir string) bool {
 func (s *Store) sweepCopies() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	list := filepath.Join(s.root, "copies.jsonl")
+	list := s.copiesLog
 	data, err := os.ReadFile(list)
 	if err != nil {
 		return
@@ -319,12 +403,25 @@ func (s *Store) sweepCopies() {
 			continue
 		}
 		if r.At.Before(cutoff) {
-			_ = os.Remove(r.Path)
-			_ = os.Remove(filepath.Dir(r.Path)) // its folder, once empty
+			if isWorkerCopy(r.Path) {
+				_ = os.Remove(r.Path)
+				_ = os.Remove(filepath.Dir(r.Path)) // its folder, once empty
+			}
 			continue
 		}
 		keep.Write(sc.Bytes())
 		keep.WriteByte('\n')
 	}
 	_ = os.WriteFile(list, keep.Bytes(), 0o600)
+}
+
+// isWorkerCopy: path is <dir>/.deskpixie/attachments/<folder>/<name>, a regular file in real
+// folders (no link on the way), the only shape the sweep deletes.
+func isWorkerCopy(path string) bool {
+	path = filepath.Clean(path)
+	folder := filepath.Dir(path)
+	attachments := filepath.Dir(folder)
+	deskpixie := filepath.Dir(attachments)
+	return filepath.IsAbs(path) && filepath.Base(attachments) == "attachments" && filepath.Base(deskpixie) == ".deskpixie" &&
+		isDir(deskpixie) && isDir(attachments) && isDir(folder) && isFile(path)
 }

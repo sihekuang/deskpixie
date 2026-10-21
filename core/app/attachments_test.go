@@ -23,7 +23,7 @@ func (f *fakeAgent) Attachments() *attach.Store {
 
 func attachHarness(t *testing.T) (*harness, *fakeAgent) {
 	t.Helper()
-	f := &fakeAgent{tray: AgentTray{Enabled: true}, attach: attach.New(filepath.Join(t.TempDir(), "attachments"), time.Now)}
+	f := &fakeAgent{tray: AgentTray{Enabled: true}, attach: attach.New(filepath.Join(t.TempDir(), "attachments"), filepath.Join(t.TempDir(), "copies.jsonl"), time.Now)}
 	return newHarness(t, withAgent(f)), f
 }
 

@@ -30,3 +30,17 @@ final class ClipboardTests: XCTestCase {
         XCTAssertFalse(ClipboardRules.pasteAttaches([]))
     }
 }
+
+/// Cmd-V is the paste shortcut whatever Caps Lock or fn say (#240 review).
+final class PasteShortcutTests: XCTestCase {
+    func testIsPaste() {
+        let cmd: UInt = 1 << 20, shift: UInt = 1 << 17, caps: UInt = 1 << 16, fn: UInt = 1 << 23, opt: UInt = 1 << 19
+        XCTAssertTrue(ClipboardRules.isPasteShortcut(flags: cmd, key: "v"))
+        XCTAssertTrue(ClipboardRules.isPasteShortcut(flags: cmd | caps, key: "v"))
+        XCTAssertTrue(ClipboardRules.isPasteShortcut(flags: cmd | fn, key: "v"))
+        XCTAssertFalse(ClipboardRules.isPasteShortcut(flags: cmd | shift, key: "v"))
+        XCTAssertFalse(ClipboardRules.isPasteShortcut(flags: cmd | opt, key: "v"))
+        XCTAssertFalse(ClipboardRules.isPasteShortcut(flags: 0, key: "v"))
+        XCTAssertFalse(ClipboardRules.isPasteShortcut(flags: cmd, key: "c"))
+    }
+}
