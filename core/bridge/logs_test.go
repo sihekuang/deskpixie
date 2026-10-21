@@ -81,3 +81,21 @@ func waitFor(t *testing.T, ok func() bool) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+// A Configure that fails leaves the running app's log where it was.
+func TestAFailedConfigureKeepsTheAppLog(t *testing.T) {
+	dir := t.TempDir()
+	e := newEngine(t, Options{})
+	if err := e.Configure(cfgIn(t, dir, "")); err != nil {
+		t.Fatal(err)
+	}
+	// No pixie pack anywhere: the new app can't be built.
+	if err := e.Configure([]byte(`{"appSupport":"` + t.TempDir() + `","bundledPixies":"` + t.TempDir() + `"}`)); err == nil {
+		t.Fatal("the bad config was accepted")
+	}
+	log.Printf("after a failed configure %s", t.Name())
+	b, _ := os.ReadFile(filepath.Join(dir, "logs", "deskpixie.log"))
+	if !strings.Contains(string(b), "after a failed configure") {
+		t.Fatalf("the log stopped: %q", b)
+	}
+}

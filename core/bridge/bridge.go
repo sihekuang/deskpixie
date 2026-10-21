@@ -161,6 +161,7 @@ func (e *Engine) configure(jsonCfg []byte) error {
 	}
 	// The core's log is kept in the app's data folder too, not only on stderr (#225), from
 	// before the app starts so its startup lines are in it.
+	prevLog := log.Writer()
 	log.SetOutput(io.MultiWriter(os.Stderr, logfile.New(app.AppLogPath(paths.AppSupport), e.logMax)))
 	a, err := app.New(app.Deps{
 		Paths:     paths,
@@ -174,7 +175,7 @@ func (e *Engine) configure(jsonCfg []byte) error {
 		MetricsLogPath: metricsPath,
 	})
 	if err != nil {
-		log.SetOutput(os.Stderr)
+		log.SetOutput(prevLog) // the running app (if any) keeps its log
 		return err
 	}
 	old := e.app.Swap(a)
@@ -291,8 +292,8 @@ func (e *Engine) Close() {
 		e.closed = true
 		e.rt.Store(nil)
 		if a := e.app.Swap(nil); a != nil {
+			a.Close() // its shutdown lines still reach its log
 			log.SetOutput(os.Stderr)
-			a.Close()
 		}
 		e.cfgMu.Unlock()
 	})

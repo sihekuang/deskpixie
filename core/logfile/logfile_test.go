@@ -163,3 +163,35 @@ func TestTheExportIsShareable(t *testing.T) {
 		}
 	}
 }
+
+// One write bigger than half the limit never pushes the history out for an empty file.
+func TestAnEmptyFileIsNotRotated(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "app.log")
+	_ = os.WriteFile(path+".1", []byte("history\n"), 0o600)
+	_ = os.WriteFile(path, nil, 0o600)
+	w := New(path, func() int64 { return 100 })
+	_, _ = w.Write([]byte(strings.Repeat("z", 80) + "\n"))
+	if b, _ := os.ReadFile(path + ".1"); string(b) != "history\n" {
+		t.Fatalf("%q", b)
+	}
+}
+
+// A trim that can't be done (a full disk, a read-only folder) isn't tried again on every write.
+func TestAFailedTrimIsNotRetriedEachWrite(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "app.log")
+	_ = os.WriteFile(path+".1", []byte(strings.Repeat("o\n", 1000)), 0o600)
+	_ = os.WriteFile(path, []byte("x\n"), 0o600)
+	_ = os.Chmod(dir, 0o500)
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+	w := New(path, func() int64 { return 100 })
+	_, _ = w.Write([]byte("a\n"))
+	if w.failedTrim == (trimMark{}) {
+		t.Fatal("the failed trim isn't remembered")
+	}
+	tries := w.trims
+	_, _ = w.Write([]byte("b\n"))
+	if w.trims != tries {
+		t.Fatal("tried again")
+	}
+}

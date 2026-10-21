@@ -24,6 +24,16 @@ type Writer struct {
 	mu   sync.Mutex
 	path string
 	max  func() int64
+	// failedTrim is the older file a trim couldn't cut (a full disk, a read-only folder): it
+	// isn't tried again on every write until that file changes. trims counts tries (tests).
+	failedTrim trimMark
+	trims      int
+}
+
+// trimMark names a version of a file: its size and modification time.
+type trimMark struct {
+	size int64
+	mod  int64
 }
 
 // New logs to path, keeping at most max() bytes on disk.
@@ -41,13 +51,20 @@ func (w *Writer) Write(p []byte) (int, error) {
 		return len(p), nil
 	}
 	half := w.max() / 2
-	if fi, err := os.Stat(w.path); err == nil && fi.Size()+int64(len(p)) > half {
+	// An empty file isn't rotated: one big write must not push the history out.
+	if fi, err := os.Stat(w.path); err == nil && fi.Size() > 0 && fi.Size()+int64(len(p)) > half {
 		_ = os.Rename(w.path, w.path+".1")
 	}
 	if old, err := os.Stat(w.path + ".1"); err == nil && old.Size() > half {
 		// Over the half (a log from before the cap, or a smaller setting): it keeps its
 		// newest whole lines.
-		keepTail(w.path+".1", half)
+		mark := trimMark{old.Size(), old.ModTime().UnixNano()}
+		if mark != w.failedTrim {
+			w.trims++
+			if !keepTail(w.path+".1", half) {
+				w.failedTrim = mark
+			}
+		}
 	}
 	f, err := os.OpenFile(w.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
@@ -58,11 +75,12 @@ func (w *Writer) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// keepTail cuts path down to its last max bytes, from the first line that starts in them.
-func keepTail(path string, max int64) {
+// keepTail cuts path down to its last max bytes, from the first line that starts in them;
+// false when it couldn't.
+func keepTail(path string, max int64) bool {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return
+		return false
 	}
 	if int64(len(b)) > max {
 		b = b[int64(len(b))-max:]
@@ -73,7 +91,9 @@ func keepTail(path string, max int64) {
 	tmp := path + ".tmp"
 	if os.WriteFile(tmp, b, 0o600) != nil || os.Rename(tmp, path) != nil {
 		_ = os.Remove(tmp)
+		return false
 	}
+	return true
 }
 
 // Files are a log's files that exist, older first.
