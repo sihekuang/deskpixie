@@ -117,3 +117,26 @@ func TestAnAnswerWithAMadeUpJobIDGoesToWhoeverAsked(t *testing.T) {
 		t.Fatalf("answered %+v", r)
 	}
 }
+
+// #229: a turn of yours that isn't announced (the setting off, or too short) still means the
+// session moved on: an answer meant for something else isn't typed into it.
+func TestASessionThatMovedOnQuietlyNoLongerTakesTheAnswer(t *testing.T) {
+	for name, edit := range map[string]func(*Settings){
+		"setting off": settingOff,
+		"short turn":  nil,
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := turnCtl(edit)
+			asked := askingTurn
+			asked.FromPixie = true
+			sessionTurn(c, asked, T0)
+			mine := longTurn
+			mine.Duration = 5_000 // under the minimum
+			sessionTurn(c, mine, T0+1_000)
+			fx := c.Step(AnswerInput("", "yes"), T0+2_000)
+			if r := answerResult(t, fx); r.Err != "No job is waiting for an answer." || anyKind(fx, EfTellSession) {
+				t.Fatalf("%s", fmtEffects(fx))
+			}
+		})
+	}
+}

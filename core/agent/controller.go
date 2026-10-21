@@ -1697,17 +1697,18 @@ func (c *AgentController) onSessionTurn(name string, t SessionTurn, now Millis, 
 	if c.shutDown {
 		return
 	}
-	if !t.FromPixie && (!c.settings.SessionTurns || t.Duration < c.settings.SessionTurnsMinMs) {
-		return
-	}
+	told := t.FromPixie || (c.settings.SessionTurns && t.Duration >= c.settings.SessionTurnsMinMs)
 	tokens := c.pendingTokens()
 	reply := maskPendingTokens(t.Reply, tokens)
 	gist, asking := SessionGist(reply)
 	switch {
-	case asking:
+	case told && asking:
 		c.askedBy(asker{session: name, at: now})
 	case c.asked.session == name:
-		c.asked = asker{} // it moved on: its question is gone
+		c.asked = asker{} // it moved on, told or not: its question is gone
+	}
+	if !told {
+		return
 	}
 	label := maskPendingTokens(t.Label, tokens)
 	c.deliverUpdate(Line{
