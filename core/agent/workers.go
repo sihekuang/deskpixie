@@ -345,6 +345,16 @@ func (ws *Workers) Up(name, worktree string, status PaneStatus, brief string, no
 	statusOf(w, status, now)
 }
 
+// UpQuiet is Up with no brief: a worker adopted after its job finished, idle until messaged.
+func (ws *Workers) UpQuiet(name, worktree string, status PaneStatus, now Millis) {
+	w := ws.live[name]
+	if w == nil || w.IsUp() {
+		return
+	}
+	w.Worktree = worktree
+	statusOf(w, status, now)
+}
+
 func (ws *Workers) Remove(name string) (*Worker, bool) {
 	w, ok := ws.live[name]
 	delete(ws.live, name)

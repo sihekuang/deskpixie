@@ -278,18 +278,7 @@ func TestAReplyWithoutAStatusKeepsAJobWithLiveWorkersOpen(t *testing.T) {
 	wantJobStatus(t, c, 1, JobDone, "no live workers: done")
 }
 
-func TestAFinishedJobStopsItsWorkersAndForgetsThemWhenClosed(t *testing.T) {
-	c := wctl()
-	running(t, c)
-	fx := c.Step(StopInput(Coordinator, fmt.Sprintf(`<spoken ref="%s" status="done">Fixed.</spoken>`, job(1))), T0)
-	wantContains(t, fx, eStopWorker(workerName))
-	fx = c.Step(WorkerClosedInput(workerName), T0+6_000)
-	wantContains(t, fx, eForgetWorker(workerName))
-	wantRows(t, c, rowView{workerName, WorkerStopped})
-	wantPrompts(t, fx) // a stop we asked for is not news for the coordinator
-	fx = c.Step(paneExited(workerName), T0+6_001)
-	wantNone(t, fx, "the pane's own exit after the close changes nothing")
-}
+// #237: a finished job keeps its workers (keep_workers_test.go); a stop_worker closes them.
 
 func TestCancelStopsAWorkerThatIsStillStartingAsSoonAsItIsUp(t *testing.T) {
 	c := wctl()

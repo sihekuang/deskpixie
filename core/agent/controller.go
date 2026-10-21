@@ -1200,7 +1200,6 @@ func (c *AgentController) failJobSaying(id JobID, reason, line string, now Milli
 		return
 	}
 	c.denyPendingFor(id, "The job ended.", fx)
-	c.stopJobWorkers(id, fx)
 	c.forgetUpdates(id)
 	c.saveJob(id, fx)
 	c.deliverOpening(NewJobLine(LineReply, line, id), now, fx)
@@ -1427,7 +1426,6 @@ func (c *AgentController) onReply(id JobID, status SpokenStatus, text string, no
 		repeats := c.handedOff[id]
 		c.forgetUpdates(id)
 		c.denyPendingFor(id, "The job ended.", fx)
-		c.stopJobWorkers(id, fx)
 		if repeats {
 			// #177: Pixie said the hand-off already; this only repeats it. A typed job's box
 			// still hears it's done (#231), with the hand-off it shows, or it thinks on.
@@ -1448,7 +1446,6 @@ func (c *AgentController) onReply(id JobID, status SpokenStatus, text string, no
 		c.saveJob(id, fx)
 		c.forgetUpdates(id)
 		c.denyPendingFor(id, "The job ended.", fx)
-		c.stopJobWorkers(id, fx)
 		c.deliverOpening(NewJobLine(LineReply, text, id), now, fx)
 		*fx = append(*fx, Effect{Kind: EfCue, Cue: CueError})
 	}

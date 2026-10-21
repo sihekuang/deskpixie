@@ -202,6 +202,29 @@ func (t *JobTable) AttachWorker(row WorkerRow, now Millis) error {
 	return nil
 }
 
+// MoveWorker moves the live worker row named name to the open job to (a worker kept after its
+// job ended, given more work in a later request, #237); false when there is no such row or job.
+func (t *JobTable) MoveWorker(name string, to JobID, now Millis) bool {
+	dst := t.find(to)
+	if dst == nil || !dst.Status.IsOpen() {
+		return false
+	}
+	for k := range t.jobs {
+		j := &t.jobs[k]
+		for r, w := range j.Workers {
+			if w.Name != name || !w.Status.IsLive() || j.ID == to {
+				continue
+			}
+			j.Workers = append(j.Workers[:r:r], j.Workers[r+1:]...)
+			w.JobID = to
+			dst.Workers = append(dst.Workers, w)
+			dst.Updated = now
+			return true
+		}
+	}
+	return false
+}
+
 // SetWorkerStatus sets the status of the worker row named name (the live one, else the
 // newest); returns its job if the status changed. Rows on closed jobs still change (a stop
 // after a job ends).

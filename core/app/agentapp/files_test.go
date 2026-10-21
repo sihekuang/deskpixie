@@ -313,10 +313,27 @@ func readFile(t *testing.T, p string) string {
 	return string(b)
 }
 
-func TestTheCoordinatorClosesAWorkerOnceItsWorkIsDone(t *testing.T) {
-	for _, phrase := range []string{"Close a worker as soon as its work is done", "call `stop_worker` right away", "the same `name`"} {
+// #237: a worker that made something stays open until the person is done with it; one that
+// only looked something up is closed once its answer is passed on.
+func TestTheCoordinatorKeepsAWorkerWithResultsAndClosesALookup(t *testing.T) {
+	for _, phrase := range []string{
+		"Keep a worker open once its work is done if it made something",
+		"ask what they want to do next",
+		"Should I close the",
+		"stop it only if they say yes",
+		"only looked something up",
+		"stop it once you've passed its answer on",
+		"`message_worker` (it moves to the new request)",
+		"the same `name`",
+		"ask the person which open worker to close",
+	} {
 		if !strings.Contains(RepoWorkWorkers, phrase) {
 			t.Fatal(phrase)
+		}
+	}
+	for _, gone := range []string{"Close a worker as soon as its work is done", "close by themselves when the request ends"} {
+		if strings.Contains(RepoWorkWorkers, gone) {
+			t.Fatal(gone)
 		}
 	}
 }
