@@ -330,7 +330,11 @@ final class AgentRosterController {
             onMode: { [weak self] in self?.pick($0) },
             onSend: { [weak self] in self?.send() },
             onStop: { [weak self] in self?.stopChat() },
-            onCloseChat: { [weak self] in self?.closeChat() })
+            onCloseChat: { [weak self] in self?.closeChat() },
+            onResize: { [weak self] in
+                // After SwiftUI has laid the new lines out.
+                DispatchQueue.main.async { self?.layout() }
+            })
             .onPreferenceChange(ChipFrameKey.self) { [weak self] frame in
                 MainActor.assumeIsolated { self?.chipFrame = frame }
             })

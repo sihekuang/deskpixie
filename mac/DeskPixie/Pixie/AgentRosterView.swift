@@ -21,6 +21,7 @@ struct AgentRosterView: View {
     let onSend: () -> Void
     let onStop: () -> Void
     let onCloseChat: () -> Void
+    let onResize: () -> Void
 
     static let listWidth: CGFloat = 260
 
@@ -48,7 +49,7 @@ struct AgentRosterView: View {
 
     private var card: some View {
         QuickChatCard(model: chat, state: chatState, showsInput: chatOpen, ago: ago,
-                      onSend: onSend, onStop: onStop, onClose: onCloseChat)
+                      onSend: onSend, onStop: onStop, onClose: onCloseChat, onResize: onResize)
     }
 
     private var chip: some View {

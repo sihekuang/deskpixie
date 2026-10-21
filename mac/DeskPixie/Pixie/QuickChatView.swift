@@ -53,6 +53,7 @@ struct QuickChatCard: View {
     let onSend: () -> Void
     let onStop: () -> Void
     let onClose: () -> Void
+    let onResize: () -> Void
 
     static let width: CGFloat = 260
     @FocusState private var focused: Bool
@@ -102,10 +103,13 @@ struct QuickChatCard: View {
                 if showsInput { Divider().padding(.top, 2) }
             }
             if showsInput {
-                HStack(spacing: 6) {
-                    TextField("Message Pixie", text: $state.draft)
+                HStack(alignment: .bottom, spacing: 6) {
+                    // Grows with what is typed, up to a few lines, then scrolls; Return sends.
+                    TextField("Message Pixie", text: $state.draft, axis: .vertical)
                         .textFieldStyle(.plain)
                         .font(.callout)
+                        .lineLimit(1...5)
+                        .fixedSize(horizontal: false, vertical: true)
                         .focused($focused)
                         .onSubmit(onSend)
                         .onExitCommand(perform: onClose)
@@ -125,7 +129,7 @@ struct QuickChatCard: View {
                     .help("Send")
                 }
                 .padding(.horizontal, 8)
-                .padding(.vertical, 4)
+                .padding(.vertical, 6)
             }
         }
         .padding(6)
@@ -134,5 +138,7 @@ struct QuickChatCard: View {
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.separator))
         .onAppear { if showsInput { focused = true } }
         .onChange(of: state.focusRequests) { focused = true }
+        // The panel is sized from the view: a taller field needs a new frame.
+        .onChange(of: state.draft) { onResize() }
     }
 }
