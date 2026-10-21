@@ -46,6 +46,19 @@ final class QuickChatModelTests: XCTestCase {
         XCTAssertTrue(m.showsStop)
     }
 
+    /// #231: a done line that only repeats what the box already shows (a hand-off) ends it as it
+    /// is, without typing it out again.
+    func test_a_done_line_repeating_the_shown_words_ends_without_retyping() {
+        var m = QuickChatModel()
+        m.sent(job: "job_1")
+        m.apply(line("working", "Passed on to your session on api."))
+        m.apply(line("done", "Passed on to your session on api."))
+        XCTAssertEqual(m.phase, .done)
+        XCTAssertEqual(m.shown, "Passed on to your session on api.")
+        XCTAssertFalse(m.showsStop)
+        XCTAssertNotNil(m.ago(now: Date()))
+    }
+
     func test_a_done_line_types_out_word_by_word_then_stop_goes() {
         var m = QuickChatModel()
         m.sent(job: "job_1")

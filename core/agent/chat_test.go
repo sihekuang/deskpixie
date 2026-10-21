@@ -171,3 +171,29 @@ func TestTheCoordinatorsReplyToAStoppedTypedJobIsDropped(t *testing.T) {
 		}
 	}
 }
+
+// #231: a typed message the coordinator hands to one of your sessions ends in the box: the
+// hand-off shows while the job is open, and the job's close tells the box it's done, even
+// though the coordinator's reply only repeats the hand-off (#177).
+func TestATypedJobHandedToASessionStopsThinkingWhenItCloses(t *testing.T) {
+	c := typedOnJob1()
+	passed := "Passed on to your session on " + landing + "."
+	wantChat(t, c.Step(SessionSentInput("repo-claude", landing), T0+5), ChatLine{Job: job(1), Status: "working", Text: passed})
+	fx := stop(c, `<spoken ref="job_000000000001" status="done">I sent your words to the landing page session.</spoken>`, T0+10)
+	wantChat(t, fx, ChatLine{Job: job(1), Status: "done", Text: passed})
+	noUsualRoute(t, fx)
+	wantJobStatus(t, c, 1, JobDone)
+}
+
+// #231 review: the done line is the hand-off as the box first showed it, confirm words masked.
+func TestATypedHandOffsDoneLineKeepsPendingConfirmWordsMasked(t *testing.T) {
+	c := typedOnJob1()
+	askPush(c, 7, T0+1) // "hawk" is pending
+	working := chats(c.Step(SessionSentInput("repo-claude", "say hawk to ship"), T0+5))
+	fx := stop(c, `<spoken ref="job_000000000001" status="done">Passed it on.</spoken>`, T0+10)
+	done := chats(fx)
+	if len(working) != 1 || len(done) != 1 || done[0].Status != "done" || done[0].Text != working[0].Text ||
+		strings.Contains(strings.ToLower(done[0].Text), "hawk") {
+		t.Fatalf("working %v, done %v", working, done)
+	}
+}

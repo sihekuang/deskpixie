@@ -1429,7 +1429,16 @@ func (c *AgentController) onReply(id JobID, status SpokenStatus, text string, no
 		c.denyPendingFor(id, "The job ended.", fx)
 		c.stopJobWorkers(id, fx)
 		if repeats {
-			break // #177: Pixie said the hand-off already; this only repeats it
+			// #177: Pixie said the hand-off already; this only repeats it. A typed job's box
+			// still hears it's done (#231), with the hand-off it shows, or it thinks on.
+			if j, ok := c.jobs.Get(id); ok && c.typed[id] {
+				handOff := text
+				if j.LastProgress != nil {
+					handOff = *j.LastProgress
+				}
+				c.deliver(NewJobLine(LineReply, handOff, id), now, fx)
+			}
+			break
 		}
 		if c.deliverOpening(NewJobLine(LineReply, text, id), now, fx) {
 			*fx = append(*fx, Effect{Kind: EfCue, Cue: CueHappy})
@@ -1624,10 +1633,11 @@ func (c *AgentController) onSessionSent(description, waiting string, now Millis,
 		}
 	}
 	c.handedOff[job] = true
+	tokens := c.pendingTokens()
+	text = maskPendingTokens(text, tokens) // kept masked too: a typed job's box shows it again (#231)
 	c.jobs.SetProgress(job, text, now)
 	c.saveJob(job, fx)
-	tokens := c.pendingTokens()
-	line := NewJobLine(LineReply, maskPendingTokens(text, tokens), job)
+	line := NewJobLine(LineReply, text, job)
 	line.Title, line.Brief = maskPendingTokens(title, tokens), brief
 	c.deliverOpening(line, now, fx)
 }
