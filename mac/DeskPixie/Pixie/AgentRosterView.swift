@@ -151,16 +151,11 @@ private struct BusyDot: View {
             .frame(width: 7, height: 7)
             .shadow(color: .green, radius: 3)
             .opacity(dim ? 0.4 : 1)
-            .onAppear { pulse() }
-            .onChange(of: reduceMotion) { _, _ in pulse() }
-    }
-
-    private func pulse() {
-        guard !reduceMotion else {
-            dim = false
-            return
-        }
-        withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) { dim = true }
+            // Only the opacity animates, never the chip's layout around it.
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: dim)
+            .onAppear { dim = !reduceMotion }
+            // A Reduce Motion change rebuilds the dot: a running repeat can't be stopped in place.
+            .id(reduceMotion)
     }
 }
 
