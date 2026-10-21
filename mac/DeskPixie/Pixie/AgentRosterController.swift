@@ -141,6 +141,8 @@ final class AgentRosterController {
         let text = chatState.draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard chat.canSend(text) else { return }
         chatState.draft = ""
+        chat.sending()
+        render()
         let engine = engine, worker = worker
         Task { @MainActor [weak self] in
             let reply: Result<String, Error>? = await worker.run {
@@ -149,7 +151,9 @@ final class AgentRosterController {
             guard let self else { return }
             let result = reply ?? .failure(DeskPixieEngineError.callFailed("Pixie couldn't send that."))
             switch result {
-            case .success(let job): self.chat.sent(job: job)
+            case .success(let job):
+                // Stop came before the job was known: cancel it now.
+                if self.chat.sent(job: job) { self.cancelInCore() }
             case .failure(let error): self.chat.failedToSend(Self.reason(error))
             }
             self.render()
@@ -157,10 +161,15 @@ final class AgentRosterController {
     }
 
     private func stopChat() {
-        chat.stopped()
+        // Only thinking means the coordinator is at work; typing out just finishes at once.
+        let cancel = chat.stopped()
         typeTimer?.invalidate()
         typeTimer = nil
         render()
+        if cancel { cancelInCore() }
+    }
+
+    private func cancelInCore() {
         let engine = engine
         worker.async { _ = try? engine.call("chat.stop") }
     }

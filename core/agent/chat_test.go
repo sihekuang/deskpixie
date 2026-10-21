@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -93,6 +94,9 @@ func TestATypedPermissionRequestAlsoKeepsItsUsualRoute(t *testing.T) {
 	if len(got) != 1 || got[0].Status != "question" || got[0].Job != job(1) {
 		t.Fatalf("%v", got)
 	}
+	if !strings.HasSuffix(got[0].Text, permissionHint) || strings.Contains(got[0].Text, "Say confirm") {
+		t.Fatalf("the box says where to allow it, and not to say a word: %q", got[0].Text)
+	}
 	usual := false
 	for _, e := range fx {
 		if e.Kind == EfNotify || e.Kind == EfAppend && e.File == OutboxFile {
@@ -138,5 +142,32 @@ func TestTheLastTypedJobIsKnown(t *testing.T) {
 	delegate(c, 2, "by voice")
 	if c.LastTyped() != job(1) {
 		t.Fatal("a voice delegation isn't typed")
+	}
+}
+
+// Review #1: with openConversationForUpdates on, a typed job's progress still goes to the box.
+func TestATypedJobsProgressGoesToTheCardWithTheOpenFlagOn(t *testing.T) {
+	c := ctlWith(func(s *Settings) { s.OpenConversation = true })
+	c.Step(TypedDelegateInput(job(1), "a slow one", ""), T0)
+	c.Step(CoordinatorUpInput(PaneIdle), T0)
+	fx := stop(c, `<spoken ref="job_000000000001" status="working">Halfway.</spoken>`, T0+10)
+	wantChat(t, fx, ChatLine{Job: job(1), Status: "working", Text: "Halfway."})
+	noUsualRoute(t, fx)
+}
+
+// Review #2: after Stop, the coordinator's confirmation of the cancel isn't notified.
+func TestTheCoordinatorsReplyToAStoppedTypedJobIsDropped(t *testing.T) {
+	for _, reply := range []string{
+		`Stopped.`, // no block: unreferenced
+		`<spoken ref="job_000000000001" status="done">Okay, stopped.</spoken>`, // its closed job
+	} {
+		c := typedOnJob1()
+		c.Step(CancelInput(job(1)), T0+10)
+		c.Step(coordStatus(PaneIdle), T0+20)
+		fx := stop(c, reply, T0+30)
+		noUsualRoute(t, fx)
+		if len(chats(fx)) != 0 {
+			t.Fatal(reply, fmtEffects(fx))
+		}
 	}
 }

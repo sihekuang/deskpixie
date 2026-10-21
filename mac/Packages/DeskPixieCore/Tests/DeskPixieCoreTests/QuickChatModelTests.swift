@@ -119,4 +119,58 @@ final class QuickChatModelTests: XCTestCase {
         XCTAssertEqual(m.shown, "")
         XCTAssertEqual(m.phase, .thinking)
     }
+
+    /// Review #3: Stop while only typing out cancels nothing in the core.
+    func test_stop_says_whether_work_must_be_cancelled() {
+        var m = QuickChatModel()
+        m.sent(job: "job_1")
+        XCTAssertTrue(m.stopped(), "thinking: the coordinator is working")
+        var a = QuickChatModel()
+        a.sent(job: "job_1")
+        a.apply(line("question", "Which repo?"))
+        XCTAssertFalse(a.stopped(), "typing out a question: nothing to cancel")
+    }
+
+    /// Review #4: a line that comes before chat.send's reply is kept and shown.
+    func test_a_line_before_the_send_reply_is_not_lost() {
+        var m = QuickChatModel()
+        m.sending()
+        XCTAssertEqual(m.phase, .thinking)
+        XCTAssertTrue(m.showsStop)
+        m.apply(line("done", "Fast answer.", job: "job_7"))
+        XCTAssertEqual(m.phase, .thinking)
+        m.sent(job: "job_7")
+        XCTAssertEqual(m.phase, .answering)
+        while m.tick() {}
+        XCTAssertEqual(m.shown, "Fast answer.")
+    }
+
+    /// Review #4: answering a question reuses its job id; the early reply survives too.
+    func test_an_early_reply_to_an_answered_question_survives() {
+        var m = QuickChatModel()
+        m.sent(job: "job_1")
+        m.apply(line("question", "Which repo?"))
+        while m.tick() {}
+        m.sending()
+        m.apply(line("done", "Fixed it.", job: "job_1"))
+        m.sent(job: "job_1")
+        while m.tick() {}
+        XCTAssertEqual(m.shown, "Fixed it.")
+        XCTAssertEqual(m.phase, .done)
+    }
+
+    /// Stop before chat.send answers: it stays stopped, and the job is cancelled once known.
+    func test_stop_before_the_job_is_known_cancels_it_when_it_is() {
+        var m = QuickChatModel()
+        m.sending()
+        XCTAssertFalse(m.stopped(), "no job to cancel yet")
+        XCTAssertEqual(m.phase, .stopped)
+        XCTAssertTrue(m.sent(job: "job_3"), "now cancel it")
+        XCTAssertEqual(m.phase, .stopped)
+        m.apply(line("failed", "The user cancelled the job.", job: "job_3"))
+        XCTAssertEqual(m.phase, .stopped)
+        var n = QuickChatModel()
+        n.sending()
+        XCTAssertFalse(n.sent(job: "job_4"))
+    }
 }

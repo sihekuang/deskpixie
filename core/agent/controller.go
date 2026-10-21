@@ -403,6 +403,9 @@ type AgentController struct {
 	typed     map[JobID]bool
 	lastTyped JobID
 	textMode  bool
+	// turnStopped: the turn that just ended was only about typed jobs the user stopped, so what
+	// it says (the coordinator confirming the stop) is dropped.
+	turnStopped bool
 
 	// asked: the question Pixie relayed last, which an answer without a job id answers (#161).
 	asked asker
@@ -1208,6 +1211,7 @@ func (c *AgentController) failJobSaying(id JobID, reason, line string, now Milli
 
 func (c *AgentController) onStop(message string, now Millis, fx *[]Effect) {
 	c.turnOpen = false
+	c.turnStopped = false
 	// The open jobs in the prompt this turn answered.
 	var answered []JobID
 	if c.landing {
@@ -1217,6 +1221,7 @@ func (c *AgentController) onStop(message string, now Millis, fx *[]Effect) {
 		c.landBy = someMs(now + PromptLandMs)
 	} else {
 		answered = c.openInFlight()
+		c.turnStopped = c.onlyStoppedTyped()
 		// The turn is over. The next prompt goes out on Idle/Done, or after a short settle if
 		// Herdr missed the Idle (the TUI may still be finishing right at the Stop). An Idle that
 		// came first doesn't send at once either: the settle covers it.
@@ -1337,7 +1342,7 @@ func (c *AgentController) onUnreferencedStop(message string, blocks []Spoken, an
 		return
 	}
 	for _, text := range texts {
-		c.deliver(NewLine(LineUnsolicited, text), now, fx)
+		c.deliverUnsolicited(text, now, fx)
 	}
 	// A question or progress can't say which job: they stay open. Failed is terminal: they fail
 	// (leaving them open would keep Pixie holding).
@@ -1378,9 +1383,11 @@ func (c *AgentController) onReferencedStop(blocks []Spoken, now Millis, fx *[]Ef
 			if id, ok := ParseJobID(*b.Reference); ok && c.jobs.IsOpen(id) {
 				c.onReply(id, b.Status, text, now, fx)
 				continue
+			} else if ok && c.typed[id] {
+				continue // a typed job Stop closed: its confirmation isn't news (#221)
 			}
 		}
-		c.deliver(NewLine(LineUnsolicited, text), now, fx)
+		c.deliverUnsolicited(text, now, fx)
 	}
 }
 
@@ -1400,7 +1407,7 @@ func (c *AgentController) onReply(id JobID, status SpokenStatus, text string, no
 		c.jobs.SetProgress(id, text, now)
 		c.saveJob(id, fx)
 		line := NewJobLine(LineReply, text, id)
-		if c.settings.OpenConversation && !c.voiceOpen {
+		if c.settings.OpenConversation && !c.voiceOpen && !c.typed[id] {
 			// #113: progress opens no conversation, so it doesn't chime or notify either (a
 			// chime means one follows); it waits in the outbox for the next conversation.
 			c.applyDelivery(OutboxDelivery(line), now, fx)

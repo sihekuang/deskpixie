@@ -31,6 +31,12 @@ public struct QuickChatModel: Equatable, Sendable {
     /// replyMode: "voice" or "text".
     public var mode = "voice"
 
+    /// Lines that came for a job before chat.send said which job is ours (newest per job).
+    private var early: [String: ChatLine] = [:]
+    private var pending = false
+    /// Stop came while pending: the job is cancelled as soon as it is known.
+    private var stopPending = false
+
     public init() {}
 
     public var showsStop: Bool { phase == .thinking || phase == .answering }
@@ -47,23 +53,55 @@ public struct QuickChatModel: Equatable, Sendable {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !showsStop
     }
 
-    /// The message went: its job's lines are what the box shows now.
-    public mutating func sent(job: String) {
-        self.job = job
+    /// The message is on its way (before chat.send answers): thinking, and lines that come
+    /// meanwhile are kept until the job is known.
+    public mutating func sending() {
+        job = nil
+        pending = true
+        stopPending = false
+        early = [:]
         phase = .thinking
         shown = ""
         full = ""
     }
 
+    /// The message went: its job's lines are what the box shows now (any that came early too).
+    /// True when Stop came first, so the core must cancel this job now.
+    @discardableResult
+    public mutating func sent(job: String) -> Bool {
+        self.job = job
+        if stopPending {
+            stopPending = false
+            pending = false
+            early = [:]
+            return true
+        }
+        let kept = pending ? early[job] : nil
+        pending = false
+        early = [:]
+        phase = .thinking
+        shown = ""
+        full = ""
+        if let kept { apply(kept) }
+        return false
+    }
+
     /// The message couldn't go: the reason is the answer.
     public mutating func failedToSend(_ reason: String) {
         job = nil
+        pending = false
+        stopPending = false
+        early = [:]
         full = reason
         shown = reason
         phase = .done
     }
 
     public mutating func apply(_ line: ChatLine) {
+        if pending {
+            early[line.job] = line
+            return
+        }
         guard line.job == job, phase == .thinking || phase == .answering || phase == .done else { return }
         if line.status == "working" {
             full = line.text
@@ -94,13 +132,23 @@ public struct QuickChatModel: Equatable, Sendable {
     }
 
     /// Stop: while thinking the work stops ("Stopped."); while typing out, the rest shows at once.
-    public mutating func stopped() {
+    /// True when the core must cancel the job (only while thinking: nothing runs while typing out).
+    @discardableResult
+    public mutating func stopped() -> Bool {
         switch phase {
-        case .thinking: phase = .stopped
+        case .thinking:
+            phase = .stopped
+            if pending {
+                // No job yet: sent(job:) says to cancel it.
+                stopPending = true
+                return false
+            }
+            return true
         case .answering:
             shown = full
             phase = .done
         default: break
         }
+        return false
     }
 }

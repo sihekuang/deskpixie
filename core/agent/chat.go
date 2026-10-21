@@ -2,6 +2,7 @@ package agent
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 )
 
@@ -39,8 +40,16 @@ func (c *AgentController) chatLine(line Line) ChatLine {
 			status = "failed"
 		}
 	}
-	return ChatLine{Job: line.Job, Status: status, Text: line.Text}
+	text := line.Text
+	if line.Token != nil {
+		// A permission request: allowed from the bubble or the notification, not by a spoken word.
+		text = strings.TrimSpace(strings.TrimSuffix(text, fmt.Sprintf("Say confirm %s.", *line.Token))) + " " + permissionHint
+	}
+	return ChatLine{Job: line.Job, Status: status, Text: text}
 }
+
+// permissionHint ends a permission request in the text box.
+const permissionHint = "Allow or deny it in Pixie's updates."
 
 // typedNote tells the coordinator where the request came from.
 const typedNote = "The user typed this in DeskPixie's text box."
@@ -80,3 +89,23 @@ func (h *AgentHandle) ChatStop() {
 
 // SetTextMode: the user switched to text (on) or back to voice.
 func (h *AgentHandle) SetTextMode(on bool) { h.Input(TextModeInput(on)) }
+
+// onlyStoppedTyped: every job in the prompt in flight is a typed one that is closed (stopped).
+func (c *AgentController) onlyStoppedTyped() bool {
+	refs := unique(c.inbox.InFlightRefs())
+	for _, id := range refs {
+		if !c.typed[id] || c.jobs.IsOpen(id) {
+			return false
+		}
+	}
+	return len(refs) > 0
+}
+
+// deliverUnsolicited delivers a line that names no open job, unless it only confirms a typed
+// job's Stop: the box already says "Stopped." (#221).
+func (c *AgentController) deliverUnsolicited(text string, now Millis, fx *[]Effect) {
+	if c.turnStopped {
+		return
+	}
+	c.deliver(NewLine(LineUnsolicited, text), now, fx)
+}
