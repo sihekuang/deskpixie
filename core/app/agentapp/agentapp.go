@@ -365,6 +365,9 @@ func Build(c Config) *Agent {
 		Roster:      rosterSink{c.Hooks},
 		Modes:       a,
 	}
+	if c.Hooks.Chat != nil {
+		deps.Chat = chatSink{c.Hooks}
+	}
 	// Exactly 127.0.0.1 (the hook server refuses any non-loopback listener). Bound before the
 	// runtime is built, so a busy port is known before a warm start could launch anything.
 	ln, err := c.Listen(s.Port)
@@ -655,6 +658,18 @@ func (a *Agent) FocusJob(job, worker string) {
 		}
 	})
 }
+
+// ChatSend is a message typed in the text box (#221).
+func (a *Agent) ChatSend(text string) (string, error) {
+	id, err := a.handle.ChatSend(text)
+	return string(id), err
+}
+
+// ChatStop is Stop in the text box.
+func (a *Agent) ChatStop() { a.handle.ChatStop() }
+
+// SetTextMode: replyMode is text.
+func (a *Agent) SetTextMode(on bool) { a.handle.SetTextMode(on) }
 
 // Roster is the roster beside Pixie (agent.RosterView).
 func (a *Agent) Roster() any { return a.handle.Roster() }

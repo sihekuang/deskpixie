@@ -40,6 +40,7 @@ type recorder struct {
 	celebrated, flashed int
 	refreshed           int
 	notes               [][2]string
+	chats               []any
 }
 
 func (r *recorder) hooks() app.AgentHooks {
@@ -52,7 +53,14 @@ func (r *recorder) hooks() app.AgentHooks {
 			r.notes = append(r.notes, [2]string{title, body})
 			r.mu.Unlock()
 		},
+		Chat: func(line any) { r.mu.Lock(); r.chats = append(r.chats, line); r.mu.Unlock() },
 	}
+}
+
+func (r *recorder) chatLines() []any {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.chats)
 }
 
 func (r *recorder) counts() (celebrated, flashed int) {
@@ -256,6 +264,40 @@ func TestEndToEndDelegateToStopHookToVoiceInject(t *testing.T) {
 	})
 	waitFor(t, "Pixie celebrates", func() bool { c, _ := f.rec.counts(); return c == 1 })
 	waitFor(t, "the job to leave the tray", func() bool { return len(f.agent.Tray().Jobs) == 0 })
+}
+
+// #221: a message typed in the text box reaches the coordinator, and its spoken answer comes
+// back to the box, not spoken or notified.
+func TestEndToEndATypedMessageAnswersInTheTextBox(t *testing.T) {
+	f := newFixture(t, nil)
+	v := openVoice(t, f)
+	id, err := f.agent.ChatSend("count the open issues")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the coordinator prompt", func() bool {
+		for _, p := range f.host.Prompts() {
+			if strings.Contains(p.Text, "count the open issues") && strings.Contains(p.Text, "[ref "+id+"]") {
+				return true
+			}
+		}
+		return false
+	})
+	f.post(t, "/hooks/stop", f.coordinatorToken(t), map[string]any{
+		"hook_event_name":        "Stop",
+		"last_assistant_message": `Counted. <spoken ref="` + id + `" status="done">There are twelve open issues.</spoken>`,
+	})
+	waitFor(t, "the answer in the box", func() bool {
+		for _, l := range f.rec.chatLines() {
+			if c, ok := l.(agent.ChatLine); ok && c == (agent.ChatLine{Job: agent.JobID(id), Status: "done", Text: "There are twelve open issues."}) {
+				return true
+			}
+		}
+		return false
+	})
+	if slices.Contains(v.Injected(), "Coordinator reply: There are twelve open issues.") || len(f.rec.notesOrNil()) != 0 {
+		t.Fatal("a typed answer was spoken or notified")
+	}
 }
 
 func TestAFailedJobFlashesTheErrorState(t *testing.T) {

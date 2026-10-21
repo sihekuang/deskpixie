@@ -108,6 +108,11 @@ func (f focusSink) Focus(plan agent.FocusPlan) {
 	}
 }
 
+// chatSink: a typed job's line → the app's `chat.line` event (#221).
+type chatSink struct{ hooks app.AgentHooks }
+
+func (c chatSink) Chat(l agent.ChatLine) { c.hooks.Chat(l) }
+
 type rosterSink struct{ hooks app.AgentHooks }
 
 func (r rosterSink) Roster(v agent.RosterView) {
