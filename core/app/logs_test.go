@@ -37,6 +37,7 @@ func TestLogsExportZipsEveryLog(t *testing.T) {
 	_ = os.MkdirAll(filepath.Join(h.dir, "logs"), 0o755)
 	_ = os.WriteFile(AppLogPath(h.dir), []byte("app line\n"), 0o600)
 	_ = os.WriteFile(filepath.Join(h.dir, "logs", "voice.log"), []byte("v\n"), 0o600)
+	_ = os.WriteFile(filepath.Join(h.dir, "logs", "pix.log"), []byte("p\n"), 0o600)
 	dst := filepath.Join(t.TempDir(), "DeskPixie logs.zip")
 	out := h.call("logs.export", map[string]string{"path": dst, "app": "0.10.0 (42)", "os": "macOS 15.6"})
 	if !strings.Contains(string(out), "DeskPixie logs.zip") {
@@ -59,7 +60,7 @@ func TestLogsExportZipsEveryLog(t *testing.T) {
 		}
 	}
 	sort.Strings(names)
-	if strings.Join(names, ",") != "about.txt,deskpixie.log,metrics.log,voice.log" {
+	if strings.Join(names, ",") != "about.txt,deskpixie.log,metrics.log,pix.log,voice.log" {
 		t.Fatal(names)
 	}
 	for _, want := range []string{"DeskPixie 0.10.0 (42)", "macOS 15.6", "Log size: 2 MB"} {

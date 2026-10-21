@@ -1,6 +1,6 @@
 package app
 
-// The app's logs (#225): the core's own log in logs/deskpixie.log (the engine tees the standard
+// The app's logs (#225): the core's own log in logs/deskpixie.log, pix's in logs/pix.log (the engine tees the standard
 // logger there), kept like the voice log and the metrics log to the Log size setting, and
 // Settings ▸ Advanced ▸ Export Logs… (`logs.export`).
 
@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/sihekuang/deskpixie/core/logfile"
+	"github.com/sihekuang/deskpixie/core/pix"
 	"github.com/sihekuang/deskpixie/core/voice"
 )
 
@@ -31,7 +32,8 @@ func (a *App) LogMaxBytes() int64 {
 
 // logFiles are the logs an export holds.
 func (a *App) logFiles() []string {
-	files := []string{AppLogPath(a.paths.AppSupport), voice.VoiceLogPath(a.paths.AppSupport)}
+	files := []string{AppLogPath(a.paths.AppSupport), voice.VoiceLogPath(a.paths.AppSupport),
+		pix.LogFile(a.paths.AppSupport)}
 	if a.deps.MetricsLogPath != "" {
 		files = append(files, a.deps.MetricsLogPath)
 	}

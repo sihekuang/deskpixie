@@ -44,7 +44,7 @@ type Config struct {
 	// CaptionDismissSecs: what Pixie said is put away this long after it was said (0 keeps it).
 	// Only the shell reads it (#224).
 	CaptionDismissSecs uint32 `json:"captionDismissSecs"`
-	// LogMaxMB caps each log on disk (the app's, the voice log, metrics), in MB (#225).
+	// LogMaxMB caps each log on disk (the app's, pix's, the voice log, metrics), in MB (#225).
 	LogMaxMB uint32 `json:"logMaxMB"`
 	// Position is the logical top-left of the pixie window; nil = bottom-right of the primary
 	// display. Managed: written by the app.

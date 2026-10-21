@@ -484,7 +484,7 @@ public enum SettingsLayout {
             return [.button(label: "Settings file", help: "settings.json holds every setting on this page.",
                             title: "Open Settings File", action: .openFile),
                     .button(label: "Logs",
-                            help: "Saves the app's log, the voice log and metrics in one zip to share. It can include what you said to Pixie.",
+                            help: "Saves the app's log, pix's log, the voice log and metrics in one zip to share. It can include what you said to Pixie.",
                             title: "Export Logs…", action: .exportLogs)]
         case .agent:
             return [.pix(help: pixHelp),
