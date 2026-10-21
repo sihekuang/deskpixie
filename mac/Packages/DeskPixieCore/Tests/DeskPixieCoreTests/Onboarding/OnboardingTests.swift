@@ -61,9 +61,9 @@ final class OnboardingTests: XCTestCase {
         XCTAssertEqual(OnboardingFlow.chosen(v), [.voice, .sessions])
     }
 
-    /// Three steps whatever is chosen: choosing and setting up share one page.
-    func testThereAreThreeSteps() {
-        XCTAssertEqual(OnboardingFlow.pages, [.welcome, .setup, .done])
+    /// Four steps whatever is chosen: choosing and setting up share one page; then permissions.
+    func testThereAreFourSteps() {
+        XCTAssertEqual(OnboardingFlow.pages, [.welcome, .setup, .permissions, .done])
     }
 
     /// On the setup page a feature's setup shows under its switch while it is on; canvas has none.
@@ -79,7 +79,7 @@ final class OnboardingTests: XCTestCase {
         XCTAssertEqual(OnboardingFeature.canvas.settingPath, "canvas.autoOpen")
     }
 
-    func testNextAndBackStayWithinTheThreeSteps() {
+    func testNextAndBackStayWithinTheSteps() {
         var flow = OnboardingFlow()
         XCTAssertEqual(flow.page, .welcome)
         XCTAssertFalse(flow.canGoBack)
@@ -88,12 +88,14 @@ final class OnboardingTests: XCTestCase {
         flow.next()
         XCTAssertEqual(flow.page, .setup)
         flow.next()
+        XCTAssertEqual(flow.page, .permissions)
+        flow.next()
         XCTAssertEqual(flow.page, .done)
         XCTAssertTrue(flow.isLast)
         flow.next()
         XCTAssertEqual(flow.page, .done)
         flow.back()
-        XCTAssertEqual(flow.page, .setup)
+        XCTAssertEqual(flow.page, .permissions)
         flow.restart()
         XCTAssertEqual(flow.page, .welcome)
     }
@@ -129,10 +131,58 @@ final class OnboardingTests: XCTestCase {
         let granted = OnboardingChecks.microphone(.granted)
         XCTAssertTrue(granted.ok)
         XCTAssertNil(granted.fix)
-        XCTAssertEqual(OnboardingChecks.microphone(.notDetermined).fix, .allowMicrophone)
+        XCTAssertEqual(OnboardingChecks.microphone(.notDetermined).fix, .allow(.microphone))
         let denied = OnboardingChecks.microphone(.denied)
         XCTAssertFalse(denied.ok)
-        XCTAssertEqual(denied.fix, .openMicrophoneSettings)
+        XCTAssertEqual(denied.fix, .openSettings(.microphone))
+    }
+
+    // MARK: Permissions (#210)
+
+    func testEveryPermissionIsListedWithAutomationOnlyForInstalledApps() {
+        XCTAssertEqual(AppPermission.all(installed: []),
+                       [.microphone, .notifications, .accessibility, .automation(.systemEvents)])
+        XCTAssertEqual(AppPermission.all(installed: [.spotify, .iTerm]),
+                       [.microphone, .notifications, .accessibility, .automation(.systemEvents),
+                        .automation(.iTerm), .automation(.spotify)])
+        XCTAssertEqual(AppPermission.automation(.music).title, "Control Music")
+    }
+
+    /// Allow All asks only what's unanswered, and Accessibility (System Settings) last.
+    func testAllowAllAsksWhatIsUnansweredWithAccessibilityLast() {
+        let asked = AppPermission.toAsk([(.microphone, .granted), (.notifications, .notDetermined),
+                                         (.accessibility, .notDetermined), (.automation(.systemEvents), .notDetermined),
+                                         (.automation(.music), .denied)])
+        XCTAssertEqual(asked, [.notifications, .automation(.systemEvents), .accessibility])
+        XCTAssertEqual(AppPermission.toAsk([(.microphone, .granted)]), [])
+    }
+
+    func testAPermissionLineOffersTheFixThatWorksNow() {
+        XCTAssertTrue(OnboardingChecks.permission(.notifications, .granted, asked: false).ok)
+        let open = OnboardingChecks.permission(.automation(.iTerm), .notDetermined, asked: false)
+        XCTAssertEqual(open.fix, .allow(.automation(.iTerm)))
+        XCTAssertTrue(open.detail.contains("iTerm"), open.detail)
+        let denied = OnboardingChecks.permission(.notifications, .denied, asked: true)
+        XCTAssertEqual(denied.fix, .openSettings(.notifications))
+        XCTAssertTrue(denied.detail.contains("Notifications"), denied.detail)
+        // Accessibility can't say no: once asked, the way on is System Settings.
+        XCTAssertEqual(OnboardingChecks.permission(.accessibility, .notDetermined, asked: false).fix, .allow(.accessibility))
+        XCTAssertEqual(OnboardingChecks.permission(.accessibility, .notDetermined, asked: true).fix, .openSettings(.accessibility))
+    }
+
+    func testThePermissionsDoneLineCountsWhatIsLeft() {
+        let ok = OnboardingCheck(title: "a", ok: true, detail: "")
+        let no = OnboardingCheck(title: "b", ok: false, detail: "")
+        XCTAssertEqual(OnboardingChecks.permissionsSummary([ok, ok]).detail, "All allowed")
+        XCTAssertEqual(OnboardingChecks.permissionsSummary([ok, no]).detail, "1 still to allow")
+        XCTAssertEqual(OnboardingChecks.permissionsSummary([no, no]).detail, "2 still to allow")
+        XCTAssertFalse(OnboardingChecks.permissionsSummary([no]).ok)
+    }
+
+    func testEachPermissionOpensItsOwnSettingsPane() {
+        XCTAssertTrue(AppPermission.accessibility.settingsURL.absoluteString.hasSuffix("Privacy_Accessibility"))
+        XCTAssertTrue(AppPermission.automation(.spotify).settingsURL.absoluteString.hasSuffix("Privacy_Automation"))
+        XCTAssertTrue(AppPermission.notifications.settingsURL.absoluteString.hasSuffix("preference.notifications"))
     }
 
     // MARK: Agent checks

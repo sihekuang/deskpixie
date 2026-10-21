@@ -25,6 +25,7 @@ struct OnboardingView: View {
             switch page {
             case .welcome: welcome
             case .setup: scrolling { setup }
+            case .permissions: scrolling { permissions }
             case .done: scrolling { done }
             }
             if page != .welcome {
@@ -362,12 +363,55 @@ struct OnboardingView: View {
         }
     }
 
+    // MARK: Permissions
+
+    /// Every permission DeskPixie uses, asked for now so nothing stops you later (#210).
+    private var permissions: some View {
+        let checks = state.permissionChecks()
+        let open = AppPermission.toAsk(state.permissions.map { ($0, state.access[$0] ?? .notDetermined) })
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .bottom) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Allow permissions")
+                        .font(.title2.weight(.bold))
+                        .accessibilityAddTraits(.isHeader)
+                    Text("macOS asks once for each. Allow them now and Pixie won't stop to ask while you work.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 12)
+                Button(state.asking ? "Asking…" : "Allow All") { state.askAll() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(state.asking || open.isEmpty)
+            }
+            .padding(.horizontal, 4)
+            .padding(.top, 16)
+            card {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(zip(state.permissions, checks).enumerated()), id: \.offset) { i, row in
+                        if i > 0 { Divider() }
+                        checkRow(row.1, purpose: row.0.purpose)
+                            .padding(.vertical, 9)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 2)
+            }
+            Text("Each one can be changed later in System Settings ▸ Privacy & Security.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 4)
+        }
+    }
+
     // MARK: Done
 
     private var done: some View {
         let checks = Dictionary(uniqueKeysWithValues: chosen.map { ($0, state.checks($0, settings: settings)) })
         let lines = OnboardingChecks.summary(chosen: chosen, checks: checks)
-        let allOk = lines.allSatisfy(\.ok)
+        let permissions = OnboardingChecks.permissionsSummary(state.permissionChecks())
+        let allOk = lines.allSatisfy(\.ok) && permissions.ok
         return VStack(spacing: 0) {
             pixie(allOk ? "happy" : "idle")
             Text(allOk ? "You're all set" : "Almost there")
@@ -386,6 +430,9 @@ struct OnboardingView: View {
                         checkRow(OnboardingCheck(title: line.feature.title, ok: line.ok, detail: line.detail))
                             .padding(.vertical, 9)
                     }
+                    Divider()
+                    checkRow(permissions)
+                        .padding(.vertical, 9)
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 2)
@@ -534,7 +581,8 @@ struct OnboardingView: View {
         }
     }
 
-    private func checkRow(_ check: OnboardingCheck) -> some View {
+    /// `purpose`: a permission's use, added to its Allowed line.
+    private func checkRow(_ check: OnboardingCheck, purpose: String? = nil) -> some View {
         HStack(alignment: .center, spacing: 10) {
             Image(systemName: check.ok ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
                 .foregroundStyle(check.ok ? Self.pixieGreen : Color.orange)
@@ -542,7 +590,7 @@ struct OnboardingView: View {
                 .accessibilityLabel(check.ok ? "Ready" : "Needs attention")
             VStack(alignment: .leading, spacing: 1) {
                 Text(check.title).font(.callout.weight(.semibold))
-                Text(check.detail)
+                Text(check.ok ? purpose.map { "Allowed. \($0)" } ?? check.detail : check.detail)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -555,10 +603,11 @@ struct OnboardingView: View {
     @ViewBuilder
     private func fixButton(_ fix: OnboardingCheck.Fix) -> some View {
         switch fix {
-        case .allowMicrophone:
-            Button("Allow Microphone") { state.requestMic() }
-        case .openMicrophoneSettings:
-            Button("Open Privacy Settings") { state.openMicSettings() }
+        case .allow(let p):
+            Button(p == .microphone ? "Allow Microphone" : "Allow") { state.ask([p]) }
+                .disabled(state.asking)
+        case .openSettings(let p):
+            Button("Open Settings") { state.openSettings(p) }
         case .installPix:
             Button("Install") {
                 state.pix?.install()

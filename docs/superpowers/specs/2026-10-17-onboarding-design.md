@@ -10,8 +10,10 @@ OPENAI_API_KEY)", "Coordinator: herdr not found").
 
 ## Goals
 
-- A window opens on a new user's first launch, in three steps: Welcome, Set up (choose and set
-  up each feature on one page), Done.
+- A window opens on a new user's first launch, in four steps: Welcome, Set up (choose and set
+  up each feature on one page), Permissions, Done. Permissions (#210) lists every macOS permission
+  (Microphone, Notifications, Accessibility, Automation for System Events and each installed app
+  DeskPixie scripts: iTerm, Music, Spotify) with Allow All, so none is asked mid-task.
 - Every choice in it is the real setting (the same control and the same save path as Settings),
   so the window and Settings can never disagree.
 - Each setup page checks itself as you go (key found, microphone allowed, herdr and Claude Code

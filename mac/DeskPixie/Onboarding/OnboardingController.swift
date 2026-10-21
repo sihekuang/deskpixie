@@ -1,12 +1,11 @@
 import AppKit
-import AVFoundation
 import DeskPixieCore
 import Observation
 import os
 import SwiftUI
 
 /// What the first-run window reads besides settings (#149): the programs the agents need, the
-/// microphone permission and the pix command. Settings themselves come from the shared
+/// macOS permissions (#210) and the pix command. Settings themselves come from the shared
 /// `SettingsModel`, so the window and Settings never disagree.
 @MainActor
 @Observable
@@ -16,7 +15,13 @@ final class OnboardingState {
     private(set) var programs: SetupPrograms?
     /// The last `setup.programs` call failed (shown instead of "Checking…").
     private(set) var programsFailed = false
-    private(set) var mic = MicrophoneAccess.notDetermined
+    /// The permissions this Mac has a use for, in the order the step shows them.
+    private(set) var permissions = AppPermission.all(installed: [])
+    private(set) var access: [AppPermission: PermissionAccess] = [:]
+    /// Accessibility was asked for in this window: its line then points to System Settings.
+    private(set) var askedAccessibility = false
+    /// Allow All (or one Allow) is going through macOS's dialogs.
+    private(set) var asking = false
     /// nil until the login shell's PATH has been read (off main: up to 2 s).
     private(set) var pix: PixCommandModel?
 
@@ -36,7 +41,7 @@ final class OnboardingState {
 
     /// Reads everything again (the window opened, or Check Again).
     func refresh() {
-        refreshMic()
+        refreshPermissions()
         refreshPrograms()
         refreshPix()
     }
@@ -61,24 +66,43 @@ final class OnboardingState {
         }
     }
 
-    func refreshMic() {
-        switch AVCaptureDevice.authorizationStatus(for: .audio) {
-        case .authorized: mic = .granted
-        case .notDetermined: mic = .notDetermined
-        default: mic = .denied
+    var mic: PermissionAccess { access[.microphone] ?? .notDetermined }
+
+    func refreshPermissions() {
+        Task { @MainActor [weak self] in
+            let installed = await Task.detached { SystemPermissions.installedTargets() }.value
+            let all = AppPermission.all(installed: installed)
+            var read: [AppPermission: PermissionAccess] = [:]
+            for p in all { read[p] = await SystemPermissions.access(p) }
+            self?.permissions = all
+            self?.access = read
         }
     }
 
-    func requestMic() {
-        AVCaptureDevice.requestAccess(for: .audio) { _ in
-            Task { @MainActor [weak self] in self?.refreshMic() }
+    func permissionChecks() -> [OnboardingCheck] {
+        permissions.map { OnboardingChecks.permission($0, access[$0] ?? .notDetermined, asked: askedAccessibility) }
+    }
+
+    /// Allow All: macOS's dialog for each one not answered yet, one after another.
+    func askAll() {
+        ask(AppPermission.toAsk(permissions.map { ($0, access[$0] ?? .notDetermined) }))
+    }
+
+    func ask(_ list: [AppPermission]) {
+        guard !asking, !list.isEmpty else { return }
+        asking = true
+        Task { @MainActor [weak self] in
+            for p in list {
+                if p == .accessibility { self?.askedAccessibility = true }
+                await SystemPermissions.ask(p)
+            }
+            self?.asking = false
+            self?.refreshPermissions()
         }
     }
 
-    func openMicSettings() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
-            NSWorkspace.shared.open(url)
-        }
+    func openSettings(_ p: AppPermission) {
+        NSWorkspace.shared.open(p.settingsURL)
     }
 
     func refreshPix() {
@@ -182,7 +206,7 @@ final class OnboardingController {
 
     private func becameKey() {
         settings().focusGained()
-        state.refreshMic()
+        state.refreshPermissions()
         state.refreshPix()
     }
 
