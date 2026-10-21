@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/sihekuang/deskpixie/core/app"
 	"github.com/sihekuang/deskpixie/core/app/agentapp"
+	"github.com/sihekuang/deskpixie/core/logfile"
 	"github.com/sihekuang/deskpixie/core/metrics"
 	"github.com/sihekuang/deskpixie/core/settings"
 	"github.com/sihekuang/deskpixie/core/voice"
@@ -166,11 +168,15 @@ func (e *Engine) configure(jsonCfg []byte) error {
 		Run:       e.opts.Run,
 		OnMicSent: e.onMicSent,
 		Agent:     e.agentFactory(),
+
+		MetricsLogPath: e.opts.MetricsLogPath,
 	})
 	if err != nil {
 		return err
 	}
 	old := e.app.Swap(a)
+	// The core's log is kept in the app's data folder too, not only on stderr (#225).
+	log.SetOutput(io.MultiWriter(os.Stderr, a.AppLog()))
 	e.rt.Store(a.Runtime())
 	a.Register(registrar{e})
 	if old != nil {
@@ -275,6 +281,7 @@ func (e *Engine) Close() {
 		e.closed = true
 		e.rt.Store(nil)
 		if a := e.app.Swap(nil); a != nil {
+			log.SetOutput(os.Stderr)
 			a.Close()
 		}
 		e.cfgMu.Unlock()
@@ -308,7 +315,13 @@ func (e *Engine) metricsLoop() {
 	defer close(e.loopDone)
 	t := time.NewTicker(e.opts.MetricsInterval)
 	defer t.Stop()
-	logFailed := false
+	// Kept to the Log size setting like the other logs (#225); the default before Configure.
+	metricsLog := logfile.New(e.opts.MetricsLogPath, func() int64 {
+		if a := e.app.Load(); a != nil {
+			return a.LogMaxBytes()
+		}
+		return logfile.DefaultMax
+	})
 	for {
 		select {
 		case <-e.stop:
@@ -319,30 +332,11 @@ func (e *Engine) metricsLoop() {
 				continue
 			}
 			e.emit(voice.UIEvent{Kind: "metrics", Text: string(snap)})
-			if err := appendLine(e.opts.MetricsLogPath, now.Format(time.RFC3339)+" "+string(snap)+"\n"); err != nil && !logFailed {
-				logFailed = true
-				log.Printf("deskpixie: metrics log: %v", err)
+			if e.opts.MetricsLogPath != "" {
+				_, _ = metricsLog.Write([]byte(now.Format(time.RFC3339) + " " + string(snap) + "\n"))
 			}
 		}
 	}
-}
-
-func appendLine(path, line string) error {
-	if path == "" {
-		return errors.New("no metrics log path")
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	_, werr := f.WriteString(line)
-	if cerr := f.Close(); werr == nil {
-		werr = cerr
-	}
-	return werr
 }
 
 // eventQueue is a bounded FIFO of encoded UI events. When full, push drops the oldest

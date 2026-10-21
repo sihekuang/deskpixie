@@ -448,7 +448,7 @@ public enum SettingsLayout {
 
     // MARK: Extra rows
 
-    public enum Action: Equatable, Sendable { case resetPosition, openFile, restartCoordinator }
+    public enum Action: Equatable, Sendable { case resetPosition, openFile, restartCoordinator, exportLogs }
 
     /// The rows a section has besides its fields.
     public enum Extra: Equatable, Sendable {
@@ -458,6 +458,15 @@ public enum SettingsLayout {
         case secret(id: SettingsSecretID, label: String, help: String)
         /// The pix command row (#89): install state, Install / Uninstall, the PATH line, Copy Aliases.
         case pix(help: String)
+    }
+
+    /// Export Logs…'s suggested file name (#225), e.g. "DeskPixie logs 2026-10-21 1402.zip".
+    public static func logExportName(_ date: Date, timeZone: TimeZone = .current) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = timeZone
+        f.dateFormat = "yyyy-MM-dd HHmm"
+        return "DeskPixie logs \(f.string(from: date)).zip"
     }
 
     /// The pix row's help.
@@ -473,7 +482,10 @@ public enum SettingsLayout {
             return SettingsSecretID.allCases.map { .secret(id: $0, label: $0.label, help: $0.help) }
         case .advanced:
             return [.button(label: "Settings file", help: "settings.json holds every setting on this page.",
-                            title: "Open Settings File", action: .openFile)]
+                            title: "Open Settings File", action: .openFile),
+                    .button(label: "Logs",
+                            help: "Saves the app's log, the voice log and metrics in one zip to share. It can include what you said to Pixie.",
+                            title: "Export Logs…", action: .exportLogs)]
         case .agent:
             return [.pix(help: pixHelp),
                     .button(label: "Restart coordinator",

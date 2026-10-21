@@ -19,6 +19,8 @@ public protocol SettingsClient {
     func restart() throws
     /// `app.action {id: "agent:restart"}`: restarts the coordinator (#179; the view asks first).
     func restartCoordinator() throws
+    /// `logs.export {path, app, os}`: the core writes the logs' zip at path (#225).
+    func exportLogs(to path: String, app: String, os: String) throws
     /// `setup.projectsFolder`: the projects folder checked on disk, changing nothing (#216).
     func projectsFolder() throws -> ProjectsFolderStatus
     /// `setup.createProjectsFolder`: creates it when it is missing; answers the check after.
@@ -74,6 +76,16 @@ public struct EngineSettingsClient: SettingsClient, Sendable {
 
     public func restartCoordinator() throws {
         _ = try engine.call("app.action", ActionArgs(id: CoordinatorRestart.actionID))
+    }
+
+    private struct ExportArgs: Encodable {
+        let path: String
+        let app: String
+        let os: String
+    }
+
+    public func exportLogs(to path: String, app: String, os: String) throws {
+        _ = try engine.call("logs.export", ExportArgs(path: path, app: app, os: os))
     }
 
     public func projectsFolder() throws -> ProjectsFolderStatus {

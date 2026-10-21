@@ -62,6 +62,15 @@ final class FakeSettingsClient: SettingsClient {
         calls.append("settings.restart")
     }
 
+    /// Export Logs… (#225): what each export asked for; set to make it fail.
+    var exports: [(path: String, app: String, os: String)] = []
+    var exportThrows: Error?
+    func exportLogs(to path: String, app: String, os: String) throws {
+        calls.append("logs.export")
+        exports.append((path, app, os))
+        if let exportThrows { throw exportThrows }
+    }
+
     var restartCoordinatorThrows: Error?
     func restartCoordinator() throws {
         calls.append("agent:restart")
@@ -314,6 +323,7 @@ final class SettingsModelTests: XCTestCase {
             func openFile() throws {}
             func restart() throws {}
             func restartCoordinator() throws {}
+            func exportLogs(to path: String, app: String, os: String) throws {}
             func setKeychain(_ values: [String: String]) throws {}
             func projectsFolder() throws -> ProjectsFolderStatus { throw DeskPixieEngineError.notInitialized }
             func createProjectsFolder() throws -> ProjectsFolderStatus { try projectsFolder() }

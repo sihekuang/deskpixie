@@ -419,6 +419,7 @@ var Fields = []FieldSpec{
 	spec("agent.tmuxPath", SectionAdvanced, "tmux program", "Empty finds tmux on PATH or in /opt/homebrew/bin or /usr/local/bin. Supported: "+tmuxcompat.SupportedVersions+".", pathKind(false, true), ApplyRestart),
 	spec("agent.port", SectionAdvanced, "Hook server port", "The local port agents report to.", intKind(1024, 65535, false), ApplyRestart),
 	spec("agent.keepPanesOnQuit", SectionAdvanced, "Keep agent panes on quit", "Leave the coordinator's and workers' terminal panes open when the app quits.", boolKind, ApplyRestart),
+	spec("logMaxMB", SectionAdvanced, "Log size (MB)", "Each log (the app's, the voice log, metrics) keeps at most this much on disk; older lines go first.", intKind(1, 100, false), ApplyLive),
 	spec("agent.permissionTimeoutSecs", SectionAdvanced, "Permission timeout (seconds)", "An unanswered permission request is denied after this long.", intKind(1, 120, false), ApplyRestart),
 	spec("agent.notifyPerMinute", SectionNotifications, "Notifications per minute", "The most coordinator notifications shown in one minute.", intKind(1, 60, false), ApplyRestart),
 	spec("notifications.debounceSecs", SectionNotifications, "Notification debounce (seconds)", "A job's updates wait until it has been quiet this long, then go out together. 0 sends each one as it comes. Questions never wait.", intKind(0, 300, false), ApplyRestart),

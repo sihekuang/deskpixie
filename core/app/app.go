@@ -27,6 +27,7 @@ import (
 
 	"github.com/sihekuang/deskpixie/core/audio/denoise"
 	"github.com/sihekuang/deskpixie/core/canvas"
+	"github.com/sihekuang/deskpixie/core/logfile"
 	"github.com/sihekuang/deskpixie/core/packs"
 	"github.com/sihekuang/deskpixie/core/settings"
 	"github.com/sihekuang/deskpixie/core/tools"
@@ -93,6 +94,8 @@ type Deps struct {
 	// Agent builds the delegation agent (nil = no agent; the factory returns nil when
 	// agent.enabled is false). Its tools and persona join the voice loop's.
 	Agent AgentFactory
+	// MetricsLogPath is the engine's metrics log, exported with the others (#225); "" = none.
+	MetricsLogPath string
 }
 
 // MouthMeter is the voice loop's view of a pack change.
@@ -108,11 +111,12 @@ type hotkeyState struct {
 
 // App is the running app core. Safe for concurrent use.
 type App struct {
-	deps  Deps
-	paths Paths
-	roots []string
-	store *settings.FileStore
-	api   *settings.API
+	deps   Deps
+	paths  Paths
+	appLog *logfile.Writer // logs/deskpixie.log (#225)
+	roots  []string
+	store  *settings.FileStore
+	api    *settings.API
 
 	rt        *voice.Runtime // nil when the voice loop could not be set up
 	setupFail *voice.Failure
@@ -255,6 +259,7 @@ func New(d Deps) (*App, error) {
 	}
 	a.emitDevices(cfg.Voice)
 	a.pushTray()
+	a.appLog = logfile.New(AppLogPath(p.AppSupport), a.LogMaxBytes)
 	return a, nil
 }
 
@@ -296,7 +301,7 @@ func (a *App) buildVoice(cfg settings.Config) {
 		MouthLevels:  MouthLevels(levels, ok),
 		Conversation: voice.ConversationConfig{IdleTimeout: idle, HoldTimeout: hold, HandOff: cfg.Voice.HandOffWhenUnsure, CheckClaims: cfg.Voice.CheckClaims},
 		OnMicSent:    a.deps.OnMicSent,
-		Log:          voice.NewVoiceLog(voice.VoiceLogPath(a.paths.AppSupport)),
+		Log:          voice.NewVoiceLog(voice.VoiceLogPath(a.paths.AppSupport), a.LogMaxBytes),
 	}, a.onVoiceEvent)
 	a.mu.Lock()
 	a.meter = a.rt
@@ -1151,6 +1156,7 @@ func (a *App) Register(r Registrar) {
 		return struct{}{}, nil
 	})
 	a.registerChat(r)
+	a.registerLogs(r)
 	r.Register("agent.updates", func(json.RawMessage) (any, error) {
 		var lines any = []any{}
 		if a.agent != nil {

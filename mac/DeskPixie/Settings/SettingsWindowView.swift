@@ -258,6 +258,20 @@ struct SettingsTabView: View {
         }
     }
 
+    /// Export Logs… (#225): where to save, then the core writes the zip; it is shown in Finder.
+    private func exportLogs() {
+        let panel = NSSavePanel()
+        panel.title = "Export Logs"
+        panel.nameFieldStringValue = SettingsLayout.logExportName(Date())
+        panel.allowedContentTypes = [.zip]
+        panel.directoryURL = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let os = "macOS " + ProcessInfo.processInfo.operatingSystemVersionString
+        if model.exportLogs(to: url.path, app: SystemPermissions.appVersion, os: os) {
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        }
+    }
+
     @ViewBuilder
     private func extraRow(_ extra: SettingsLayout.Extra) -> some View {
         switch extra {
@@ -268,6 +282,7 @@ struct SettingsTabView: View {
                     case .resetPosition: model.resetPosition()
                     case .openFile: model.openFile()
                     case .restartCoordinator: confirmRestart = true
+                    case .exportLogs: exportLogs()
                     }
                 }
                 .disabled(!model.enabled)

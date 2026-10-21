@@ -350,6 +350,19 @@ public final class SettingsModel {
         }
     }
 
+    /// Export Logs… (#225): the view picked where; the core writes the zip. True when it did.
+    @discardableResult
+    public func exportLogs(to path: String, app: String, os: String) -> Bool {
+        do {
+            try client.exportLogs(to: path, app: app, os: os)
+            notice = nil
+            return true
+        } catch {
+            notice = Self.describe(error)
+            return false
+        }
+    }
+
     /// Restarts the coordinator (#179); the view has asked the user first.
     public func restartCoordinator() {
         do {
