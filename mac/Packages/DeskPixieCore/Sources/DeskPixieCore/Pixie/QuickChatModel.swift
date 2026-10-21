@@ -149,6 +149,10 @@ public struct QuickChatModel: Equatable, Sendable {
             full = line.text
             shown = line.text
             phase = .thinking
+        } else if !line.text.isEmpty && line.text == full && shown == full {
+            // Only the end of what it already shows (a hand-off, #231): no typing it out again.
+            phase = .done
+            saidAt = now
         } else {
             full = line.text
             shown = ""

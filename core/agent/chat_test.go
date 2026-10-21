@@ -184,3 +184,16 @@ func TestATypedJobHandedToASessionStopsThinkingWhenItCloses(t *testing.T) {
 	noUsualRoute(t, fx)
 	wantJobStatus(t, c, 1, JobDone)
 }
+
+// #231 review: the done line is the hand-off as the box first showed it, confirm words masked.
+func TestATypedHandOffsDoneLineKeepsPendingConfirmWordsMasked(t *testing.T) {
+	c := typedOnJob1()
+	askPush(c, 7, T0+1) // "hawk" is pending
+	working := chats(c.Step(SessionSentInput("repo-claude", "say hawk to ship"), T0+5))
+	fx := stop(c, `<spoken ref="job_000000000001" status="done">Passed it on.</spoken>`, T0+10)
+	done := chats(fx)
+	if len(working) != 1 || len(done) != 1 || done[0].Status != "done" || done[0].Text != working[0].Text ||
+		strings.Contains(strings.ToLower(done[0].Text), "hawk") {
+		t.Fatalf("working %v, done %v", working, done)
+	}
+}

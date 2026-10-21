@@ -1633,10 +1633,11 @@ func (c *AgentController) onSessionSent(description, waiting string, now Millis,
 		}
 	}
 	c.handedOff[job] = true
+	tokens := c.pendingTokens()
+	text = maskPendingTokens(text, tokens) // kept masked too: a typed job's box shows it again (#231)
 	c.jobs.SetProgress(job, text, now)
 	c.saveJob(job, fx)
-	tokens := c.pendingTokens()
-	line := NewJobLine(LineReply, maskPendingTokens(text, tokens), job)
+	line := NewJobLine(LineReply, text, job)
 	line.Title, line.Brief = maskPendingTokens(title, tokens), brief
 	c.deliverOpening(line, now, fx)
 }
