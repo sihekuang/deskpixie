@@ -38,6 +38,9 @@ struct AgentRosterView: View {
                 }
                 ReplyModeToggle(mode: chat.mode, onPick: onMode)
             }
+            // Its own width, not the card's: a wider card would stretch the chip's frame up to
+            // maxChipWidth and open a gap before the toggle (#227).
+            .fixedSize()
             if model.open && below { list }
             if showsCard && below { card }
         }
