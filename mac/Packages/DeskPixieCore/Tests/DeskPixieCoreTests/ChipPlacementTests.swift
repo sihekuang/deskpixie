@@ -38,4 +38,17 @@ final class ChipPlacementTests: XCTestCase {
         let (f, _) = ChipPlacement.frame(pixie: edge, panel: CGSize(width: 260, height: 200), screen: screen, openHeight: 200)
         XCTAssertEqual(f.minX, 0)
     }
+
+    /// #221: the text box is placed for its tallest (a long answer and five lines typed), so near
+    /// the bottom it opens above Pixie at once and never runs off the screen as it grows.
+    func testTheTextBoxNearTheBottomOpensAbove() {
+        // 260 points under Pixie: room for the old 170 estimate, not for the full box.
+        let low = CGRect(x: 100, y: 900 - 128 - 260, width: 128, height: 128)
+        let (_, below) = ChipPlacement.frame(pixie: low, panel: CGSize(width: 76, height: 32), screen: screen,
+                                             openHeight: ChipPlacement.textBoxHeight + 32)
+        XCTAssertFalse(below)
+        let (_, roomy) = ChipPlacement.frame(pixie: pixie, panel: CGSize(width: 76, height: 32), screen: screen,
+                                             openHeight: ChipPlacement.textBoxHeight + 32)
+        XCTAssertTrue(roomy, "with room it still opens below")
+    }
 }

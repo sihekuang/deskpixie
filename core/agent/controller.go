@@ -155,6 +155,7 @@ const (
 	InSessionAnswerFailed                  // Name, Text: EfAnswerSession could not be typed (#105)
 	InSubmit                               // Agent, Message: a Claude agent took a prompt (its UserPromptSubmit hook); Message is the prompt
 	InSessionSent                          // Name, Text, Message: the coordinator's message_session reached your session Name, described Text (#177); Message: why it waits ("" = typed, #183)
+	InTextMode                             // Away: text mode on (#221): no conversation is opened for updates
 )
 
 // Input is one stimulus for AgentController.Step. Build it with the *Input constructors.
@@ -187,7 +188,9 @@ type Input struct {
 	Reason     string
 	// Keep (InRestored): the coordinator was kept running over the quit (agent.keepPanesOnQuit).
 	Keep bool
-	Plan WorkerPlan
+	// Typed (InDelegate): the request was typed in the text box (#221).
+	Typed bool
+	Plan  WorkerPlan
 	// Memories (InRestored): memories.jsonl's lines.
 	Memories []string
 	// IDs (InUpdatesSeen): outbox line ids. Clicked: the user dismissed them (a click on the line
@@ -211,7 +214,16 @@ func RestoredInput(jobs, outbox []string, keep bool) Input {
 func DelegateInput(id JobID, task, context string) Input {
 	return Input{Kind: InDelegate, Job: id, Task: task, Context: context}
 }
-func CancelInput(id JobID) Input { return Input{Kind: InCancel, Job: id} }
+
+// TypedDelegateInput is DelegateInput for a message typed in the text box (#221): the job's
+// lines go to the box (EfChat).
+func TypedDelegateInput(id JobID, task, context string) Input {
+	return Input{Kind: InDelegate, Job: id, Task: task, Context: context, Typed: true}
+}
+
+// TextModeInput: the user switched to text (on) or back to voice (#221).
+func TextModeInput(on bool) Input { return Input{Kind: InTextMode, Away: on} }
+func CancelInput(id JobID) Input  { return Input{Kind: InCancel, Job: id} }
 
 // AnswerInput: id "" means the only job waiting on an answer.
 func AnswerInput(id JobID, text string) Input { return Input{Kind: InAnswer, Job: id, Text: text} }
@@ -332,6 +344,7 @@ const (
 	EfShowPane         // Job, Name: bring up this agent's pane (Name "": the coordinator) — it waits at a prompt in its terminal (#110)
 	EfAnswerSession    // Name, Text, Answer: type your answer to session Name's prompt Text (#105); a failure comes back as InSessionAnswerFailed
 	EfTellSession      // Name, Text: type your answer to the question session Name's turn ended on (#161); a failure comes back as InSessionAnswerFailed
+	EfChat             // Chat: a spoken line for a job typed in the text box (#221)
 )
 
 // Effect is one thing the caller must do, in order. Err set (non-empty) is the Err branch of
@@ -360,6 +373,8 @@ type Effect struct {
 	// Update (EfNotify): the bubble line the notification is about, nil when none (#199): a
 	// click on the notification does what a click on the line does.
 	Update *UpdateItem
+	// Chat (EfChat): the line for the text box.
+	Chat ChatLine
 }
 
 type coordinatorState int
@@ -382,6 +397,16 @@ type watchdog struct {
 
 // AgentController holds the delegation state. Not safe for concurrent use; the runtime owns it.
 type AgentController struct {
+	// typed: jobs typed in the text box, whose lines go to the box (#221); lastTyped the newest.
+	// Memory only: after a restart their lines take the usual route. textMode: no conversation
+	// is opened for updates.
+	typed     map[JobID]bool
+	lastTyped JobID
+	textMode  bool
+	// turnStopped: the turn that just ended was only about typed jobs the user stopped, so what
+	// it says (the coordinator confirming the stop) is dropped.
+	turnStopped bool
+
 	// asked: the question Pixie relayed last, which an answer without a job id answers (#161).
 	asked asker
 
@@ -479,6 +504,7 @@ func NewAgentController(settings Settings) *AgentController {
 		memories:  NewMemoryLog(),
 		workers:   NewWorkers(),
 		handedOff: map[JobID]bool{},
+		typed:     map[JobID]bool{},
 		opener:    newOpener(settings.NotifyPerMinute),
 		modes:     map[string]bool{},
 	}
@@ -547,6 +573,12 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 		fx = append(fx, Effect{Kind: EfRewrite, File: MemoriesFile, Lines: c.memories.Lines()})
 	case InDelegate:
 		c.delegate(in.Job, in.Task, in.Context, now, &fx)
+		if in.Typed && !c.isDisabled() {
+			c.typed[in.Job] = true
+			c.lastTyped = in.Job
+		}
+	case InTextMode:
+		c.textMode = in.Away
 	case InCancel:
 		c.cancel(in.Job, now, &fx)
 	case InAnswer:
@@ -1179,6 +1211,7 @@ func (c *AgentController) failJobSaying(id JobID, reason, line string, now Milli
 
 func (c *AgentController) onStop(message string, now Millis, fx *[]Effect) {
 	c.turnOpen = false
+	c.turnStopped = false
 	// The open jobs in the prompt this turn answered.
 	var answered []JobID
 	if c.landing {
@@ -1188,6 +1221,7 @@ func (c *AgentController) onStop(message string, now Millis, fx *[]Effect) {
 		c.landBy = someMs(now + PromptLandMs)
 	} else {
 		answered = c.openInFlight()
+		c.turnStopped = c.onlyStoppedTyped()
 		// The turn is over. The next prompt goes out on Idle/Done, or after a short settle if
 		// Herdr missed the Idle (the TUI may still be finishing right at the Stop). An Idle that
 		// came first doesn't send at once either: the settle covers it.
@@ -1308,7 +1342,7 @@ func (c *AgentController) onUnreferencedStop(message string, blocks []Spoken, an
 		return
 	}
 	for _, text := range texts {
-		c.deliver(NewLine(LineUnsolicited, text), now, fx)
+		c.deliverUnsolicited(text, now, fx)
 	}
 	// A question or progress can't say which job: they stay open. Failed is terminal: they fail
 	// (leaving them open would keep Pixie holding).
@@ -1349,9 +1383,11 @@ func (c *AgentController) onReferencedStop(blocks []Spoken, now Millis, fx *[]Ef
 			if id, ok := ParseJobID(*b.Reference); ok && c.jobs.IsOpen(id) {
 				c.onReply(id, b.Status, text, now, fx)
 				continue
+			} else if ok && c.typed[id] {
+				continue // a typed job Stop closed: its confirmation isn't news (#221)
 			}
 		}
-		c.deliver(NewLine(LineUnsolicited, text), now, fx)
+		c.deliverUnsolicited(text, now, fx)
 	}
 }
 
@@ -1371,7 +1407,7 @@ func (c *AgentController) onReply(id JobID, status SpokenStatus, text string, no
 		c.jobs.SetProgress(id, text, now)
 		c.saveJob(id, fx)
 		line := NewJobLine(LineReply, text, id)
-		if c.settings.OpenConversation && !c.voiceOpen {
+		if c.settings.OpenConversation && !c.voiceOpen && !c.typed[id] {
 			// #113: progress opens no conversation, so it doesn't chime or notify either (a
 			// chime means one follows); it waits in the outbox for the next conversation.
 			c.applyDelivery(OutboxDelivery(line), now, fx)
@@ -1753,6 +1789,13 @@ func (c *AgentController) tick(now Millis, fx *[]Effect) {
 
 // deliver routes a line; true if the user got it now (spoken or notified), not just outboxed.
 func (c *AgentController) deliver(line Line, now Millis, fx *[]Effect) bool {
+	if c.typed[line.Job] {
+		*fx = append(*fx, Effect{Kind: EfChat, Chat: c.chatLine(line)})
+		if line.Token == nil {
+			return true
+		}
+		// A permission request also goes where it can be allowed: the bubble or a notification.
+	}
 	reached := false
 	for _, d := range c.router.Route(c.voiceOpen, line, now) {
 		if d.Kind == DeliverInject {

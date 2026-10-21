@@ -35,6 +35,15 @@ type Config struct {
 	Hotkey string `json:"hotkey"`
 	Pack   string `json:"pack"`
 	Scale  uint32 `json:"scale"`
+	// ReplyMode is how you talk to Pixie: "voice" (as always) or "text" (a quick message box
+	// under Pixie that goes straight to the coordinator, #221).
+	ReplyMode string `json:"replyMode"`
+	// AlwaysShowCaption keeps what Pixie last said up under Pixie; off, it shows while Pixie
+	// talks and on hover (#224). Only the shell reads it.
+	AlwaysShowCaption bool `json:"alwaysShowCaption"`
+	// CaptionDismissSecs: what Pixie said is put away this long after it was said (0 keeps it).
+	// Only the shell reads it (#224).
+	CaptionDismissSecs uint32 `json:"captionDismissSecs"`
 	// Position is the logical top-left of the pixie window; nil = bottom-right of the primary
 	// display. Managed: written by the app.
 	Position      *[2]float64          `json:"position"`
@@ -170,10 +179,12 @@ type WorkerSettings struct {
 // Default is the config with every default (spec: inventory "settings.json schema").
 func Default() Config {
 	return Config{
-		Hotkey:        "ctrl+alt+Space",
-		Pack:          "bit",
-		Scale:         8,
-		ProximityFade: Fade{Enabled: false, Radius: 150},
+		Hotkey:             "ctrl+alt+Space",
+		Pack:               "bit",
+		Scale:              8,
+		ReplyMode:          ReplyVoice,
+		CaptionDismissSecs: 120,
+		ProximityFade:      Fade{Enabled: false, Radius: 150},
 		Voice: VoiceSettings{
 			Provider: "openai-realtime", Audio: "macos-vpio", Model: "gpt-realtime", Voice: "marin",
 			Chimes: true, IdleTimeoutSecs: 7, NoiseModel: "hush", LiveBackendModel: "gpt-6-luna",
@@ -234,19 +245,22 @@ func (c Config) Equal(o Config) bool {
 
 // configFields is Config without Extra or custom marshalling.
 type configFields struct {
-	Hotkey        string               `json:"hotkey"`
-	Pack          string               `json:"pack"`
-	Scale         uint32               `json:"scale"`
-	Position      *[2]float64          `json:"position"`
-	ProximityFade Fade                 `json:"proximityFade"`
-	Voice         VoiceSettings        `json:"voice"`
-	Canvas        CanvasSettings       `json:"canvas"`
-	Agent         AgentSettings        `json:"agent"`
-	Notifications NotificationSettings `json:"notifications"`
+	Hotkey             string               `json:"hotkey"`
+	Pack               string               `json:"pack"`
+	Scale              uint32               `json:"scale"`
+	ReplyMode          string               `json:"replyMode"`
+	AlwaysShowCaption  bool                 `json:"alwaysShowCaption"`
+	CaptionDismissSecs uint32               `json:"captionDismissSecs"`
+	Position           *[2]float64          `json:"position"`
+	ProximityFade      Fade                 `json:"proximityFade"`
+	Voice              VoiceSettings        `json:"voice"`
+	Canvas             CanvasSettings       `json:"canvas"`
+	Agent              AgentSettings        `json:"agent"`
+	Notifications      NotificationSettings `json:"notifications"`
 }
 
 var knownKeys = map[string]bool{
-	"hotkey": true, "pack": true, "scale": true, "position": true, "proximityFade": true,
+	"hotkey": true, "pack": true, "scale": true, "replyMode": true, "alwaysShowCaption": true, "captionDismissSecs": true, "position": true, "proximityFade": true,
 	"voice": true, "canvas": true, "agent": true, "notifications": true,
 }
 
@@ -256,7 +270,7 @@ func (c Config) MarshalJSON() ([]byte, error) {
 	if kinds == nil {
 		kinds = []string{}
 	}
-	f := configFields{c.Hotkey, c.Pack, c.Scale, c.Position, c.ProximityFade, c.Voice, c.Canvas, c.Agent, c.Notifications}
+	f := configFields{c.Hotkey, c.Pack, c.Scale, c.ReplyMode, c.AlwaysShowCaption, c.CaptionDismissSecs, c.Position, c.ProximityFade, c.Voice, c.Canvas, c.Agent, c.Notifications}
 	f.Agent.Workers.Kinds = kinds
 	b, err := json.Marshal(f)
 	if err != nil || len(c.Extra) == 0 {
@@ -297,7 +311,7 @@ func (c *Config) UnmarshalJSON(b []byte) error {
 		return errors.New("invalid type: null, expected struct Config")
 	}
 	targets := map[string]any{
-		"hotkey": &c.Hotkey, "pack": &c.Pack, "scale": &c.Scale, "position": &c.Position,
+		"hotkey": &c.Hotkey, "pack": &c.Pack, "scale": &c.Scale, "replyMode": &c.ReplyMode, "alwaysShowCaption": &c.AlwaysShowCaption, "captionDismissSecs": &c.CaptionDismissSecs, "position": &c.Position,
 		"proximityFade": &c.ProximityFade, "voice": &c.Voice, "canvas": &c.Canvas, "agent": &c.Agent,
 		"notifications": &c.Notifications,
 	}

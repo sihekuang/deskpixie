@@ -41,6 +41,8 @@ type AgentHooks struct {
 	// Focus asks the shell to show a terminal by walking a FocusPlan (the `focusPlan` event,
 	// #116): the shell executes it, Go only decided it.
 	Focus func(plan any)
+	// Chat is a line for the text box (the `chat.line` event's job, status and text, #221).
+	Chat func(line any)
 	// LocalTools are Pixie's local tools (NewLocalTools), the very instances the voice loop
 	// holds: the agent serves them to the coordinator over MCP. Never to workers.
 	LocalTools []tools.Tool
@@ -85,6 +87,12 @@ type Agent interface {
 	// ReportFocusOutcome: the shell finished executing a FocusPlan (#116). Failure becomes the
 	// tray status line, as for OpenTerminal.
 	ReportFocusOutcome(success bool, detail string)
+	// ChatSend is a message typed in the text box (#221): its job id, or why it can't go.
+	ChatSend(text string) (string, error)
+	// ChatStop is Stop in the text box: cancel the typed job still running.
+	ChatStop()
+	// SetTextMode: replyMode is text (no conversation is opened for updates).
+	SetTextMode(on bool)
 	// Shutdown is the app's quit: deny pending permissions, stop the panes, clear the MCP
 	// configs, stop the session host and the hook server. Idempotent; blocks ~3 s at most.
 	Shutdown()

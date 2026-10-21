@@ -10,16 +10,47 @@ struct AgentRosterView: View {
     let maxChipWidth: CGFloat
     let onChip: () -> Void
     let onRow: (RosterRow) -> Void
+    /// The text box and its toggle (#221).
+    let chat: QuickChatModel
+    let chatState: QuickChatState
+    /// The card on its own, without the input line (#224): the controller decides.
+    let captionCard: Bool
+    /// "2m ago" for the card's header.
+    let ago: String?
+    let onMode: (String) -> Void
+    let onSend: () -> Void
+    let onStop: () -> Void
+    let onCloseChat: () -> Void
+    let onResize: () -> Void
+    let onDismiss: () -> Void
 
     static let listWidth: CGFloat = 260
 
     var body: some View {
         VStack(spacing: 4) {
             if model.open && !below { list }
-            chip
+            if showsCard && !below { card }
+            HStack(spacing: 6) {
+                if model.visible {
+                    chip.background(GeometryReader { g in
+                        Color.clear.preference(key: ChipFrameKey.self, value: g.frame(in: .global))
+                    })
+                }
+                ReplyModeToggle(mode: chat.mode, onPick: onMode)
+            }
             if model.open && below { list }
+            if showsCard && below { card }
         }
         .fixedSize()
+    }
+
+    private var chatOpen: Bool { chat.open && chat.mode == "text" }
+    /// The text box when open, or the card alone (a caption, or the last words, #224).
+    private var showsCard: Bool { chatOpen || captionCard }
+
+    private var card: some View {
+        QuickChatCard(model: chat, state: chatState, showsInput: chatOpen, ago: ago,
+                      onSend: onSend, onStop: onStop, onClose: onCloseChat, onResize: onResize, onDismiss: onDismiss)
     }
 
     private var chip: some View {
@@ -101,4 +132,10 @@ struct AgentRosterView: View {
         .padding(.vertical, 3)
         .contentShape(Rectangle())
     }
+}
+
+/// Where the session chip is in the window (top-left origin): hovering it opens the list.
+struct ChipFrameKey: PreferenceKey {
+    static let defaultValue: CGRect = .zero
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
 }

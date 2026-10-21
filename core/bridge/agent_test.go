@@ -21,6 +21,9 @@ func (b *bridgeAgent) Tools() []voice.Tool             { return nil }
 func (b *bridgeAgent) Persona() string                 { return "" }
 func (b *bridgeAgent) Tray() app.AgentTray             { return app.AgentTray{Enabled: true} }
 func (b *bridgeAgent) Menu(string) bool                { return true }
+func (b *bridgeAgent) ChatSend(string) (string, error) { return "", nil }
+func (b *bridgeAgent) ChatStop()                       {}
+func (b *bridgeAgent) SetTextMode(bool)                {}
 func (b *bridgeAgent) OpenTerminal()                   { b.mu.Lock(); b.opened++; b.mu.Unlock() }
 func (b *bridgeAgent) AttachVoice(app.AgentVoice)      {}
 func (b *bridgeAgent) OnMouth(int)                     {}

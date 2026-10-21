@@ -38,6 +38,10 @@ type fakeAgent struct {
 	focusedAgents   []string
 	focusedSessions []string
 	focusOutcomes   []string
+	sent            []string
+	chatErr         error
+	stops           int
+	textModes       []bool
 }
 
 func (f *fakeAgent) Tools() []voice.Tool { return []voice.Tool{namedTool("delegate")} }

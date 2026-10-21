@@ -236,7 +236,11 @@ func New(d Deps) (*App, error) {
 			Roster:   func(view any) { a.emit("agents", map[string]any{"roster": view}) },
 			ShowPane: func(job, worker string) { a.emit("showPane", map[string]any{"job": job, "worker": worker}) },
 			Focus:    func(plan any) { a.emit("focusPlan", map[string]any{"plan": plan}) },
+			Chat:     func(line any) { a.emit("chat.line", fieldsOf(line)) },
 		})
+		if a.agent != nil {
+			a.agent.SetTextMode(cfg.ReplyMode == settings.ReplyText)
+		}
 	}
 	a.buildVoice(cfg)
 
@@ -558,8 +562,13 @@ func (a *App) showHeld(name string, h HeldState, ok bool) {
 	})
 }
 
-// Hotkey starts or ends a conversation; when the voice loop failed to build it shows why.
+// Hotkey starts or ends a conversation; when the voice loop failed to build it shows why. In
+// text mode it puts the cursor in the text box instead (#221).
 func (a *App) Hotkey() {
+	if a.store.Current().ReplyMode == settings.ReplyText {
+		a.emit("chat.focus", nil)
+		return
+	}
 	if a.rt != nil {
 		a.rt.Hotkey()
 		return
@@ -943,6 +952,10 @@ func (ap applier) Apply(field string, cfg settings.Config) error {
 		a.cleaner.SetEnabled(cfg.Voice.NoiseFilter)
 	case settings.RouteAudioDevices:
 		a.emitDevices(cfg.Voice)
+	case settings.RouteReplyMode:
+		a.applyReplyMode(cfg.ReplyMode)
+	case settings.RouteCaptions:
+		a.emit("captions", map[string]any{"always": cfg.AlwaysShowCaption, "dismissSecs": cfg.CaptionDismissSecs})
 	}
 	// The tray shows the size, pack and fade checkmarks and the hotkey line.
 	a.pushTray()
@@ -1137,6 +1150,7 @@ func (a *App) Register(r Registrar) {
 		a.emit("settings.changed", nil)
 		return struct{}{}, nil
 	})
+	a.registerChat(r)
 	r.Register("agent.updates", func(json.RawMessage) (any, error) {
 		var lines any = []any{}
 		if a.agent != nil {

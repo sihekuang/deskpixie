@@ -93,6 +93,9 @@ type Deps struct {
 	Roster RosterSink
 	// Panes brings up an agent's pane waiting at a prompt in its terminal (nil: ignored).
 	Panes PaneSink
+	// Chat is the text box under Pixie (#221): typed jobs' lines go to it (nil: no text box, and
+	// typed messages are ordinary jobs).
+	Chat ChatSink
 }
 
 // WorkerDeps are the worker adapters (spec §5.5), injected only when agent.workers.enabled.
@@ -433,6 +436,10 @@ func (h *AgentHandle) Deliver(ev HookEvent) bool {
 
 // Delegate is the delegate tool: a new job id at once, or why delegation is off.
 func (h *AgentHandle) Delegate(task, context string) (JobID, error) {
+	return h.delegate(task, context, false)
+}
+
+func (h *AgentHandle) delegate(task, context string, typed bool) (JobID, error) {
 	if h.quitting() {
 		return "", errQuitting
 	}
@@ -446,7 +453,11 @@ func (h *AgentHandle) Delegate(task, context string) (JobID, error) {
 	if note := h.requestNote(); note != "" {
 		context = strings.TrimSpace(context + "\n" + note)
 	}
-	h.Input(DelegateInput(id, task, context))
+	if typed && h.deps.Chat != nil {
+		h.Input(TypedDelegateInput(id, task, context))
+	} else {
+		h.Input(DelegateInput(id, task, context))
+	}
 	return id, nil
 }
 
@@ -1763,6 +1774,10 @@ func (h *AgentHandle) apply(e Effect) {
 		go h.answerSession(e.Name, e.Text, e.Answer)
 	case EfTellSession:
 		go h.tellSession(e.Name, e.Text)
+	case EfChat:
+		if d.Chat != nil {
+			d.Chat.Chat(e.Chat)
+		}
 	case EfInject:
 		if d.Voice.IsOpen() {
 			d.Voice.Inject(e.Notice)

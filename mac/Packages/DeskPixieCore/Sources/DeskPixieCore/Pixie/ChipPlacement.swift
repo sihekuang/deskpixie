@@ -3,6 +3,10 @@ import CoreGraphics
 /// Where the roster chip (and the list it opens) sits: centred under Pixie, clamped on screen.
 /// Desktop coordinates (`DesktopSpace`: top-left origin, y down), like `BubblePlacement`.
 public enum ChipPlacement {
+    /// The text box at its tallest (#221): the answer's 180 points, the header and status, and
+    /// five typed lines. Placed for this, it never runs off the screen as it grows.
+    public static let textBoxHeight: CGFloat = 340
+
     /// `panel` is the chip, or the chip with the open list. `openHeight` (the open panel's height)
     /// picks below/above in every phase, so the chip doesn't jump when the list opens. Above
     /// Pixie when the open panel wouldn't fit below. `keeping` (the side while the list is open)

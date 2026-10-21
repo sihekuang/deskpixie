@@ -479,6 +479,7 @@ final class EngineCoordinator {
             pixie?.setMouth(level)
         case .mic(let start):
             voiceIO.setMicEnabled(start)
+            roster?.conversation(open: start)
             Self.log.info("mic \(start ? "on" : "off", privacy: .public)")
         case .status(let text):
             // The tray line comes from app.state; the core follows this with a tray event.
@@ -487,6 +488,7 @@ final class EngineCoordinator {
             Self.log.error("engine error: \(text, privacy: .public)")
         case .transcript(let role, let text):
             Self.log.info("\(role, privacy: .public): \(text, privacy: .private)")
+            roster?.caption(role: role, text: text)
         case .metrics(let json):
             Self.metricsLog.notice("\(json, privacy: .public)")
         case .tray:
@@ -513,6 +515,14 @@ final class EngineCoordinator {
             bubble?.apply(lines: lines)
         case .agents(let view):
             roster?.apply(view: view)
+        case .chatLine(let line):
+            roster?.apply(chatLine: line)
+        case .chatFocus:
+            roster?.focusChat()
+        case .replyMode(let mode):
+            roster?.apply(mode: mode)
+        case .captions(let always, let secs):
+            roster?.apply(captions: always, dismissSecs: secs)
         case .showPane(let r):
             bubble?.showPane(r)
         case .focusPlan(let plan):

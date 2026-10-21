@@ -200,6 +200,18 @@ var NoiseModels = []Opt{
 	{"dfn3", "DeepFilterNet3 (steady noise only)", mac},
 }
 
+// Reply modes (replyMode, #221).
+const (
+	ReplyVoice = "voice"
+	ReplyText  = "text"
+)
+
+// ReplyModes are replyMode's choices.
+var ReplyModes = []Opt{
+	{ReplyVoice, "Voice", AllPlatforms},
+	{ReplyText, "Text", AllPlatforms},
+}
+
 // GPT-Live delegation modes (voice.liveDelegation).
 const (
 	LiveDelegationBackend = "backend"
@@ -353,6 +365,9 @@ var Fields = []FieldSpec{
 	spec("hotkey", SectionPixie, "Voice hotkey", "Starts or ends a conversation with Pixie from any app.", hotkeyKind, ApplyLive),
 	spec("pack", SectionPixie, "Pixie", "Which pixie pack is shown.", choiceKind(SourcePacks), ApplyLive),
 	spec("scale", SectionPixie, "Size", "Whole-number sizes keep the pixel art crisp.", intKind(1, MaxScale, true), ApplyLive),
+	spec("replyMode", SectionPixie, "Talk to Pixie by", "Voice: talk and Pixie answers aloud. Text: type a quick message under Pixie and read the coordinator's answer.", staticChoice(ReplyModes), ApplyLive),
+	spec("alwaysShowCaption", SectionPixie, "Always show what Pixie said", "Keeps Pixie's last words under it, with how long ago. Off, they show while Pixie talks and when you hover near Pixie.", boolKind, ApplyLive),
+	spec("captionDismissSecs", SectionPixie, "Put away what Pixie said after", "Seconds after Pixie said it; 0 keeps it until something new. The ✕ on it puts it away at once.", intKind(0, 86400, false), ApplyLive),
 	spec("proximityFade.enabled", SectionPixie, "Fade near the pointer", "Pixie fades as the pointer comes close, so it never blocks your work.", boolKind, ApplyLive),
 	spec("proximityFade.radius", SectionPixie, "Fade distance", "How far from Pixie, in points, the fading starts.", intKind(0, 1000, false), ApplyLive),
 	spec("position", SectionPixie, "Position", "Where Pixie was last dragged; written by the app.", managedKind, ApplyLive),

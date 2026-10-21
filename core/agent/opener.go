@@ -43,6 +43,9 @@ func newOpener(perMinute int) *opener { return &opener{perMinute: max(perMinute,
 // Returns deliver's answer.
 func (c *AgentController) deliverOpening(line Line, now Millis, fx *[]Effect) bool {
 	reached := c.deliver(line, now, fx)
+	if c.typed[line.Job] {
+		return reached // the text box has it: nothing to open a conversation for
+	}
 	c.openForUpdate(now, fx)
 	return reached
 }
@@ -52,7 +55,7 @@ func (c *AgentController) deliverOpening(line Line, now Millis, fx *[]Effect) bo
 // opener's cap is its own: the Router's per-minute slots never hold back an open, and the
 // Router never holds back a question, so a question is never stopped by both.
 func (c *AgentController) openForUpdate(now Millis, fx *[]Effect) {
-	if c.settings.OpenConversation && !c.voiceOpen {
+	if c.settings.OpenConversation && !c.voiceOpen && !c.textMode {
 		c.opener.retry = true
 		c.tryOpen(now, fx)
 	}
@@ -69,7 +72,7 @@ func (c *AgentController) tryOpen(now Millis, fx *[]Effect) {
 	if c.away {
 		return
 	}
-	if !c.settings.OpenConversation || !o.retry || c.shutDown || o.waiting.set {
+	if !c.settings.OpenConversation || c.textMode || !o.retry || c.shutDown || o.waiting.set {
 		return
 	}
 	if c.voiceOpen || len(c.outbox.Undelivered()) == 0 {
