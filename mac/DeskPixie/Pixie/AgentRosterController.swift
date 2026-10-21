@@ -45,7 +45,6 @@ final class AgentRosterController {
     static let captionInterval: TimeInterval = 0.3
     static let captionLinger: TimeInterval = 3
     private var captionHide: Timer?
-    static let cardHeight: CGFloat = 170
 
     init(engine: CoreEngine, worker: CoreWorker, pixie: PixieController) {
         self.engine = engine
@@ -361,7 +360,7 @@ final class AgentRosterController {
         let agentRows: Int = min(model.view.agents.count, AgentRosterModel.maxRows + 1)
         let yourRows: Int = min(model.view.yours.count, AgentRosterModel.maxRows + 1)
         let listHeight: CGFloat = CGFloat(agentRows + yourRows + 3) * 22
-        let openHeight: CGFloat = max(listHeight, Self.cardHeight) + chipHeight
+        let openHeight: CGFloat = max(listHeight, ChipPlacement.textBoxHeight) + chipHeight
         // While open the side stays put: only a closed chip decides it (the real list can be
         // taller than the estimate, and flipping would move it from under the pointer).
         let (rect0, b) = ChipPlacement.frame(pixie: DesktopSpace.desktopRect(bit, primaryMaxY: top),
