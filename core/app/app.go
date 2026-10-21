@@ -238,7 +238,9 @@ func New(d Deps) (*App, error) {
 			Focus:    func(plan any) { a.emit("focusPlan", map[string]any{"plan": plan}) },
 			Chat:     func(line any) { a.emit("chat.line", fieldsOf(line)) },
 		})
-		a.agent.SetTextMode(cfg.ReplyMode == settings.ReplyText)
+		if a.agent != nil {
+			a.agent.SetTextMode(cfg.ReplyMode == settings.ReplyText)
+		}
 	}
 	a.buildVoice(cfg)
 
