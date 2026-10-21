@@ -25,6 +25,15 @@ final class AgentRosterController {
     /// The chip alone, measured while closed: the open height must not depend on the phase, or
     /// the side flips when the list opens (and flickers against the poll).
     private var chipHeight: CGFloat = 22
+    /// The text box (#221): its model, what survives redraws, the toggle's place in the window
+    /// (hovering it doesn't open the list), the word-by-word timer and the click-away monitor.
+    private(set) var chat = QuickChatModel()
+    private let chatState = QuickChatState()
+    private var toggleFrame: CGRect = .zero
+    private var typeTimer: Timer?
+    private var clickAway: Any?
+    static let typeInterval: TimeInterval = 0.12
+    static let cardHeight: CGFloat = 170
 
     init(engine: CoreEngine, worker: CoreWorker, pixie: PixieController) {
         self.engine = engine
@@ -39,12 +48,142 @@ final class AgentRosterController {
         }
         RunLoop.main.add(timer!, forMode: .common)
         fetchCurrent()
+        fetchMode()
     }
 
     func stop() {
         timer?.invalidate()
         timer = nil
+        typeTimer?.invalidate()
+        typeTimer = nil
+        closeChat()
         hide()
+    }
+
+    // MARK: - the text box (#221)
+
+    /// replyMode changed (the `replyMode` event or the first read).
+    func apply(mode: String) {
+        chat.mode = mode
+        if mode != "text" { closeChat() }
+        render()
+    }
+
+    /// A spoken line for the typed message.
+    func apply(chatLine: ChatLine) {
+        chat.apply(chatLine)
+        if chat.phase == .answering { startTyping() }
+        render()
+    }
+
+    /// The hotkey in text mode: open the box and put the cursor in it.
+    func focusChat() {
+        guard chat.mode == "text" else { return }
+        openChat()
+    }
+
+    private func fetchMode() {
+        let engine = engine, worker = worker
+        Task { @MainActor [weak self] in
+            let mode: String?? = await worker.run {
+                (try? engine.call("chat.mode", as: ModeReply.self))?.mode
+            }
+            if let self, let mode = mode ?? nil { self.apply(mode: mode) }
+        }
+    }
+
+    private func pick(_ mode: String) {
+        if mode == chat.mode {
+            // 💬 again toggles the box; 🔊 again does nothing.
+            if mode == "text" { chat.open ? closeChat() : openChat() }
+            return
+        }
+        apply(mode: mode) // at once; the core's replyMode event confirms it
+        if mode == "text" { openChat() }
+        let engine = engine
+        worker.async {
+            do {
+                _ = try EngineSettingsClient(engine: engine).set("replyMode", .string(mode))
+            } catch {
+                Self.log.error("replyMode: \(String(describing: error), privacy: .public)")
+            }
+        }
+    }
+
+    private func openChat() {
+        model.open = false // never both
+        chat.open = true
+        panel.acceptsKey = true
+        render()
+        panel.makeKey()
+        chatState.focusRequests += 1
+        if clickAway == nil {
+            // A click in another app puts the box away (clicks on Pixie's own panels are local).
+            clickAway = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+                MainActor.assumeIsolated { self?.closeChat() }
+            }
+        }
+    }
+
+    private func closeChat() {
+        if let m = clickAway {
+            NSEvent.removeMonitor(m)
+            clickAway = nil
+        }
+        guard chat.open else { return }
+        chat.open = false
+        panel.acceptsKey = false
+        if panel.isKeyWindow { panel.resignKey() }
+        render()
+    }
+
+    private func send() {
+        let text = chatState.draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard chat.canSend(text) else { return }
+        chatState.draft = ""
+        let engine = engine, worker = worker
+        Task { @MainActor [weak self] in
+            let reply: Result<String, Error>? = await worker.run {
+                Result { try engine.call("chat.send", SendArgs(text: text), as: SendReply.self).job }
+            }
+            guard let self else { return }
+            let result = reply ?? .failure(DeskPixieEngineError.callFailed("Pixie couldn't send that."))
+            switch result {
+            case .success(let job): self.chat.sent(job: job)
+            case .failure(let error): self.chat.failedToSend(Self.reason(error))
+            }
+            self.render()
+        }
+    }
+
+    private func stopChat() {
+        chat.stopped()
+        typeTimer?.invalidate()
+        typeTimer = nil
+        render()
+        let engine = engine
+        worker.async { _ = try? engine.call("chat.stop") }
+    }
+
+    private func startTyping() {
+        guard typeTimer == nil else { return }
+        typeTimer = Timer.scheduledTimer(withTimeInterval: Self.typeInterval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if !self.chat.tick() {
+                    self.typeTimer?.invalidate()
+                    self.typeTimer = nil
+                }
+                self.render()
+            }
+        }
+        RunLoop.main.add(typeTimer!, forMode: .common)
+    }
+
+    /// The core's error text as the user should read it.
+    private static func reason(_ error: Error) -> String {
+        if case DeskPixieEngineError.callFailed(let message) = error { return message }
+        return "Pixie couldn't send that."
     }
 
     /// The core's roster (`agents` event).
@@ -85,8 +224,14 @@ final class AgentRosterController {
     }
 
     private func poll() {
-        // Opens under the pointer; closes when it leaves the chip and the list.
-        let inside = panel.isVisible && panel.frame.contains(NSEvent.mouseLocation) && model.visible
+        // Opens under the pointer; closes when it leaves the chip and the list. Not over the
+        // toggle, and never while the text box is open.
+        var inside = panel.isVisible && panel.frame.contains(NSEvent.mouseLocation) && model.visible && !chat.open
+        if inside {
+            let p = panel.convertPoint(fromScreen: NSEvent.mouseLocation)
+            let flipped = CGPoint(x: p.x, y: hosting.bounds.height - p.y)
+            if toggleFrame.insetBy(dx: -3, dy: -3).contains(flipped) && !model.open { inside = false }
+        }
         if inside != model.open {
             model.open = inside
             render()
@@ -105,14 +250,24 @@ final class AgentRosterController {
                 // Hover already opens the list; a click only opens it (never closes, so click and
                 // hover poll can't fight). Leaving the panel closes it.
                 guard let self, !self.model.open else { return }
+                self.closeChat()
                 self.model.open = true
                 self.render()
             },
-            onRow: { [weak self] in self?.clicked($0) }))
+            onRow: { [weak self] in self?.clicked($0) },
+            chat: chat, chatState: chatState,
+            onMode: { [weak self] in self?.pick($0) },
+            onSend: { [weak self] in self?.send() },
+            onStop: { [weak self] in self?.stopChat() },
+            onCloseChat: { [weak self] in self?.closeChat() })
+            .onPreferenceChange(ToggleFrameKey.self) { [weak self] frame in
+                MainActor.assumeIsolated { self?.toggleFrame = frame }
+            })
     }
 
     private func layout() {
-        guard model.visible, pixie.isShown else {
+        // The toggle is always there, so the row shows whenever Pixie does (#221).
+        guard pixie.isShown else {
             hide()
             return
         }
@@ -121,7 +276,7 @@ final class AgentRosterController {
             hide()
             return
         }
-        if !model.open { chipHeight = size.height }
+        if !model.open && !chat.open { chipHeight = size.height }
         let top = ScreenDisplays.primaryMaxY
         let bit = pixie.panel.frame
         let screen = NSScreen.screens.first { $0.frame.contains(NSPoint(x: bit.midX, y: bit.midY)) }
@@ -130,12 +285,13 @@ final class AgentRosterController {
         // Split up: as one expression it takes CI's type checker too long (#192).
         let agentRows: Int = min(model.view.agents.count, AgentRosterModel.maxRows + 1)
         let yourRows: Int = min(model.view.yours.count, AgentRosterModel.maxRows + 1)
-        let openHeight: CGFloat = CGFloat(agentRows + yourRows + 3) * 22 + chipHeight
+        let listHeight: CGFloat = CGFloat(agentRows + yourRows + 3) * 22
+        let openHeight: CGFloat = max(listHeight, Self.cardHeight) + chipHeight
         // While open the side stays put: only a closed chip decides it (the real list can be
         // taller than the estimate, and flipping would move it from under the pointer).
         let (rect0, b) = ChipPlacement.frame(pixie: DesktopSpace.desktopRect(bit, primaryMaxY: top),
                                             panel: size, screen: area, openHeight: openHeight,
-                                            keeping: model.open ? below : nil)
+                                            keeping: model.open || chat.open ? below : nil)
         var rect = rect0
         if b != below {
             // Redraw with the list on the other side and place once more with the new size. Not
@@ -148,7 +304,7 @@ final class AgentRosterController {
             if !(s.width > 0 && s.height > 0) { hide(); return }
         }
         panel.setFrame(ScreenDisplays.appKitFrame(topLeft: rect.origin, size: rect.size), display: true)
-        if model.open && panel.parent != nil {
+        if (model.open || chat.open) && panel.parent != nil {
             // Above the updates bubble (a sibling child panel): re-adding puts it last.
             pixie.panel.removeChildWindow(panel)
         }
@@ -165,6 +321,9 @@ final class AgentRosterController {
     }
 
     private struct RosterReply: Decodable { var roster: RosterView }
+    private struct ModeReply: Decodable { var mode: String }
+    private struct SendArgs: Encodable, Sendable { let text: String }
+    private struct SendReply: Decodable { var job: String }
     private struct FocusAgentArgs: Encodable, Sendable { let name: String }
 }
 

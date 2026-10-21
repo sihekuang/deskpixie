@@ -10,16 +10,37 @@ struct AgentRosterView: View {
     let maxChipWidth: CGFloat
     let onChip: () -> Void
     let onRow: (RosterRow) -> Void
+    /// The text box and its toggle (#221).
+    let chat: QuickChatModel
+    let chatState: QuickChatState
+    let onMode: (String) -> Void
+    let onSend: () -> Void
+    let onStop: () -> Void
+    let onCloseChat: () -> Void
 
     static let listWidth: CGFloat = 260
 
     var body: some View {
         VStack(spacing: 4) {
             if model.open && !below { list }
-            chip
+            if chatOpen && !below { card }
+            HStack(spacing: 6) {
+                if model.visible { chip }
+                ReplyModeToggle(mode: chat.mode, onPick: onMode)
+                    .background(GeometryReader { g in
+                        Color.clear.preference(key: ToggleFrameKey.self, value: g.frame(in: .global))
+                    })
+            }
             if model.open && below { list }
+            if chatOpen && below { card }
         }
         .fixedSize()
+    }
+
+    private var chatOpen: Bool { chat.open && chat.mode == "text" }
+
+    private var card: some View {
+        QuickChatCard(model: chat, state: chatState, onSend: onSend, onStop: onStop, onClose: onCloseChat)
     }
 
     private var chip: some View {
@@ -101,4 +122,10 @@ struct AgentRosterView: View {
         .padding(.vertical, 3)
         .contentShape(Rectangle())
     }
+}
+
+/// Where the toggle is in the window (top-left origin): hovering it doesn't open the list.
+struct ToggleFrameKey: PreferenceKey {
+    static let defaultValue: CGRect = .zero
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
 }

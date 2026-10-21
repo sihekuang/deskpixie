@@ -17,6 +17,9 @@ final class PixiePanel: NSPanel {
         hidesOnDeactivate = false
     }
 
-    override var canBecomeKey: Bool { false }
+    /// Only while it holds a text field to type in (the text box, #221).
+    var acceptsKey = false
+
+    override var canBecomeKey: Bool { acceptsKey }
     override var canBecomeMain: Bool { false }
 }

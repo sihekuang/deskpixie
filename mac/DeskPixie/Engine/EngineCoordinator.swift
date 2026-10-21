@@ -513,6 +513,12 @@ final class EngineCoordinator {
             bubble?.apply(lines: lines)
         case .agents(let view):
             roster?.apply(view: view)
+        case .chatLine(let line):
+            roster?.apply(chatLine: line)
+        case .chatFocus:
+            roster?.focusChat()
+        case .replyMode(let mode):
+            roster?.apply(mode: mode)
         case .showPane(let r):
             bubble?.showPane(r)
         case .focusPlan(let plan):
