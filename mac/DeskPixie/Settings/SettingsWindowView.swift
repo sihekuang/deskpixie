@@ -266,7 +266,8 @@ struct SettingsTabView: View {
         panel.allowedContentTypes = [.zip]
         panel.directoryURL = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        let os = "macOS " + ProcessInfo.processInfo.operatingSystemVersionString
+        let v = ProcessInfo.processInfo.operatingSystemVersion
+        let os = "macOS \(v.majorVersion).\(v.minorVersion).\(v.patchVersion)"
         if model.exportLogs(to: url.path, app: SystemPermissions.appVersion, os: os) {
             NSWorkspace.shared.activateFileViewerSelecting([url])
         }

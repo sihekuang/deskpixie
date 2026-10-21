@@ -14,16 +14,11 @@ func withMetricsLog(path string) harnessOpt {
 	return func(d *Deps, _ *harness) { d.MetricsLogPath = path }
 }
 
-// #225: the app log goes to logs/deskpixie.log, kept to the Log size setting.
-func TestTheAppLogKeepsToTheLogSize(t *testing.T) {
+// #225: the logs keep to the Log size setting, read live.
+func TestLogMaxBytesFollowsTheSetting(t *testing.T) {
 	h := newHarness(t)
-	w := h.app.AppLog()
-	if _, err := w.Write([]byte("hello\n")); err != nil {
-		t.Fatal(err)
-	}
-	b, _ := os.ReadFile(filepath.Join(h.dir, "logs", "deskpixie.log"))
-	if string(b) != "hello\n" {
-		t.Fatalf("%q", b)
+	if AppLogPath(h.dir) != filepath.Join(h.dir, "logs", "deskpixie.log") {
+		t.Fatal(AppLogPath(h.dir))
 	}
 	if got := h.app.LogMaxBytes(); got != 2<<20 {
 		t.Fatal(got)
@@ -39,7 +34,8 @@ func TestLogsExportZipsEveryLog(t *testing.T) {
 	metrics := filepath.Join(t.TempDir(), "metrics.log")
 	_ = os.WriteFile(metrics, []byte("m\n"), 0o644)
 	h := newHarness(t, withMetricsLog(metrics))
-	_, _ = h.app.AppLog().Write([]byte("app line\n"))
+	_ = os.MkdirAll(filepath.Join(h.dir, "logs"), 0o755)
+	_ = os.WriteFile(AppLogPath(h.dir), []byte("app line\n"), 0o600)
 	_ = os.WriteFile(filepath.Join(h.dir, "logs", "voice.log"), []byte("v\n"), 0o600)
 	dst := filepath.Join(t.TempDir(), "DeskPixie logs.zip")
 	out := h.call("logs.export", map[string]string{"path": dst, "app": "0.10.0 (42)", "os": "macOS 15.6"})

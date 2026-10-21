@@ -1,13 +1,13 @@
 package app
 
-// The app's logs (#225): the core's own log in logs/deskpixie.log, kept like the voice log and
-// the metrics log to the Log size setting, and Settings ▸ Advanced ▸ Export Logs… (`logs.export`).
+// The app's logs (#225): the core's own log in logs/deskpixie.log (the engine tees the standard
+// logger there), kept like the voice log and the metrics log to the Log size setting, and
+// Settings ▸ Advanced ▸ Export Logs… (`logs.export`).
 
 import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"path/filepath"
 	"time"
 
@@ -19,9 +19,6 @@ import (
 func AppLogPath(appSupport string) string {
 	return filepath.Join(appSupport, "logs", "deskpixie.log")
 }
-
-// AppLog is where the core's log goes (the engine tees the standard logger into it).
-func (a *App) AppLog() io.Writer { return a.appLog }
 
 // LogMaxBytes is the Log size setting in bytes, read on every write.
 func (a *App) LogMaxBytes() int64 {

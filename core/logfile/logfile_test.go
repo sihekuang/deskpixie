@@ -5,8 +5,10 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func size(t *testing.T, p string) int64 {
@@ -112,5 +114,52 @@ func TestExportFailsCleanly(t *testing.T) {
 	}
 	if err := Export("", nil, "x"); err == nil {
 		t.Fatal("empty path accepted")
+	}
+}
+
+// An older file over the limit (an old log from before the cap, or a smaller setting) keeps
+// its newest lines, never deleted outright.
+func TestAnOversizeLogKeepsItsNewestLines(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "metrics.log")
+	var b strings.Builder
+	for i := range 200 {
+		b.WriteString(strings.Repeat("m", 30) + " line " + strconv.Itoa(i) + "\n")
+	}
+	_ = os.WriteFile(path, []byte(b.String()), 0o644)
+	w := New(path, func() int64 { return 1000 })
+	_, _ = w.Write([]byte("new\n"))
+	old, _ := os.ReadFile(path + ".1")
+	if len(old) == 0 || len(old) > 500 {
+		t.Fatal(len(old))
+	}
+	if !strings.HasSuffix(string(old), " line 199\n") || !strings.HasPrefix(string(old), "mmm") {
+		t.Fatalf("not the newest whole lines: %q", old)
+	}
+	cur, _ := os.ReadFile(path)
+	if string(cur) != "new\n" {
+		t.Fatalf("%q", cur)
+	}
+}
+
+// The export is a normal file to share, its entries dated like the logs.
+func TestTheExportIsShareable(t *testing.T) {
+	dir := t.TempDir()
+	app := filepath.Join(dir, "deskpixie.log")
+	_ = os.WriteFile(app, []byte("x\n"), 0o600)
+	when := time.Date(2026, 10, 21, 9, 30, 0, 0, time.UTC)
+	_ = os.Chtimes(app, when, when)
+	dst := filepath.Join(dir, "logs.zip")
+	if err := Export(dst, []string{app}, "about"); err != nil {
+		t.Fatal(err)
+	}
+	if fi, _ := os.Stat(dst); fi.Mode().Perm() != 0o644 {
+		t.Fatal(fi.Mode())
+	}
+	r, _ := zip.OpenReader(dst)
+	defer r.Close()
+	for _, f := range r.File {
+		if f.Name == "deskpixie.log" && !f.Modified.Equal(when) {
+			t.Fatal(f.Modified)
+		}
 	}
 }

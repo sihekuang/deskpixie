@@ -27,7 +27,6 @@ import (
 
 	"github.com/sihekuang/deskpixie/core/audio/denoise"
 	"github.com/sihekuang/deskpixie/core/canvas"
-	"github.com/sihekuang/deskpixie/core/logfile"
 	"github.com/sihekuang/deskpixie/core/packs"
 	"github.com/sihekuang/deskpixie/core/settings"
 	"github.com/sihekuang/deskpixie/core/tools"
@@ -111,12 +110,11 @@ type hotkeyState struct {
 
 // App is the running app core. Safe for concurrent use.
 type App struct {
-	deps   Deps
-	paths  Paths
-	appLog *logfile.Writer // logs/deskpixie.log (#225)
-	roots  []string
-	store  *settings.FileStore
-	api    *settings.API
+	deps  Deps
+	paths Paths
+	roots []string
+	store *settings.FileStore
+	api   *settings.API
 
 	rt        *voice.Runtime // nil when the voice loop could not be set up
 	setupFail *voice.Failure
@@ -259,7 +257,6 @@ func New(d Deps) (*App, error) {
 	}
 	a.emitDevices(cfg.Voice)
 	a.pushTray()
-	a.appLog = logfile.New(AppLogPath(p.AppSupport), a.LogMaxBytes)
 	return a, nil
 }
 

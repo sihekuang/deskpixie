@@ -6,11 +6,13 @@ package logfile
 
 import (
 	"archive/zip"
+	"bytes"
 	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 // DefaultMax is the Log size setting's default (2 MB), for a log made before settings are read.
@@ -43,8 +45,9 @@ func (w *Writer) Write(p []byte) (int, error) {
 		_ = os.Rename(w.path, w.path+".1")
 	}
 	if old, err := os.Stat(w.path + ".1"); err == nil && old.Size() > half {
-		// The limit went down: an older file over the new half goes.
-		_ = os.Remove(w.path + ".1")
+		// Over the half (a log from before the cap, or a smaller setting): it keeps its
+		// newest whole lines.
+		keepTail(w.path+".1", half)
 	}
 	f, err := os.OpenFile(w.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
@@ -53,6 +56,24 @@ func (w *Writer) Write(p []byte) (int, error) {
 	_, _ = f.Write(p)
 	_ = f.Close()
 	return len(p), nil
+}
+
+// keepTail cuts path down to its last max bytes, from the first line that starts in them.
+func keepTail(path string, max int64) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	if int64(len(b)) > max {
+		b = b[int64(len(b))-max:]
+		if i := bytes.IndexByte(b, '\n'); i >= 0 {
+			b = b[i+1:]
+		}
+	}
+	tmp := path + ".tmp"
+	if os.WriteFile(tmp, b, 0o600) != nil || os.Rename(tmp, path) != nil {
+		_ = os.Remove(tmp)
+	}
 }
 
 // Files are a log's files that exist, older first.
@@ -86,7 +107,7 @@ func Export(dst string, logs []string, about string) (err error) {
 		}
 	}()
 	z := zip.NewWriter(tmp)
-	w, err := z.Create("about.txt")
+	w, err := z.CreateHeader(&zip.FileHeader{Name: "about.txt", Method: zip.Deflate, Modified: time.Now()})
 	if err != nil {
 		return err
 	}
@@ -103,6 +124,9 @@ func Export(dst string, logs []string, about string) (err error) {
 	if err = z.Close(); err != nil {
 		return err
 	}
+	if err = tmp.Chmod(0o644); err != nil { // a file to share, like any the user saves
+		return err
+	}
 	if err = tmp.Close(); err != nil {
 		return err
 	}
@@ -115,7 +139,16 @@ func add(z *zip.Writer, path string) error {
 		return nil // rotated or removed meanwhile
 	}
 	defer f.Close()
-	w, err := z.Create(filepath.Base(path))
+	fi, err := f.Stat()
+	if err != nil {
+		return nil
+	}
+	h, err := zip.FileInfoHeader(fi) // keeps the log's time
+	if err != nil {
+		return err
+	}
+	h.Method = zip.Deflate
+	w, err := z.CreateHeader(h)
 	if err != nil {
 		return err
 	}

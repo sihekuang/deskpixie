@@ -13,7 +13,7 @@ Decides whether the Go core + Swift shell is good enough to continue. A **no-go*
 ## What each app actually measures today
 
 ### DeskPixie (instrumented)
-`core/metrics` writes a snapshot every 10 s to `~/Library/Logs/DeskPixie/metrics.log`, one line per snapshot:
+`core/metrics` writes a snapshot every 10 s to `logs/metrics.log` in the app's data folder (`~/Library/Application Support/com.sihekuang.deskpixie`; before #225 it was `~/Library/Logs/DeskPixie/metrics.log`), one line per snapshot:
 `<RFC3339> {"micToSendP50Ms":..,"micToSendP95Ms":..,"micSamples":..,"maxGcPauseMs":..,"underruns":..,"micDrops":..}`
 
 - Read the **last line** after the 10 minutes. `underruns` and `maxGcPauseMs` are cumulative since process start.
