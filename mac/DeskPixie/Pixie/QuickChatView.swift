@@ -108,6 +108,12 @@ struct QuickChatCard: View {
                         .focused($focused)
                         .onSubmit(onSend)
                         .onExitCommand(perform: onClose)
+                        // With text in the field, Esc is the field editor's "complete" and never
+                        // reaches onExitCommand: take it first.
+                        .onKeyPress(.escape) {
+                            onClose()
+                            return .handled
+                        }
                     Button(action: onSend) {
                         Image(systemName: "arrow.up.circle.fill")
                             .font(.title3)
