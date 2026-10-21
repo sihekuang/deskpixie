@@ -51,6 +51,9 @@ final class AttachmentsController {
 
     var clipboardKind: ClipboardKind { kind }
 
+    /// The copy on the clipboard now was already attached (or sent past): nothing to offer.
+    var currentUsed: Bool { usedCount == seenCount }
+
     /// The message went: the hint is for a newer copy only.
     func sent() { usedCount = seenCount }
 

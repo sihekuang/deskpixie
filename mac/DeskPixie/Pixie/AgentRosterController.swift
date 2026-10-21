@@ -99,7 +99,8 @@ final class AgentRosterController {
         var changed = offer.expire(now: Date(), hovering: hovering)
         guard watchTicks % 5 == 0 else { return changed }
         attach.poll()
-        if watch.poll(changeCount: attach.clipboard.changeCount, kind: attach.clipboardKind) {
+        // A copy attached before this look (a quick Attach or Cmd-V) isn't offered again.
+        if watch.poll(changeCount: attach.clipboard.changeCount, kind: attach.clipboardKind) && !attach.currentUsed {
             offer.show(attach.clipboardKind, now: Date())
             changed = true
         }
@@ -117,7 +118,11 @@ final class AgentRosterController {
     private var attachmentUI: AttachmentUI {
         let a = attach!
         return AttachmentUI(model: a.model, hint: a.hint,
-                            onAttachHint: { a.attachClipboard() },
+                            onAttachHint: { [weak self] in
+                                // The same copy: Pixie's offer goes too.
+                                self?.offer.take()
+                                a.attachClipboard()
+                            },
                             onRemove: { a.remove($0) },
                             onPick: { a.pick() },
                             onDrop: { a.drop($0) })
