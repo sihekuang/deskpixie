@@ -467,6 +467,14 @@ type AgentController struct {
 	// handedOff: jobs whose request the coordinator passed to one of your sessions, which Pixie
 	// has already told you (#177); true while it has done nothing else since.
 	handedOff map[JobID]bool
+	// typedTo: the typed job last handed to each of your sessions; that session's told turns
+	// go to the text box while it shows that job (#241).
+	typedTo map[string]JobID
+	// boxAsker: the session whose question the box shows, answered from the box (#241).
+	boxAsker string
+	// boxAnswered: the typed job a session already answered in the box; the coordinator's
+	// closing line doesn't replace that answer (#241).
+	boxAnswered JobID
 	// sessionSeq numbers session prompts' request ids (#105).
 	sessionSeq uint64
 	// restartAt: when the coordinator is started again after an exit or a failed start (#118);
@@ -504,6 +512,7 @@ func NewAgentController(settings Settings) *AgentController {
 		memories:  NewMemoryLog(),
 		workers:   NewWorkers(),
 		handedOff: map[JobID]bool{},
+		typedTo:   map[string]JobID{},
 		typed:     map[JobID]bool{},
 		opener:    newOpener(settings.NotifyPerMinute),
 		modes:     map[string]bool{},
@@ -576,6 +585,8 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 		if in.Typed && !c.isDisabled() {
 			c.typed[in.Job] = true
 			c.lastTyped = in.Job
+			c.boxAsker, c.boxAnswered = "", ""
+			clear(c.typedTo) // the box shows this message now
 		}
 	case InTextMode:
 		c.textMode = in.Away
@@ -659,7 +670,7 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 			c.onSubmit(in.Message, now, &fx)
 		}
 	case InSessionSent:
-		c.onSessionSent(in.Text, in.Message, now, &fx)
+		c.onSessionSent(in.Name, in.Text, in.Message, now, &fx)
 	case InStop:
 		if in.Agent == Coordinator {
 			c.onStop(in.Message, now, &fx)
@@ -1600,12 +1611,17 @@ func (c *AgentController) resumeJob(job JobID, now Millis, fx *[]Effect) {
 // onSessionSent: the request in flight went to one of your sessions (#177). Pixie says so now
 // rather than after the coordinator writes its reply; it stays the coordinator's job until then.
 // With several requests in flight, which one it was isn't known: the reply tells.
-func (c *AgentController) onSessionSent(description, waiting string, now Millis, fx *[]Effect) {
+func (c *AgentController) onSessionSent(name, description, waiting string, now Millis, fx *[]Effect) {
 	refs := unique(c.inbox.InFlightRefs())
 	if len(refs) != 1 || !c.jobs.IsOpen(refs[0]) {
 		return
 	}
 	job := refs[0]
+	if c.typed[job] {
+		c.typedTo[name] = job
+	} else {
+		delete(c.typedTo, name) // its answer is for this request now, not an earlier typed one
+	}
 	session, title := "your session", "Your session"
 	if d := oneLine(description); d != "" {
 		title = strings.TrimSuffix(d, ".")
@@ -1725,6 +1741,19 @@ func (c *AgentController) onSessionTurn(name string, t SessionTurn, now Millis, 
 	if !told {
 		return
 	}
+	if job, ok := c.typedTo[name]; ok {
+		if c.boxShows(job) {
+			// #241: the answer to a message typed in the box, so it goes there.
+			status := "done"
+			c.boxAsker = ""
+			if asking {
+				status, c.boxAsker = "question", name
+			}
+			c.boxAnswered = job
+			*fx = append(*fx, Effect{Kind: EfChat, Chat: ChatLine{Job: job, Status: status, Text: SessionTurnBrief(gist)}})
+			return
+		}
+	}
 	label := maskPendingTokens(t.Label, tokens)
 	c.deliverUpdate(Line{
 		Kind:    LineSession,
@@ -1808,15 +1837,34 @@ func (c *AgentController) tick(now Millis, fx *[]Effect) {
 // job (text mode, the newest typed job) and isn't waiting on the coordinator's question, which
 // it would replace; otherwise it takes the usual route, so it is never lost (#235).
 func (c *AgentController) workerReportToBox(job JobID) bool {
-	if !c.typed[job] || !c.textMode || job != c.lastTyped {
+	if !c.boxShows(job) {
 		return false
 	}
 	j, ok := c.jobs.Get(job)
 	return !ok || j.Status != JobQuestion
 }
 
+// takeBoxAnswer: the session whose question the box shows, if it is still the one asked, and the
+// typed job the box shows ("" = none).
+func (c *AgentController) takeBoxAnswer() (string, JobID) {
+	s := c.boxAsker
+	c.boxAsker = ""
+	if s == "" || c.asked.session != s || !c.boxShows(c.lastTyped) {
+		return "", ""
+	}
+	return s, c.lastTyped
+}
+
+// boxShows: the text box shows job (text mode, and it is the newest typed job).
+func (c *AgentController) boxShows(job JobID) bool {
+	return c.typed[job] && c.textMode && job == c.lastTyped
+}
+
 // deliver routes a line; true if the user got it now (spoken or notified), not just outboxed.
 func (c *AgentController) deliver(line Line, now Millis, fx *[]Effect) bool {
+	if c.typed[line.Job] && line.Token == nil && line.Job == c.boxAnswered {
+		return true // the session's own answer stays in the box (#241)
+	}
 	if c.typed[line.Job] {
 		*fx = append(*fx, Effect{Kind: EfChat, Chat: c.chatLine(line)})
 		if line.Token == nil {
