@@ -102,7 +102,7 @@ Ideas and requests are welcome as [issues](https://github.com/sihekuang/deskpixi
 
 ## Contributing
 
-Issues and pull requests are welcome. Please open an issue first for anything large. Unless you
+Issues and pull requests are welcome. Please open an issue first for anything large. [AGENTS.md](AGENTS.md) describes how changes are made and tested here. Unless you
 say otherwise, contributions are licensed under the Apache License 2.0, as section 5 of the
 license says.
 
