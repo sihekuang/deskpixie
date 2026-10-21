@@ -152,9 +152,18 @@ final class OnboardingTests: XCTestCase {
     func testAllowAllAsksWhatIsUnansweredWithAccessibilityLast() {
         let asked = AppPermission.toAsk([(.microphone, .granted), (.notifications, .notDetermined),
                                          (.accessibility, .notDetermined), (.automation(.systemEvents), .notDetermined),
-                                         (.automation(.music), .denied)])
+                                         (.automation(.music), .denied)], askedAccessibility: false)
         XCTAssertEqual(asked, [.notifications, .automation(.systemEvents), .accessibility])
-        XCTAssertEqual(AppPermission.toAsk([(.microphone, .granted)]), [])
+        XCTAssertEqual(AppPermission.toAsk([(.microphone, .granted)], askedAccessibility: false), [])
+        // Asked once, Accessibility is System Settings' to turn on: Allow All doesn't send you back.
+        XCTAssertEqual(AppPermission.toAsk([(.accessibility, .notDetermined)], askedAccessibility: true), [])
+    }
+
+    /// An app quit after its question can't be read: the answer it gave stands.
+    func testAnAnswerStandsWhenTheAppCanNoLongerBeRead() {
+        XCTAssertEqual(AppPermission.merged(read: .notDetermined, answered: .granted), .granted)
+        XCTAssertEqual(AppPermission.merged(read: .notDetermined, answered: nil), .notDetermined)
+        XCTAssertEqual(AppPermission.merged(read: .denied, answered: .granted), .denied)
     }
 
     func testAPermissionLineOffersTheFixThatWorksNow() {

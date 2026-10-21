@@ -36,8 +36,9 @@ enum SystemPermissions {
     }
 
     /// Asks macOS for `p` and returns once it was answered (Accessibility: once its dialog is up,
-    /// since the answer is given in System Settings).
-    static func ask(_ p: AppPermission) async {
+    /// since the answer is given in System Settings). The Automation answer, which can't be read
+    /// back once the app quits; nil for the others, which can.
+    static func ask(_ p: AppPermission) async -> PermissionAccess? {
         switch p {
         case .microphone:
             _ = await AVCaptureDevice.requestAccess(for: .audio)
@@ -48,13 +49,14 @@ enum SystemPermissions {
             // The literal value of kAXTrustedCheckOptionPrompt (see SystemTerminalFocusPrimitives).
             _ = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
         case .automation(let app):
-            await askAutomation(app)
+            return await askAutomation(app)
         }
+        return nil
     }
 
     /// macOS only asks about an app that is running: one that isn't is opened hidden for the
     /// question, then quit again.
-    private static func askAutomation(_ app: AutomationTarget) async {
+    private static func askAutomation(_ app: AutomationTarget) async -> PermissionAccess {
         let wasRunning = !NSRunningApplication.runningApplications(withBundleIdentifier: app.bundleID).isEmpty
         var opened: NSRunningApplication?
         if !wasRunning, let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: app.bundleID) {
@@ -65,11 +67,17 @@ enum SystemPermissions {
             opened = try? await NSWorkspace.shared.openApplication(at: url, configuration: config)
         }
         // A just-opened app takes a moment to take Apple Events: try for up to 5 s.
+        var answer = PermissionAccess.notDetermined
         for _ in 0..<20 {
-            if await Task.detached(operation: { automationAnswer(app, ask: true) }).value != nil { break }
+            if let a = await Task.detached(operation: { automationAnswer(app, ask: true) }).value {
+                answer = a
+                break
+            }
             try? await Task.sleep(for: .milliseconds(250))
         }
-        opened?.terminate()
+        // Still hidden in the background: nobody started using it meanwhile.
+        if let opened, opened.isHidden, !opened.isActive { opened.terminate() }
+        return answer
     }
 
     private static func automation(_ app: AutomationTarget, ask: Bool) -> PermissionAccess {

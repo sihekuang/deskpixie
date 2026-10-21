@@ -368,7 +368,7 @@ struct OnboardingView: View {
     /// Every permission DeskPixie uses, asked for now so nothing stops you later (#210).
     private var permissions: some View {
         let checks = state.permissionChecks()
-        let open = AppPermission.toAsk(state.permissions.map { ($0, state.access[$0] ?? .notDetermined) })
+        let open = state.openPermissions
         return VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .bottom) {
                 VStack(alignment: .leading, spacing: 4) {

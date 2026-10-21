@@ -22,6 +22,10 @@ final class OnboardingState {
     private(set) var askedAccessibility = false
     /// Allow All (or one Allow) is going through macOS's dialogs.
     private(set) var asking = false
+    /// The Automation answers given in this window (a quit app can't be read back).
+    @ObservationIgnored private var answered: [AppPermission: PermissionAccess] = [:]
+    /// Only the latest read lands: one started while a dialog was up finishes late.
+    @ObservationIgnored private var readGeneration = 0
     /// nil until the login shell's PATH has been read (off main: up to 2 s).
     private(set) var pix: PixCommandModel?
 
@@ -69,13 +73,18 @@ final class OnboardingState {
     var mic: PermissionAccess { access[.microphone] ?? .notDetermined }
 
     func refreshPermissions() {
+        readGeneration += 1
+        let generation = readGeneration
         Task { @MainActor [weak self] in
             let installed = await Task.detached { SystemPermissions.installedTargets() }.value
             let all = AppPermission.all(installed: installed)
             var read: [AppPermission: PermissionAccess] = [:]
             for p in all { read[p] = await SystemPermissions.access(p) }
-            self?.permissions = all
-            self?.access = read
+            guard let self, generation == self.readGeneration else { return }
+            self.permissions = all
+            self.access = Dictionary(uniqueKeysWithValues: all.map { p in
+                (p, AppPermission.merged(read: read[p] ?? .notDetermined, answered: self.answered[p]))
+            })
         }
     }
 
@@ -85,7 +94,12 @@ final class OnboardingState {
 
     /// Allow All: macOS's dialog for each one not answered yet, one after another.
     func askAll() {
-        ask(AppPermission.toAsk(permissions.map { ($0, access[$0] ?? .notDetermined) }))
+        ask(openPermissions)
+    }
+
+    /// The ones Allow All would ask for.
+    var openPermissions: [AppPermission] {
+        AppPermission.toAsk(permissions.map { ($0, access[$0] ?? .notDetermined) }, askedAccessibility: askedAccessibility)
     }
 
     func ask(_ list: [AppPermission]) {
@@ -94,7 +108,7 @@ final class OnboardingState {
         Task { @MainActor [weak self] in
             for p in list {
                 if p == .accessibility { self?.askedAccessibility = true }
-                await SystemPermissions.ask(p)
+                if let answer = await SystemPermissions.ask(p) { self?.answered[p] = answer }
             }
             self?.asking = false
             self?.refreshPermissions()

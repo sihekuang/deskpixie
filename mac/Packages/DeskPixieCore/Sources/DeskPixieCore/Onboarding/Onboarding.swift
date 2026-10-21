@@ -227,10 +227,17 @@ public enum AppPermission: Hashable, Sendable {
     }
 
     /// What Allow All asks for: every one not answered yet, Accessibility last (it sends the
-    /// person to System Settings, which would cover the other dialogs).
-    public static func toAsk(_ access: [(AppPermission, PermissionAccess)]) -> [AppPermission] {
+    /// person to System Settings, which would cover the other dialogs). Accessibility never reads
+    /// as answered, so once it was asked (`askedAccessibility`) it is left to System Settings.
+    public static func toAsk(_ access: [(AppPermission, PermissionAccess)], askedAccessibility: Bool) -> [AppPermission] {
         let open = access.filter { $0.1 == .notDetermined }.map(\.0)
-        return open.filter { $0 != .accessibility } + open.filter { $0 == .accessibility }
+        return open.filter { $0 != .accessibility } + (askedAccessibility ? [] : open.filter { $0 == .accessibility })
+    }
+
+    /// A read merged with this window's answers: an Automation target quit after its question
+    /// reads as notDetermined again, so the answer it gave stands.
+    public static func merged(read: PermissionAccess, answered: PermissionAccess?) -> PermissionAccess {
+        read == .notDetermined ? answered ?? read : read
     }
 }
 
