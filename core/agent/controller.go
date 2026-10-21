@@ -1682,6 +1682,11 @@ func (c *AgentController) flushUpdates(now Millis, fx *[]Effect) {
 		if !u.Progress {
 			l := NewJobLine(LineInfo, u.Text, u.Job)
 			l.Worker = u.Worker
+			if c.workerReportToBox(u.Job) {
+				// #221: a typed job's worker reports go to the box like the coordinator's reply.
+				*fx = append(*fx, Effect{Kind: EfChat, Chat: c.chatLine(l)})
+				continue
+			}
 			c.deliverUpdate(l, now, fx)
 			continue
 		}
@@ -1798,6 +1803,17 @@ func (c *AgentController) tick(now Millis, fx *[]Effect) {
 }
 
 // ---------- helpers ----------
+
+// workerReportToBox: a worker's report on job goes to the text box only when the box shows that
+// job (text mode, the newest typed job) and isn't waiting on the coordinator's question, which
+// it would replace; otherwise it takes the usual route, so it is never lost (#235).
+func (c *AgentController) workerReportToBox(job JobID) bool {
+	if !c.typed[job] || !c.textMode || job != c.lastTyped {
+		return false
+	}
+	j, ok := c.jobs.Get(job)
+	return !ok || j.Status != JobQuestion
+}
 
 // deliver routes a line; true if the user got it now (spoken or notified), not just outboxed.
 func (c *AgentController) deliver(line Line, now Millis, fx *[]Effect) bool {
