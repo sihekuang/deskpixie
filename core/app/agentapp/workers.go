@@ -58,20 +58,23 @@ func WorkersOn(w settings.WorkerSettings, policy agent.WorkerPolicy) (bool, erro
 	return w.Enabled, nil
 }
 
-// WorkersSetup is whether workers start, decided from agent.workers and agent.projectsRoot.
+// WorkersSetup is whether workers start, decided from agent.workers and the projects folder.
 type WorkersSetup struct {
 	// Policy is Enabled only when workers really start.
 	Policy agent.WorkerPolicy
 	// Root is the canonical projects root when workers start ("" otherwise).
 	Root string
-	// Notice says why enabled workers are off (a tray notice; "" = none). It never disables
-	// delegation: the coordinator works solo.
+	// Notice says why enabled workers are off, or that they use DeskPixie's own projects folder
+	// (a tray notice; "" = none). It never disables delegation: the coordinator works solo.
 	Notice string
 }
 
+// FallbackNotice: workers run, in DeskPixie's own projects folder (#216).
+const FallbackNotice = "Coordinator: workers use DeskPixie's own projects folder"
+
 // SetupWorkers: workers on, or off with a notice (logged) when they are enabled but can't
-// run: no usable kind, or an unusable projects root.
-func SetupWorkers(w settings.WorkerSettings, projectsRootRaw, home string) WorkersSetup {
+// run: no usable kind, or no projects folder at all. `folder` is UseProjectsFolder's.
+func SetupWorkers(w settings.WorkerSettings, folder UsedFolder) WorkersSetup {
 	policy := Policy(w)
 	off := func(notice string) WorkersSetup {
 		policy.Enabled = false
@@ -84,12 +87,15 @@ func SetupWorkers(w settings.WorkerSettings, projectsRootRaw, home string) Worke
 	case !on:
 		return WorkersSetup{Policy: policy}
 	}
-	root, err := ProjectsRoot(projectsRootRaw, home)
-	if err != nil {
-		log.Printf("agent: workers off: projectsRoot not usable: %v", err)
-		return off("Coordinator: workers off: projectsRoot not usable")
+	if folder.Root == "" {
+		log.Printf("agent: workers off: no projects folder: %s", folder.Why)
+		return off("Coordinator: workers off: no projects folder")
 	}
-	return WorkersSetup{Policy: policy, Root: root}
+	notice := ""
+	if folder.Fallback {
+		notice = FallbackNotice
+	}
+	return WorkersSetup{Policy: policy, Root: folder.Root, Notice: notice}
 }
 
 // TerminalDir is where the agent terminal starts: the projects folder when it is usable
@@ -105,21 +111,9 @@ func TerminalDir(projectsRootRaw, home string) string {
 // path is taken from the home folder. The result is canonical, an existing folder, and
 // strictly below the home folder (a root that wide, or outside it, is a mistake).
 func ProjectsRoot(raw, home string) (string, error) {
-	raw = strings.TrimSpace(raw)
-	var joined string
-	switch {
-	case raw == "":
-		return "", errors.New("empty")
-	case raw == "~":
-		joined = home
-	case strings.HasPrefix(raw, "~/"):
-		joined = filepath.Join(home, raw[2:])
-	case strings.HasPrefix(raw, "~"):
-		return "", errors.New("~user is not supported")
-	case filepath.IsAbs(raw):
-		joined = raw
-	default:
-		joined = filepath.Join(home, raw)
+	joined, err := settings.ExpandProjectsRoot(raw, home)
+	if err != nil {
+		return "", err
 	}
 	root, err := canonical(joined)
 	if err != nil {

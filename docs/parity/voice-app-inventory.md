@@ -80,7 +80,7 @@ Read the Rust source with `git -C ~/Documents/Projects/ai-moscot show origin/mai
   "canvas": { "autoOpen": true, "keep": 50, "window": null },
   "agent": { "enabled": true, "sessionHost": "herdr", "session": "deskpixie", "terminal": "warp", "herdrPath": null,
              "model": null, "warm": false, "port": 48217, "keepPanesOnQuit": false, "holdOpenSecs": 180,
-             "permissionTimeoutSecs": 120, "notifyPerMinute": 4, "narration": true, "projectsRoot": "~/Documents/Projects",
+             "permissionTimeoutSecs": 120, "notifyPerMinute": 4, "narration": true, "projectsRoot": "~/Documents/deskpixie",
              "workers": { "enabled": false, "max": 4, "kinds": ["claude", "codex"] } } }
 ```
 (`agent.session` default renamed `ai-mascot` → `deskpixie`, spec §6.)

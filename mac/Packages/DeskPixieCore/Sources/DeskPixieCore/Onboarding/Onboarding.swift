@@ -283,6 +283,8 @@ public struct OnboardingCheck: Equatable, Sendable {
         /// Already answered: only System Settings can change it.
         case openSettings(AppPermission)
         case installPix
+        /// Creates the missing projects folder (#216).
+        case createProjectsFolder
         /// Something to install: opens the page in the browser.
         case link(String, URL)
     }
@@ -393,6 +395,23 @@ public enum OnboardingChecks {
         }
         let shown = !home.isEmpty && path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path
         return OnboardingCheck(title: name, ok: true, detail: "Found at \(shown)")
+    }
+
+    /// The projects folder workers use (#216). Missing is created when DeskPixie starts, so it
+    /// offers Create now; one that can't be used says so (Settings changes it). nil: not read.
+    public static func projectsFolder(_ status: ProjectsFolderStatus?, home: String) -> OnboardingCheck {
+        let title = "Projects folder"
+        guard let status else { return OnboardingCheck(title: title, ok: false, detail: "Checking…") }
+        let shown = ProjectsFolderStatus.shown(status.path, home: home)
+        switch status.state {
+        case .ready:
+            return OnboardingCheck(title: title, ok: true, detail: shown)
+        case .missing:
+            return OnboardingCheck(title: title, ok: false, detail: "\(shown): \(status.detail)", fix: .createProjectsFolder)
+        case .unusable:
+            return OnboardingCheck(title: title, ok: false,
+                                   detail: shown.isEmpty ? status.detail : "\(shown): \(status.detail)")
+        }
     }
 
     /// The core's tray lines about the coordinator (herdr version, integration hook, …).

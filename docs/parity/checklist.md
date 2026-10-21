@@ -688,7 +688,7 @@ Not in the sum: voice-openai (28 Rust tests, done in Phase 3; Go has 24 `Test` f
 | D-536 | `agent.permissionTimeoutSecs` default `120` | ✅ | core/settings/{config,schema,validate}.go | core/settings/{config,schema,validate}_test.go |  |
 | D-537 | `agent.notifyPerMinute` default `4` | ✅ | core/settings/{config,schema,validate}.go | core/settings/{config,schema,validate}_test.go |  |
 | D-538 | `agent.narration` default `true` | ✅ | core/settings/{config,schema,validate}.go | core/settings/{config,schema,validate}_test.go |  |
-| D-539 | `agent.projectsRoot` default `"~/Documents/Projects"` | ✅ | core/settings/{config,schema,validate}.go | core/settings/{config,schema,validate}_test.go |  |
+| D-539 | `agent.projectsRoot` default `"~/Documents/deskpixie"` (was `~/Documents/Projects`; #216: created at start when missing, else workers use `<app data>/agent/projects`) | ✅ | core/settings/{config,schema,validate}.go | core/settings/{config,schema,validate}_test.go |  |
 | D-540 | `agent.workers.enabled` default `false` | ✅ | core/settings/{config,schema,validate}.go | core/settings/{config,schema,validate}_test.go |  |
 | D-541 | `agent.workers.max` default `4` | ✅ | core/settings/{config,schema,validate}.go | core/settings/{config,schema,validate}_test.go |  |
 | D-542 | `agent.workers.kinds` default `["claude","codex"]` | ✅ | core/settings/{config,schema,validate}.go | core/settings/{config,schema,validate}_test.go |  |

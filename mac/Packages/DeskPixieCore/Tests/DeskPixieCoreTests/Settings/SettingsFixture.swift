@@ -687,7 +687,7 @@ enum SettingsFixture {
   "path": "agent.projectsRoot",
   "section": "Agent",
   "label": "Projects folder",
-  "help": "The folder whose repositories workers may use. It must be inside your home folder.",
+  "help": "The folder whose repositories workers may use, inside your home folder. DeskPixie creates it when it's missing.",
   "kind": {
    "type": "path",
    "dir": true,
@@ -959,7 +959,7 @@ enum SettingsFixture {
 """#
 
     static let defaultsJSON = #"""
-{"hotkey": "ctrl+alt+Space", "pack": "bit", "scale": 8, "position": null, "proximityFade": {"enabled": false, "radius": 150}, "voice": {"provider": "openai-realtime", "audio": "macos-vpio", "model": "gpt-realtime", "voice": "marin", "chimes": true, "idleTimeoutSecs": 7, "personaPath": null, "noiseFilter": false, "noiseModel": "hush", "noisyRoom": false, "inputDevice": null, "outputDevice": null, "homeCity": null}, "canvas": {"autoOpen": true, "keep": 50, "window": null}, "agent": {"enabled": true, "sessionHost": "herdr", "session": "deskpixie", "terminal": "warp", "herdrPath": null, "tmuxPath": null, "model": null, "warm": false, "port": 48217, "keepPanesOnQuit": true, "holdOpenSecs": 180, "permissionTimeoutSecs": 120, "notifyPerMinute": 4, "narration": true, "projectsRoot": "~/Documents/Projects", "workers": {"enabled": false, "max": 4, "kinds": ["claude", "codex"]}}}
+{"hotkey": "ctrl+alt+Space", "pack": "bit", "scale": 8, "position": null, "proximityFade": {"enabled": false, "radius": 150}, "voice": {"provider": "openai-realtime", "audio": "macos-vpio", "model": "gpt-realtime", "voice": "marin", "chimes": true, "idleTimeoutSecs": 7, "personaPath": null, "noiseFilter": false, "noiseModel": "hush", "noisyRoom": false, "inputDevice": null, "outputDevice": null, "homeCity": null}, "canvas": {"autoOpen": true, "keep": 50, "window": null}, "agent": {"enabled": true, "sessionHost": "herdr", "session": "deskpixie", "terminal": "warp", "herdrPath": null, "tmuxPath": null, "model": null, "warm": false, "port": 48217, "keepPanesOnQuit": true, "holdOpenSecs": 180, "permissionTimeoutSecs": 120, "notifyPerMinute": 4, "narration": true, "projectsRoot": "~/Documents/deskpixie", "workers": {"enabled": false, "max": 4, "kinds": ["claude", "codex"]}}}
 """#
 
     static let fields: [SettingsField] = try! JSONDecoder().decode([SettingsField].self, from: Data(fieldsJSON.utf8))

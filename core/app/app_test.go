@@ -28,7 +28,16 @@ func TestMain(m *testing.M) {
 	if os.Getenv("APP_TEST_LOG") == "" {
 		log.SetOutput(io.Discard)
 	}
-	os.Exit(m.Run())
+	// A throwaway home: the agent creates the projects folder below it at start (#216), and
+	// that must never be the real one.
+	home, err := os.MkdirTemp("", "app-test-home")
+	if err != nil {
+		panic(err)
+	}
+	os.Setenv("HOME", home)
+	code := m.Run()
+	os.RemoveAll(home)
+	os.Exit(code)
 }
 
 type harness struct {

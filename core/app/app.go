@@ -1058,6 +1058,14 @@ func (a *App) Register(r Registrar) {
 	r.Register("setup.programs", func(json.RawMessage) (any, error) {
 		return a.setupPrograms(), nil
 	})
+	// setup.projectsFolder: the projects folder setting checked on disk, changing nothing;
+	// setup.createProjectsFolder creates it when it is missing (#216). Both answer the check.
+	r.Register("setup.projectsFolder", func(json.RawMessage) (any, error) {
+		return a.projectsFolder(), nil
+	})
+	r.Register("setup.createProjectsFolder", func(json.RawMessage) (any, error) {
+		return a.createProjectsFolder()
+	})
 	r.Register("settings.hotkeyFailed", func(args json.RawMessage) (any, error) {
 		var in struct {
 			Combo string `json:"combo"`

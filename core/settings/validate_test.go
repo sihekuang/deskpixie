@@ -160,13 +160,15 @@ func TestHotkeyGrammarFollowsGlobalHotkey(t *testing.T) {
 	}
 }
 
-func TestTheProjectsRootIsAnExistingFolderBelowHome(t *testing.T) {
+// A folder below home that doesn't exist yet is fine: the agent creates it at start (#216).
+func TestTheProjectsRootIsAFolderBelowHomeExistingOrNot(t *testing.T) {
 	env := testEnv(t)
 	outside := os.TempDir()
 	for _, tc := range []struct {
 		root string
 		ok   bool
-	}{{"~/Documents/Projects", true}, {"~", false}, {"~/missing", false}, {outside, false}, {"", false}} {
+	}{{"~/Documents/Projects", true}, {"~/Documents/deskpixie", true}, {"~/missing/deeper", true}, {"~", false},
+		{outside, false}, {filepath.Join(outside, "new-folder"), false}, {"", false}, {"~other/code", false}} {
 		c := Default()
 		c.Agent.ProjectsRoot = tc.root
 		if valid(c, env) != tc.ok {
@@ -174,7 +176,7 @@ func TestTheProjectsRootIsAnExistingFolderBelowHome(t *testing.T) {
 		}
 	}
 	c := Default()
-	c.Agent.ProjectsRoot = "~/missing"
+	c.Agent.ProjectsRoot = outside
 	if p := problems(c, env); !reflect.DeepEqual(p, [][2]string{{"agent.projectsRoot", BadProjectsRoot}}) {
 		t.Fatal(p)
 	}

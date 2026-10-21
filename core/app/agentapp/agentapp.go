@@ -223,7 +223,9 @@ func Build(c Config) *Agent {
 		}
 	}
 	// A workers problem turns only workers off (a tray notice): the coordinator still works solo.
-	ws := SetupWorkers(s.Workers, s.ProjectsRoot, c.Home)
+	// The projects folder is created when missing, else DeskPixie's own is used (#216).
+	folder := UseProjectsFolder(s.ProjectsRoot, c.Home, ProjectsFallback(paths))
+	ws := SetupWorkers(s.Workers, folder)
 	workersOn := ws.Policy.Enabled
 	// tmux detects no agent status: Claude agents report theirs through hooks.
 	if err := InstallFor(paths, s.Port, ws.Root, s.SessionHost == tmux.Name); err != nil {

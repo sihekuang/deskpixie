@@ -68,6 +68,24 @@ final class FakeSettingsClient: SettingsClient {
         if let restartCoordinatorThrows { throw restartCoordinatorThrows }
     }
 
+    /// The projects folder each check answers; nil throws (#216).
+    var folder: ProjectsFolderStatus? = ProjectsFolderStatus(state: .missing, path: "/Users/u/Documents/deskpixie",
+                                                             fallback: "/data/agent/projects", detail: "Doesn't exist yet.")
+    var folderReads = 0
+    var folderCreates = 0
+    func projectsFolder() throws -> ProjectsFolderStatus {
+        folderReads += 1
+        guard let folder else { throw NSError(domain: "fake", code: 1) }
+        return folder
+    }
+
+    func createProjectsFolder() throws -> ProjectsFolderStatus {
+        folderCreates += 1
+        guard let folder else { throw NSError(domain: "fake", code: 1) }
+        self.folder = ProjectsFolderStatus(state: .ready, path: folder.path, fallback: folder.fallback, detail: "Found")
+        return self.folder!
+    }
+
     var keychainPushes: [[String: String]] = []
     func setKeychain(_ values: [String: String]) throws {
         calls.append("secrets.keychain")
@@ -297,12 +315,60 @@ final class SettingsModelTests: XCTestCase {
             func restart() throws {}
             func restartCoordinator() throws {}
             func setKeychain(_ values: [String: String]) throws {}
+            func projectsFolder() throws -> ProjectsFolderStatus { throw DeskPixieEngineError.notInitialized }
+            func createProjectsFolder() throws -> ProjectsFolderStatus { try projectsFolder() }
         }
         let m = SettingsModel(client: Failing())
         m.load()
         XCTAssertNil(m.snapshot)
         XCTAssertEqual(m.loadError, "unknown method settings.snapshot")
         XCTAssertEqual(m.secretText(.openAI), "Unknown")
+    }
+
+    // MARK: Projects folder (#216)
+
+    func test_the_projects_folder_is_read_with_the_window_and_after_its_setting_is_saved() {
+        let fake = FakeSettingsClient()
+        let m = SettingsModel(client: fake)
+        m.load()
+        XCTAssertEqual(m.projectsFolder?.state, .missing)
+        XCTAssertEqual(fake.folderReads, 1)
+        m.focusGained()
+        XCTAssertEqual(fake.folderReads, 2)
+        m.commit("scale", .menu(0))
+        XCTAssertEqual(fake.folderReads, 2, "another setting doesn't read it")
+        XCTAssertTrue(m.commit(SettingsModel.projectsRootPath, .path("~/code")))
+        XCTAssertEqual(fake.folderReads, 3, "saving the folder reads it again")
+    }
+
+    func test_create_makes_the_folder_and_shows_the_check_after() {
+        let fake = FakeSettingsClient()
+        let m = SettingsModel(client: fake)
+        m.load()
+        m.createProjectsFolder()
+        XCTAssertEqual(fake.folderCreates, 1)
+        XCTAssertEqual(m.projectsFolder?.state, .ready)
+        XCTAssertNil(m.notice)
+        fake.folder = nil
+        m.createProjectsFolder()
+        XCTAssertEqual(m.projectsFolder?.state, .ready, "a failed create keeps the last check")
+        XCTAssertTrue(m.notice?.hasPrefix("Couldn't create the projects folder") == true, m.notice ?? "")
+    }
+
+    func test_an_unreadable_projects_folder_shows_nothing() {
+        let fake = FakeSettingsClient()
+        fake.folder = nil
+        let m = SettingsModel(client: fake)
+        m.load()
+        XCTAssertNil(m.projectsFolder)
+        XCTAssertNotNil(m.snapshot, "the rest of the window still loads")
+    }
+
+    func test_a_folder_below_home_is_shown_with_a_tilde() {
+        XCTAssertEqual(ProjectsFolderStatus.shown("/Users/u/Documents/deskpixie", home: "/Users/u"), "~/Documents/deskpixie")
+        XCTAssertEqual(ProjectsFolderStatus.shown("/Users/u", home: "/Users/u"), "~")
+        XCTAssertEqual(ProjectsFolderStatus.shown("/Users/uu/x", home: "/Users/u"), "/Users/uu/x")
+        XCTAssertEqual(ProjectsFolderStatus.shown("/data/x", home: ""), "/data/x")
     }
 
     // MARK: API keys (#59)

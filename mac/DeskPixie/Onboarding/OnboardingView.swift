@@ -326,8 +326,11 @@ struct OnboardingView: View {
         }
         HStack {
             Spacer()
-            Button("Check Again") { state.refreshPrograms() }
-                .controlSize(.small)
+            Button("Check Again") {
+                state.refreshPrograms()
+                settings.refreshProjectsFolder()
+            }
+            .controlSize(.small)
         }
     }
 
@@ -677,6 +680,9 @@ struct OnboardingView: View {
                 .disabled(state.asking)
         case .openSettings(let p):
             Button("Open Settings") { state.openSettings(p) }
+        case .createProjectsFolder:
+            Button("Create") { settings.createProjectsFolder() }
+                .disabled(!settings.enabled)
         case .installPix:
             Button("Install") {
                 state.pix?.install()
