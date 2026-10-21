@@ -35,6 +35,7 @@ type wRig struct {
 	clock     *agenttest.ManualClock
 	kept      *agenttest.FakeKept
 	roster    *agenttest.RecordingRoster
+	attach    *fakeAttach
 }
 
 func wRigWith(t *testing.T, workers bool) *wRig { return rigKeeping(t, workers, false) }
@@ -69,9 +70,9 @@ func rigBuild(t *testing.T, workers, keep bool, store *agenttest.MemStore, wt *a
 		Host: NewAgentHost(host, clock, recipe), Voice: &agenttest.RecordingVoiceLink{}, Notifier: notifier,
 		Pixie: &agenttest.RecordingNotifier{}, Status: &agenttest.RecordingStatus{}, Planner: &agenttest.FakePlanner{}, Focus: &agenttest.FakeFocusSink{},
 		Store: store, Clock: clock, IDs: &agenttest.SeqIds{}, Kept: &agenttest.FakeKept{},
-		Roster: &agenttest.RecordingRoster{},
+		Roster: &agenttest.RecordingRoster{}, Attachments: &fakeAttach{},
 	}
-	r := &wRig{host: host, worktrees: wt, tokens: &agenttest.FakeTokens{}, recipes: &agenttest.FakeRecipes{}, clock: clock, kept: deps.Kept.(*agenttest.FakeKept), roster: deps.Roster.(*agenttest.RecordingRoster)}
+	r := &wRig{attach: deps.Attachments.(*fakeAttach), host: host, worktrees: wt, tokens: &agenttest.FakeTokens{}, recipes: &agenttest.FakeRecipes{}, clock: clock, kept: deps.Kept.(*agenttest.FakeKept), roster: deps.Roster.(*agenttest.RecordingRoster)}
 	settings := DefaultSettings()
 	settings.Workers = WorkerPolicy{Enabled: true, Max: 4, Kinds: []AgentKind{Claude, Codex}}
 	settings.KeepPanesOnQuit = keep

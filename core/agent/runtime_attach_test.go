@@ -142,3 +142,29 @@ func TestAttachmentsWaitWhenDelegationIsOff(t *testing.T) {
 		}
 	})
 }
+
+// #240: a worker's prompt names its own copies of the job's attachments, in its folder.
+func TestAWorkerPromptGetsLocalPaths(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := withJob(t, true)
+		c := startCall("focus")
+		c.Worker.Task = "Fix the upload test.\nAttached: /a/1.png"
+		okValue(t, call(r, Coordinator, c))
+		settle()
+		var brief string
+		for _, p := range r.host.Prompts() {
+			if p.Agent == wName {
+				brief = p.Text
+			}
+		}
+		const wt = "/projects/focus/.worktrees/upload"
+		if !strings.Contains(brief, "Attached: "+wt+"/.deskpixie/attachments/1.png") {
+			t.Fatal(brief)
+		}
+		r.attach.mu.Lock()
+		defer r.attach.mu.Unlock()
+		if len(r.attach.workers) == 0 || r.attach.workers[0][1] != wt {
+			t.Fatal(r.attach.workers)
+		}
+	})
+}

@@ -197,3 +197,86 @@ func TestSweep(t *testing.T) {
 	}
 	_ = s
 }
+
+func sentFile(t *testing.T, s *Store, name string) string {
+	t.Helper()
+	if _, err := s.Add(name, png); err != nil {
+		t.Fatal(err)
+	}
+	return s.Take()[0]
+}
+
+func TestForWorkerCopiesAndRewrites(t *testing.T) {
+	s, root, _ := newStore(t)
+	p := sentFile(t, s, "x.png")
+	dir := t.TempDir()
+	got := s.ForWorker("Fix it.\nAttached: "+p+"\nthanks", dir)
+	local := filepath.Join(dir, ".deskpixie", "attachments", filepath.Base(filepath.Dir(p)), "x.png")
+	if got != "Fix it.\nAttached: "+local+"\nthanks" {
+		t.Fatal(got)
+	}
+	if b, _ := os.ReadFile(local); !bytes.Equal(b, png) {
+		t.Fatal("not copied")
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, ".deskpixie", ".gitignore")); string(b) != "*\n" {
+		t.Fatalf("%q", b)
+	}
+	if b, _ := os.ReadFile(filepath.Join(root, "copies.jsonl")); !strings.Contains(string(b), local) {
+		t.Fatalf("%q", b)
+	}
+}
+
+func TestForWorkerIsIdempotent(t *testing.T) {
+	s, root, _ := newStore(t)
+	p := sentFile(t, s, "x.png")
+	dir := t.TempDir()
+	once := s.ForWorker("Attached: "+p, dir)
+	if twice := s.ForWorker(once, dir); twice != once {
+		t.Fatal(twice)
+	}
+	if again := s.ForWorker("Attached: "+p, dir); again != once {
+		t.Fatal(again)
+	}
+	b, _ := os.ReadFile(filepath.Join(root, "copies.jsonl"))
+	if n := strings.Count(string(b), "\n"); n != 1 {
+		t.Fatalf("%d records: %q", n, b)
+	}
+}
+
+func TestForWorkerLeavesOtherPaths(t *testing.T) {
+	s, _, _ := newStore(t)
+	dir := t.TempDir()
+	for _, text := range []string{"Attached: /etc/hosts", "no attachments here", ""} {
+		if got := s.ForWorker(text, dir); got != text {
+			t.Fatal(got)
+		}
+	}
+	p := sentFile(t, s, "x.png")
+	if got := s.ForWorker("Attached: "+p, ""); got != "Attached: "+p {
+		t.Fatal(got)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".deskpixie")); !os.IsNotExist(err) {
+		t.Fatal("copied for nothing")
+	}
+}
+
+func TestSweepRemovesOldCopies(t *testing.T) {
+	s, root, _ := newStore(t)
+	p := sentFile(t, s, "x.png")
+	oldDir, newDir := t.TempDir(), t.TempDir()
+	s.now = func() time.Time { return time.Now().Add(-15 * 24 * time.Hour) }
+	s.ForWorker("Attached: "+p, oldDir)
+	s.now = time.Now
+	s.ForWorker("Attached: "+p, newDir)
+	fresh := New(root, time.Now)
+	fresh.Sweep()
+	if _, err := os.Stat(filepath.Join(oldDir, ".deskpixie", "attachments", filepath.Base(filepath.Dir(p)), "x.png")); !os.IsNotExist(err) {
+		t.Fatal("old copy kept")
+	}
+	if _, err := os.Stat(filepath.Join(newDir, ".deskpixie", "attachments", filepath.Base(filepath.Dir(p)), "x.png")); err != nil {
+		t.Fatal("new copy removed")
+	}
+	if b, _ := os.ReadFile(filepath.Join(root, "copies.jsonl")); strings.Contains(string(b), oldDir) {
+		t.Fatal("old record kept")
+	}
+}

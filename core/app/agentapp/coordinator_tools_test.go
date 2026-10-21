@@ -314,3 +314,15 @@ func TestThePermissionAllowListCoversTheLocalTools(t *testing.T) {
 		}
 	}
 }
+
+// #240: a request's attachments are named by `Attached:` lines, passed on unchanged.
+func TestTheCoordinatorPromptPassesAttachmentsOn(t *testing.T) {
+	for _, md := range []string{RenderClaudeMd("/data/canvas", ""), RenderClaudeMd("/data/canvas", "/Users/x/code")} {
+		for _, rule := range []string{"`Attached:` lines", "pass those lines on unchanged",
+			"copies the files into a worker's folder", "a session gets the paths as they are"} {
+			if !strings.Contains(md, rule) {
+				t.Errorf("coordinator.md does not say %q", rule)
+			}
+		}
+	}
+}

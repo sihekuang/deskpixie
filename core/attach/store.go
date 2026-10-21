@@ -7,8 +7,11 @@
 package attach
 
 import (
+	"bufio"
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -187,9 +190,10 @@ func (s *Store) Take() []string {
 }
 
 // Sweep runs at start: attachments still waiting when the app last quit are deleted, and
-// handed-over ones older than Retention.
+// handed-over ones and workers' copies older than Retention.
 func (s *Store) Sweep() {
 	_ = os.RemoveAll(filepath.Join(s.root, "pending"))
+	s.sweepCopies()
 	sent := filepath.Join(s.root, "sent")
 	entries, _ := os.ReadDir(sent)
 	cutoff := s.now().Add(-Retention)
@@ -236,4 +240,91 @@ func kindOf(name string) string {
 		return "image"
 	}
 	return "file"
+}
+
+// attachedPrefix starts the line a request names an attachment with.
+const attachedPrefix = "Attached: "
+
+// copyRecord is a line of copies.jsonl: where a worker's copy went, and when.
+type copyRecord struct {
+	Path string    `json:"path"`
+	At   time.Time `json:"at"`
+}
+
+// ForWorker copies each handed-over attachment text names into the worker folder dir
+// (dir/.deskpixie/attachments/<its folder>/<name>, ignored by git) and returns text naming the
+// copies. Other paths, and an empty dir, are left as they are; a copy already made is reused.
+func (s *Store) ForWorker(text, dir string) string {
+	if dir == "" || !strings.Contains(text, attachedPrefix) {
+		return text
+	}
+	sent := filepath.Join(s.root, "sent")
+	lines := strings.Split(text, "\n")
+	for i, l := range lines {
+		path, ok := strings.CutPrefix(l, attachedPrefix)
+		if !ok {
+			continue
+		}
+		rel, err := filepath.Rel(sent, filepath.Clean(path))
+		if err != nil || strings.HasPrefix(rel, "..") || strings.Count(rel, string(filepath.Separator)) != 1 {
+			continue
+		}
+		dest := filepath.Join(dir, ".deskpixie", "attachments", rel)
+		if s.copyFor(path, dest, dir) {
+			lines[i] = attachedPrefix + dest
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// copyFor makes the copy at dest (once) and records it; false if it couldn't be made.
+func (s *Store) copyFor(src, dest, dir string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, err := os.Stat(dest); err == nil {
+		return true
+	}
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return false
+	}
+	ignore := filepath.Join(dir, ".deskpixie", ".gitignore")
+	if os.MkdirAll(filepath.Dir(dest), 0o700) != nil || os.WriteFile(ignore, []byte("*\n"), 0o600) != nil ||
+		os.WriteFile(dest, data, 0o600) != nil {
+		return false
+	}
+	rec, _ := json.Marshal(copyRecord{Path: dest, At: s.now()})
+	if f, err := os.OpenFile(filepath.Join(s.root, "copies.jsonl"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600); err == nil {
+		_, _ = f.Write(append(rec, '\n'))
+		_ = f.Close()
+	}
+	return true
+}
+
+// sweepCopies deletes workers' copies older than Retention and forgets them.
+func (s *Store) sweepCopies() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	list := filepath.Join(s.root, "copies.jsonl")
+	data, err := os.ReadFile(list)
+	if err != nil {
+		return
+	}
+	cutoff := s.now().Add(-Retention)
+	var keep bytes.Buffer
+	sc := bufio.NewScanner(bytes.NewReader(data))
+	for sc.Scan() {
+		var r copyRecord
+		if json.Unmarshal(sc.Bytes(), &r) != nil || r.Path == "" {
+			continue
+		}
+		if r.At.Before(cutoff) {
+			_ = os.Remove(r.Path)
+			_ = os.Remove(filepath.Dir(r.Path)) // its folder, once empty
+			continue
+		}
+		keep.Write(sc.Bytes())
+		keep.WriteByte('\n')
+	}
+	_ = os.WriteFile(list, keep.Bytes(), 0o600)
 }

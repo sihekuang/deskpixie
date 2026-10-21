@@ -1696,6 +1696,14 @@ func (h *AgentHandle) runWorkerOp(e Effect) {
 	name := e.Name
 	switch e.Kind {
 	case EfPromptWorker:
+		text := e.Text
+		if h.deps.Attachments != nil {
+			// Its own copies of the job's attachments, in its folder (#240).
+			h.ctlMu.Lock()
+			dir := h.ctl.WorktreeOf(name)
+			h.ctlMu.Unlock()
+			text = h.deps.Attachments.ForWorker(text, dir)
+		}
 		_, err := within(h.ctx, OpLimit, func(c context.Context) (struct{}, error) {
 			if h.setReconnect(name, false) {
 				if _, err := ReconnectMcp(c, session, name); err != nil {
@@ -1704,7 +1712,7 @@ func (h *AgentHandle) runWorkerOp(e Effect) {
 					return struct{}{}, err
 				}
 			}
-			return struct{}{}, session.Prompt(c, name, e.Text)
+			return struct{}{}, session.Prompt(c, name, text)
 		})
 		if err != nil && !h.quitting() {
 			h.Input(WorkerPromptFailedInput(name, e.Text))
