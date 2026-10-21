@@ -23,6 +23,7 @@ type Client struct {
 	OnRegistered func(reply wire.Msg)    // Address, and Outdated (#189)
 	OnRefused    func(reason string)     // the daemon refused; pix runs standalone from then on
 	Resend       func() []wire.Msg       // state to send after each registration
+	OnDropped    func()                  // a registered connection ended; pix reconnects
 
 	mu   sync.Mutex
 	conn net.Conn
@@ -37,6 +38,9 @@ func (c *Client) Run(ctx context.Context) {
 		}
 		if registered {
 			wait = BackoffMin
+			if c.OnDropped != nil && ctx.Err() == nil {
+				c.OnDropped()
+			}
 		}
 		select {
 		case <-ctx.Done():

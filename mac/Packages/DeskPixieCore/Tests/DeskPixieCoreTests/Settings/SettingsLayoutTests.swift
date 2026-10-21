@@ -320,7 +320,7 @@ final class SettingsLayoutTests: XCTestCase {
         else { return XCTFail() }
         XCTAssertEqual(title, "Reset Position")
         XCTAssertEqual(action, .resetPosition)
-        guard case .button(_, _, let t2, let a2)? = L.extras(.advanced).first, L.extras(.advanced).count == 1
+        guard case .button(_, _, let t2, let a2)? = L.extras(.advanced).first, L.extras(.advanced).count == 2
         else { return XCTFail() }
         XCTAssertEqual(t2, "Open Settings File")
         XCTAssertEqual(a2, .openFile)

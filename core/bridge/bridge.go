@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/sihekuang/deskpixie/core/app"
 	"github.com/sihekuang/deskpixie/core/app/agentapp"
+	"github.com/sihekuang/deskpixie/core/logfile"
 	"github.com/sihekuang/deskpixie/core/metrics"
 	"github.com/sihekuang/deskpixie/core/settings"
 	"github.com/sihekuang/deskpixie/core/voice"
@@ -73,7 +75,7 @@ func (c Config) paths() app.Paths {
 
 // Options are the engine's injectable dependencies (tests).
 type Options struct {
-	MetricsLogPath  string        // "" = ~/Library/Logs/DeskPixie/metrics.log
+	MetricsLogPath  string        // "" = logs/metrics.log in the configured app's data folder (#225)
 	MetricsInterval time.Duration // 0 = DefaultMetricsInterval
 	// Providers replaces the voice provider registry (nil = OpenAI Realtime + Gemini Live).
 	Providers map[string]app.ModelFactory
@@ -89,15 +91,6 @@ type Options struct {
 // NoAgent is an agent factory that never builds one (delegation off).
 var NoAgent app.AgentFactory = func(settings.Config, string, app.AgentHooks) app.Agent { return nil }
 
-// DefaultMetricsLogPath is ~/Library/Logs/DeskPixie/metrics.log ("" if HOME is unknown).
-func DefaultMetricsLogPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, "Library", "Logs", "DeskPixie", "metrics.log")
-}
-
 // Engine owns at most one app core (and so one voice.Runtime), the event queue and the
 // metrics recorder. Safe for concurrent use.
 type Engine struct {
@@ -108,9 +101,11 @@ type Engine struct {
 	cfgMu  sync.Mutex // serialises Configure and Close
 	closed bool       // guarded by cfgMu
 
-	app   atomic.Pointer[app.App]
-	rt    atomic.Pointer[voice.Runtime]
-	drops atomic.Uint64 // mic frames dropped (cumulative across runtimes)
+	app atomic.Pointer[app.App]
+	// metricsPath is where metrics go once configured ("" before: none are kept).
+	metricsPath atomic.Pointer[string]
+	rt          atomic.Pointer[voice.Runtime]
+	drops       atomic.Uint64 // mic frames dropped (cumulative across runtimes)
 
 	errMu   sync.Mutex
 	lastErr string
@@ -124,13 +119,13 @@ type Engine struct {
 
 // New starts an engine (and its metrics loop) with no app; Configure builds one.
 func New(o Options) *Engine {
-	if o.MetricsLogPath == "" {
-		o.MetricsLogPath = DefaultMetricsLogPath()
-	}
 	if o.MetricsInterval <= 0 {
 		o.MetricsInterval = DefaultMetricsInterval
 	}
 	e := &Engine{opts: o, stop: make(chan struct{}), loopDone: make(chan struct{})}
+	if o.MetricsLogPath != "" {
+		e.metricsPath.Store(&o.MetricsLogPath) // a set path is used from the start
+	}
 	go e.metricsLoop()
 	return e
 }
@@ -158,6 +153,16 @@ func (e *Engine) configure(jsonCfg []byte) error {
 	if e.closed {
 		return ErrNotInit
 	}
+	// With the other logs in the app's data folder, so an isolated app (DESKPIXIE_SUPPORT_DIR)
+	// never writes the real user's (#225).
+	metricsPath := e.opts.MetricsLogPath
+	if metricsPath == "" {
+		metricsPath = filepath.Join(paths.AppSupport, "logs", "metrics.log")
+	}
+	// The core's log is kept in the app's data folder too, not only on stderr (#225), from
+	// before the app starts so its startup lines are in it.
+	prevLog := log.Writer()
+	log.SetOutput(io.MultiWriter(os.Stderr, logfile.New(app.AppLogPath(paths.AppSupport), e.logMax)))
 	a, err := app.New(app.Deps{
 		Paths:     paths,
 		Emit:      e.q.push,
@@ -166,17 +171,29 @@ func (e *Engine) configure(jsonCfg []byte) error {
 		Run:       e.opts.Run,
 		OnMicSent: e.onMicSent,
 		Agent:     e.agentFactory(),
+
+		MetricsLogPath: metricsPath,
 	})
 	if err != nil {
+		log.SetOutput(prevLog) // the running app (if any) keeps its log
 		return err
 	}
 	old := e.app.Swap(a)
+	e.metricsPath.Store(&metricsPath)
 	e.rt.Store(a.Runtime())
 	a.Register(registrar{e})
 	if old != nil {
 		old.Close()
 	}
 	return nil
+}
+
+// logMax is the Log size setting in bytes (the default before an app is configured).
+func (e *Engine) logMax() int64 {
+	if a := e.app.Load(); a != nil {
+		return a.LogMaxBytes()
+	}
+	return logfile.DefaultMax
 }
 
 func (e *Engine) agentFactory() app.AgentFactory {
@@ -275,7 +292,8 @@ func (e *Engine) Close() {
 		e.closed = true
 		e.rt.Store(nil)
 		if a := e.app.Swap(nil); a != nil {
-			a.Close()
+			a.Close() // its shutdown lines still reach its log
+			log.SetOutput(os.Stderr)
 		}
 		e.cfgMu.Unlock()
 	})
@@ -308,7 +326,8 @@ func (e *Engine) metricsLoop() {
 	defer close(e.loopDone)
 	t := time.NewTicker(e.opts.MetricsInterval)
 	defer t.Stop()
-	logFailed := false
+	// Kept to the Log size setting like the other logs (#225).
+	var metricsLog *logfile.Writer
 	for {
 		select {
 		case <-e.stop:
@@ -319,30 +338,14 @@ func (e *Engine) metricsLoop() {
 				continue
 			}
 			e.emit(voice.UIEvent{Kind: "metrics", Text: string(snap)})
-			if err := appendLine(e.opts.MetricsLogPath, now.Format(time.RFC3339)+" "+string(snap)+"\n"); err != nil && !logFailed {
-				logFailed = true
-				log.Printf("deskpixie: metrics log: %v", err)
+			if p := e.metricsPath.Load(); p != nil {
+				if metricsLog == nil || metricsLog.Path() != *p {
+					metricsLog = logfile.New(*p, e.logMax)
+				}
+				_, _ = metricsLog.Write([]byte(now.Format(time.RFC3339) + " " + string(snap) + "\n"))
 			}
 		}
 	}
-}
-
-func appendLine(path, line string) error {
-	if path == "" {
-		return errors.New("no metrics log path")
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	_, werr := f.WriteString(line)
-	if cerr := f.Close(); werr == nil {
-		werr = cerr
-	}
-	return werr
 }
 
 // eventQueue is a bounded FIFO of encoded UI events. When full, push drops the oldest

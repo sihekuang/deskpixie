@@ -65,6 +65,7 @@ type sessionOpts struct {
 	tool, description, daemonSock, home, where, app string
 	stdin, stdout                                   *os.File
 	agent                                           Launch
+	log                                             *Log // nil: none
 }
 
 // Session is one wrapped agent: its PTY, delivery, and connection to DeskPixie.
@@ -361,6 +362,16 @@ func (s *Session) SetDescription(text string) error {
 }
 
 func (s *Session) command(m wire.Msg) wire.Msg {
+	r := s.runCommand(m)
+	if r.Err != "" {
+		s.o.log.Printf("command %s: %s", m.Command, r.Err)
+	} else {
+		s.o.log.Printf("command %s", m.Command) // never its text
+	}
+	return r
+}
+
+func (s *Session) runCommand(m wire.Msg) wire.Msg {
 	switch m.Command {
 	case "prompt":
 		text := Sanitize(m.Text)
@@ -542,8 +553,12 @@ func (s *Session) setStatus(st string) {
 	if st == "working" && s.turnStart.IsZero() {
 		s.turnStart = s.now()
 	}
+	changed := s.status != st
 	s.status = st
 	s.mu.Unlock()
+	if changed {
+		s.o.log.Printf("status %s", st)
+	}
 	s.client.Send(wire.Msg{Kind: wire.KindEvent, Event: "status", Status: st})
 }
 
@@ -559,6 +574,7 @@ func (s *Session) setSessionID(id string) {
 	s.sessionID = id
 	s.mu.Unlock()
 	if changed {
+		s.o.log.Printf("session %s", id)
 		s.client.SetSessionID(id)
 		s.client.Send(wire.Msg{Kind: wire.KindEvent, Event: "session", SessionID: id})
 	}
@@ -632,6 +648,7 @@ func (s *Session) start(ctx context.Context) error {
 			Where: s.o.where, App: s.o.app, Description: s.o.description, Build: wire.SelfBuild()},
 		OnCommand: s.command,
 		OnRegistered: func(reply wire.Msg) {
+			s.o.log.Printf("registered with DeskPixie as %s (outdated %v)", reply.Address, reply.Outdated)
 			s.mu.Lock()
 			changed := s.outdated != reply.Outdated
 			s.outdated = reply.Outdated
@@ -641,14 +658,18 @@ func (s *Session) start(ctx context.Context) error {
 			}
 		},
 		OnRefused: func(r string) {
+			s.o.log.Printf("DeskPixie refused: %s", r)
 			s.mu.Lock()
 			s.userDesc = "pix: " + r
 			s.mu.Unlock()
 			s.title()
 		},
-		Resend: s.resend,
+		Resend:    s.resend,
+		OnDropped: func() { s.o.log.Printf("lost DeskPixie; reconnecting") },
 	}
+	s.o.log.Printf("start in %s (%s)", cwd, strings.TrimSpace(s.o.where+" "+s.o.app))
 	if err := s.runner.Start(); err != nil {
+		s.o.log.Printf("couldn't start the agent: %v", err)
 		return err
 	}
 	s.client.Hello.Pid = s.runner.Pid()
@@ -663,6 +684,7 @@ func (s *Session) start(ctx context.Context) error {
 // finish waits for the agent, tells DeskPixie it exited, and returns its exit code.
 func (s *Session) finish() int {
 	code := s.runner.Wait()
+	s.o.log.Printf("the agent exited (%d)", code)
 	s.client.Send(wire.Msg{Kind: wire.KindEvent, Event: "exited", ExitCode: code})
 	s.client.Send(wire.Msg{Kind: wire.KindBye})
 	return code
@@ -706,8 +728,10 @@ func Run(args []string, env func(string) string, home string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
 	}
+	appData := AppData(home, env)
 	s := newSession(sessionOpts{tool: tool, description: desc, home: home, stdin: os.Stdin, stdout: os.Stdout,
-		agent: launch, where: Where(env), app: AppID(env), daemonSock: DaemonSocket(home, env)})
+		agent: launch, where: Where(env), app: AppID(env), daemonSock: DaemonSocket(home, env),
+		log: openLog(LogFile(appData), logMax(appData), tool)})
 	stop, err := ServeLocal(localSock, s)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "pix:", err)
@@ -725,6 +749,7 @@ func Run(args []string, env func(string) string, home string) int {
 	}
 	go func() {
 		if _, ok := <-sig; ok {
+			s.o.log.Printf("hung up")
 			s.runner.Hangup() // tab closed or the terminal app quit: end the agent too
 		}
 	}()
@@ -756,11 +781,10 @@ func gitRoot(dir string) string {
 }
 
 // DaemonSocket is where DeskPixie listens: DESKPIXIE_PIX_SOCK when set (tests, smoke), else
-// wire.SocketPath under Application Support.
+// wire.SocketPath under its data folder (AppData).
 func DaemonSocket(home string, env func(string) string) string {
 	if p := env("DESKPIXIE_PIX_SOCK"); p != "" {
 		return p
 	}
-	appData := filepath.Join(home, "Library", "Application Support", "com.sihekuang.deskpixie")
-	return wire.SocketPath(appData, os.Getuid(), os.TempDir())
+	return wire.SocketPath(AppData(home, env), os.Getuid(), os.TempDir())
 }

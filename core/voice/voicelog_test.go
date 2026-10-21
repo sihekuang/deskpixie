@@ -10,7 +10,7 @@ import (
 
 func TestVoiceLogWritesTimestampedFlatLines(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "logs", "voice.log")
-	l := NewVoiceLog(path)
+	l := NewVoiceLog(path, nil)
 	l.now = func() time.Time { return time.Date(2026, 10, 15, 11, 6, 10, 0, time.UTC) }
 	l.Printf("user: %s", "how many agents\nare running")
 	b, _ := os.ReadFile(path)
@@ -19,20 +19,21 @@ func TestVoiceLogWritesTimestampedFlatLines(t *testing.T) {
 	}
 	var none *VoiceLog
 	none.Printf("ignored") // a nil log is off
-	if NewVoiceLog("") != nil || VoiceLogPath("") != "" {
+	if NewVoiceLog("", nil) != nil || VoiceLogPath("") != "" {
 		t.Fatal("empty path")
 	}
 }
 
-func TestVoiceLogRotates(t *testing.T) {
+// #225: the voice log keeps to the Log size setting (the file and one older one, half each).
+func TestVoiceLogRotatesAtTheLogSize(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "voice.log")
-	if err := os.WriteFile(path, []byte(strings.Repeat("x", VoiceLogMaxBytes)), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(strings.Repeat("x", 500)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	NewVoiceLog(path).Printf("new")
+	NewVoiceLog(path, func() int64 { return 1000 }).Printf("new")
 	old, _ := os.Stat(path + ".1")
 	cur, _ := os.ReadFile(path)
-	if old == nil || old.Size() != VoiceLogMaxBytes || !strings.HasSuffix(string(cur), " new\n") || len(cur) > 100 {
+	if old == nil || old.Size() != 500 || !strings.HasSuffix(string(cur), " new\n") || len(cur) > 100 {
 		t.Fatalf("old %v, current %q", old, cur)
 	}
 }
@@ -55,7 +56,7 @@ func TestTheRuntimeLogsAConversation(t *testing.T) {
 	cc := DefaultConversationConfig()
 	cc.HandOff = true
 	r := NewRuntime(m, nil, RuntimeConfig{
-		Session: testSessionCfg, APIKey: "k", MouthLevels: 4, Tools: reg, Conversation: cc, Log: NewVoiceLog(path),
+		Session: testSessionCfg, APIKey: "k", MouthLevels: 4, Tools: reg, Conversation: cc, Log: NewVoiceLog(path, nil),
 	}, ui.emit)
 	t.Cleanup(r.Close)
 	startListening(t, r, m, ui)

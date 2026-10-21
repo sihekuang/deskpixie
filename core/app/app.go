@@ -93,6 +93,8 @@ type Deps struct {
 	// Agent builds the delegation agent (nil = no agent; the factory returns nil when
 	// agent.enabled is false). Its tools and persona join the voice loop's.
 	Agent AgentFactory
+	// MetricsLogPath is the engine's metrics log, exported with the others (#225); "" = none.
+	MetricsLogPath string
 }
 
 // MouthMeter is the voice loop's view of a pack change.
@@ -296,7 +298,7 @@ func (a *App) buildVoice(cfg settings.Config) {
 		MouthLevels:  MouthLevels(levels, ok),
 		Conversation: voice.ConversationConfig{IdleTimeout: idle, HoldTimeout: hold, HandOff: cfg.Voice.HandOffWhenUnsure, CheckClaims: cfg.Voice.CheckClaims},
 		OnMicSent:    a.deps.OnMicSent,
-		Log:          voice.NewVoiceLog(voice.VoiceLogPath(a.paths.AppSupport)),
+		Log:          voice.NewVoiceLog(voice.VoiceLogPath(a.paths.AppSupport), a.LogMaxBytes),
 	}, a.onVoiceEvent)
 	a.mu.Lock()
 	a.meter = a.rt
@@ -1151,6 +1153,7 @@ func (a *App) Register(r Registrar) {
 		return struct{}{}, nil
 	})
 	a.registerChat(r)
+	a.registerLogs(r)
 	r.Register("agent.updates", func(json.RawMessage) (any, error) {
 		var lines any = []any{}
 		if a.agent != nil {
