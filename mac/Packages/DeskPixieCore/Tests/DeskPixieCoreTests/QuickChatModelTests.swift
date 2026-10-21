@@ -347,3 +347,16 @@ final class QuickChatModelTests: XCTestCase {
         XCTAssertFalse(m.dismissIfOlder(than: 120, now: t0.addingTimeInterval(500)), "nothing left")
     }
 }
+
+/// #240: attachments alone can be sent.
+final class QuickChatAttachmentTests: XCTestCase {
+    func testCanSendWithAttachmentsAndNoText() {
+        let m = QuickChatModel()
+        XCTAssertTrue(m.canSend("", attachments: 1))
+        XCTAssertFalse(m.canSend("  ", attachments: 0))
+        XCTAssertTrue(m.canSend("hi"))
+        var busy = QuickChatModel()
+        busy.sending()
+        XCTAssertFalse(busy.canSend("", attachments: 1))
+    }
+}
