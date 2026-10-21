@@ -96,6 +96,8 @@ type Deps struct {
 	// Chat is the text box under Pixie (#221): typed jobs' lines go to it (nil: no text box, and
 	// typed messages are ordinary jobs).
 	Chat ChatSink
+	// Attachments wait for the next request or answer (#240); nil = none.
+	Attachments Attachments
 }
 
 // WorkerDeps are the worker adapters (spec §5.5), injected only when agent.workers.enabled.
@@ -449,6 +451,7 @@ func (h *AgentHandle) delegate(task, context string, typed bool) (JobID, error) 
 	if off {
 		return "", fmt.Errorf("Delegation is off (%s).", why)
 	}
+	task += h.attached() // only now that it can go
 	id := h.deps.IDs.JobID()
 	if note := h.requestNote(); note != "" {
 		context = strings.TrimSpace(context + "\n" + note)
@@ -548,6 +551,7 @@ func (h *AgentHandle) AnswerAsked(jobID, text string) (JobID, string, error) {
 	if h.quitting() {
 		return "", "", errQuitting
 	}
+	text += h.attached()
 	r := h.stepLocked(AnswerInput(id, text))
 	if r == nil || r.Kind != EfAnswerResult {
 		return "", "", errors.New("The answer was not processed.")
