@@ -54,9 +54,9 @@ final class OnboardingTests: XCTestCase {
     // MARK: Pages
 
     func testTheChosenFeaturesFollowTheirSettings() {
-        XCTAssertEqual(OnboardingFlow.chosen(SettingsFixture.defaults), [.voice, .agents, .canvas])
+        XCTAssertEqual(OnboardingFlow.chosen(SettingsFixture.defaults), [.voice, .agents, .sessions, .canvas])
         // No snapshot yet: the core's defaults.
-        XCTAssertEqual(OnboardingFlow.chosen(.null), [.voice, .agents, .canvas])
+        XCTAssertEqual(OnboardingFlow.chosen(.null), [.voice, .agents, .sessions, .canvas])
         let v = values(#"{"agent":{"enabled":false},"notifications":{"sessionTurns":true},"canvas":{"autoOpen":false}}"#)
         XCTAssertEqual(OnboardingFlow.chosen(v), [.voice, .sessions])
     }

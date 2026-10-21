@@ -77,9 +77,9 @@ type Settings struct {
 	// SpeakWorkerReports (`agent.workers.speakResults`, a feature flag, off by default): a
 	// worker's report_result and report_blocked are also said to the user at once.
 	SpeakWorkerReports bool
-	// SessionTurns (`notifications.sessionTurns`, off by default): a session you started with
-	// pix that finishes a turn is announced (#114). SessionTurnsMinMs: a turn of yours shorter
-	// than this stays quiet; one Pixie started is always announced.
+	// SessionTurns (`notifications.sessionTurns`, on by default, #229): a session you started
+	// with pix that finishes a turn is announced (#114). SessionTurnsMinMs: a turn of yours
+	// shorter than this stays quiet. One Pixie started is always announced, setting or not.
 	SessionTurns      bool
 	SessionTurnsMinMs Millis
 	// OpenConversation (`agent.openConversationForUpdates`, a feature flag, off by default): a job's done
@@ -98,7 +98,7 @@ type Settings struct {
 
 // DefaultSettings: 4 notifications a minute, 2-minute permission timeout, narration on.
 func DefaultSettings() Settings {
-	return Settings{NotifyPerMinute: 4, PermissionTimeoutMs: 120_000, Narration: true, UpdateQuietMs: UpdateQuietMs, Workers: DefaultWorkerPolicy(), SessionTurnsMinMs: 30_000}
+	return Settings{NotifyPerMinute: 4, PermissionTimeoutMs: 120_000, Narration: true, UpdateQuietMs: UpdateQuietMs, Workers: DefaultWorkerPolicy(), SessionTurns: true, SessionTurnsMinMs: 30_000}
 }
 
 // WorkerPolicy is `agent.workers` (spec §12): whether the coordinator may start workers, how
@@ -1688,15 +1688,16 @@ func (c *AgentController) flushUpdates(now Millis, fx *[]Effect) {
 // MaxSessionDetailBytes caps the reply the voice model is given to sum up (#114).
 const MaxSessionDetailBytes = 2 << 10
 
-// onSessionTurn: a session you started with pix finished a turn (#114). With the setting on,
-// a turn of yours that ran long enough, or any turn Pixie started, is told like an update:
-// its gist, or its question (never held by the cap). Pending confirm words are masked in all
-// of it: the label is agent-settable too.
+// onSessionTurn: a session you started with pix finished a turn (#114). Any turn Pixie
+// started (the coordinator was told its answer comes back, #229), or with the setting on a
+// turn of yours that ran long enough, is told like an update: its gist, or its question
+// (never held by the cap). Pending confirm words are masked in all of it: the label is
+// agent-settable too.
 func (c *AgentController) onSessionTurn(name string, t SessionTurn, now Millis, fx *[]Effect) {
-	if !c.settings.SessionTurns || c.shutDown {
+	if c.shutDown {
 		return
 	}
-	if !t.FromPixie && t.Duration < c.settings.SessionTurnsMinMs {
+	if !t.FromPixie && (!c.settings.SessionTurns || t.Duration < c.settings.SessionTurnsMinMs) {
 		return
 	}
 	tokens := c.pendingTokens()

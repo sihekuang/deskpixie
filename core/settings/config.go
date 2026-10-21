@@ -103,8 +103,8 @@ type NotificationSettings struct {
 	// AwayAfterMins: this long with no keyboard or mouse input counts as away.
 	AwayAfterMins uint64 `json:"awayAfterMins"`
 	// SessionTurns: Pixie tells you when a session you started with pix finishes a turn, even
-	// one it didn't start (#114). SessionTurnsMinSeconds: a turn of yours shorter than this
-	// stays quiet (one Pixie started is always told).
+	// one it didn't start (#114); on by default (#229). SessionTurnsMinSeconds: a turn of yours
+	// shorter than this stays quiet. One Pixie started is always told, setting or not.
 	SessionTurns           bool   `json:"sessionTurns"`
 	SessionTurnsMinSeconds uint64 `json:"sessionTurnsMinSeconds"`
 }
@@ -195,7 +195,7 @@ func Default() Config {
 			HandOffWhenUnsure: true, CheckClaims: true,
 		},
 		Canvas:        CanvasSettings{AutoOpen: true, Keep: 50},
-		Notifications: NotificationSettings{DebounceSecs: 20, Bubble: BubbleSettings{Enabled: true, PopSecs: 6, Lines: 5}, AwayAfterMins: 5, SessionTurnsMinSeconds: 30},
+		Notifications: NotificationSettings{DebounceSecs: 20, Bubble: BubbleSettings{Enabled: true, PopSecs: 6, Lines: 5}, AwayAfterMins: 5, SessionTurns: true, SessionTurnsMinSeconds: 30},
 		Agent: AgentSettings{
 			Enabled: true, SessionHost: "herdr", Session: "deskpixie", Terminal: "warp",
 			CoordinatorKind: CoordinatorClaude, CoordinatorEffort: "low",
