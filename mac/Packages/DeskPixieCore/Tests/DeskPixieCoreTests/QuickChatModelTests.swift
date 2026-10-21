@@ -16,8 +16,11 @@ final class QuickChatModelTests: XCTestCase {
         guard case .chatFocus? = d(#"{"kind":"chat.focus"}"#) else { return XCTFail("chat.focus") }
         guard case .replyMode(let m)? = d(#"{"kind":"replyMode","mode":"text"}"#) else { return XCTFail("replyMode") }
         XCTAssertEqual(m, "text")
-        guard case .captions(let on)? = d(#"{"kind":"captions","always":true}"#) else { return XCTFail("captions") }
+        guard case .captions(let on, let secs)? = d(#"{"kind":"captions","always":true,"dismissSecs":120}"#) else {
+            return XCTFail("captions")
+        }
         XCTAssertTrue(on)
+        XCTAssertEqual(secs, 120)
     }
 
     func test_send_thinks_with_stop_and_no_sending() {
@@ -283,5 +286,51 @@ final class QuickChatModelTests: XCTestCase {
         while m.tick() {}
         m.conversationEnded()
         XCTAssertEqual(m.shown, "Kept.")
+    }
+
+    // MARK: - putting it away (#224)
+
+    /// The ✕: the words go, hover and always show nothing until something new is said.
+    func test_dismiss_puts_the_words_away() {
+        var m = QuickChatModel()
+        m.caption(role: "assistant", text: "Hi.")
+        while m.tick() {}
+        m.conversationEnded()
+        XCTAssertTrue(m.canDismiss)
+        m.dismiss()
+        XCTAssertFalse(m.showsCard(hovering: true, always: true))
+        XCTAssertFalse(m.canDismiss)
+        XCTAssertNil(m.ago(now: Date()))
+        XCTAssertTrue(m.caption(role: "assistant", text: "New."), "the next words show again")
+    }
+
+    /// No ✕ while a typed message is at work (Stop is there).
+    func test_no_dismiss_while_a_typed_message_works() {
+        var m = QuickChatModel()
+        m.mode = "text"
+        m.sent(job: "job_1")
+        XCTAssertFalse(m.canDismiss)
+        m.apply(line("done", "Done it."))
+        XCTAssertFalse(m.canDismiss, "still typing out")
+        while m.tick() {}
+        XCTAssertTrue(m.canDismiss)
+        m.dismiss()
+        XCTAssertEqual(m.phase, .ready)
+        XCTAssertEqual(m.shown, "")
+    }
+
+    /// Put away after the setting's seconds; 0 keeps it; never while the conversation goes on.
+    func test_dismissed_after_the_setting() {
+        let t0 = Date(timeIntervalSince1970: 1_000_000)
+        var m = QuickChatModel()
+        m.caption(role: "assistant", text: "Hi.", now: t0)
+        while m.tick() {}
+        XCTAssertFalse(m.dismissIfOlder(than: 120, now: t0.addingTimeInterval(500)), "still live")
+        m.conversationEnded()
+        XCTAssertFalse(m.dismissIfOlder(than: 0, now: t0.addingTimeInterval(500)), "0 keeps it")
+        XCTAssertFalse(m.dismissIfOlder(than: 120, now: t0.addingTimeInterval(119)))
+        XCTAssertTrue(m.dismissIfOlder(than: 120, now: t0.addingTimeInterval(120)))
+        XCTAssertFalse(m.showsCard(hovering: true, always: true))
+        XCTAssertFalse(m.dismissIfOlder(than: 120, now: t0.addingTimeInterval(500)), "nothing left")
     }
 }

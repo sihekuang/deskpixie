@@ -34,6 +34,8 @@ final class AgentRosterController {
     /// Captions (#224): kept up always (the setting), the pointer near Pixie, and the "ago"
     /// last drawn.
     private var alwaysCaption = false
+    /// captionDismissSecs: the words are put away this long after they were said (0 keeps them).
+    private var dismissSecs = 120
     private var hovering = false
     private var agoShown: String?
     /// How near Pixie, in points, the pointer brings the last words back.
@@ -82,9 +84,18 @@ final class AgentRosterController {
         render()
     }
 
-    /// The always-show switch (the `captions` event or the first read, #224).
-    func apply(captions always: Bool) {
+    /// The always-show switch and the put-away time (the `captions` event or the first read, #224).
+    func apply(captions always: Bool, dismissSecs: Int) {
         alwaysCaption = always
+        self.dismissSecs = dismissSecs
+        render()
+    }
+
+    /// The ✕ on the card: the words go at once.
+    private func dismissWords() {
+        chat.dismiss()
+        typeTimer?.invalidate()
+        typeTimer = nil
         render()
     }
 
@@ -133,6 +144,7 @@ final class AgentRosterController {
             let reply: ModeReply?? = await worker.run { try? engine.call("chat.mode", as: ModeReply.self) }
             guard let self, let reply = reply ?? nil else { return }
             self.alwaysCaption = reply.alwaysShowCaption ?? false
+            self.dismissSecs = reply.captionDismissSecs ?? 120
             self.apply(mode: reply.mode)
         }
     }
@@ -293,8 +305,10 @@ final class AgentRosterController {
         let near = pixie.isShown
             && (pixie.panel.frame.insetBy(dx: -Self.hoverMargin, dy: -Self.hoverMargin).contains(mouse)
                 || (overPanel && captionCard))
+        // Put away once old enough (captionDismissSecs).
+        let expired = chat.dismissIfOlder(than: dismissSecs, now: Date())
         let ago = cardUp ? chat.ago(now: Date()) : nil
-        if inside != model.open || near != hovering || ago != agoShown {
+        if expired || inside != model.open || near != hovering || ago != agoShown {
             model.open = inside
             hovering = near
             render()
@@ -333,7 +347,8 @@ final class AgentRosterController {
             onResize: { [weak self] in
                 // After SwiftUI has laid the new lines out.
                 DispatchQueue.main.async { self?.layout() }
-            })
+            },
+            onDismiss: { [weak self] in self?.dismissWords() })
             .onPreferenceChange(ChipFrameKey.self) { [weak self] frame in
                 MainActor.assumeIsolated { self?.chipFrame = frame }
             })
@@ -398,7 +413,11 @@ final class AgentRosterController {
     }
 
     private struct RosterReply: Decodable { var roster: RosterView }
-    private struct ModeReply: Decodable { var mode: String; var alwaysShowCaption: Bool? }
+    private struct ModeReply: Decodable {
+        var mode: String
+        var alwaysShowCaption: Bool?
+        var captionDismissSecs: Int?
+    }
     private struct SendArgs: Encodable, Sendable { let text: String }
     private struct SendReply: Decodable { var job: String }
     private struct FocusAgentArgs: Encodable, Sendable { let name: String }

@@ -63,3 +63,31 @@ func TestAlwaysShowCaptionIsALivePixieSwitchOffByDefault(t *testing.T) {
 		t.Fatal(r, ok)
 	}
 }
+
+// #224: what Pixie said is dismissed after a while, 2 minutes by default (0 keeps it).
+func TestCaptionDismissSecsIsALivePixieNumber(t *testing.T) {
+	if got := Default().CaptionDismissSecs; got != 120 {
+		t.Fatal(got)
+	}
+	c, err := ParseConfig([]byte(`{"hotkey":"ctrl+alt+Space"}`))
+	if err != nil || c.CaptionDismissSecs != 120 {
+		t.Fatal("an old settings.json gets the default:", c.CaptionDismissSecs, err)
+	}
+	f := FieldByPath("captionDismissSecs")
+	if f.Section != SectionPixie || f.Apply != ApplyLive || f.Kind.Type != KindInt {
+		t.Fatalf("%+v", f)
+	}
+	if r, ok := RouteFor("captionDismissSecs"); !ok || r != RouteCaptions {
+		t.Fatal(r, ok)
+	}
+	env := testEnv(t)
+	for secs, ok := range map[uint32]bool{0: true, 120: true, 86400: true, 86401: false} {
+		c := Default()
+		c.CaptionDismissSecs = secs
+		got := problems(c, env)
+		bad := len(got) == 1 && got[0][0] == "captionDismissSecs"
+		if ok && len(got) != 0 || !ok && !bad {
+			t.Errorf("%d: %v", secs, got)
+		}
+	}
+}

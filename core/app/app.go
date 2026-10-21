@@ -955,7 +955,7 @@ func (ap applier) Apply(field string, cfg settings.Config) error {
 	case settings.RouteReplyMode:
 		a.applyReplyMode(cfg.ReplyMode)
 	case settings.RouteCaptions:
-		a.emit("captions", map[string]any{"always": cfg.AlwaysShowCaption})
+		a.emit("captions", map[string]any{"always": cfg.AlwaysShowCaption, "dismissSecs": cfg.CaptionDismissSecs})
 	}
 	// The tray shows the size, pack and fade checkmarks and the hotkey line.
 	a.pushTray()

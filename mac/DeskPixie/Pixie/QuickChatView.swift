@@ -54,6 +54,7 @@ struct QuickChatCard: View {
     let onStop: () -> Void
     let onClose: () -> Void
     let onResize: () -> Void
+    let onDismiss: () -> Void
 
     static let width: CGFloat = 260
     @FocusState private var focused: Bool
@@ -61,11 +62,26 @@ struct QuickChatCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             if !model.shown.isEmpty || model.phase != .ready {
-                Text(ago.map { "Pixie · \($0)" } ?? "Pixie")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 8)
-                    .padding(.top, 4)
+                HStack(spacing: 4) {
+                    Text(ago.map { "Pixie · \($0)" } ?? "Pixie")
+                    Spacer(minLength: 4)
+                    if model.canDismiss {
+                        // Puts the words away (#224); the setting does it on its own after a while.
+                        Button(action: onDismiss) {
+                            Image(systemName: "xmark")
+                                .font(.caption2.weight(.bold))
+                                .frame(width: 16, height: 16)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Dismiss")
+                        .accessibilityLabel("Dismiss")
+                    }
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
+                .padding(.top, 4)
                 if !model.shown.isEmpty {
                     ScrollView {
                         Text(model.shown)

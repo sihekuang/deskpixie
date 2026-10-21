@@ -94,8 +94,8 @@ public enum EngineEvent: Sendable, Equatable {
     case chatFocus
     /// replyMode changed: "voice" or "text".
     case replyMode(String)
-    /// alwaysShowCaption changed (#224).
-    case captions(Bool)
+    /// alwaysShowCaption or captionDismissSecs changed (#224).
+    case captions(always: Bool, dismissSecs: Int)
 
     private struct Kind: Decodable { var kind: String }
 
@@ -115,7 +115,7 @@ public enum EngineEvent: Sendable, Equatable {
     private struct Agents: Decodable { var roster: RosterView }
     private struct FocusPlanEvent: Decodable { var plan: FocusPlan }
     private struct ReplyModeEvent: Decodable { var mode: String }
-    private struct CaptionsEvent: Decodable { var always: Bool }
+    private struct CaptionsEvent: Decodable { var always: Bool; var dismissSecs: Int }
 
     /// Decodes one event JSON object; unknown kinds, malformed JSON and events missing a
     /// required field yield nil.
@@ -152,7 +152,7 @@ public enum EngineEvent: Sendable, Equatable {
         case "chat.line": return get(ChatLine.self).map { .chatLine($0) }
         case "chat.focus": return .chatFocus
         case "replyMode": return get(ReplyModeEvent.self).map { .replyMode($0.mode) }
-        case "captions": return get(CaptionsEvent.self).map { .captions($0.always) }
+        case "captions": return get(CaptionsEvent.self).map { .captions(always: $0.always, dismissSecs: $0.dismissSecs) }
         default: return nil
         }
     }

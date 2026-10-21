@@ -157,6 +157,32 @@ public struct QuickChatModel: Equatable, Sendable {
         }
     }
 
+    /// The words can be put away (the ✕): a caption, or a finished answer; never while a typed
+    /// message is at work (Stop is there then).
+    public var canDismiss: Bool {
+        isCaption ? phase != .ready : (phase == .done || phase == .stopped)
+    }
+
+    /// The ✕ (#224): the words go; hover and always show nothing until something new is said.
+    public mutating func dismiss() {
+        guard canDismiss else { return }
+        isCaption = false
+        captionLive = false
+        saidAt = nil
+        full = ""
+        shown = ""
+        phase = .ready
+    }
+
+    /// Puts the words away `secs` after they were said (0 keeps them), never while the
+    /// conversation they came from goes on. True when it did.
+    public mutating func dismissIfOlder(than secs: Int, now: Date) -> Bool {
+        guard secs > 0, let saidAt, !(isCaption && captionLive), canDismiss,
+              now.timeIntervalSince(saidAt) >= TimeInterval(secs) else { return false }
+        dismiss()
+        return true
+    }
+
     /// What Pixie said aloud (the voice model's transcript). Only Pixie's side; a new caption
     /// replaces the last. In text mode it never covers a typed message still at work. True when
     /// it shows.
