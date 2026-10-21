@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/sihekuang/deskpixie/core/settings"
 )
 
 func TestSetupProgramsFindsEachOnThePathOrInTheInstallDirs(t *testing.T) {
@@ -47,5 +49,38 @@ func TestSetupProgramsRPCAnswersEachProgram(t *testing.T) {
 	}
 	if reply["herdr"] != configured {
 		t.Fatalf("herdr = %q, want the configured %q", reply["herdr"], configured)
+	}
+}
+
+// #216: the window checks the projects folder without changing anything, and Create makes it.
+func TestProjectsFolderRPCChecksThenCreates(t *testing.T) {
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	h := newHarness(t)
+	h.call("settings.set", map[string]any{"field": "agent.projectsRoot", "value": "~/Documents/dp-rpc"})
+	want := filepath.Join(home, "Documents", "dp-rpc")
+	var check settings.ProjectsFolder
+	if err := json.Unmarshal(h.call("setup.projectsFolder", nil), &check); err != nil {
+		t.Fatal(err)
+	}
+	if check.State != settings.FolderMissing || check.Path != want ||
+		check.Fallback != filepath.Join(h.dir, "agent", "projects") {
+		t.Fatalf("%+v", check)
+	}
+	if _, err := os.Stat(want); err == nil {
+		t.Fatal("the check made the folder")
+	}
+	var made settings.ProjectsFolder
+	if err := json.Unmarshal(h.call("setup.createProjectsFolder", nil), &made); err != nil {
+		t.Fatal(err)
+	}
+	if made.State != settings.FolderReady || made.Path != want {
+		t.Fatalf("%+v", made)
+	}
+	if st, err := os.Stat(want); err != nil || !st.IsDir() {
+		t.Fatal("not created")
 	}
 }

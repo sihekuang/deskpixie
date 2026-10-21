@@ -74,25 +74,28 @@ func TestNoUsableKindTurnsWorkersOff(t *testing.T) {
 
 func TestAWorkersProblemTurnsOnlyWorkersOff(t *testing.T) {
 	home := tmpDir(t, "setuphome")
-	if err := os.MkdirAll(filepath.Join(home, "code"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	code := filepath.Join(home, "code")
 	on := settings.WorkerSettings{Enabled: true, Max: 4, Kinds: []string{"claude"}}
-	bad := SetupWorkers(on, "~/missing", home)
-	if bad.Policy.Enabled || bad.Root != "" || bad.Notice != "Coordinator: workers off: projectsRoot not usable" {
-		t.Fatalf("%+v", bad)
+	none := SetupWorkers(on, UsedFolder{Why: "no room"})
+	if none.Policy.Enabled || none.Root != "" || none.Notice != "Coordinator: workers off: no projects folder" {
+		t.Fatalf("%+v", none)
 	}
 	noKind := on
 	noKind.Kinds = []string{"gpt"}
-	nk := SetupWorkers(noKind, "~/code", home)
+	nk := SetupWorkers(noKind, UsedFolder{Root: code})
 	if nk.Policy.Enabled || nk.Root != "" || nk.Notice != "Coordinator: workers off: no usable worker kind" {
 		t.Fatalf("%+v", nk)
 	}
-	good := SetupWorkers(on, "~/code", home)
-	if !good.Policy.Enabled || good.Notice != "" || good.Root != filepath.Join(home, "code") {
+	good := SetupWorkers(on, UsedFolder{Root: code})
+	if !good.Policy.Enabled || good.Notice != "" || good.Root != code {
 		t.Fatalf("%+v", good)
 	}
-	off := SetupWorkers(settings.Default().Agent.Workers, "~/missing", home)
+	// DeskPixie's own folder: workers run, and the tray says where (#216).
+	fb := SetupWorkers(on, UsedFolder{Root: "/data/agent/projects", Fallback: true, Why: "outside home"})
+	if !fb.Policy.Enabled || fb.Root != "/data/agent/projects" || fb.Notice != FallbackNotice {
+		t.Fatalf("%+v", fb)
+	}
+	off := SetupWorkers(settings.Default().Agent.Workers, UsedFolder{Root: "/data/agent/projects", Fallback: true})
 	if off.Policy.Enabled || off.Notice != "" {
 		t.Fatal("off is not news")
 	}
@@ -164,17 +167,19 @@ func TestTheCoordinatorMcpConfigIsPrivateAndCarriesItsBearer(t *testing.T) {
 	}
 }
 
-// TerminalDir is the projects folder when usable, else home.
+// TerminalDir is the projects folder in use, else home (never DeskPixie's own fallback).
 func TestTheTerminalDirIsTheProjectsFolderOrHome(t *testing.T) {
-	home, _ := filepath.EvalSymlinks(t.TempDir())
-	if err := os.MkdirAll(filepath.Join(home, "code"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	for raw, want := range map[string]string{
-		"~/code": filepath.Join(home, "code"), "~/missing": home, "": home, "/etc": home, "~": home,
+	home := "/Users/u"
+	for _, tc := range []struct {
+		folder UsedFolder
+		want   string
+	}{
+		{UsedFolder{Root: "/Users/u/code"}, "/Users/u/code"},
+		{UsedFolder{}, home},
+		{UsedFolder{Root: "/data/agent/projects", Fallback: true}, home},
 	} {
-		if got := TerminalDir(raw, home); got != want {
-			t.Fatalf("%q: %q, want %q", raw, got, want)
+		if got := TerminalDir(tc.folder, home); got != tc.want {
+			t.Fatalf("%+v: %q, want %q", tc.folder, got, tc.want)
 		}
 	}
 }

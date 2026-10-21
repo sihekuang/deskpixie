@@ -302,7 +302,11 @@ func TestOpenTerminalAttachesAndAFailureNamesTheTerminal(t *testing.T) {
 	if got := f.launcher.Opened()[0]; !slices.Equal(got, f.host.AttachCommand()) {
 		t.Fatal(got)
 	}
-	// The default projects folder (~/Documents/Projects) is missing here: start in home.
+	// Workers are off by default, so the missing projects folder is left alone (never created,
+	// #216) and the terminal starts in home.
+	if _, err := os.Stat(filepath.Join(f.home, "Documents", "deskpixie")); err == nil {
+		t.Fatal("created the projects folder with workers off")
+	}
 	if got := f.launcher.Attaches()[0].Dir; got != f.home {
 		t.Fatal(got)
 	}

@@ -27,6 +27,8 @@ public final class SettingsModel {
     public private(set) var notice: String?
     /// The hotkey field being recorded, if any.
     public var recordingPath: String?
+    /// The projects folder checked on disk (#216); nil until read, or when the read failed.
+    public private(set) var projectsFolder: ProjectsFolderStatus?
 
     /// Where typed API keys are stored (the app sets the Keychain); nil = keys can't be typed.
     @ObservationIgnored public var keyStore: APIKeyStore?
@@ -58,12 +60,38 @@ public final class SettingsModel {
     public func load() {
         fetch { try client.snapshot() }
         readKeyStatus()
+        refreshProjectsFolder()
     }
 
     /// The window became key: pick up hand edits and a key added to `.env`.
     public func focusGained() {
         fetch { try client.reload() }
         readKeyStatus()
+        refreshProjectsFolder()
+    }
+
+    /// The path that holds the projects folder setting.
+    public static let projectsRootPath = "agent.projectsRoot"
+    /// Workers' switch: the projects folder only matters while it is on.
+    public static let workersPath = "agent.workers.enabled"
+
+    /// Workers are on (the projects folder is in use).
+    public var workersOn: Bool { snapshot?.values.at(Self.workersPath)?.boolValue ?? false }
+
+    /// Reads the projects folder again (window shown, the setting saved, Check Again). Only
+    /// while workers are on: with them off DeskPixie never looks at it, since a folder in
+    /// ~/Documents can bring up a macOS privacy prompt (#216).
+    public func refreshProjectsFolder() {
+        projectsFolder = workersOn ? try? client.projectsFolder() : nil
+    }
+
+    /// Create: makes the missing projects folder; a failure is the notice.
+    public func createProjectsFolder() {
+        do {
+            projectsFolder = try client.createProjectsFolder()
+        } catch {
+            notice = "Couldn't create the projects folder: \(Self.describe(error))"
+        }
     }
 
     private func readKeyStatus() {
@@ -231,6 +259,7 @@ public final class SettingsModel {
             errors[path] = nil
             drafts[path] = nil
             notice = nil
+            if path == Self.projectsRootPath || path == Self.workersPath { refreshProjectsFolder() }
             return true
         case .invalid(let list)?:
             for placed in SettingsLayout.placeErrors(path, list, fields: snapshot?.fields ?? []) {

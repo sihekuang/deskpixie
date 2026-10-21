@@ -1,10 +1,12 @@
 package app
 
 import (
+	"log"
 	"os"
 
 	"github.com/sihekuang/deskpixie/core/agent/proc"
 	"github.com/sihekuang/deskpixie/core/herdr"
+	"github.com/sihekuang/deskpixie/core/settings"
 	"github.com/sihekuang/deskpixie/core/tmux"
 )
 
@@ -51,4 +53,22 @@ func (a *App) setupPrograms() SetupPrograms {
 func isRegularFile(p string) bool {
 	info, err := os.Stat(p)
 	return err == nil && info.Mode().IsRegular()
+}
+
+// projectsFolder: setup.projectsFolder (#216).
+func (a *App) projectsFolder() settings.ProjectsFolder {
+	home, _ := os.UserHomeDir()
+	return settings.CheckProjectsFolder(a.store.Current().Agent.ProjectsRoot, home, settings.ProjectsFallback(a.paths.AppSupport))
+}
+
+// createProjectsFolder: setup.createProjectsFolder (#216). A folder that can't be made stays
+// missing, its detail saying so; the agent picks a new folder up at its next start.
+func (a *App) createProjectsFolder() (settings.ProjectsFolder, error) {
+	home, _ := os.UserHomeDir()
+	f, err := settings.CreateProjectsFolder(a.store.Current().Agent.ProjectsRoot, home, settings.ProjectsFallback(a.paths.AppSupport))
+	if err != nil {
+		log.Printf("setup: could not create the projects folder: %v", err)
+		f.Detail = settings.CouldNotCreate
+	}
+	return f, nil
 }

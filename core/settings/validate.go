@@ -2,7 +2,9 @@ package settings
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"math"
 	"os"
 	"path/filepath"
@@ -15,7 +17,7 @@ const (
 	NotAChoice    = "Not one of the choices"
 	NoFile        = "No file at that path"
 	// BadProjectsRoot is shown for any bad projects folder: never the OS error or a path.
-	BadProjectsRoot = "Choose an existing folder inside your home folder"
+	BadProjectsRoot = "Choose a folder inside your home folder"
 	BadHotkey       = "Not a key combination (e.g. ctrl+alt+Space)"
 	BadSession      = "Use a-z, 0-9 and -, up to 48 characters, not starting with - and not \"default\""
 	NoWorkerKind    = "Pick at least one worker kind to turn workers on"
@@ -82,7 +84,7 @@ func Validate(c Config, env Env) []FieldError {
 	if CheckHotkey(c.Hotkey) != nil {
 		add("hotkey", BadHotkey)
 	}
-	if _, err := ProjectsRoot(c.Agent.ProjectsRoot, env.Home); err != nil {
+	if !projectsRootOK(c.Agent, env.Home) {
 		add("agent.projectsRoot", BadProjectsRoot)
 	}
 	if CheckSession(c.Agent.Session) != nil {
@@ -156,25 +158,97 @@ func CheckSession(session string) error {
 	return nil
 }
 
-// ProjectsRoot resolves the projects folder: ~ and ~/… expand to home, a relative path is
-// below home; the result must be an existing folder strictly below home after resolving
-// symlinks. (Rust agent::workers::projects_root.)
-func ProjectsRoot(raw, home string) (string, error) {
+// projectsRootOK: with workers on, the folder is checked on disk (ProjectsRootUsable); with
+// them off only its name, so saving settings never looks into a privacy-protected folder such
+// as ~/Documents (#216). Workers turned on later get the full check, and the agent falls back
+// at start whatever happens.
+func projectsRootOK(a AgentSettings, home string) bool {
+	if a.Workers.Enabled {
+		return ProjectsRootUsable(a.ProjectsRoot, home)
+	}
+	p, err := ExpandProjectsRoot(a.ProjectsRoot, home)
+	return err == nil && BelowHome(p, home)
+}
+
+// ProjectsRootUsable: the projects folder exists below home, or doesn't exist yet at a path
+// below home, where the agent creates it at start (#216).
+func ProjectsRootUsable(raw, home string) bool {
+	if _, err := ProjectsRoot(raw, home); err == nil {
+		return true
+	}
+	joined, err := ExpandProjectsRoot(raw, home)
+	return err == nil && CreatableBelowHome(joined, home)
+}
+
+// CreatableBelowHome: p doesn't exist yet, and creating it would land below home: its deepest
+// existing parent, with symlinks resolved, is home or below it (a link out of home doesn't
+// count).
+func CreatableBelowHome(p, home string) bool {
+	if !BelowHome(p, home) {
+		return false
+	}
+	if _, err := os.Lstat(p); !errors.Is(err, fs.ErrNotExist) {
+		return false
+	}
+	parent := filepath.Dir(p)
+	for {
+		if _, err := os.Lstat(parent); err == nil {
+			break
+		}
+		next := filepath.Dir(parent)
+		if next == parent {
+			return false
+		}
+		parent = next
+	}
+	real, err := filepath.EvalSymlinks(parent)
+	if err != nil {
+		return false
+	}
+	if st, err := os.Stat(real); err != nil || !st.IsDir() {
+		return false
+	}
+	h, err := filepath.EvalSymlinks(home)
+	if err != nil {
+		h = filepath.Clean(home)
+	}
+	return real == h || BelowHome(real, h)
+}
+
+// ExpandProjectsRoot is the projects folder setting as a full path: ~ and ~/… expand to home
+// (not ~user), a relative path is below home. Nothing is checked on disk.
+func ExpandProjectsRoot(raw, home string) (string, error) {
 	raw = strings.TrimSpace(raw)
-	var joined string
 	switch {
 	case raw == "":
 		return "", fmt.Errorf("empty")
 	case raw == "~":
-		joined = home
+		return home, nil
 	case strings.HasPrefix(raw, "~/"):
-		joined = filepath.Join(home, raw[2:])
+		return filepath.Join(home, raw[2:]), nil
 	case strings.HasPrefix(raw, "~"):
 		return "", fmt.Errorf("~user is not supported")
 	case filepath.IsAbs(raw):
-		joined = raw
+		return filepath.Clean(raw), nil
 	default:
-		joined = filepath.Join(home, raw)
+		return filepath.Join(home, raw), nil
+	}
+}
+
+// BelowHome: p is strictly below home by name (a folder that doesn't exist yet can't be
+// resolved; ProjectsRoot checks the real one).
+func BelowHome(p, home string) bool {
+	rel, err := filepath.Rel(filepath.Clean(home), filepath.Clean(p))
+	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// ProjectsRoot resolves the projects folder (see ExpandProjectsRoot); the result must be an
+// existing folder strictly below home after resolving symlinks. (Rust
+// agent::workers::projects_root.)
+func ProjectsRoot(raw, home string) (string, error) {
+	joined, err := ExpandProjectsRoot(raw, home)
+	if err != nil {
+		return "", err
 	}
 	root, err := filepath.EvalSymlinks(joined)
 	if err != nil {

@@ -223,7 +223,16 @@ func Build(c Config) *Agent {
 		}
 	}
 	// A workers problem turns only workers off (a tray notice): the coordinator still works solo.
-	ws := SetupWorkers(s.Workers, s.ProjectsRoot, c.Home)
+	// With workers on, the projects folder is created when missing, else DeskPixie's own is
+	// used (#216). With them off nothing is created (~/Documents is privacy-protected, and a
+	// folder nobody asked for is clutter): the terminal starts there only if it already exists.
+	folder := UsedFolder{}
+	if s.Workers.Enabled {
+		folder = UseProjectsFolder(s.ProjectsRoot, c.Home, ProjectsFallback(paths))
+	} else if root, err := ProjectsRoot(s.ProjectsRoot, c.Home); err == nil {
+		folder = UsedFolder{Root: root}
+	}
+	ws := SetupWorkers(s.Workers, folder)
 	workersOn := ws.Policy.Enabled
 	// tmux detects no agent status: Claude agents report theirs through hooks.
 	if err := InstallFor(paths, s.Port, ws.Root, s.SessionHost == tmux.Name); err != nil {
@@ -346,7 +355,7 @@ func Build(c Config) *Agent {
 		Planner:     termFactory(c.Runner, c.Home),
 		Sessions:    terminal.NewSessionPlanner(c.Runner),
 		Focus:       focusSink{c.Hooks},
-		TerminalDir: TerminalDir(s.ProjectsRoot, c.Home),
+		TerminalDir: TerminalDir(folder, c.Home),
 		Store:       NewJsonlStore(paths.Root),
 		Clock:       c.Clock,
 		IDs:         c.IDs,

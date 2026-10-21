@@ -241,7 +241,7 @@ func TestOldErrorsElsewhereDoNotBlockOtherChanges(t *testing.T) {
 	env := testEnv(t)
 	start := Default()
 	start.Agent.Port = 80
-	start.Agent.ProjectsRoot = "~/missing"
+	start.Agent.ProjectsRoot = "/outside-home"
 	store, rec := newMemStore(start), &recorder{}
 	svc := NewService(store, rec)
 	if err := svc.SetField(env, "scale", raw(`6`)); err != nil {
@@ -253,7 +253,7 @@ func TestOldErrorsElsewhereDoNotBlockOtherChanges(t *testing.T) {
 	if e := errorsOf(t, svc.SetField(env, "agent.port", raw(`81`))); !reflect.DeepEqual(e, one("agent.port", RangeMessage(1024, 65535))) {
 		t.Fatal(e)
 	}
-	if e := errorsOf(t, svc.SetField(env, "agent.projectsRoot", raw(`"~/missing-too"`))); len(e) != 1 {
+	if e := errorsOf(t, svc.SetField(env, "agent.projectsRoot", raw(`"/outside-home-too"`))); len(e) != 1 {
 		t.Fatal(e)
 	}
 	if err := svc.SetField(env, "agent.port", raw(`8080`)); err != nil {

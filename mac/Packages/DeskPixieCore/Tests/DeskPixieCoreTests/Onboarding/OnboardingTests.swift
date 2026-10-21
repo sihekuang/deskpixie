@@ -186,6 +186,28 @@ final class OnboardingTests: XCTestCase {
         XCTAssertEqual(denied.fix, .openSettings(.microphone))
     }
 
+    // MARK: Projects folder (#216)
+
+    func testTheProjectsFolderCheckOffersCreateOnlyWhenItIsMissing() {
+        let home = "/Users/u"
+        let path = "/Users/u/Documents/deskpixie"
+        let ready = OnboardingChecks.projectsFolder(ProjectsFolderStatus(state: .ready, path: path, fallback: "/d", detail: "Found"), home: home)
+        XCTAssertTrue(ready.ok)
+        XCTAssertEqual(ready.detail, "~/Documents/deskpixie")
+        XCTAssertNil(ready.fix)
+        let missing = OnboardingChecks.projectsFolder(ProjectsFolderStatus(state: .missing, path: path, fallback: "/d",
+                                                                           detail: "Doesn't exist yet."), home: home)
+        XCTAssertFalse(missing.ok)
+        XCTAssertEqual(missing.fix, .createProjectsFolder)
+        XCTAssertEqual(missing.detail, "~/Documents/deskpixie: Doesn't exist yet.")
+        let unusable = OnboardingChecks.projectsFolder(ProjectsFolderStatus(state: .unusable, path: "", fallback: "/d",
+                                                                            detail: "No folder is set."), home: home)
+        XCTAssertFalse(unusable.ok)
+        XCTAssertNil(unusable.fix)
+        XCTAssertEqual(unusable.detail, "No folder is set.")
+        XCTAssertEqual(OnboardingChecks.projectsFolder(nil, home: home).detail, "Checking…")
+    }
+
     // MARK: Permissions (#210)
 
     func testEveryPermissionIsListedWithAutomationOnlyForInstalledApps() {

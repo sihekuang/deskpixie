@@ -19,6 +19,10 @@ public protocol SettingsClient {
     func restart() throws
     /// `app.action {id: "agent:restart"}`: restarts the coordinator (#179; the view asks first).
     func restartCoordinator() throws
+    /// `setup.projectsFolder`: the projects folder checked on disk, changing nothing (#216).
+    func projectsFolder() throws -> ProjectsFolderStatus
+    /// `setup.createProjectsFolder`: creates it when it is missing; answers the check after.
+    func createProjectsFolder() throws -> ProjectsFolderStatus
 }
 
 /// `SettingsClient` over the Go core's `dp_call`.
@@ -70,5 +74,13 @@ public struct EngineSettingsClient: SettingsClient, Sendable {
 
     public func restartCoordinator() throws {
         _ = try engine.call("app.action", ActionArgs(id: CoordinatorRestart.actionID))
+    }
+
+    public func projectsFolder() throws -> ProjectsFolderStatus {
+        try engine.call("setup.projectsFolder", as: ProjectsFolderStatus.self)
+    }
+
+    public func createProjectsFolder() throws -> ProjectsFolderStatus {
+        try engine.call("setup.createProjectsFolder", as: ProjectsFolderStatus.self)
     }
 }

@@ -854,7 +854,7 @@ repo-work-workers.md:
 - `GIT_TIMEOUT=45s` (asserted below ENSURE_BUDGET), `GIT_CLEANUP_TIMEOUT=60s`.
 - `policy(WorkerSettings)` drops unknown and duplicate kinds and clamps `max` to 1–16. It is enabled only with at least one usable kind.
 - `workers_on`: an enabled setting with no usable kind is an error, "Agent: workers off: no usable worker kind".
-- `setup` → `WorkersSetup{policy, root?, notice?}`. A bad root gives the notice "Agent: workers off: projectsRoot not usable"; the coordinator still runs solo.
+- `setup` → `WorkersSetup{policy, root?, notice?}`. A bad root gives the notice "Agent: workers off: projectsRoot not usable"; the coordinator still runs solo. (#216 deviation: a missing root below home is created at start; one that can't be used or created makes workers use `<app data>/agent/projects`, notice "Coordinator: workers use DeskPixie's own projects folder"; only when even that can't be made are workers off.)
 - `projects_root(raw, home)`: expands `~` and `~/`, refuses `~user`, resolves relative paths against home. The result must be canonical, an existing directory, and strictly below home.
 - `write_coordinator_mcp(paths, port, token)`.
 - `deps(...)` builds WorkerDeps: `ClaudeTrustStore` limited to the projects root, `GitWorktrees(root, workspace, home, PatientRunner(45s)).with_cleanup_runner(PatientRunner(60s))`, the Tokens clone, and `FileWorkerRecipes(mcp_dir, worker_settings, port, model, trust)`.
@@ -914,7 +914,7 @@ repo-work-workers.md:
 | `agent.permissionTimeoutSecs` | `120` | Int 1–120 (clamped to ≤120) | Auto-deny after this |
 | `agent.notifyPerMinute` | `4` | Int 1–60 | Notification cap (questions bypass it) |
 | `agent.narration` | `true` | Bool | "Agent progress:" injections |
-| `agent.projectsRoot` | `"~/Documents/Projects"` | Path (dir), strictly below home | Where worker repos must live |
+| `agent.projectsRoot` | `"~/Documents/deskpixie"` (#216; was `~/Documents/Projects`) | Path (dir), strictly below home; may not exist yet (created at start) | Where worker repos must live |
 | `agent.workers.enabled` | `false` | Bool | Allow `start_worker` |
 | `agent.workers.max` | `4` | Int 1–MAX_WORKERS (clamped to 1–16 in code) | Concurrent live workers |
 | `agent.workers.kinds` | `["claude","codex"]` | MultiChoice | Allowed worker kinds |

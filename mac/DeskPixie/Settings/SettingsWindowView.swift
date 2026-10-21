@@ -218,10 +218,43 @@ struct SettingsTabView: View {
                 } note: {
                     NoteText(text: spec.note.text, isError: spec.note.isError)
                 }
+                if field.path == SettingsModel.projectsRootPath, let folder = model.projectsFolder {
+                    projectsFolderRow(folder)
+                }
             }
             ForEach(Array(SettingsLayout.extras(section).enumerated()), id: \.offset) { _, extra in
                 extraRow(extra)
             }
+        }
+    }
+
+    /// Under the projects folder: whether it is there, with Create when it is missing (#216).
+    private func projectsFolderRow(_ folder: ProjectsFolderStatus) -> some View {
+        GridRow {
+            Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
+            VStack(alignment: .leading, spacing: 6) {
+                Label {
+                    Text(folder.state == .ready ? "Found" : folder.detail)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: 340, alignment: .leading)
+                } icon: {
+                    Image(systemName: folder.state == .ready ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                        .foregroundStyle(folder.state == .ready ? Color.green : Color.orange)
+                        .accessibilityHidden(true)
+                }
+                HStack(spacing: 8) {
+                    if folder.state == .missing {
+                        Button("Create") { model.createProjectsFolder() }
+                            .disabled(!model.enabled)
+                    }
+                    Button("Check Again") { model.refreshProjectsFolder() }
+                }
+                .controlSize(.small)
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Projects folder: \(folder.state == .ready ? "found" : folder.detail)")
         }
     }
 

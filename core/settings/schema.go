@@ -390,7 +390,7 @@ var Fields = []FieldSpec{
 	spec("agent.openConversationForUpdates", SectionAgent, "Open a conversation for updates", "When a job finishes or fails, or the coordinator asks you something, while you're not talking to Pixie, Pixie starts a conversation to tell you and then listens for your answer.", boolKind, ApplyRestart),
 	spec("agent.alwaysForceSend", SectionAgent, "Always send messages at once", "Messages Pixie passes to your sessions go in right away, with any still waiting, even while you're typing there. A busy session still gets them with its next step.", boolKind, ApplyRestart),
 	spec("agent.holdOpenSecs", SectionAgent, "Hold open (seconds)", "How long a conversation stays open while a job runs.", intKind(0, 3600, false), ApplyRestart),
-	spec("agent.projectsRoot", SectionAgent, "Projects folder", "The folder whose repositories workers may use. It must be inside your home folder.", pathKind(true, false), ApplyRestart),
+	spec("agent.projectsRoot", SectionAgent, "Projects folder", "The folder whose repositories workers may use, inside your home folder. DeskPixie creates it when it's missing.", pathKind(true, false), ApplyRestart),
 	spec("agent.workers.enabled", SectionWorkers, "Workers", "Let the coordinator start worker agents in git worktrees.", boolKind, ApplyRestart),
 	spec("agent.workers.max", SectionWorkers, "Most workers at once", "Up to four workers run at the same time.", intKind(1, MaxWorkers, true), ApplyRestart),
 	spec("agent.workers.kinds", SectionWorkers, "Worker kinds", "Which agents may work as workers.", Kind{Type: KindMultiChoice, Choices: Choices{Source: SourceStatic, Static: WorkerKinds}}, ApplyRestart),
