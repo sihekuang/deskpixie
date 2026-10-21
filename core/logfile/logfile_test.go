@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -182,6 +183,7 @@ func TestAFailedTrimIsNotRetriedEachWrite(t *testing.T) {
 	path := filepath.Join(dir, "app.log")
 	_ = os.WriteFile(path+".1", []byte(strings.Repeat("o\n", 1000)), 0o600)
 	_ = os.WriteFile(path, []byte("x\n"), 0o600)
+	_ = os.WriteFile(path+".lock", nil, 0o600)
 	_ = os.Chmod(dir, 0o500)
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 	w := New(path, func() int64 { return 100 })
@@ -193,5 +195,33 @@ func TestAFailedTrimIsNotRetriedEachWrite(t *testing.T) {
 	_, _ = w.Write([]byte("b\n"))
 	if w.trims != tries {
 		t.Fatal("tried again")
+	}
+}
+
+// Several processes share a log (every pix): while one rotates, the others don't, so a rotation
+// can't throw away the half another just rotated. A busy lock never makes a write wait.
+func TestRotationSkipsWhileAnotherProcessRotates(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pix.log")
+	_ = os.WriteFile(path, []byte(strings.Repeat("a", 48)+"\n"), 0o600)
+	other, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Flock(int(other.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+	w := New(path, func() int64 { return 100 })
+	_, _ = w.Write([]byte("b\n"))
+	if _, err := os.Stat(path + ".1"); err == nil {
+		t.Fatal("rotated while another process held the lock")
+	}
+	_ = syscall.Flock(int(other.Fd()), syscall.LOCK_UN)
+	other.Close()
+	_, _ = w.Write([]byte("c\n"))
+	if b, _ := os.ReadFile(path + ".1"); !strings.HasSuffix(string(b), "b\n") {
+		t.Fatalf("%q", b)
+	}
+	if b, _ := os.ReadFile(path); string(b) != "c\n" {
+		t.Fatalf("%q", b)
 	}
 }

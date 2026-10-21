@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -51,8 +52,42 @@ func (w *Writer) Write(p []byte) (int, error) {
 		return len(p), nil
 	}
 	half := w.max() / 2
-	// An empty file isn't rotated: one big write must not push the history out.
-	if fi, err := os.Stat(w.path); err == nil && fi.Size() > 0 && fi.Size()+int64(len(p)) > half {
+	if w.overHalf(half, len(p)) {
+		w.rotate(half, len(p))
+	}
+	f, err := os.OpenFile(w.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return len(p), nil
+	}
+	_, _ = f.Write(p)
+	_ = f.Close()
+	return len(p), nil
+}
+
+// overHalf is whether the file needs rotating before n more bytes, or the older file trimming.
+// An empty file isn't rotated: one big write must not push the history out.
+func (w *Writer) overHalf(half int64, n int) bool {
+	if fi, err := os.Stat(w.path); err == nil && fi.Size() > 0 && fi.Size()+int64(n) > half {
+		return true
+	}
+	old, err := os.Stat(w.path + ".1")
+	return err == nil && old.Size() > half && trimMark{old.Size(), old.ModTime().UnixNano()} != w.failedTrim
+}
+
+// rotate moves the file to path.1 and trims an older file over the half. Several processes
+// can share a log (every pix), so it holds path.lock while it does, checking again once it has
+// it; when another process holds it, it skips: a write never waits on another process.
+func (w *Writer) rotate(half int64, n int) {
+	lf, err := os.OpenFile(w.path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return
+	}
+	defer lf.Close()
+	if syscall.Flock(int(lf.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) != nil {
+		return
+	}
+	defer syscall.Flock(int(lf.Fd()), syscall.LOCK_UN)
+	if fi, err := os.Stat(w.path); err == nil && fi.Size() > 0 && fi.Size()+int64(n) > half {
 		_ = os.Rename(w.path, w.path+".1")
 	}
 	if old, err := os.Stat(w.path + ".1"); err == nil && old.Size() > half {
@@ -66,13 +101,6 @@ func (w *Writer) Write(p []byte) (int, error) {
 			}
 		}
 	}
-	f, err := os.OpenFile(w.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		return len(p), nil
-	}
-	_, _ = f.Write(p)
-	_ = f.Close()
-	return len(p), nil
 }
 
 // keepTail cuts path down to its last max bytes, from the first line that starts in them;
@@ -88,9 +116,14 @@ func keepTail(path string, max int64) bool {
 			b = b[i+1:]
 		}
 	}
-	tmp := path + ".tmp"
-	if os.WriteFile(tmp, b, 0o600) != nil || os.Rename(tmp, path) != nil {
-		_ = os.Remove(tmp)
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return false
+	}
+	_, werr := tmp.Write(b)
+	cerr := tmp.Close()
+	if werr != nil || cerr != nil || os.Rename(tmp.Name(), path) != nil {
+		_ = os.Remove(tmp.Name())
 		return false
 	}
 	return true
