@@ -103,13 +103,22 @@ func (c *AgentController) adoptWorker(plan WorkerPlan, worktree string, status P
 		refuse(fmt.Sprintf("A worker named %s is already running.", plan.Name))
 		return
 	}
-	if c.shutDown || !c.jobs.IsOpen(plan.Job) {
+	j, known := c.jobs.Get(plan.Job)
+	// Kept open after its job finished (#237): adopted as it is, with nothing to report again.
+	// A cancelled or forgotten job's worker is closed.
+	// One the restart itself failed was mid-task: closed too.
+	finished := known && !j.Status.IsOpen() && j.Status != JobCancelled && !(j.Reason != nil && *j.Reason == RestartReason)
+	if c.shutDown || !known || !j.Status.IsOpen() && !finished {
 		*fx = append(*fx, Effect{Kind: EfStopWorker, Name: plan.Name})
 		refuse(fmt.Sprintf("No open job %s.", plan.Job))
 		return
 	}
 	c.workers.Admit(plan)
-	c.workers.Up(plan.Name, worktree, status, WorkerRestartNote, now)
+	if finished {
+		c.workers.UpQuiet(plan.Name, worktree, status, now)
+	} else {
+		c.workers.Up(plan.Name, worktree, status, WorkerRestartNote, now)
+	}
 	row := WorkerRunning
 	if status == PaneBlocked {
 		row = WorkerBlocked
@@ -239,8 +248,22 @@ func (c *AgentController) onMcp(agent string, call McpCall, now Millis, fx *[]Ef
 }
 
 func (c *AgentController) messageWorker(name, text string, now Millis, fx *[]Effect) (any, error) {
-	if w := c.workers.Get(name); w == nil || w.StopRequested {
+	w := c.workers.GetMut(name)
+	if w == nil || w.StopRequested {
 		return nil, fmt.Errorf("No running worker %s.", name)
+	}
+	// A worker kept open after its job ended, given more work in the request now in flight,
+	// works for that request: its reports and permission requests count again (#237).
+	// With no single such request its replies would be refused, so nothing is sent.
+	if !c.jobs.IsOpen(w.Plan.Job) {
+		refs := unique(c.inbox.InFlightRefs())
+		if len(refs) != 1 || !c.jobs.MoveWorker(name, refs[0], now) {
+			return nil, fmt.Errorf("%s's request has ended, and no single request is in progress for it to join, so its replies would be lost.", name)
+		}
+		old := w.Plan.Job
+		w.Plan.Job = refs[0]
+		c.saveJob(old, fx)
+		c.saveJob(refs[0], fx)
 	}
 	c.workers.Push(name, CoordinatorSays(text))
 	status := "queued"
@@ -393,8 +416,9 @@ func (c *AgentController) workerSendFailed(name, text string, now Millis, fx *[]
 	}
 }
 
-// stopJobWorkers stops every live worker of job (it ended): at once if its pane is up, else
-// when it is.
+// stopJobWorkers stops every live worker of job (the user cancelled it): at once if its pane is
+// up, else when it is. A job that ends otherwise keeps its workers until the coordinator stops
+// them (#237).
 func (c *AgentController) stopJobWorkers(job JobID, fx *[]Effect) {
 	for _, name := range c.workers.ForJob(job) {
 		if w := c.workers.GetMut(name); w != nil && !w.StopRequested {
@@ -408,7 +432,7 @@ func (c *AgentController) stopJobWorkers(job JobID, fx *[]Effect) {
 
 func (c *AgentController) hasLiveWorkers(job JobID) bool {
 	for _, n := range c.workers.ForJob(job) {
-		if w := c.workers.Get(n); w != nil && !w.StopRequested {
+		if w := c.workers.Get(n); w != nil && !w.StopRequested && w.Busy() {
 			return true
 		}
 	}

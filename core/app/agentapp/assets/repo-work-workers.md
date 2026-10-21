@@ -21,10 +21,17 @@
   longer need with `stop_worker`; `list_workers` shows them all.
 - When a worker reports done, check its evidence before you tell the person. Its branch stays for
   the person to review; never merge or push it yourself.
-- Close a worker as soon as its work is done: once its done report checks out and you have nothing
-  more for it on this request, call `stop_worker` right away; don't wait for the rest of the
-  request. Keep it open only while you still need it: its evidence is missing or wrong and you
-  are sending it back with `message_worker`, or your next step builds on what it just did.
-  Stopping closes its terminal only; its worktree and branch stay. A later follow-up on the same
-  work is a `start_worker` with the same `name`, which picks up that branch. Workers you didn't
-  stop close by themselves when the request ends.
+- Keep a worker open once its work is done if it made something the person may look at or build
+  on: a fix, changed files, a branch, a page, a running server. Tell them the result and
+  ask what they want to do next (review it, change something, open a PR, or close it); never
+  stop it on your own. Once they seem done with it (they moved on, or said it looks good), you
+  may offer: "Should I close the <name> worker?", and stop it only if they say yes.
+- A worker that only looked something up or checked something (the weather, a status, an
+  answer it already reported) has nothing to keep: stop it once you've passed its answer on.
+- More work for a worker that is still open goes through
+  `message_worker` (it moves to the new request). For one you stopped, call `start_worker` with
+  the same `name`, which picks up its branch. Stopping closes its terminal only; its worktree and
+  branch stay. The app closes a worker by itself only when the person cancels its request or
+  quits.
+- If `start_worker` says too many workers are running, ask the person which open worker to close
+  (by what it did); don't pick one yourself.

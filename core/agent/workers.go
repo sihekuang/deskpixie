@@ -242,6 +242,10 @@ type Worker struct {
 
 func newWorker(plan WorkerPlan) *Worker { return &Worker{Plan: plan} }
 
+// Busy: it has work it hasn't reported on yet (a turn with no result, question or block, or
+// messages still queued). A worker kept open after reporting is not (#237).
+func (w *Worker) Busy() bool { return !w.reported || len(w.queue) > 0 }
+
 // delivered: the worker showed it got its last prompt (or it no longer matters).
 func (w *Worker) delivered() {
 	w.delivering = nil
@@ -342,6 +346,16 @@ func (ws *Workers) Up(name, worktree string, status PaneStatus, brief string, no
 	w.Worktree = worktree
 	w.queue = append([]string{brief}, w.queue...)
 	w.startWaitAt = someMs(now + WorkerStartReadyMs)
+	statusOf(w, status, now)
+}
+
+// UpQuiet is Up with no brief: a worker adopted after its job finished, idle until messaged.
+func (ws *Workers) UpQuiet(name, worktree string, status PaneStatus, now Millis) {
+	w := ws.live[name]
+	if w == nil || w.IsUp() {
+		return
+	}
+	w.Worktree = worktree
 	statusOf(w, status, now)
 }
 

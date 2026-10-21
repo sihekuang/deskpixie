@@ -670,6 +670,30 @@ func (s *workerSmoke) dump() {
 	}
 }
 
+// keptThenClosed (#237): a worker that made something is still open after its job ends, and the
+// coordinator closes it once the person says they're done with it.
+func (s *workerSmoke) keptThenClosed(worker, made string) error {
+	if s.gone(worker, 10*time.Second) {
+		return fmt.Errorf("%s was closed when its job ended, before the person was done with it", worker)
+	}
+	ok(s.t, fmt.Sprintf("%s stays open after its job ended", worker))
+	id, view, err := s.job("That " + made + " looks good, thanks. You can close the worker that made it now.")
+	if err != nil {
+		return err
+	}
+	if view.Status != agent.JobDone {
+		return fmt.Errorf("%s ended %v (last progress: %v)", id, view.Status, view.LastProgress)
+	}
+	if !s.gone(worker, 30*time.Second) {
+		return fmt.Errorf("%s is still open after the person said to close it", worker)
+	}
+	if _, err := os.Stat(filepath.Join(s.mcpDir, worker+".json")); err == nil {
+		return fmt.Errorf("%s's MCP config was not deleted", worker)
+	}
+	ok(s.t, fmt.Sprintf("%s closed once the person said to, and its MCP config is deleted", worker))
+	return nil
+}
+
 func (s *workerSmoke) gone(name string, limit time.Duration) bool {
 	deadline := time.Now().Add(limit)
 	for time.Now().Before(deadline) {
@@ -956,13 +980,9 @@ func (s *workerSmoke) scenarios(codex bool) error {
 		return err
 	}
 	ok(t, fmt.Sprintf("claude worker %s: HELLO.txt committed on pixie/%s; the main checkout is untouched; .worktrees/ excluded", worker, slug))
-	if !s.gone(worker, 20*time.Second) {
-		return fmt.Errorf("%s's pane is still open after its job ended", worker)
+	if err := s.keptThenClosed(worker, "HELLO.txt commit"); err != nil {
+		return err
 	}
-	if _, err := os.Stat(filepath.Join(s.mcpDir, worker+".json")); err == nil {
-		return fmt.Errorf("%s's MCP config was not deleted", worker)
-	}
-	ok(t, "the job's end stopped its worker and deleted its MCP config")
 
 	// 2. Cancelling a job stops its worker.
 	long, err := s.handle.Delegate("In the repository demo, have a claude worker write the numbers 1 to 2000 to COUNT.txt, one per line, one shell command per number, reporting progress every 200 numbers.", "")
@@ -1111,10 +1131,10 @@ func (s *workerSmoke) codexPart() error {
 	if committed != nil {
 		return committed
 	}
-	if !s.gone(worker, 20*time.Second) {
-		return fmt.Errorf("%s's pane is still open after its job ended", worker)
+	ok(t, fmt.Sprintf("codex worker %s: CODEX.txt committed on pixie/%s", worker, slug))
+	if err := s.keptThenClosed(worker, "CODEX.txt commit"); err != nil {
+		return err
 	}
-	ok(t, fmt.Sprintf("codex worker %s: CODEX.txt committed on pixie/%s; stopped with its job", worker, slug))
 	return nil
 }
 
