@@ -1429,7 +1429,16 @@ func (c *AgentController) onReply(id JobID, status SpokenStatus, text string, no
 		c.denyPendingFor(id, "The job ended.", fx)
 		c.stopJobWorkers(id, fx)
 		if repeats {
-			break // #177: Pixie said the hand-off already; this only repeats it
+			// #177: Pixie said the hand-off already; this only repeats it. A typed job's box
+			// still hears it's done (#231), with the hand-off it shows, or it thinks on.
+			if j, ok := c.jobs.Get(id); ok && c.typed[id] {
+				handOff := text
+				if j.LastProgress != nil {
+					handOff = *j.LastProgress
+				}
+				c.deliver(NewJobLine(LineReply, handOff, id), now, fx)
+			}
+			break
 		}
 		if c.deliverOpening(NewJobLine(LineReply, text, id), now, fx) {
 			*fx = append(*fx, Effect{Kind: EfCue, Cue: CueHappy})
