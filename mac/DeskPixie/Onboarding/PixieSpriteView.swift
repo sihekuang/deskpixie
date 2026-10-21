@@ -2,25 +2,35 @@ import AppKit
 import DeskPixieCore
 import SwiftUI
 
-/// Pixie drawn from the bundled pack and animated by `PixiePlayer`, the way the desktop panel
-/// plays it: the first-run window's welcome (idle) and done (happy, then idle) (#149). Still
-/// with Reduce Motion on; the app icon when the pack can't be read.
+/// Pixie drawn from a pack and animated by `PixiePlayer`, the way the desktop panel plays it: the
+/// first-run window's welcome (idle), its pick-your-Pixie cards (#212) and done (happy, then idle)
+/// (#149). Still with Reduce Motion on; the app icon when the pack can't be read.
 struct PixieSpriteView: View {
     let state: String
     var scale: CGFloat = 4
+    /// The pack's folder; nil: the bundled bit.
+    var packDir: URL? = nil
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var player = PixiePlayer()
 
-    private static let bundled = PackFolder.load(
-        (Bundle.main.resourceURL ?? Bundle.main.bundleURL).appendingPathComponent("pixies/bit"))
+    private static let bundledBit = (Bundle.main.resourceURL ?? Bundle.main.bundleURL).appendingPathComponent("pixies/bit")
+    /// Read once each: the window redraws every frame.
+    private static var loaded: [URL: (pack: Pack, sheet: SpriteSheet)?] = [:]
+
+    private static func load(_ dir: URL) -> (pack: Pack, sheet: SpriteSheet)? {
+        if let hit = loaded[dir] { return hit }
+        let read = PackFolder.load(dir)
+        loaded[dir] = read
+        return read
+    }
 
     var body: some View {
         Group {
-            if let (pack, sheet) = Self.bundled {
+            if let (pack, sheet) = Self.load(packDir ?? Self.bundledBit) {
                 Canvas { ctx, _ in draw(ctx, pack: pack, sheet: sheet) }
                     .frame(width: CGFloat(pack.cellWidth) * scale, height: CGFloat(pack.cellHeight) * scale)
-                    .task(id: state) { await play(pack) }
+                    .task(id: "\(state) \(packDir?.path ?? "")") { await play(pack) }
             } else {
                 Image(nsImage: NSApp.applicationIconImage)
                     .resizable()

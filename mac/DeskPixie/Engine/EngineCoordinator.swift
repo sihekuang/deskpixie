@@ -162,17 +162,37 @@ final class EngineCoordinator {
            OnboardingGate.shouldOpenAtLaunch(done: defaults.bool(forKey: OnboardingGate.doneKey),
                                              settingsExisted: settingsExisted, pending: pending) {
             showOnboarding()
+        } else if configured, pixie != nil {
+            reopenPermissionsIfNeeded()
+        }
+    }
+
+    /// Someone already onboarded, on a version that hasn't checked yet: a permission still not
+    /// asked (a new build needs it, or macOS reset it) opens the window on Permissions (#213).
+    private func reopenPermissionsIfNeeded() {
+        let defaults = UserDefaults.standard
+        let version = SystemPermissions.appVersion
+        let checked = defaults.string(forKey: OnboardingGate.permissionsVersionKey)
+        let done = defaults.bool(forKey: OnboardingGate.doneKey)
+        guard done, checked != version else { return }
+        Task { @MainActor [weak self] in
+            let unasked = await SystemPermissions.unasked()
+            defaults.set(version, forKey: OnboardingGate.permissionsVersionKey)
+            guard OnboardingGate.shouldOpenPermissions(done: done, version: version, checkedVersion: checked,
+                                                       unasked: unasked) else { return }
+            Self.log.info("permissions not asked yet: \(unasked.map(\.title).joined(separator: ", "), privacy: .public)")
+            self?.showOnboarding(at: .permissions)
         }
     }
 
     /// The first-run window (launch, or the tray's Welcome to DeskPixie…).
-    func showOnboarding() {
+    func showOnboarding(at page: OnboardingPage = .welcome) {
         guard configured, let settingsModel else { return }
         if onboarding == nil {
             onboarding = OnboardingController(engine: engine, worker: worker, settings: settingsModel,
                                               statusLines: { [weak appState] in appState?.core?.statusLines ?? [] })
         }
-        onboarding?.show()
+        onboarding?.show(at: page)
     }
 
     /// Hands the core the API keys kept in the Keychain (`secrets.keychain`), off main: a

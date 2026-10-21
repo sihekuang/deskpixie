@@ -60,10 +60,21 @@ public enum OnboardingFeature: String, CaseIterable, Sendable {
     }
 }
 
-/// Three steps: welcome; set up, where each feature's card holds its switch and, while it is on,
-/// its setup; done.
+/// Five steps: welcome; pick your Pixie (#212); set up, where each feature's card holds its switch
+/// and, while it is on, its setup; permissions, every one asked for at once (#210); done.
 public enum OnboardingPage: Equatable, Sendable, CaseIterable {
-    case welcome, setup, done
+    case welcome, pixie, setup, permissions, done
+}
+
+/// The pick-your-Pixie step (#212).
+public enum OnboardingPixies {
+    /// A pack's folder, for its preview: the last root that has it, as the core loads them (a
+    /// pack in the user's folder replaces a bundled one of the same name). nil when none has it.
+    public static func folder(id: String, roots: [URL], exists: (URL) -> Bool) -> URL? {
+        guard !id.isEmpty, !id.contains("/") else { return nil }
+        return roots.reversed().map { $0.appendingPathComponent(id, isDirectory: true) }
+            .first { exists($0.appendingPathComponent("pixie.json")) }
+    }
 }
 
 /// Where the window is.
@@ -106,7 +117,9 @@ public struct OnboardingFlow: Equatable, Sendable {
         index = max(index - 1, 0)
     }
 
-    public mutating func restart() { index = 0 }
+    public mutating func restart(at page: OnboardingPage = .welcome) {
+        index = Self.pages.firstIndex(of: page) ?? 0
+    }
 
     /// The last page's button: a chosen setting that applies only after a restart restarts.
     public static func finishTitle(restartPending: Bool) -> String {
@@ -122,6 +135,19 @@ public enum OnboardingGate {
     /// The core writes that file on the same launch, so without it a first launch that never got
     /// to the window (a crash, a quit while starting) would leave the user looking like an old one.
     public static let pendingKey = "DeskPixieOnboardingPending"
+
+    /// UserDefaults: the app version the window last opened for by itself, or was finished or
+    /// closed in (#213).
+    public static let permissionsVersionKey = "DeskPixiePermissionsCheckedVersion"
+
+    /// For someone already onboarded: the window opens on its Permissions step when a permission
+    /// is still not asked (`unasked`, of `AppPermission.launchCheck`), at most once per app
+    /// version, so one turned off on purpose (or Accessibility, which reads the same) doesn't
+    /// reopen it every launch (#213).
+    public static func shouldOpenPermissions(done: Bool, version: String, checkedVersion: String?,
+                                             unasked: [AppPermission]) -> Bool {
+        done && version != checkedVersion && !unasked.isEmpty
+    }
 
     /// For a new user (no settings file before this launch, or a first launch that never got to
     /// the window) who hasn't finished or closed it.
@@ -155,15 +181,107 @@ public struct SetupPrograms: Decodable, Equatable, Sendable {
     }
 }
 
-public enum MicrophoneAccess: Equatable, Sendable {
+/// Where a permission stands. Accessibility can't tell not asked from turned off, and an app that
+/// isn't running can't be asked about: both read as notDetermined.
+public enum PermissionAccess: Equatable, Sendable {
     case notDetermined, granted, denied
+}
+
+/// An app DeskPixie sends Apple Events to; macOS asks once per app.
+public enum AutomationTarget: String, CaseIterable, Sendable {
+    case systemEvents = "com.apple.systemevents"
+    case iTerm = "com.googlecode.iterm2"
+    case music = "com.apple.Music"
+    case spotify = "com.spotify.client"
+
+    public var bundleID: String { rawValue }
+
+    public var name: String {
+        switch self {
+        case .systemEvents: return "System Events"
+        case .iTerm: return "iTerm"
+        case .music: return "Music"
+        case .spotify: return "Spotify"
+        }
+    }
+}
+
+/// A macOS permission DeskPixie uses, asked for together on the permissions step (#210) instead
+/// of in the middle of whatever needs it first.
+public enum AppPermission: Hashable, Sendable {
+    case microphone, notifications, accessibility
+    case automation(AutomationTarget)
+
+    public var title: String {
+        switch self {
+        case .microphone: return "Microphone"
+        case .notifications: return "Notifications"
+        case .accessibility: return "Accessibility"
+        case .automation(let app): return "Control \(app.name)"
+        }
+    }
+
+    /// What DeskPixie needs it for.
+    public var purpose: String {
+        switch self {
+        case .microphone: return "To hear you when you talk to Pixie."
+        case .notifications: return "To tell you when a session or task finishes."
+        case .accessibility: return "To bring a session's terminal window to the front."
+        case .automation(.systemEvents): return "To find a session's terminal window."
+        case .automation(.iTerm): return "To open and show sessions in iTerm."
+        case .automation(.music), .automation(.spotify): return "To play, pause and skip when you ask."
+        }
+    }
+
+    /// Its pane in System Settings ▸ Privacy & Security (Notifications has its own).
+    public var settingsURL: URL {
+        let pane: String
+        switch self {
+        case .microphone: pane = "com.apple.preference.security?Privacy_Microphone"
+        case .notifications: pane = "com.apple.preference.notifications"
+        case .accessibility: pane = "com.apple.preference.security?Privacy_Accessibility"
+        case .automation: pane = "com.apple.preference.security?Privacy_Automation"
+        }
+        return URL(string: "x-apple.systempreferences:" + pane)!
+    }
+
+    /// Every permission, in the order the step shows them: Automation only for the apps installed
+    /// (System Events always is).
+    public static func all(installed: Set<AutomationTarget>) -> [AppPermission] {
+        [.microphone, .notifications, .accessibility]
+            + AutomationTarget.allCases.filter { $0 == .systemEvents || installed.contains($0) }.map(AppPermission.automation)
+    }
+
+    /// What the launch check reads (#213): the ones whose state can be read without asking.
+    /// Automation only for apps that are running: one that isn't reads as not asked whatever was
+    /// answered.
+    public static func launchCheck(running: Set<AutomationTarget>) -> [AppPermission] {
+        [.microphone, .notifications, .accessibility]
+            + AutomationTarget.allCases.filter(running.contains).map(AppPermission.automation)
+    }
+
+    /// What Allow All asks for: every one not answered yet, Accessibility last (it sends the
+    /// person to System Settings, which would cover the other dialogs). Accessibility never reads
+    /// as answered, so once it was asked (`askedAccessibility`) it is left to System Settings.
+    public static func toAsk(_ access: [(AppPermission, PermissionAccess)], askedAccessibility: Bool) -> [AppPermission] {
+        let open = access.filter { $0.1 == .notDetermined }.map(\.0)
+        return open.filter { $0 != .accessibility } + (askedAccessibility ? [] : open.filter { $0 == .accessibility })
+    }
+
+    /// A read merged with this window's answers: an Automation target quit after its question
+    /// reads as notDetermined again, so the answer it gave stands.
+    public static func merged(read: PermissionAccess, answered: PermissionAccess?) -> PermissionAccess {
+        read == .notDetermined ? answered ?? read : read
+    }
 }
 
 /// One line of a setup page: what is checked, whether it is ready, and the fix if there is one.
 public struct OnboardingCheck: Equatable, Sendable {
     public enum Fix: Equatable, Sendable {
-        case allowMicrophone
-        case openMicrophoneSettings
+        /// Ask macOS for it (its own dialog).
+        case allow(AppPermission)
+        /// Already answered: only System Settings can change it.
+        case openSettings(AppPermission)
         case installPix
         /// Something to install: opens the page in the browser.
         case link(String, URL)
@@ -208,18 +326,36 @@ public enum OnboardingChecks {
         }
     }
 
-    public static func microphone(_ access: MicrophoneAccess) -> OnboardingCheck {
+    public static func microphone(_ access: PermissionAccess) -> OnboardingCheck {
+        permission(.microphone, access, asked: false)
+    }
+
+    /// A permission's line. Accessibility has no answer to read back, so once it was asked
+    /// (`asked`) and still isn't on, its fix is System Settings, where it is turned on.
+    public static func permission(_ p: AppPermission, _ access: PermissionAccess, asked: Bool) -> OnboardingCheck {
         switch access {
         case .granted:
-            return OnboardingCheck(title: "Microphone", ok: true, detail: "Allowed")
+            return OnboardingCheck(title: p.title, ok: true, detail: "Allowed")
+        case .notDetermined where p == .accessibility && asked:
+            return OnboardingCheck(title: p.title, ok: false,
+                                   detail: "Not on yet. Open Settings and turn DeskPixie on in the list.",
+                                   fix: .openSettings(p))
         case .notDetermined:
-            return OnboardingCheck(title: "Microphone", ok: false, detail: "Not asked yet: macOS asks you once.",
-                                   fix: .allowMicrophone)
+            return OnboardingCheck(title: p.title, ok: false, detail: "Not asked yet. \(p.purpose)", fix: .allow(p))
         case .denied:
-            return OnboardingCheck(title: "Microphone", ok: false,
-                                   detail: "Turned off for DeskPixie in System Settings ▸ Privacy & Security.",
-                                   fix: .openMicrophoneSettings)
+            let place = p == .notifications ? "System Settings ▸ Notifications" : "System Settings ▸ Privacy & Security"
+            return OnboardingCheck(title: p.title, ok: false, detail: "Turned off for DeskPixie in \(place).",
+                                   fix: .openSettings(p))
         }
+    }
+
+    /// The Done line for the permissions step.
+    public static func permissionsSummary(_ checks: [OnboardingCheck]) -> OnboardingCheck {
+        let todo = checks.filter { !$0.ok }.count
+        return todo == 0
+            ? OnboardingCheck(title: "Permissions", ok: true, detail: "All allowed")
+            : OnboardingCheck(title: "Permissions", ok: false,
+                              detail: todo == 1 ? "1 still to allow" : "\(todo) still to allow")
     }
 
     static let herdrPage = URL(string: "https://herdr.dev")!

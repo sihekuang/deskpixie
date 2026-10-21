@@ -24,7 +24,9 @@ struct OnboardingView: View {
         VStack(spacing: 0) {
             switch page {
             case .welcome: welcome
+            case .pixie: scrolling { pickPixie }
             case .setup: scrolling { setup }
+            case .permissions: scrolling { permissions }
             case .done: scrolling { done }
             }
             if page != .welcome {
@@ -119,6 +121,74 @@ struct OnboardingView: View {
             }
         }
         .accessibilityElement(children: .combine)
+    }
+
+    // MARK: Pick your Pixie
+
+    /// The chosen pack's folder: the window's own Pixie is the one you picked.
+    private var chosenPack: URL? {
+        settings.snapshot?.values.at("pack")?.stringValue.flatMap(state.packFolder)
+    }
+
+    /// Every loaded pack as a card; choosing one is the Pixie setting, so the one on the desktop
+    /// changes at once (#212).
+    @ViewBuilder
+    private var pickPixie: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Pick your Pixie")
+                .font(.title2.weight(.bold))
+                .accessibilityAddTraits(.isHeader)
+            Text("Who keeps you company on your desktop? Change it any time from the menu bar.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 4)
+        .padding(.top, 16)
+        if let spec = settings.spec(path: "pack"), case .menu(let items, let selected) = spec.control {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 14)], spacing: 14) {
+                ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                    pixieCard(item, chosen: index == selected) {
+                        _ = settings.commit(spec.path, .menu(index))
+                    }
+                    .disabled(!settings.enabled || !item.enabled)
+                }
+            }
+            .padding(.top, 4)
+        } else {
+            Text(settings.loadError.map { "Couldn't read settings: \($0)" } ?? "Loading…")
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func pixieCard(_ item: SettingsLayout.MenuItem, chosen: Bool, choose: @escaping () -> Void) -> some View {
+        Button(action: choose) {
+            VStack(spacing: 8) {
+                PixieSpriteView(state: chosen ? "happy" : "idle", scale: 3,
+                                packDir: item.value.stringValue.flatMap(state.packFolder))
+                    .frame(height: 104)
+                Text(item.label)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+            }
+            .padding(.vertical, 14)
+            .frame(maxWidth: .infinity)
+            .background(RoundedRectangle(cornerRadius: 12)
+                .fill(chosen ? Self.pixieGreen.opacity(0.16) : Color(nsColor: .controlBackgroundColor)))
+            .overlay(RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(chosen ? Self.accent : Color(nsColor: .separatorColor).opacity(0.6), lineWidth: chosen ? 2 : 1))
+            .overlay(alignment: .topTrailing) {
+                if chosen {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(Self.accent)
+                        .padding(8)
+                }
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(item.label)
+        .accessibilityAddTraits(chosen ? .isSelected : [])
     }
 
     // MARK: Set up
@@ -362,12 +432,55 @@ struct OnboardingView: View {
         }
     }
 
+    // MARK: Permissions
+
+    /// Every permission DeskPixie uses, asked for now so nothing stops you later (#210).
+    private var permissions: some View {
+        let checks = state.permissionChecks()
+        let open = state.openPermissions
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .bottom) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Allow permissions")
+                        .font(.title2.weight(.bold))
+                        .accessibilityAddTraits(.isHeader)
+                    Text("macOS asks once for each. Allow them now and Pixie won't stop to ask while you work.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 12)
+                Button(state.asking ? "Asking…" : "Allow All") { state.askAll() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(state.asking || open.isEmpty)
+            }
+            .padding(.horizontal, 4)
+            .padding(.top, 16)
+            card {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(zip(state.permissions, checks).enumerated()), id: \.offset) { i, row in
+                        if i > 0 { Divider() }
+                        checkRow(row.1, purpose: row.0.purpose)
+                            .padding(.vertical, 9)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 2)
+            }
+            Text("Each one can be changed later in System Settings ▸ Privacy & Security.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 4)
+        }
+    }
+
     // MARK: Done
 
     private var done: some View {
         let checks = Dictionary(uniqueKeysWithValues: chosen.map { ($0, state.checks($0, settings: settings)) })
         let lines = OnboardingChecks.summary(chosen: chosen, checks: checks)
-        let allOk = lines.allSatisfy(\.ok)
+        let permissions = OnboardingChecks.permissionsSummary(state.permissionChecks())
+        let allOk = lines.allSatisfy(\.ok) && permissions.ok
         return VStack(spacing: 0) {
             pixie(allOk ? "happy" : "idle")
             Text(allOk ? "You're all set" : "Almost there")
@@ -386,6 +499,9 @@ struct OnboardingView: View {
                         checkRow(OnboardingCheck(title: line.feature.title, ok: line.ok, detail: line.detail))
                             .padding(.vertical, 9)
                     }
+                    Divider()
+                    checkRow(permissions)
+                        .padding(.vertical, 9)
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 2)
@@ -447,7 +563,7 @@ struct OnboardingView: View {
 
     private func pixie(_ state: String) -> some View {
         VStack(spacing: 0) {
-            PixieSpriteView(state: state)
+            PixieSpriteView(state: state, packDir: chosenPack)
             Ellipse()
                 .fill(Color.black.opacity(0.12))
                 .frame(width: 84, height: 10)
@@ -534,7 +650,8 @@ struct OnboardingView: View {
         }
     }
 
-    private func checkRow(_ check: OnboardingCheck) -> some View {
+    /// `purpose`: a permission's use, added to its Allowed line.
+    private func checkRow(_ check: OnboardingCheck, purpose: String? = nil) -> some View {
         HStack(alignment: .center, spacing: 10) {
             Image(systemName: check.ok ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
                 .foregroundStyle(check.ok ? Self.pixieGreen : Color.orange)
@@ -542,7 +659,7 @@ struct OnboardingView: View {
                 .accessibilityLabel(check.ok ? "Ready" : "Needs attention")
             VStack(alignment: .leading, spacing: 1) {
                 Text(check.title).font(.callout.weight(.semibold))
-                Text(check.detail)
+                Text(check.ok ? purpose.map { "Allowed. \($0)" } ?? check.detail : check.detail)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -555,10 +672,11 @@ struct OnboardingView: View {
     @ViewBuilder
     private func fixButton(_ fix: OnboardingCheck.Fix) -> some View {
         switch fix {
-        case .allowMicrophone:
-            Button("Allow Microphone") { state.requestMic() }
-        case .openMicrophoneSettings:
-            Button("Open Privacy Settings") { state.openMicSettings() }
+        case .allow(let p):
+            Button(p == .microphone ? "Allow Microphone" : "Allow") { state.ask([p]) }
+                .disabled(state.asking)
+        case .openSettings(let p):
+            Button("Open Settings") { state.openSettings(p) }
         case .installPix:
             Button("Install") {
                 state.pix?.install()

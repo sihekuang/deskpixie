@@ -1,12 +1,11 @@
 import AppKit
-import AVFoundation
 import DeskPixieCore
 import Observation
 import os
 import SwiftUI
 
 /// What the first-run window reads besides settings (#149): the programs the agents need, the
-/// microphone permission and the pix command. Settings themselves come from the shared
+/// macOS permissions (#210) and the pix command. Settings themselves come from the shared
 /// `SettingsModel`, so the window and Settings never disagree.
 @MainActor
 @Observable
@@ -16,7 +15,17 @@ final class OnboardingState {
     private(set) var programs: SetupPrograms?
     /// The last `setup.programs` call failed (shown instead of "Checking…").
     private(set) var programsFailed = false
-    private(set) var mic = MicrophoneAccess.notDetermined
+    /// The permissions this Mac has a use for, in the order the step shows them.
+    private(set) var permissions = AppPermission.all(installed: [])
+    private(set) var access: [AppPermission: PermissionAccess] = [:]
+    /// Accessibility was asked for in this window: its line then points to System Settings.
+    private(set) var askedAccessibility = false
+    /// Allow All (or one Allow) is going through macOS's dialogs.
+    private(set) var asking = false
+    /// The Automation answers given in this window (a quit app can't be read back).
+    @ObservationIgnored private var answered: [AppPermission: PermissionAccess] = [:]
+    /// Only the latest read lands: one started while a dialog was up finishes late.
+    @ObservationIgnored private var readGeneration = 0
     /// nil until the login shell's PATH has been read (off main: up to 2 s).
     private(set) var pix: PixCommandModel?
 
@@ -34,9 +43,20 @@ final class OnboardingState {
     var statusLines: [String] { statusLinesNow() }
     let home = FileManager.default.homeDirectoryForCurrentUser.path
 
+    /// Where the core loads packs from (bundled, then the user's), for the Pixie previews.
+    private let packRoots: [URL] = (EngineConfig.forBundle(
+        resources: Bundle.main.resourceURL ?? Bundle.main.bundleURL,
+        appSupport: AppSupportDirectory.resolve(home: FileManager.default.homeDirectoryForCurrentUser)
+    ).packRoots ?? []).map { URL(fileURLWithPath: $0, isDirectory: true) }
+
+    /// Pack `id`'s folder; nil when it can't be found (its card then shows the bundled bit).
+    func packFolder(_ id: String) -> URL? {
+        OnboardingPixies.folder(id: id, roots: packRoots) { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
     /// Reads everything again (the window opened, or Check Again).
     func refresh() {
-        refreshMic()
+        refreshPermissions()
         refreshPrograms()
         refreshPix()
     }
@@ -61,24 +81,53 @@ final class OnboardingState {
         }
     }
 
-    func refreshMic() {
-        switch AVCaptureDevice.authorizationStatus(for: .audio) {
-        case .authorized: mic = .granted
-        case .notDetermined: mic = .notDetermined
-        default: mic = .denied
+    var mic: PermissionAccess { access[.microphone] ?? .notDetermined }
+
+    func refreshPermissions() {
+        readGeneration += 1
+        let generation = readGeneration
+        Task { @MainActor [weak self] in
+            let installed = await Task.detached { SystemPermissions.installedTargets() }.value
+            let all = AppPermission.all(installed: installed)
+            var read: [AppPermission: PermissionAccess] = [:]
+            for p in all { read[p] = await SystemPermissions.access(p) }
+            guard let self, generation == self.readGeneration else { return }
+            self.permissions = all
+            self.access = Dictionary(uniqueKeysWithValues: all.map { p in
+                (p, AppPermission.merged(read: read[p] ?? .notDetermined, answered: self.answered[p]))
+            })
         }
     }
 
-    func requestMic() {
-        AVCaptureDevice.requestAccess(for: .audio) { _ in
-            Task { @MainActor [weak self] in self?.refreshMic() }
+    func permissionChecks() -> [OnboardingCheck] {
+        permissions.map { OnboardingChecks.permission($0, access[$0] ?? .notDetermined, asked: askedAccessibility) }
+    }
+
+    /// Allow All: macOS's dialog for each one not answered yet, one after another.
+    func askAll() {
+        ask(openPermissions)
+    }
+
+    /// The ones Allow All would ask for.
+    var openPermissions: [AppPermission] {
+        AppPermission.toAsk(permissions.map { ($0, access[$0] ?? .notDetermined) }, askedAccessibility: askedAccessibility)
+    }
+
+    func ask(_ list: [AppPermission]) {
+        guard !asking, !list.isEmpty else { return }
+        asking = true
+        Task { @MainActor [weak self] in
+            for p in list {
+                if p == .accessibility { self?.askedAccessibility = true }
+                if let answer = await SystemPermissions.ask(p) { self?.answered[p] = answer }
+            }
+            self?.asking = false
+            self?.refreshPermissions()
         }
     }
 
-    func openMicSettings() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
-            NSWorkspace.shared.open(url)
-        }
+    func openSettings(_ p: AppPermission) {
+        NSWorkspace.shared.open(p.settingsURL)
     }
 
     func refreshPix() {
@@ -127,7 +176,8 @@ final class OnboardingController {
         self.settings = settings
     }
 
-    func show() {
+    /// Opens the window (or brings it forward); a new one starts on `page`.
+    func show(at page: OnboardingPage = .welcome) {
         let model = settings()
         model.load()
         state.refresh()
@@ -135,7 +185,7 @@ final class OnboardingController {
             WindowFocus.bringForward(window, app: NSApp, showInDock: true)
             return
         }
-        state.flow.restart()
+        state.flow.restart(at: page)
         let view = OnboardingView(state: state, settings: model,
                                   onFinish: { [weak self] in self?.finish() },
                                   onClose: { [weak self] in self?.window?.close() })
@@ -182,7 +232,7 @@ final class OnboardingController {
 
     private func becameKey() {
         settings().focusGained()
-        state.refreshMic()
+        state.refreshPermissions()
         state.refreshPix()
     }
 
@@ -197,6 +247,8 @@ final class OnboardingController {
 
     private static func markDone() {
         UserDefaults.standard.set(true, forKey: OnboardingGate.doneKey)
+        // Its Permissions step was just there: the launch check waits for the next version.
+        UserDefaults.standard.set(SystemPermissions.appVersion, forKey: OnboardingGate.permissionsVersionKey)
         UserDefaults.standard.removeObject(forKey: OnboardingGate.pendingKey)
     }
 }
