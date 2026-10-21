@@ -13,6 +13,24 @@ enum SystemPermissions {
         Set(AutomationTarget.allCases.filter { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0.bundleID) != nil })
     }
 
+    /// The launch check's permissions still not asked (#213).
+    static func unasked() async -> [AppPermission] {
+        let running = Set(AutomationTarget.allCases.filter {
+            !NSRunningApplication.runningApplications(withBundleIdentifier: $0.bundleID).isEmpty
+        })
+        var out: [AppPermission] = []
+        for p in AppPermission.launchCheck(running: running) where await access(p) == .notDetermined {
+            out.append(p)
+        }
+        return out
+    }
+
+    /// This build, as the once-per-version launch check counts it: "0.8.12 (8120)".
+    static var appVersion: String {
+        let info = Bundle.main.infoDictionary
+        return "\(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?"))"
+    }
+
     /// Where `p` stands. Automation calls into the Apple Event manager: run it off main.
     static func access(_ p: AppPermission) async -> PermissionAccess {
         switch p {

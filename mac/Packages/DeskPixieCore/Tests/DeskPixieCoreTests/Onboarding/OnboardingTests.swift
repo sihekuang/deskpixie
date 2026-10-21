@@ -66,6 +66,40 @@ final class OnboardingTests: XCTestCase {
         XCTAssertEqual(OnboardingFlow.pages, [.welcome, .pixie, .setup, .permissions, .done])
     }
 
+    func testTheWindowCanStartOnAnyStep() {
+        var flow = OnboardingFlow()
+        flow.restart(at: .permissions)
+        XCTAssertEqual(flow.page, .permissions)
+        flow.next()
+        XCTAssertEqual(flow.page, .done)
+        flow.restart()
+        XCTAssertEqual(flow.page, .welcome)
+    }
+
+    // MARK: Permissions at launch (#213)
+
+    /// An onboarded user sees the Permissions step again only for something not asked yet, once
+    /// per version.
+    func testThePermissionsStepReopensOncePerVersionForSomethingUnasked() {
+        XCTAssertTrue(OnboardingGate.shouldOpenPermissions(done: true, version: "0.8.12 (8120)", checkedVersion: "0.8.11 (811)",
+                                                           unasked: [.notifications]))
+        XCTAssertTrue(OnboardingGate.shouldOpenPermissions(done: true, version: "0.8.12 (8120)", checkedVersion: nil,
+                                                           unasked: [.accessibility]))
+        XCTAssertFalse(OnboardingGate.shouldOpenPermissions(done: true, version: "0.8.12 (8120)", checkedVersion: "0.8.12 (8120)",
+                                                            unasked: [.notifications]), "already shown for this version")
+        XCTAssertFalse(OnboardingGate.shouldOpenPermissions(done: true, version: "0.8.12 (8120)", checkedVersion: nil,
+                                                            unasked: []), "nothing to ask")
+        XCTAssertFalse(OnboardingGate.shouldOpenPermissions(done: false, version: "0.8.12 (8120)", checkedVersion: nil,
+                                                            unasked: [.microphone]), "a new user gets the whole window")
+    }
+
+    /// Only what can be read counts: Automation for apps that are running.
+    func testTheLaunchCheckReadsOnlyWhatCanBeRead() {
+        XCTAssertEqual(AppPermission.launchCheck(running: []), [.microphone, .notifications, .accessibility])
+        XCTAssertEqual(AppPermission.launchCheck(running: [.music, .systemEvents]),
+                       [.microphone, .notifications, .accessibility, .automation(.systemEvents), .automation(.music)])
+    }
+
     /// A pack's preview comes from the folder the core loads it from: the user's beats bundled.
     func testAPacksPreviewIsTheFolderTheCoreLoads() {
         let bundled = URL(fileURLWithPath: "/App/Resources/pixies")

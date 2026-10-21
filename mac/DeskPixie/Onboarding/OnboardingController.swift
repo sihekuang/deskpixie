@@ -176,7 +176,8 @@ final class OnboardingController {
         self.settings = settings
     }
 
-    func show() {
+    /// Opens the window (or brings it forward); a new one starts on `page`.
+    func show(at page: OnboardingPage = .welcome) {
         let model = settings()
         model.load()
         state.refresh()
@@ -184,7 +185,7 @@ final class OnboardingController {
             WindowFocus.bringForward(window, app: NSApp, showInDock: true)
             return
         }
-        state.flow.restart()
+        state.flow.restart(at: page)
         let view = OnboardingView(state: state, settings: model,
                                   onFinish: { [weak self] in self?.finish() },
                                   onClose: { [weak self] in self?.window?.close() })
@@ -246,6 +247,8 @@ final class OnboardingController {
 
     private static func markDone() {
         UserDefaults.standard.set(true, forKey: OnboardingGate.doneKey)
+        // Its Permissions step was just there: the launch check waits for the next version.
+        UserDefaults.standard.set(SystemPermissions.appVersion, forKey: OnboardingGate.permissionsVersionKey)
         UserDefaults.standard.removeObject(forKey: OnboardingGate.pendingKey)
     }
 }

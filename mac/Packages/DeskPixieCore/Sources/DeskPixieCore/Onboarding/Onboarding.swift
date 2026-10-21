@@ -117,7 +117,9 @@ public struct OnboardingFlow: Equatable, Sendable {
         index = max(index - 1, 0)
     }
 
-    public mutating func restart() { index = 0 }
+    public mutating func restart(at page: OnboardingPage = .welcome) {
+        index = Self.pages.firstIndex(of: page) ?? 0
+    }
 
     /// The last page's button: a chosen setting that applies only after a restart restarts.
     public static func finishTitle(restartPending: Bool) -> String {
@@ -133,6 +135,19 @@ public enum OnboardingGate {
     /// The core writes that file on the same launch, so without it a first launch that never got
     /// to the window (a crash, a quit while starting) would leave the user looking like an old one.
     public static let pendingKey = "DeskPixieOnboardingPending"
+
+    /// UserDefaults: the app version the window last opened for by itself, or was finished or
+    /// closed in (#213).
+    public static let permissionsVersionKey = "DeskPixiePermissionsCheckedVersion"
+
+    /// For someone already onboarded: the window opens on its Permissions step when a permission
+    /// is still not asked (`unasked`, of `AppPermission.launchCheck`), at most once per app
+    /// version, so one turned off on purpose (or Accessibility, which reads the same) doesn't
+    /// reopen it every launch (#213).
+    public static func shouldOpenPermissions(done: Bool, version: String, checkedVersion: String?,
+                                             unasked: [AppPermission]) -> Bool {
+        done && version != checkedVersion && !unasked.isEmpty
+    }
 
     /// For a new user (no settings file before this launch, or a first launch that never got to
     /// the window) who hasn't finished or closed it.
@@ -235,6 +250,14 @@ public enum AppPermission: Hashable, Sendable {
     public static func all(installed: Set<AutomationTarget>) -> [AppPermission] {
         [.microphone, .notifications, .accessibility]
             + AutomationTarget.allCases.filter { $0 == .systemEvents || installed.contains($0) }.map(AppPermission.automation)
+    }
+
+    /// What the launch check reads (#213): the ones whose state can be read without asking.
+    /// Automation only for apps that are running: one that isn't reads as not asked whatever was
+    /// answered.
+    public static func launchCheck(running: Set<AutomationTarget>) -> [AppPermission] {
+        [.microphone, .notifications, .accessibility]
+            + AutomationTarget.allCases.filter(running.contains).map(AppPermission.automation)
     }
 
     /// What Allow All asks for: every one not answered yet, Accessibility last (it sends the

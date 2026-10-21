@@ -13,7 +13,11 @@ OPENAI_API_KEY)", "Coordinator: herdr not found").
 - A window opens on a new user's first launch, in five steps: Welcome, Pick your Pixie (#212: every
   loaded pack as an animated card; choosing one is the `pack` setting, so the desktop Pixie changes
   at once, and the window's own Pixie follows), Set up (choose and set up each feature on one
-  page), Permissions, Done. Permissions (#210) lists every macOS permission
+  page), Permissions, Done.
+- Someone already onboarded sees the window again, opened on Permissions, when a launch finds a
+  permission still not asked (#213): one a new build needs, or one macOS reset. Only what can be
+  read counts (Microphone, Notifications, Accessibility, Automation for running apps), and at
+  most once per app version, so one turned off on purpose doesn't reopen it every launch. Permissions (#210) lists every macOS permission
   (Microphone, Notifications, Accessibility, Automation for System Events and each installed app
   DeskPixie scripts: iTerm, Music, Spotify) with Allow All, so none is asked mid-task.
 - Every choice in it is the real setting (the same control and the same save path as Settings),
