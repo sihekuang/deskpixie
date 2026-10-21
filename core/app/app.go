@@ -126,6 +126,7 @@ type App struct {
 	// localTools are built once and shared by the voice loop (voiceTools) and the agent.
 	localTools []tools.Tool
 	voiceTools *voice.ToolRegistry
+	clip       clipboardReads
 
 	canvas   *canvas.CanvasController // nil when the canvas is unavailable
 	resolver *canvas.Resolver
@@ -242,6 +243,7 @@ func New(d Deps) (*App, error) {
 		})
 		if a.agent != nil {
 			a.agent.SetTextMode(cfg.ReplyMode == settings.ReplyText)
+			a.watchAttachments()
 		}
 	}
 	a.buildVoice(cfg)
@@ -337,6 +339,9 @@ func (a *App) voiceExtras() ([]voice.Tool, string) {
 	persona := strings.TrimSpace(a.deps.ExtraPersona)
 	if a.agent != nil {
 		tools = append(tools, a.agent.Tools()...)
+		if a.agent.Attachments() != nil {
+			tools = append(tools, a.clipboardTool())
+		}
 		if persona == "" {
 			persona = a.agent.Persona()
 		} else {
@@ -1153,6 +1158,7 @@ func (a *App) Register(r Registrar) {
 		return struct{}{}, nil
 	})
 	a.registerChat(r)
+	a.registerAttachments(r)
 	a.registerLogs(r)
 	r.Register("agent.updates", func(json.RawMessage) (any, error) {
 		var lines any = []any{}

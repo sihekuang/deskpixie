@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/sihekuang/deskpixie/core/app"
+	"github.com/sihekuang/deskpixie/core/attach"
 	"github.com/sihekuang/deskpixie/core/settings"
 	"github.com/sihekuang/deskpixie/core/voice"
 )
@@ -24,6 +25,7 @@ func (b *bridgeAgent) Menu(string) bool                { return true }
 func (b *bridgeAgent) ChatSend(string) (string, error) { return "", nil }
 func (b *bridgeAgent) ChatStop()                       {}
 func (b *bridgeAgent) SetTextMode(bool)                {}
+func (b *bridgeAgent) Attachments() *attach.Store      { return nil }
 func (b *bridgeAgent) OpenTerminal()                   { b.mu.Lock(); b.opened++; b.mu.Unlock() }
 func (b *bridgeAgent) AttachVoice(app.AgentVoice)      {}
 func (b *bridgeAgent) OnMouth(int)                     {}

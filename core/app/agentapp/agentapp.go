@@ -26,6 +26,7 @@ import (
 	"github.com/sihekuang/deskpixie/core/agent/proc"
 	"github.com/sihekuang/deskpixie/core/agent/terminal"
 	"github.com/sihekuang/deskpixie/core/app"
+	"github.com/sihekuang/deskpixie/core/attach"
 	"github.com/sihekuang/deskpixie/core/pix/wire"
 	"github.com/sihekuang/deskpixie/core/pixhost"
 	"github.com/sihekuang/deskpixie/core/settings"
@@ -125,6 +126,7 @@ type Agent struct {
 	paths   Paths
 	hooks   app.AgentHooks
 	addr    string
+	attach  *attach.Store
 
 	// toAgent receives the voice signals the echo gate admits (handle.Voice; tests replace it).
 	toAgent func(voice.VoiceSignal)
@@ -365,6 +367,9 @@ func Build(c Config) *Agent {
 		Roster:      rosterSink{c.Hooks},
 		Modes:       a,
 	}
+	a.attach = attach.New(paths.Attachments, time.Now)
+	a.attach.Sweep()
+	deps.Attachments = a.attach
 	if c.Hooks.Chat != nil {
 		deps.Chat = chatSink{c.Hooks}
 	}
@@ -660,6 +665,9 @@ func (a *Agent) FocusJob(job, worker string) {
 }
 
 // ChatSend is a message typed in the text box (#221).
+// Attachments are the files waiting for the next request (#240).
+func (a *Agent) Attachments() *attach.Store { return a.attach }
+
 func (a *Agent) ChatSend(text string) (string, error) {
 	id, err := a.handle.ChatSend(text)
 	return string(id), err
