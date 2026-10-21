@@ -1672,6 +1672,11 @@ func (c *AgentController) flushUpdates(now Millis, fx *[]Effect) {
 		if !u.Progress {
 			l := NewJobLine(LineInfo, u.Text, u.Job)
 			l.Worker = u.Worker
+			if c.typed[u.Job] {
+				// #221: a typed job's worker reports go to the box like the coordinator's reply.
+				*fx = append(*fx, Effect{Kind: EfChat, Chat: c.chatLine(l)})
+				continue
+			}
 			c.deliverUpdate(l, now, fx)
 			continue
 		}
