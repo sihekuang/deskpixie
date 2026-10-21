@@ -117,6 +117,18 @@ final class AttachmentsController {
         return took
     }
 
+    /// Files or an image dropped on Pixie (a drop is the user's own act: no prompt).
+    func drop(board: NSPasteboard) -> Bool {
+        let urls = board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+        if !urls.isEmpty {
+            add(.adds(urls.map { .file($0.path) }))
+            return true
+        }
+        guard let image = NSImage(pasteboard: board), let tiff = image.tiffRepresentation else { return false }
+        add(AttachmentIntake.fromImage(tiff))
+        return true
+    }
+
     private func add(_ result: IntakeResult) {
         switch result {
         case .refused(let why):

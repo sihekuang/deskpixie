@@ -12,6 +12,8 @@ final class PixieView: NSView {
     var onMouseUp: ((NSEvent) -> Void)?
     /// A secondary click (right-click, or control-click).
     var onSecondaryClick: ((NSEvent) -> Void)?
+    /// Files or an image dropped on Pixie (#240): true when taken.
+    var onDrop: ((NSPasteboard) -> Bool)?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -27,6 +29,7 @@ final class PixieView: NSView {
             l.actions = ["contents": NSNull(), "position": NSNull(), "bounds": NSNull(), "frame": NSNull()]
             root.addSublayer(l)
         }
+        registerForDraggedTypes([.fileURL, .png, .tiff])
     }
 
     @available(*, unavailable)
@@ -59,6 +62,9 @@ final class PixieView: NSView {
         if event.modifierFlags.contains(.control) { onSecondaryClick?(event) } else { onMouseDown?(event) }
     }
     override func rightMouseDown(with event: NSEvent) { onSecondaryClick?(event) }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { onDrop == nil ? [] : .copy }
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool { onDrop?(sender.draggingPasteboard) ?? false }
     override func mouseDragged(with event: NSEvent) { onMouseDragged?(event) }
     override func mouseUp(with event: NSEvent) {
         if !event.modifierFlags.contains(.control) { onMouseUp?(event) }

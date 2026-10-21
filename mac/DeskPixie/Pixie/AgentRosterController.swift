@@ -50,6 +50,10 @@ final class AgentRosterController {
     /// The attachments waiting for the next request (#240), and Cmd-V while the box is open.
     private var attach: AttachmentsController!
     private var pasteMonitor: Any?
+    /// Pixie's "Want me to take this?" for each new copy of an image or files.
+    private var watch = ClipboardWatch()
+    private var offer = CopyOffer()
+    private var watchTicks = 0
 
     init(engine: CoreEngine, worker: CoreWorker, pixie: PixieController) {
         self.engine = engine
@@ -66,6 +70,7 @@ final class AgentRosterController {
         attach = AttachmentsController(engine: engine, worker: worker, clipboard: PasteboardClipboard()) { [weak self] in
             self?.render()
         }
+        pixie.view.onDrop = { [weak self] board in self?.attach.drop(board: board) ?? false }
         fetchCurrent()
         fetchMode()
     }
@@ -80,9 +85,31 @@ final class AgentRosterController {
 
     var attachments: AttachmentsController { attach }
 
+    /// A click on Pixie's offer: what was copied, attached.
+    private func takeOffer() {
+        offer.take()
+        attach.attachClipboard()
+        // Text mode: the box opens with it; voice mode keeps the card under Pixie (#221's rule).
+        if chat.mode == "text" && !chat.open { openChat() } else { render() }
+    }
+
+    /// Every half second: a new copy brings the offer up.
+    private func watchClipboard(hovering: Bool) -> Bool {
+        watchTicks += 1
+        var changed = offer.expire(now: Date(), hovering: hovering)
+        guard watchTicks % 5 == 0 else { return changed }
+        attach.poll()
+        if watch.poll(changeCount: attach.clipboard.changeCount, kind: attach.clipboardKind) {
+            offer.show(attach.clipboardKind, now: Date())
+            changed = true
+        }
+        return changed
+    }
+
     /// Cmd-V in the open box: attaches when the clipboard holds only an image or files.
     private func pasteAttaches() -> Bool {
         guard chat.open, panel.isKeyWindow, ClipboardRules.pasteAttaches(attach.clipboard.detectedTypes()) else { return false }
+        offer.take()
         attach.attachClipboard()
         return true
     }
@@ -339,9 +366,9 @@ final class AgentRosterController {
     }
 
     private func poll() {
-        if chat.open { attach.poll() }
         let mouse = NSEvent.mouseLocation
         let overPanel = panel.isVisible && panel.frame.contains(mouse)
+        let offerChanged = watchClipboard(hovering: overPanel)
         // The list opens over the chip and closes when the pointer leaves the chip and the list;
         // never while the text box is open.
         var inside = false
@@ -357,7 +384,7 @@ final class AgentRosterController {
         // Put away once old enough (captionDismissSecs).
         let expired = chat.dismissIfOlder(than: dismissSecs, now: Date())
         let ago = cardUp ? chat.ago(now: Date()) : nil
-        if expired || inside != model.open || near != hovering || ago != agoShown {
+        if offerChanged || expired || inside != model.open || near != hovering || ago != agoShown {
             model.open = inside
             hovering = near
             render()
@@ -399,7 +426,8 @@ final class AgentRosterController {
                 DispatchQueue.main.async { self?.layout() }
             },
             onDismiss: { [weak self] in self?.dismissWords() },
-            attachments: attach == nil ? .none : attachmentUI)
+            attachments: attach == nil ? .none : attachmentUI,
+            offer: offer.kind, onOffer: { [weak self] in self?.takeOffer() })
             .onPreferenceChange(ChipFrameKey.self) { [weak self] frame in
                 MainActor.assumeIsolated { self?.chipFrame = frame }
             })
@@ -416,7 +444,7 @@ final class AgentRosterController {
             hide()
             return
         }
-        if !model.open && !cardUp { chipHeight = size.height }
+        if !model.open && !cardUp && offer.kind == nil { chipHeight = size.height }
         let top = ScreenDisplays.primaryMaxY
         let bit = pixie.panel.frame
         let screen = NSScreen.screens.first { $0.frame.contains(NSPoint(x: bit.midX, y: bit.midY)) }

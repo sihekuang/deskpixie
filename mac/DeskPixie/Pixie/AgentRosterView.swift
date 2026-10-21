@@ -24,6 +24,9 @@ struct AgentRosterView: View {
     let onResize: () -> Void
     let onDismiss: () -> Void
     let attachments: AttachmentUI
+    /// Pixie's "Want me to take this?" for a new copy (#240), nil when not up.
+    let offer: ClipboardKind?
+    let onOffer: () -> Void
 
     static let listWidth: CGFloat = 260
 
@@ -31,6 +34,7 @@ struct AgentRosterView: View {
         VStack(spacing: 4) {
             if model.open && !below { list }
             if showsCard && !below { card }
+            if let offer, !below { offerBubble(offer) }
             HStack(spacing: 6) {
                 if model.visible {
                     chip.background(GeometryReader { g in
@@ -43,6 +47,7 @@ struct AgentRosterView: View {
             // maxChipWidth and open a gap before the toggle (#227).
             .fixedSize()
             if model.open && below { list }
+            if let offer, below { offerBubble(offer) }
             if showsCard && below { card }
         }
         .fixedSize()
@@ -56,6 +61,23 @@ struct AgentRosterView: View {
         QuickChatCard(model: chat, state: chatState, showsInput: chatOpen, ago: ago,
                       onSend: onSend, onStop: onStop, onClose: onCloseChat, onResize: onResize, onDismiss: onDismiss,
                       attachments: attachments)
+    }
+
+    private func offerBubble(_ kind: ClipboardKind) -> some View {
+        Button(action: onOffer) {
+            HStack(spacing: 6) {
+                Image(systemName: kind == .files ? "doc.fill" : "photo.fill")
+                Text("Want me to take this?")
+            }
+            .font(.callout.weight(.semibold))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(Capsule().fill(.regularMaterial))
+            .overlay(Capsule().strokeBorder(.separator))
+        }
+        .buttonStyle(.plain)
+        .help("Attach what you copied to your next request")
+        .transition(.opacity)
     }
 
     private var chip: some View {
