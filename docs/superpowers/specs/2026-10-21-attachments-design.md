@@ -155,8 +155,9 @@ denies the read, Pixie says DeskPixie isn't allowed to read the clipboard and wh
 
 ## To check early (unknowns from the research)
 
-1. That Claude Code in the coordinator pane reads an image from a typed absolute path inside its
-   working folder without asking (expected: yes).
-2. Whether Codex reads an image from a typed path mid-session. If not, Codex coordinators get the
-   path as text only, and the request says so; this must not block the Claude path.
+1. ~~That Claude Code reads an image from a typed absolute path inside its working folder without
+   asking.~~ Checked 2026-10-21: `claude -p` in auto mode, given "Attached: <cwd>/attachments/
+   test.png", described the image correctly with no prompt.
+2. ~~Whether Codex reads an image from a typed path.~~ Checked 2026-10-21: `codex exec -s
+   workspace-write` with the same line described it correctly.
 3. That `detect` really doesn't prompt on macOS 27, and that the first explicit read does, once.
