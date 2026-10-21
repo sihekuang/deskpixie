@@ -61,4 +61,24 @@ final class AgentRosterModelTests: XCTestCase {
     func testDots() {
         XCTAssertEqual(["working", "blocked", "idle", "done", "unknown"].map(AgentRosterModel.dot), ["●", "◐", "○", "○", "·"])
     }
+
+    // #234: the chip's busy dot follows the core's `busy`, and only while the chip shows.
+    func testTheBusyDotFollowsTheCore() throws {
+        let json = #"{"agents":[{"name":"coordinator","label":"Coordinator","status":"working","kind":"coordinator","reachable":true},{"name":"w","label":"w","status":"working","kind":"worker","reachable":true}],"yours":[],"agent_count":1,"your_count":0,"busy":true}"#
+        var m = AgentRosterModel()
+        m.apply(try JSONDecoder().decode(RosterView.self, from: Data(json.utf8)))
+        XCTAssertTrue(m.busy)
+        // The coordinator alone shows no chip, so no dot either.
+        m.apply(RosterView(agents: [row("coordinator", kind: "coordinator", status: "working")], yours: [],
+                           agentCount: 0, yourCount: 0, busy: true))
+        XCTAssertFalse(m.busy)
+        m.apply(RosterView(agents: [row("a")], yours: [], agentCount: 1, yourCount: 0, busy: false))
+        XCTAssertFalse(m.busy)
+    }
+
+    // A roster without `busy` (an older core) decodes as not busy.
+    func testARosterWithoutBusyIsNotBusy() throws {
+        let json = #"{"agents":[],"yours":[],"agent_count":0,"your_count":0}"#
+        XCTAssertFalse(try JSONDecoder().decode(RosterView.self, from: Data(json.utf8)).busy)
+    }
 }

@@ -384,3 +384,24 @@ func TestAPrimaryThatNeverListedStillShowsYourSessions(t *testing.T) {
 		}
 	})
 }
+
+// #234: the busy dot counts the part of the roster kept from before when its host can't be
+// listed: a working coordinator kept from the last list still makes the roster busy.
+func TestTheKeptPartStillCountsForBusy(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRosterRig(t, true)
+		time.Sleep(time.Second)
+		r.host.SetStatus(Coordinator, PaneWorking)
+		time.Sleep(time.Second)
+		if !lastRoster(t, r.roster).Busy {
+			t.Fatal("a working coordinator isn't busy")
+		}
+		r.host.FailList(true)
+		r.user.connect(t, "api-claude")
+		r.user.SetStatus("api-claude", PaneIdle)
+		time.Sleep(time.Second)
+		if v := lastRoster(t, r.roster); len(v.Yours) != 1 || !v.Busy {
+			t.Fatalf("%+v", v)
+		}
+	})
+}

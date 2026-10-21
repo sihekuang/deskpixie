@@ -35,7 +35,7 @@ func TestRosterWorkersPanesAndSessions(t *testing.T) {
 		`{"name":"focus-claude","label":"login bug","detail":"WebStorm","status":"idle","kind":"session","reachable":true,"app":"com.jetbrains.WebStorm"},` +
 		`{"name":"api-codex","label":"codex in api","detail":"iTerm","status":"working","kind":"session","reachable":true},` +
 		`{"name":"repo-claude","label":"claude","detail":"terminal","status":"idle","kind":"session","reachable":false}],` +
-		`"agent_count":2,"your_count":2}`
+		`"agent_count":2,"your_count":2,"busy":true}`
 	if string(b) != want {
 		t.Fatalf("got  %s\nwant %s", b, want)
 	}
@@ -43,10 +43,35 @@ func TestRosterWorkersPanesAndSessions(t *testing.T) {
 
 func TestRosterEmptyIsArraysNotNull(t *testing.T) {
 	b, _ := json.Marshal(BuildRoster(nil, nil, "tmux"))
-	if string(b) != `{"agents":[],"yours":[],"agent_count":0,"your_count":0}` {
+	if string(b) != `{"agents":[],"yours":[],"agent_count":0,"your_count":0,"busy":false}` {
 		t.Fatal(string(b))
 	}
-	if b, _ := json.Marshal(EmptyRoster()); string(b) != `{"agents":[],"yours":[],"agent_count":0,"your_count":0}` {
+	if b, _ := json.Marshal(EmptyRoster()); string(b) != `{"agents":[],"yours":[],"agent_count":0,"your_count":0,"busy":false}` {
 		t.Fatal(string(b))
+	}
+}
+
+// #234: the chip's busy dot shows while anything Pixie counts is working: the coordinator, a
+// worker or pane, or one of your reachable sessions. Blocked, idle and done are not busy.
+func TestRosterIsBusyWhileAnythingWorks(t *testing.T) {
+	session := func(name string, s PaneStatus, reachable bool) AgentInfo {
+		return AgentInfo{Name: name, Status: s, Origin: OriginUser, User: &UserSession{Tool: "claude", Reachable: reachable}}
+	}
+	for _, c := range []struct {
+		name string
+		list []AgentInfo
+		busy bool
+	}{
+		{"nothing", nil, false},
+		{"all idle, blocked or done", []AgentInfo{{Name: Coordinator, Status: PaneIdle}, {Name: "w", Status: PaneBlocked},
+			{Name: "d", Status: PaneDone}, session("s", PaneIdle, true)}, false},
+		{"the coordinator", []AgentInfo{{Name: Coordinator, Status: PaneWorking}}, true},
+		{"a worker", []AgentInfo{{Name: Coordinator, Status: PaneIdle}, {Name: "w", Status: PaneWorking}}, true},
+		{"your session", []AgentInfo{session("s", PaneWorking, true)}, true},
+		{"your session you can't reach", []AgentInfo{session("s", PaneWorking, false)}, false},
+	} {
+		if got := BuildRoster(c.list, nil, "herdr").Busy; got != c.busy {
+			t.Errorf("%s: busy %v", c.name, got)
+		}
 	}
 }
