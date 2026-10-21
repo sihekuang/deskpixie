@@ -24,6 +24,7 @@ struct OnboardingView: View {
         VStack(spacing: 0) {
             switch page {
             case .welcome: welcome
+            case .pixie: scrolling { pickPixie }
             case .setup: scrolling { setup }
             case .permissions: scrolling { permissions }
             case .done: scrolling { done }
@@ -120,6 +121,74 @@ struct OnboardingView: View {
             }
         }
         .accessibilityElement(children: .combine)
+    }
+
+    // MARK: Pick your Pixie
+
+    /// The chosen pack's folder: the window's own Pixie is the one you picked.
+    private var chosenPack: URL? {
+        settings.snapshot?.values.at("pack")?.stringValue.flatMap(state.packFolder)
+    }
+
+    /// Every loaded pack as a card; choosing one is the Pixie setting, so the one on the desktop
+    /// changes at once (#212).
+    @ViewBuilder
+    private var pickPixie: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Pick your Pixie")
+                .font(.title2.weight(.bold))
+                .accessibilityAddTraits(.isHeader)
+            Text("Who keeps you company on your desktop? Change it any time from the menu bar.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 4)
+        .padding(.top, 16)
+        if let spec = settings.spec(path: "pack"), case .menu(let items, let selected) = spec.control {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 14)], spacing: 14) {
+                ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                    pixieCard(item, chosen: index == selected) {
+                        _ = settings.commit(spec.path, .menu(index))
+                    }
+                    .disabled(!settings.enabled || !item.enabled)
+                }
+            }
+            .padding(.top, 4)
+        } else {
+            Text(settings.loadError.map { "Couldn't read settings: \($0)" } ?? "Loading…")
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func pixieCard(_ item: SettingsLayout.MenuItem, chosen: Bool, choose: @escaping () -> Void) -> some View {
+        Button(action: choose) {
+            VStack(spacing: 8) {
+                PixieSpriteView(state: chosen ? "happy" : "idle", scale: 3,
+                                packDir: item.value.stringValue.flatMap(state.packFolder))
+                    .frame(height: 104)
+                Text(item.label)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+            }
+            .padding(.vertical, 14)
+            .frame(maxWidth: .infinity)
+            .background(RoundedRectangle(cornerRadius: 12)
+                .fill(chosen ? Self.pixieGreen.opacity(0.16) : Color(nsColor: .controlBackgroundColor)))
+            .overlay(RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(chosen ? Self.accent : Color(nsColor: .separatorColor).opacity(0.6), lineWidth: chosen ? 2 : 1))
+            .overlay(alignment: .topTrailing) {
+                if chosen {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(Self.accent)
+                        .padding(8)
+                }
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(item.label)
+        .accessibilityAddTraits(chosen ? .isSelected : [])
     }
 
     // MARK: Set up
@@ -494,7 +563,7 @@ struct OnboardingView: View {
 
     private func pixie(_ state: String) -> some View {
         VStack(spacing: 0) {
-            PixieSpriteView(state: state)
+            PixieSpriteView(state: state, packDir: chosenPack)
             Ellipse()
                 .fill(Color.black.opacity(0.12))
                 .frame(width: 84, height: 10)

@@ -40,7 +40,7 @@ by Apple. DeskPixie lives in the menu bar and asks for microphone access the fir
 
 ## First run
 
-On a new Mac, DeskPixie opens a welcome window: pick what Pixie does (talk, run agents, watch your
+On a new Mac, DeskPixie opens a welcome window: pick your Pixie, pick what it does (talk, run agents, watch your
 own sessions, show canvas pages) and set each part up (voice key and microphone, herdr and Claude
 Code or Codex, the `pix` command), then allow every macOS permission at once so none interrupts you
 later. Every choice is the same setting as in Settings. Open it again

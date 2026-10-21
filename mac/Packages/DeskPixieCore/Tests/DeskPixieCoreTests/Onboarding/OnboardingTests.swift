@@ -61,9 +61,22 @@ final class OnboardingTests: XCTestCase {
         XCTAssertEqual(OnboardingFlow.chosen(v), [.voice, .sessions])
     }
 
-    /// Four steps whatever is chosen: choosing and setting up share one page; then permissions.
-    func testThereAreFourSteps() {
-        XCTAssertEqual(OnboardingFlow.pages, [.welcome, .setup, .permissions, .done])
+    /// Five steps whatever is chosen: choosing and setting up share one page.
+    func testThereAreFiveSteps() {
+        XCTAssertEqual(OnboardingFlow.pages, [.welcome, .pixie, .setup, .permissions, .done])
+    }
+
+    /// A pack's preview comes from the folder the core loads it from: the user's beats bundled.
+    func testAPacksPreviewIsTheFolderTheCoreLoads() {
+        let bundled = URL(fileURLWithPath: "/App/Resources/pixies")
+        let user = URL(fileURLWithPath: "/Support/pixies")
+        let have: Set<String> = ["/App/Resources/pixies/bit/pixie.json", "/App/Resources/pixies/dino/pixie.json",
+                                 "/Support/pixies/dino/pixie.json"]
+        let exists = { (u: URL) in have.contains(u.path) }
+        XCTAssertEqual(OnboardingPixies.folder(id: "bit", roots: [bundled, user], exists: exists)?.path, "/App/Resources/pixies/bit")
+        XCTAssertEqual(OnboardingPixies.folder(id: "dino", roots: [bundled, user], exists: exists)?.path, "/Support/pixies/dino")
+        XCTAssertNil(OnboardingPixies.folder(id: "nope", roots: [bundled, user], exists: exists))
+        XCTAssertNil(OnboardingPixies.folder(id: "../bit", roots: [bundled, user], exists: { _ in true }))
     }
 
     /// On the setup page a feature's setup shows under its switch while it is on; canvas has none.
@@ -85,6 +98,8 @@ final class OnboardingTests: XCTestCase {
         XCTAssertFalse(flow.canGoBack)
         flow.back()
         XCTAssertEqual(flow.page, .welcome)
+        flow.next()
+        XCTAssertEqual(flow.page, .pixie)
         flow.next()
         XCTAssertEqual(flow.page, .setup)
         flow.next()

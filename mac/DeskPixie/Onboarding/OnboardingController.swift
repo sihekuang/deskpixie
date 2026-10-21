@@ -43,6 +43,17 @@ final class OnboardingState {
     var statusLines: [String] { statusLinesNow() }
     let home = FileManager.default.homeDirectoryForCurrentUser.path
 
+    /// Where the core loads packs from (bundled, then the user's), for the Pixie previews.
+    private let packRoots: [URL] = (EngineConfig.forBundle(
+        resources: Bundle.main.resourceURL ?? Bundle.main.bundleURL,
+        appSupport: AppSupportDirectory.resolve(home: FileManager.default.homeDirectoryForCurrentUser)
+    ).packRoots ?? []).map { URL(fileURLWithPath: $0, isDirectory: true) }
+
+    /// Pack `id`'s folder; nil when it can't be found (its card then shows the bundled bit).
+    func packFolder(_ id: String) -> URL? {
+        OnboardingPixies.folder(id: id, roots: packRoots) { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
     /// Reads everything again (the window opened, or Check Again).
     func refresh() {
         refreshPermissions()

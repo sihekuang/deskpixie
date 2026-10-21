@@ -60,10 +60,21 @@ public enum OnboardingFeature: String, CaseIterable, Sendable {
     }
 }
 
-/// Four steps: welcome; set up, where each feature's card holds its switch and, while it is on,
-/// its setup; permissions, every one asked for at once (#210); done.
+/// Five steps: welcome; pick your Pixie (#212); set up, where each feature's card holds its switch
+/// and, while it is on, its setup; permissions, every one asked for at once (#210); done.
 public enum OnboardingPage: Equatable, Sendable, CaseIterable {
-    case welcome, setup, permissions, done
+    case welcome, pixie, setup, permissions, done
+}
+
+/// The pick-your-Pixie step (#212).
+public enum OnboardingPixies {
+    /// A pack's folder, for its preview: the last root that has it, as the core loads them (a
+    /// pack in the user's folder replaces a bundled one of the same name). nil when none has it.
+    public static func folder(id: String, roots: [URL], exists: (URL) -> Bool) -> URL? {
+        guard !id.isEmpty, !id.contains("/") else { return nil }
+        return roots.reversed().map { $0.appendingPathComponent(id, isDirectory: true) }
+            .first { exists($0.appendingPathComponent("pixie.json")) }
+    }
 }
 
 /// Where the window is.
