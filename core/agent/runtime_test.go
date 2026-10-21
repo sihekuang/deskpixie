@@ -74,6 +74,16 @@ func newRig(t *testing.T) *rtRig { return rigWith(t, &agenttest.MemStore{}, fals
 
 func settle() { time.Sleep(50 * time.Millisecond) }
 
+// eventually waits up to 5 s for cond (the runtime's loop may lag under a loaded test run).
+func eventually(cond func() bool) bool {
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if cond() {
+			return true
+		}
+	}
+	return cond()
+}
+
 func stopHook(r *rtRig, message string) {
 	r.h.Deliver(HookEvent{Kind: HookStop, Agent: Coordinator, Message: message})
 }

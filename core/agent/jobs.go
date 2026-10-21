@@ -9,6 +9,9 @@ import (
 // Pure: callers pass now; persistence is jsonl lines the caller writes through Store.
 
 // RetentionMs: closed jobs older than this are dropped when the file is compacted at start.
+// RestartReason is the reason of a job a restart found open (and failed).
+const RestartReason = "app restarted"
+
 const RetentionMs Millis = 14 * 24 * 60 * 60 * 1000
 
 // JobsFile is the file name under `<app_data>/agent/`.
@@ -328,7 +331,7 @@ func RestoreJobTable(lines []string, now Millis, keepOpen bool) (*JobTable, []Jo
 			}
 		}
 		if j.Status.IsOpen() && !keepOpen {
-			reason := "app restarted"
+			reason := RestartReason
 			j.Status = JobFailed
 			j.Reason = &reason
 			j.Updated = now

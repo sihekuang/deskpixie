@@ -92,16 +92,48 @@ func TestAKeptWorkerMessagedForANewRequestWorksForIt(t *testing.T) {
 	}
 }
 
-func TestAKeptWorkerMessagedOutsideARequestStaysOnItsJob(t *testing.T) {
+// With no one request for it to join, its replies would be refused: nothing is sent.
+func TestAKeptWorkerMessagedOutsideARequestIsRefused(t *testing.T) {
 	c := wctl()
 	running(t, c)
 	c.Step(StopInput(Coordinator, fmt.Sprintf(`<spoken ref="%s" status="done">Fixed.</spoken>`, job(1))), T0)
-	_, err, _ := mcp(t, c, Coordinator, McpCall{Kind: CallMessageWorker, Name: workerName, Text: "Thanks."}, T0+1)
-	if err != "" {
-		t.Fatal(err)
+	_, err, fx := mcp(t, c, Coordinator, McpCall{Kind: CallMessageWorker, Name: workerName, Text: "Thanks."}, T0+1)
+	wantToolErr(t, err, "focus-upload's request has ended, and no single request is in progress for it to join, so its replies would be lost.")
+	if anyKind(fx, EfPromptWorker) {
+		t.Fatal(fmtEffects(fx))
 	}
 	if w := c.workers.Get(workerName); w == nil || w.Plan.Job != job(1) {
 		t.Fatalf("%+v", w)
+	}
+}
+
+// A kept worker that reported keeps no job open: a reply with no status ends it.
+func TestAWorkerThatReportedDoesNotKeepAReplyWithoutAStatusOpen(t *testing.T) {
+	c := newRequestInFlight(t)
+	mcp(t, c, Coordinator, McpCall{Kind: CallMessageWorker, Name: workerName, Text: "Now the docs test."}, T0+StopSettleMs+1)
+	c.Step(StopInput(workerName, "ok"), T0+StopSettleMs+2)
+	c.Step(StopInput(Coordinator, fmt.Sprintf(`<spoken ref="%s">Asked it.</spoken>`, job(2))), T0+StopSettleMs+3)
+	wantJobStatus(t, c, 2, JobWorking, "still on the docs test")
+	_, err, _ := mcp(t, c, workerName, McpCall{Kind: CallReportResult, Outcome: OutcomeDone, Summary: "docs test fixed", Evidence: "x"}, T0+StopSettleMs+4)
+	if err != "" {
+		t.Fatal(err)
+	}
+	c.Step(StopInput(Coordinator, fmt.Sprintf(`<spoken ref="%s">The docs test is fixed.</spoken>`, job(2))), T0+StopSettleMs+5)
+	wantJobStatus(t, c, 2, JobDone, "its worker reported and is only kept open")
+}
+
+// A worker whose job the restart itself failed was mid-task: it is closed, as before.
+func TestAWorkerWhoseJobTheRestartFailedIsClosed(t *testing.T) {
+	first := wctl()
+	running(t, first)
+	line, _ := first.jobs.Line(job(1))
+	c := NewAgentController(workerSettings())
+	c.Step(RestoredInput([]string{line}, nil, false), T0+10)
+	wantJobStatus(t, c, 1, JobFailed)
+	fx := c.Step(AdoptWorkerInput(keptPlan(), "/projects/focus/.worktrees/upload", PaneIdle), T0+20)
+	wantContains(t, fx, eStopWorker(workerName))
+	if c.workers.Get(workerName) != nil {
+		t.Fatal("adopted")
 	}
 }
 

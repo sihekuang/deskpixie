@@ -106,7 +106,8 @@ func (c *AgentController) adoptWorker(plan WorkerPlan, worktree string, status P
 	j, known := c.jobs.Get(plan.Job)
 	// Kept open after its job finished (#237): adopted as it is, with nothing to report again.
 	// A cancelled or forgotten job's worker is closed.
-	finished := known && !j.Status.IsOpen() && j.Status != JobCancelled
+	// One the restart itself failed was mid-task: closed too.
+	finished := known && !j.Status.IsOpen() && j.Status != JobCancelled && !(j.Reason != nil && *j.Reason == RestartReason)
 	if c.shutDown || !known || !j.Status.IsOpen() && !finished {
 		*fx = append(*fx, Effect{Kind: EfStopWorker, Name: plan.Name})
 		refuse(fmt.Sprintf("No open job %s.", plan.Job))
@@ -253,13 +254,16 @@ func (c *AgentController) messageWorker(name, text string, now Millis, fx *[]Eff
 	}
 	// A worker kept open after its job ended, given more work in the request now in flight,
 	// works for that request: its reports and permission requests count again (#237).
-	if refs := unique(c.inbox.InFlightRefs()); !c.jobs.IsOpen(w.Plan.Job) && len(refs) == 1 && c.jobs.IsOpen(refs[0]) {
-		old := w.Plan.Job
-		if c.jobs.MoveWorker(name, refs[0], now) {
-			w.Plan.Job = refs[0]
-			c.saveJob(old, fx)
-			c.saveJob(refs[0], fx)
+	// With no single such request its replies would be refused, so nothing is sent.
+	if !c.jobs.IsOpen(w.Plan.Job) {
+		refs := unique(c.inbox.InFlightRefs())
+		if len(refs) != 1 || !c.jobs.MoveWorker(name, refs[0], now) {
+			return nil, fmt.Errorf("%s's request has ended, and no single request is in progress for it to join, so its replies would be lost.", name)
 		}
+		old := w.Plan.Job
+		w.Plan.Job = refs[0]
+		c.saveJob(old, fx)
+		c.saveJob(refs[0], fx)
 	}
 	c.workers.Push(name, CoordinatorSays(text))
 	status := "queued"
@@ -428,7 +432,7 @@ func (c *AgentController) stopJobWorkers(job JobID, fx *[]Effect) {
 
 func (c *AgentController) hasLiveWorkers(job JobID) bool {
 	for _, n := range c.workers.ForJob(job) {
-		if w := c.workers.Get(n); w != nil && !w.StopRequested {
+		if w := c.workers.Get(n); w != nil && !w.StopRequested && w.Busy() {
 			return true
 		}
 	}

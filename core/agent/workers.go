@@ -242,6 +242,10 @@ type Worker struct {
 
 func newWorker(plan WorkerPlan) *Worker { return &Worker{Plan: plan} }
 
+// Busy: it has work it hasn't reported on yet (a turn with no result, question or block, or
+// messages still queued). A worker kept open after reporting is not (#237).
+func (w *Worker) Busy() bool { return !w.reported || len(w.queue) > 0 }
+
 // delivered: the worker showed it got its last prompt (or it no longer matters).
 func (w *Worker) delivered() {
 	w.delivering = nil

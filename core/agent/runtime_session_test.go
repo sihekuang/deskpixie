@@ -49,15 +49,14 @@ func TestClosingYourSessionAsksFirst(t *testing.T) {
 	{
 		r, user := pixRig(t)
 		reply := closeCall(r)
-		settle()
-		if !hasCall(r.voice.Calls(), agenttest.InjectCall("Coordinator question: Close your session login bug? Say confirm hawk.")) {
+		asked := agenttest.InjectCall("Coordinator question: Close your session login bug? Say confirm hawk.")
+		if !eventually(func() bool { return hasCall(r.voice.Calls(), asked) }) {
 			t.Fatal(r.voice.Calls())
 		}
 		if _, ok := user.StatusOf("focus-claude"); !ok {
 			t.Fatal("closed before you confirmed")
 		}
 		r.h.Voice(VoiceSignal{Kind: voice.SigUserSaid, Text: "confirm hawk"})
-		settle()
 		if got := <-reply; got.Err != nil {
 			t.Fatal(got.Err)
 		}
