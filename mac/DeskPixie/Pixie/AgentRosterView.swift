@@ -60,6 +60,7 @@ struct AgentRosterView: View {
         Button(action: onChip) {
             // SF Symbols, not the ⚙/⌨ characters: those render tiny at small text sizes.
             HStack(spacing: 10) {
+                if model.busy { BusyDot() }
                 if model.view.agentCount > 0 { count("gearshape.fill", model.view.agentCount) }
                 if model.view.yourCount > 0 { count("keyboard", model.view.yourCount) }
             }
@@ -74,7 +75,8 @@ struct AgentRosterView: View {
         }
         .buttonStyle(.plain)
         .frame(maxWidth: maxChipWidth)
-        .accessibilityLabel("\(model.view.agentCount) of Pixie's agents, \(model.view.yourCount) of your sessions")
+        .accessibilityLabel("\(model.view.agentCount) of Pixie's agents, \(model.view.yourCount) of your sessions"
+                            + (model.busy ? ", working" : ""))
     }
 
     private func count(_ symbol: String, _ n: Int) -> some View {
@@ -134,6 +136,31 @@ struct AgentRosterView: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
         .contentShape(Rectangle())
+    }
+}
+
+/// The chip's busy dot (#234), as on the landing page: 7 pt, green with a soft glow, its
+/// opacity 1 → 0.4 → 1 over 1.6 s; still with Reduce Motion.
+private struct BusyDot: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var dim = false
+
+    var body: some View {
+        Circle()
+            .fill(Color.green)
+            .frame(width: 7, height: 7)
+            .shadow(color: .green, radius: 3)
+            .opacity(dim ? 0.4 : 1)
+            .onAppear { pulse() }
+            .onChange(of: reduceMotion) { _, _ in pulse() }
+    }
+
+    private func pulse() {
+        guard !reduceMotion else {
+            dim = false
+            return
+        }
+        withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) { dim = true }
     }
 }
 

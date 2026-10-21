@@ -864,6 +864,7 @@ func (h *AgentHandle) rebuildRoster() {
 	if parts.SecondaryErr != nil {
 		v.Yours, v.YourCount = last.Yours, last.YourCount
 	}
+	v.Busy = v.IsBusy() // over the kept part too
 	h.rosterMu.Lock()
 	if h.rosterSent && reflect.DeepEqual(v, h.rosterLast) {
 		h.rosterMu.Unlock()

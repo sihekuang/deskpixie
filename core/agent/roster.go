@@ -17,12 +17,14 @@ type RosterRow struct {
 }
 
 // RosterView is the whole roster. AgentCount excludes the coordinator; YourCount counts only
-// reachable sessions.
+// reachable sessions. Busy: the coordinator, a worker or pane, or a reachable session of yours
+// is working (the chip's busy dot, #234).
 type RosterView struct {
 	Agents     []RosterRow `json:"agents"`
 	Yours      []RosterRow `json:"yours"`
 	AgentCount int         `json:"agent_count"`
 	YourCount  int         `json:"your_count"`
+	Busy       bool        `json:"busy"`
 }
 
 // EmptyRoster has empty lists (never null in JSON).
@@ -71,5 +73,22 @@ func BuildRoster(list []AgentInfo, workers []WorkerRow, hostName string) RosterV
 	if v.Agents == nil {
 		v.Agents = []RosterRow{}
 	}
+	v.Busy = v.IsBusy()
 	return v
+}
+
+// IsBusy: a row of Pixie's (the coordinator included) or a reachable session of yours is working.
+func (v RosterView) IsBusy() bool {
+	working := PaneWorking.String()
+	for _, r := range v.Agents {
+		if r.Status == working {
+			return true
+		}
+	}
+	for _, r := range v.Yours {
+		if r.Reachable && r.Status == working {
+			return true
+		}
+	}
+	return false
 }

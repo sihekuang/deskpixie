@@ -1225,6 +1225,7 @@ func (a *App) Register(r Registrar) {
 			Yours      []any `json:"yours"`
 			AgentCount int   `json:"agent_count"`
 			YourCount  int   `json:"your_count"`
+			Busy       bool  `json:"busy"`
 		}{Agents: []any{}, Yours: []any{}}
 		if a.agent != nil {
 			view = a.agent.Roster()
