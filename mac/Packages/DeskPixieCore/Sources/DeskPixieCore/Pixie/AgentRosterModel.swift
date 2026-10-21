@@ -26,23 +26,35 @@ public struct RosterRow: Decodable, Sendable, Equatable, Identifiable {
 }
 
 /// The whole roster. `agentCount` never counts the coordinator; `yourCount` only reachable sessions.
+/// `busy`: something is working, as the core decides (#234).
 public struct RosterView: Decodable, Sendable, Equatable {
     public let agents: [RosterRow]
     public let yours: [RosterRow]
     public let agentCount: Int
     public let yourCount: Int
+    public let busy: Bool
 
     public static let empty = RosterView(agents: [], yours: [], agentCount: 0, yourCount: 0)
 
-    public init(agents: [RosterRow], yours: [RosterRow], agentCount: Int, yourCount: Int) {
+    public init(agents: [RosterRow], yours: [RosterRow], agentCount: Int, yourCount: Int, busy: Bool = false) {
         self.agents = agents
         self.yours = yours
         self.agentCount = agentCount
         self.yourCount = yourCount
+        self.busy = busy
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(agents: try c.decode([RosterRow].self, forKey: .agents),
+                  yours: try c.decode([RosterRow].self, forKey: .yours),
+                  agentCount: try c.decode(Int.self, forKey: .agentCount),
+                  yourCount: try c.decode(Int.self, forKey: .yourCount),
+                  busy: try c.decodeIfPresent(Bool.self, forKey: .busy) ?? false)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case agents, yours
+        case agents, yours, busy
         case agentCount = "agent_count"
         case yourCount = "your_count"
     }
@@ -73,6 +85,9 @@ public struct AgentRosterModel: Sendable, Equatable {
 
     /// Anything counted: the coordinator alone shows no chip.
     public var visible: Bool { view.agentCount + view.yourCount > 0 }
+
+    /// The chip's pulsing dot (#234): something is working, while the chip shows.
+    public var busy: Bool { visible && view.busy }
 
     /// `⚙ 3 · ⌨ 2`; a zero side is left out.
     public var chipText: String {

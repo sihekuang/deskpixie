@@ -464,7 +464,7 @@ func TestAgentRosterIsEmptyWithoutAnAgent(t *testing.T) {
 	h := newHarness(t, func(d *Deps, _ *harness) {
 		d.Agent = func(settings.Config, string, AgentHooks) Agent { return nil }
 	})
-	if out := h.call("agent.roster", nil); string(out) != `{"roster":{"agents":[],"yours":[],"agent_count":0,"your_count":0}}` {
+	if out := h.call("agent.roster", nil); string(out) != `{"roster":{"agents":[],"yours":[],"agent_count":0,"your_count":0,"busy":false}}` {
 		t.Fatal(string(out))
 	}
 	if out := h.call("agent.focusAgent", map[string]any{"name": "x"}); string(out) != "{}" {
