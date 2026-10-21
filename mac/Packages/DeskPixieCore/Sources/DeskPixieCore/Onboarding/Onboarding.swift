@@ -95,7 +95,7 @@ public struct OnboardingFlow: Equatable, Sendable {
 
     /// The core's defaults (`settings.Default`), for a value the snapshot doesn't carry.
     private static func defaultOn(_ f: OnboardingFeature) -> Bool {
-        f == .agents || f == .canvas
+        f == .agents || f == .sessions || f == .canvas
     }
 
     /// The features whose setup shows under their switch on the setup page.

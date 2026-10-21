@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// #114: a pix session's finished turn, announced when the setting is on.
+// #114: a pix session's finished turn, announced when the setting is on (#229: it is by default).
 
 const webstorm = "com.jetbrains.WebStorm"
 
@@ -28,10 +28,20 @@ var longTurn = SessionTurn{Label: "deskpixie: fix login redirect",
 
 const longTurnLine = "deskpixie: fix login redirect is done: the redirect loop is fixed and all 412 tests pass."
 
-func TestWithTheSettingOffATurnIsNotAnnounced(t *testing.T) {
-	if fx := sessionTurn(ctl(), longTurn, T0); anyKind(fx, EfInject, EfNotify, EfChime, EfAppend) {
+func settingOff(s *Settings) { s.SessionTurns = false }
+
+func TestWithTheSettingOffYourOwnTurnIsNotAnnounced(t *testing.T) {
+	if fx := sessionTurn(ctlWith(settingOff), longTurn, T0); anyKind(fx, EfInject, EfNotify, EfChime, EfAppend) {
 		t.Fatal(fmtEffects(fx))
 	}
+}
+
+// #229: Pixie handed it a message and the coordinator was told the answer comes back, so it
+// does, whatever the setting.
+func TestWithTheSettingOffATurnPixieStartedIsStillAnnounced(t *testing.T) {
+	asked := longTurn
+	asked.FromPixie = true
+	wantContains(t, sessionTurn(ctlWith(settingOff), asked, T0), eNotify(longTurnLine))
 }
 
 func TestYourOwnShortTurnStaysQuiet(t *testing.T) {
