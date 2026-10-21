@@ -38,7 +38,8 @@ func (a *App) registerChat(r Registrar) {
 		return struct{}{}, nil
 	})
 	r.Register("chat.mode", func(json.RawMessage) (any, error) {
-		return map[string]any{"mode": a.store.Current().ReplyMode}, nil
+		cur := a.store.Current()
+		return map[string]any{"mode": cur.ReplyMode, "alwaysShowCaption": cur.AlwaysShowCaption}, nil
 	})
 }
 

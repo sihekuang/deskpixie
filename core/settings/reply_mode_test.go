@@ -45,3 +45,21 @@ func TestReplyModeMustBeVoiceOrText(t *testing.T) {
 		}
 	}
 }
+
+// #224: captions show on hover; a Pixie switch keeps them up all the time. Off by default.
+func TestAlwaysShowCaptionIsALivePixieSwitchOffByDefault(t *testing.T) {
+	if Default().AlwaysShowCaption {
+		t.Fatal("on by default")
+	}
+	c, err := ParseConfig([]byte(`{"hotkey":"ctrl+alt+Space"}`))
+	if err != nil || c.AlwaysShowCaption {
+		t.Fatal("an old settings.json without the key is off:", c.AlwaysShowCaption, err)
+	}
+	f := FieldByPath("alwaysShowCaption")
+	if f.Section != SectionPixie || f.Apply != ApplyLive || f.Kind.Type != KindBool {
+		t.Fatalf("%+v", f)
+	}
+	if r, ok := RouteFor("alwaysShowCaption"); !ok || r != RouteCaptions {
+		t.Fatal(r, ok)
+	}
+}

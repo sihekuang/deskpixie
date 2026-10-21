@@ -49,6 +49,7 @@ struct QuickChatCard: View {
     let model: QuickChatModel
     @Bindable var state: QuickChatState
     let showsInput: Bool
+    let ago: String?
     let onSend: () -> Void
     let onStop: () -> Void
     let onClose: () -> Void
@@ -59,7 +60,7 @@ struct QuickChatCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             if !model.shown.isEmpty || model.phase != .ready {
-                Text("Pixie")
+                Text(ago.map { "Pixie · \($0)" } ?? "Pixie")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 8)

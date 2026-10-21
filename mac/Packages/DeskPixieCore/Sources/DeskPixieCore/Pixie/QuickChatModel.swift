@@ -40,13 +40,39 @@ public struct QuickChatModel: Equatable, Sendable {
     private var stopPending = false
     /// What is shown is a caption (Pixie's spoken words), not a typed message's answer.
     public private(set) var isCaption = false
+    /// The caption's conversation is still going (it shows on its own until it ends).
+    private var captionLive = false
+    /// When what is shown was said: the card's "2m ago" (#224).
+    public private(set) var saidAt: Date?
 
     public init() {}
 
     public var showsStop: Bool { phase == .thinking || (phase == .answering && !isCaption) }
 
-    /// A caption is up (voice mode draws the card for it alone).
-    public var showsCaption: Bool { isCaption && phase != .ready }
+    /// A live caption is up (voice mode draws the card for it alone).
+    public var showsCaption: Bool { isCaption && captionLive && phase != .ready }
+
+    /// There is something said to show again: a caption, or a typed message's finished answer.
+    private var hasLast: Bool {
+        saidAt != nil && !full.isEmpty && (phase == .done || (isCaption && phase == .answering))
+    }
+
+    /// The card without the input line: a live caption, or the last words on hover or always.
+    public func showsCard(hovering: Bool, always: Bool) -> Bool {
+        showsCaption || ((hovering || always) && hasLast)
+    }
+
+    /// How long ago it was said ("just now", "2m ago"), once it is all shown.
+    public func ago(now: Date) -> String? {
+        guard let saidAt, phase == .done else { return nil }
+        let s = max(0, Int(now.timeIntervalSince(saidAt)))
+        switch s {
+        case ..<60: return "just now"
+        case ..<3600: return "\(s / 60)m ago"
+        case ..<86400: return "\(s / 3600)h ago"
+        default: return "\(s / 86400)d ago"
+        }
+    }
 
     public var statusText: String? {
         if isCaption { return nil }
@@ -65,6 +91,8 @@ public struct QuickChatModel: Equatable, Sendable {
     /// meanwhile are kept until the job is known.
     public mutating func sending() {
         isCaption = false
+        captionLive = false
+        saidAt = nil
         job = nil
         pending = true
         stopPending = false
@@ -80,6 +108,7 @@ public struct QuickChatModel: Equatable, Sendable {
     public mutating func sent(job: String) -> Bool {
         self.job = job
         isCaption = false
+        captionLive = false
         if stopPending {
             stopPending = false
             pending = false
@@ -99,6 +128,8 @@ public struct QuickChatModel: Equatable, Sendable {
     /// The message couldn't go: the reason is the answer.
     public mutating func failedToSend(_ reason: String) {
         isCaption = false
+        captionLive = false
+        saidAt = Date()
         job = nil
         pending = false
         stopPending = false
@@ -108,7 +139,7 @@ public struct QuickChatModel: Equatable, Sendable {
         phase = .done
     }
 
-    public mutating func apply(_ line: ChatLine) {
+    public mutating func apply(_ line: ChatLine, now: Date = Date()) {
         if pending {
             early[line.job] = line
             return
@@ -122,6 +153,7 @@ public struct QuickChatModel: Equatable, Sendable {
             full = line.text
             shown = ""
             phase = .answering
+            saidAt = now
         }
     }
 
@@ -129,13 +161,15 @@ public struct QuickChatModel: Equatable, Sendable {
     /// replaces the last. In text mode it never covers a typed message still at work. True when
     /// it shows.
     @discardableResult
-    public mutating func caption(role: String, text: String) -> Bool {
+    public mutating func caption(role: String, text: String, now: Date = Date()) -> Bool {
         let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard role == "assistant", !words.isEmpty else { return false }
         if mode == "text" && !isCaption && (pending || phase == .thinking || phase == .answering) {
             return false
         }
         isCaption = true
+        captionLive = true
+        saidAt = now
         job = nil
         full = words
         shown = ""
@@ -143,13 +177,15 @@ public struct QuickChatModel: Equatable, Sendable {
         return true
     }
 
-    /// The voice conversation ended: a caption goes away (voice mode; text mode keeps the box).
+    /// The voice conversation ended: the caption stops showing on its own, all of it shown, and
+    /// is kept for hover or always-show (#224).
     public mutating func conversationEnded() {
-        guard isCaption, mode != "text" else { return }
-        isCaption = false
-        full = ""
-        shown = ""
-        phase = .ready
+        guard isCaption else { return }
+        captionLive = false
+        if phase == .answering {
+            shown = full
+            phase = .done
+        }
     }
 
     /// Shows the next word of the answer; false when nothing changed. The last word ends it.

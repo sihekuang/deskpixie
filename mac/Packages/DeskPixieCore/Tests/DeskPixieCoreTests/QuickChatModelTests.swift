@@ -16,6 +16,8 @@ final class QuickChatModelTests: XCTestCase {
         guard case .chatFocus? = d(#"{"kind":"chat.focus"}"#) else { return XCTFail("chat.focus") }
         guard case .replyMode(let m)? = d(#"{"kind":"replyMode","mode":"text"}"#) else { return XCTFail("replyMode") }
         XCTAssertEqual(m, "text")
+        guard case .captions(let on)? = d(#"{"kind":"captions","always":true}"#) else { return XCTFail("captions") }
+        XCTAssertTrue(on)
     }
 
     func test_send_thinks_with_stop_and_no_sending() {
@@ -198,7 +200,7 @@ final class QuickChatModelTests: XCTestCase {
     }
 
     /// A new reply replaces the last; the conversation ending puts the caption away.
-    func test_a_new_caption_replaces_and_the_end_clears_it() {
+    func test_a_new_caption_replaces_and_the_end_keeps_it_for_hover() {
         var m = QuickChatModel()
         m.caption(role: "assistant", text: "First.")
         while m.tick() {}
@@ -207,9 +209,52 @@ final class QuickChatModelTests: XCTestCase {
         while m.tick() {}
         XCTAssertEqual(m.shown, "Second one.")
         m.conversationEnded()
-        XCTAssertFalse(m.showsCaption)
-        XCTAssertEqual(m.shown, "")
-        XCTAssertEqual(m.phase, .ready)
+        XCTAssertFalse(m.showsCaption, "no longer live")
+        XCTAssertEqual(m.shown, "Second one.")
+        XCTAssertFalse(m.showsCard(hovering: false, always: false))
+        XCTAssertTrue(m.showsCard(hovering: true, always: false), "hover brings it back (#224)")
+        XCTAssertTrue(m.showsCard(hovering: false, always: true), "always keeps it up")
+    }
+
+    /// The conversation ending while it types out shows the rest at once.
+    func test_the_end_finishes_a_caption_still_typing() {
+        var m = QuickChatModel()
+        m.caption(role: "assistant", text: "One two three.")
+        _ = m.tick()
+        m.conversationEnded()
+        XCTAssertEqual(m.shown, "One two three.")
+        XCTAssertEqual(m.phase, .done)
+    }
+
+    /// Nothing said yet: hover and always show nothing.
+    func test_nothing_said_shows_no_card() {
+        let m = QuickChatModel()
+        XCTAssertFalse(m.showsCard(hovering: true, always: true))
+    }
+
+    /// A typed message's answer is also what hover shows, once it is done.
+    func test_hover_shows_a_typed_answer_once_done() {
+        var m = QuickChatModel()
+        m.mode = "text"
+        m.sent(job: "job_1")
+        XCTAssertFalse(m.showsCard(hovering: true, always: false), "still thinking")
+        m.apply(line("done", "Two are running."))
+        while m.tick() {}
+        XCTAssertTrue(m.showsCard(hovering: true, always: false))
+    }
+
+    /// How long ago it was said, once it is all shown.
+    func test_ago() {
+        let t0 = Date(timeIntervalSince1970: 1_000_000)
+        var m = QuickChatModel()
+        XCTAssertNil(m.ago(now: t0))
+        m.caption(role: "assistant", text: "Hi.", now: t0)
+        XCTAssertNil(m.ago(now: t0), "not while typing out")
+        while m.tick() {}
+        XCTAssertEqual(m.ago(now: t0.addingTimeInterval(20)), "just now")
+        XCTAssertEqual(m.ago(now: t0.addingTimeInterval(125)), "2m ago")
+        XCTAssertEqual(m.ago(now: t0.addingTimeInterval(3 * 3600 + 5)), "3h ago")
+        XCTAssertEqual(m.ago(now: t0.addingTimeInterval(2 * 86400)), "2d ago")
     }
 
     /// Text mode: captions show in the same place, but never over a typed message at work.

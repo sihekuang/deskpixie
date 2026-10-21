@@ -521,6 +521,8 @@ final class EngineCoordinator {
             roster?.focusChat()
         case .replyMode(let mode):
             roster?.apply(mode: mode)
+        case .captions(let always):
+            roster?.apply(captions: always)
         case .showPane(let r):
             bubble?.showPane(r)
         case .focusPlan(let plan):

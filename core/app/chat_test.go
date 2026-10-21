@@ -64,7 +64,7 @@ func TestChatStopCallsTheAgent(t *testing.T) {
 func TestChatModeReportsTheSettingAndTheAgentStartsInIt(t *testing.T) {
 	f := &fakeAgent{tray: AgentTray{Enabled: true}}
 	h := newHarness(t, withAgent(f), withSettings(func(c *settings.Config) { c.ReplyMode = settings.ReplyText }))
-	if out := h.call("chat.mode", nil); string(out) != `{"mode":"text"}` {
+	if out := h.call("chat.mode", nil); string(out) != `{"alwaysShowCaption":false,"mode":"text"}` {
 		t.Fatal(string(out))
 	}
 	if !slices.Equal(f.textModes, []bool{true}) {
@@ -106,7 +106,7 @@ func TestSwitchingReplyModeTellsTheAgentAndTheShell(t *testing.T) {
 	if !slices.Equal(f.textModes, []bool{false, true}) {
 		t.Fatal(f.textModes)
 	}
-	if out := h.call("chat.mode", nil); string(out) != `{"mode":"text"}` {
+	if out := h.call("chat.mode", nil); string(out) != `{"alwaysShowCaption":false,"mode":"text"}` {
 		t.Fatal(string(out))
 	}
 }
@@ -117,4 +117,21 @@ func TestAChatLineHookEmitsAnEvent(t *testing.T) {
 	h.take()
 	f.hooks.Chat(map[string]string{"job": "job_000000000001", "status": "done", "text": "Two are running."})
 	h.waitFor("chat.line", func(e event) bool { return e["text"] == "Two are running." && e["status"] == "done" }, time.Second)
+}
+
+// #224: the always-show switch reaches the shell; it never touches the agent or the mode.
+func TestAlwaysShowCaptionTellsTheShell(t *testing.T) {
+	f := &fakeAgent{tray: AgentTray{Enabled: true}}
+	h := newHarness(t, withAgent(f))
+	h.take()
+	if s := h.set("alwaysShowCaption", true); s.SetError != nil && string(s.SetError) != "null" {
+		t.Fatal(string(s.SetError))
+	}
+	h.waitFor("captions", func(e event) bool { return e["always"] == true }, time.Second)
+	if len(f.textModes) != 1 {
+		t.Fatal("the agent was told again:", f.textModes)
+	}
+	if out := h.call("chat.mode", nil); string(out) != `{"alwaysShowCaption":true,"mode":"voice"}` {
+		t.Fatal(string(out))
+	}
 }

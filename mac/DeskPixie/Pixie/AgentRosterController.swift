@@ -29,7 +29,15 @@ final class AgentRosterController {
     /// (hovering it doesn't open the list), the word-by-word timer and the click-away monitor.
     private(set) var chat = QuickChatModel()
     private let chatState = QuickChatState()
-    private var toggleFrame: CGRect = .zero
+    /// Where the session chip is in the window (top-left origin): only it opens the list on hover.
+    private var chipFrame: CGRect = .zero
+    /// Captions (#224): kept up always (the setting), the pointer near Pixie, and the "ago"
+    /// last drawn.
+    private var alwaysCaption = false
+    private var hovering = false
+    private var agoShown: String?
+    /// How near Pixie, in points, the pointer brings the last words back.
+    static let hoverMargin: CGFloat = 24
     private var typeTimer: Timer?
     private var clickAway: Any?
     static let typeInterval: TimeInterval = 0.12
@@ -75,6 +83,12 @@ final class AgentRosterController {
         render()
     }
 
+    /// The always-show switch (the `captions` event or the first read, #224).
+    func apply(captions always: Bool) {
+        alwaysCaption = always
+        render()
+    }
+
     /// A spoken line for the typed message.
     func apply(chatLine: ChatLine) {
         chat.apply(chatLine)
@@ -117,10 +131,10 @@ final class AgentRosterController {
     private func fetchMode() {
         let engine = engine, worker = worker
         Task { @MainActor [weak self] in
-            let mode: String?? = await worker.run {
-                (try? engine.call("chat.mode", as: ModeReply.self))?.mode
-            }
-            if let self, let mode = mode ?? nil { self.apply(mode: mode) }
+            let reply: ModeReply?? = await worker.run { try? engine.call("chat.mode", as: ModeReply.self) }
+            guard let self, let reply = reply ?? nil else { return }
+            self.alwaysCaption = reply.alwaysShowCaption ?? false
+            self.apply(mode: reply.mode)
         }
     }
 
@@ -266,18 +280,32 @@ final class AgentRosterController {
     }
 
     private func poll() {
-        // Opens under the pointer; closes when it leaves the chip and the list. Not over the
-        // toggle, and never while the text box or a caption is up.
-        var inside = panel.isVisible && panel.frame.contains(NSEvent.mouseLocation) && model.visible && !cardUp
-        if inside {
-            let p = panel.convertPoint(fromScreen: NSEvent.mouseLocation)
+        let mouse = NSEvent.mouseLocation
+        let overPanel = panel.isVisible && panel.frame.contains(mouse)
+        // The list opens over the chip and closes when the pointer leaves the chip and the list;
+        // never while the text box is open.
+        var inside = false
+        if overPanel && model.visible && !chat.open {
+            let p = panel.convertPoint(fromScreen: mouse)
             let flipped = CGPoint(x: p.x, y: hosting.bounds.height - p.y)
-            if toggleFrame.insetBy(dx: -3, dy: -3).contains(flipped) && !model.open { inside = false }
+            inside = model.open || chipFrame.insetBy(dx: -3, dy: -3).contains(flipped)
         }
-        if inside != model.open {
+        // Near Pixie, or on the card it brought back: the last words show (#224).
+        let near = pixie.isShown
+            && (pixie.panel.frame.insetBy(dx: -Self.hoverMargin, dy: -Self.hoverMargin).contains(mouse)
+                || (overPanel && captionCard))
+        let ago = cardUp ? chat.ago(now: Date()) : nil
+        if inside != model.open || near != hovering || ago != agoShown {
             model.open = inside
+            hovering = near
             render()
         }
+    }
+
+    /// The card without the input line: a live caption, or the last words on hover or always;
+    /// never with the list or the open text box.
+    private var captionCard: Bool {
+        !chat.open && !model.open && chat.showsCard(hovering: hovering, always: alwaysCaption)
     }
 
     private func render() {
@@ -286,6 +314,7 @@ final class AgentRosterController {
     }
 
     private func setRoot() {
+        agoShown = cardUp ? chat.ago(now: Date()) : nil
         hosting.rootView = AnyView(AgentRosterView(
             model: model, below: below, maxChipWidth: max(40, pixie.panel.frame.width),
             onChip: { [weak self] in
@@ -297,13 +326,13 @@ final class AgentRosterController {
                 self.render()
             },
             onRow: { [weak self] in self?.clicked($0) },
-            chat: chat, chatState: chatState,
+            chat: chat, chatState: chatState, captionCard: captionCard, ago: agoShown,
             onMode: { [weak self] in self?.pick($0) },
             onSend: { [weak self] in self?.send() },
             onStop: { [weak self] in self?.stopChat() },
             onCloseChat: { [weak self] in self?.closeChat() })
-            .onPreferenceChange(ToggleFrameKey.self) { [weak self] frame in
-                MainActor.assumeIsolated { self?.toggleFrame = frame }
+            .onPreferenceChange(ChipFrameKey.self) { [weak self] frame in
+                MainActor.assumeIsolated { self?.chipFrame = frame }
             })
     }
 
@@ -356,7 +385,7 @@ final class AgentRosterController {
     }
 
     /// The card is drawn: the text box, or a caption on its own in voice mode (#224).
-    private var cardUp: Bool { chat.open || (chat.mode != "text" && chat.showsCaption) }
+    private var cardUp: Bool { chat.open || captionCard }
 
     private func hide() {
         if panel.parent != nil { pixie.panel.removeChildWindow(panel) }
@@ -366,7 +395,7 @@ final class AgentRosterController {
     }
 
     private struct RosterReply: Decodable { var roster: RosterView }
-    private struct ModeReply: Decodable { var mode: String }
+    private struct ModeReply: Decodable { var mode: String; var alwaysShowCaption: Bool? }
     private struct SendArgs: Encodable, Sendable { let text: String }
     private struct SendReply: Decodable { var job: String }
     private struct FocusAgentArgs: Encodable, Sendable { let name: String }

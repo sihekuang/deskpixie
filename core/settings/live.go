@@ -27,6 +27,8 @@ const (
 	RouteNotifications
 	// RouteReplyMode: the agent and the shell switch between voice and text (#221).
 	RouteReplyMode
+	// RouteCaptions: the shell keeps captions up or shows them on hover (#224).
+	RouteCaptions
 )
 
 // RouteFor is the route for a Live field (or "position" for Reset position); ok is false for
@@ -52,6 +54,8 @@ func RouteFor(path string) (Route, bool) {
 		return RouteNotifications, true
 	case "replyMode":
 		return RouteReplyMode, true
+	case "alwaysShowCaption":
+		return RouteCaptions, true
 	case "position":
 		return RouteResetPosition, true
 	}

@@ -366,6 +366,7 @@ var Fields = []FieldSpec{
 	spec("pack", SectionPixie, "Pixie", "Which pixie pack is shown.", choiceKind(SourcePacks), ApplyLive),
 	spec("scale", SectionPixie, "Size", "Whole-number sizes keep the pixel art crisp.", intKind(1, MaxScale, true), ApplyLive),
 	spec("replyMode", SectionPixie, "Talk to Pixie by", "Voice: talk and Pixie answers aloud. Text: type a quick message under Pixie and read the coordinator's answer.", staticChoice(ReplyModes), ApplyLive),
+	spec("alwaysShowCaption", SectionPixie, "Always show what Pixie said", "Keeps Pixie's last words under it, with how long ago. Off, they show while Pixie talks and when you hover near Pixie.", boolKind, ApplyLive),
 	spec("proximityFade.enabled", SectionPixie, "Fade near the pointer", "Pixie fades as the pointer comes close, so it never blocks your work.", boolKind, ApplyLive),
 	spec("proximityFade.radius", SectionPixie, "Fade distance", "How far from Pixie, in points, the fading starts.", intKind(0, 1000, false), ApplyLive),
 	spec("position", SectionPixie, "Position", "Where Pixie was last dragged; written by the app.", managedKind, ApplyLive),
