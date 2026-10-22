@@ -26,6 +26,8 @@ struct AgentRosterView: View {
     let onCloseChat: () -> Void
     let onResize: () -> Void
     let onDismiss: () -> Void
+    /// The card's arrows through Pixie's recent replies (#263).
+    var onStep: (ReplyStep) -> Void = { _ in }
     let attachments: AttachmentUI
     /// The caption's buttons to sessions (#261), and what a click does.
     var sessionButtons: [RosterRow] = []
@@ -66,7 +68,7 @@ struct AgentRosterView: View {
     private var card: some View {
         QuickChatCard(model: chat, state: chatState, showsInput: chatOpen, ago: ago,
                       onSend: onSend, onStop: onStop, onClose: onCloseChat, onResize: onResize, onDismiss: onDismiss,
-                      attachments: attachments, sessions: sessionButtons, onSession: onSession)
+                      onStep: onStep, attachments: attachments, sessions: sessionButtons, onSession: onSession)
     }
 
     /// The other side's last words, above the caption until they fade (#254).

@@ -55,6 +55,7 @@ struct QuickChatCard: View {
     let onClose: () -> Void
     let onResize: () -> Void
     let onDismiss: () -> Void
+    var onStep: (ReplyStep) -> Void = { _ in }
     /// The chips, the hint row, 📎 and drops (#240).
     let attachments: AttachmentUI
     /// Buttons to the sessions the words are about (#261), and what a click does.
@@ -66,11 +67,14 @@ struct QuickChatCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            if !model.shown.isEmpty || model.phase != .ready {
+            if !model.shownText.isEmpty || model.phase != .ready || model.showsEarlierOnly {
                 HStack(spacing: 4) {
-                    let who = model.isYou ? "You" : "Pixie"
+                    let who = model.showsEarlierOnly ? "Earlier replies" : model.isYou && model.viewed == nil ? "You" : "Pixie"
                     Text(ago.map { "\(who) · \($0)" } ?? who)
                     Spacer(minLength: 4)
+                    if model.position != nil || model.showsEarlierOnly {
+                        ReplyArrows(model: model, position: model.position, onStep: onStep)
+                    }
                     if model.canDismiss {
                         // Puts the words away (#224); the setting does it on its own after a while.
                         Button(action: onDismiss) {
@@ -88,9 +92,9 @@ struct QuickChatCard: View {
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 8)
                 .padding(.top, 4)
-                if !model.shown.isEmpty {
+                if !model.shownText.isEmpty {
                     ScrollView {
-                        Text(model.shown)
+                        Text(model.shownText)
                             .font(.callout)
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -104,7 +108,7 @@ struct QuickChatCard: View {
                         .padding(.horizontal, 8)
                         .padding(.top, 2)
                 }
-                if model.phase == .stopped {
+                if model.phase == .stopped && model.viewed == nil {
                     Text("Stopped.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -202,6 +206,59 @@ struct QuickChatCard: View {
     }
 
     private var canSend: Bool { model.canSend(state.draft, attachments: attachments.model.items.count) }
+}
+
+/// What the card's arrows ask for (#263).
+enum ReplyStep { case back, forward, newest }
+
+/// ‹ 2/3 › on the card (#263): step through Pixie's recent replies. While you look back a new
+/// reply leaves you there and » goes to it. With nothing current, only ‹.
+struct ReplyArrows: View {
+    let model: QuickChatModel
+    /// Nil with nothing current and not looking back: only ‹ to the kept replies.
+    let position: QuickChatModel.Position?
+    let onStep: (ReplyStep) -> Void
+
+    var body: some View {
+        HStack(spacing: 2) {
+            arrow("chevron.left", "Earlier reply", enabled: model.canBack) { onStep(.back) }
+            if let position {
+                Text("\(position.index)/\(position.count)")
+                    .monospacedDigit()
+                    .frame(minWidth: 26)
+                    .accessibilityLabel("Reply \(position.index) of \(position.count)")
+                arrow("chevron.right", "Later reply", enabled: model.canForward) { onStep(.forward) }
+            }
+            if model.newerWaiting {
+                Button { onStep(.newest) } label: {
+                    Image(systemName: "chevron.right.2")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 4)
+                        .frame(height: 16)
+                        .background(Capsule().fill(Color.accentColor))
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .help("Newest reply")
+                .accessibilityLabel("Newest reply")
+            }
+        }
+    }
+
+    private func arrow(_ symbol: String, _ label: String, enabled: Bool, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.caption2.weight(.bold))
+                .frame(width: 16, height: 16)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(enabled ? .primary : .tertiary)
+        .disabled(!enabled)
+        .help(label)
+        .accessibilityLabel(label)
+    }
 }
 
 /// One button per session the words are about (#261): a click brings up its terminal tab, as

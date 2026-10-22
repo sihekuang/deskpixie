@@ -47,6 +47,9 @@ type Config struct {
 	// CaptionFadeSecs: when the other side speaks, the last caption bubble moves up and fades
 	// this long after (0 shows only the latest). Only the shell reads it (#254).
 	CaptionFadeSecs uint32 `json:"captionFadeSecs"`
+	// ReplyHistoryMins: Pixie's earlier replies are kept this long, to step back through on the
+	// card (0 keeps only the latest). Only the shell reads it (#263).
+	ReplyHistoryMins uint32 `json:"replyHistoryMins"`
 	// LogMaxMB caps each log on disk (the app's, pix's, the voice log, metrics), in MB (#225).
 	LogMaxMB uint32 `json:"logMaxMB"`
 	// Position is the logical top-left of the pixie window; nil = bottom-right of the primary
@@ -190,6 +193,7 @@ func Default() Config {
 		ReplyMode:          ReplyVoice,
 		CaptionDismissSecs: 120,
 		CaptionFadeSecs:    4,
+		ReplyHistoryMins:   5,
 		LogMaxMB:           2,
 		ProximityFade:      Fade{Enabled: false, Radius: 150},
 		Voice: VoiceSettings{
@@ -259,6 +263,7 @@ type configFields struct {
 	AlwaysShowCaption  bool                 `json:"alwaysShowCaption"`
 	CaptionDismissSecs uint32               `json:"captionDismissSecs"`
 	CaptionFadeSecs    uint32               `json:"captionFadeSecs"`
+	ReplyHistoryMins   uint32               `json:"replyHistoryMins"`
 	LogMaxMB           uint32               `json:"logMaxMB"`
 	Position           *[2]float64          `json:"position"`
 	ProximityFade      Fade                 `json:"proximityFade"`
@@ -269,7 +274,7 @@ type configFields struct {
 }
 
 var knownKeys = map[string]bool{
-	"hotkey": true, "pack": true, "scale": true, "replyMode": true, "alwaysShowCaption": true, "captionDismissSecs": true, "captionFadeSecs": true, "logMaxMB": true, "position": true, "proximityFade": true,
+	"hotkey": true, "pack": true, "scale": true, "replyMode": true, "alwaysShowCaption": true, "captionDismissSecs": true, "captionFadeSecs": true, "replyHistoryMins": true, "logMaxMB": true, "position": true, "proximityFade": true,
 	"voice": true, "canvas": true, "agent": true, "notifications": true,
 }
 
@@ -279,7 +284,7 @@ func (c Config) MarshalJSON() ([]byte, error) {
 	if kinds == nil {
 		kinds = []string{}
 	}
-	f := configFields{c.Hotkey, c.Pack, c.Scale, c.ReplyMode, c.AlwaysShowCaption, c.CaptionDismissSecs, c.CaptionFadeSecs, c.LogMaxMB, c.Position, c.ProximityFade, c.Voice, c.Canvas, c.Agent, c.Notifications}
+	f := configFields{c.Hotkey, c.Pack, c.Scale, c.ReplyMode, c.AlwaysShowCaption, c.CaptionDismissSecs, c.CaptionFadeSecs, c.ReplyHistoryMins, c.LogMaxMB, c.Position, c.ProximityFade, c.Voice, c.Canvas, c.Agent, c.Notifications}
 	f.Agent.Workers.Kinds = kinds
 	b, err := json.Marshal(f)
 	if err != nil || len(c.Extra) == 0 {
@@ -320,7 +325,7 @@ func (c *Config) UnmarshalJSON(b []byte) error {
 		return errors.New("invalid type: null, expected struct Config")
 	}
 	targets := map[string]any{
-		"hotkey": &c.Hotkey, "pack": &c.Pack, "scale": &c.Scale, "replyMode": &c.ReplyMode, "alwaysShowCaption": &c.AlwaysShowCaption, "captionDismissSecs": &c.CaptionDismissSecs, "captionFadeSecs": &c.CaptionFadeSecs, "logMaxMB": &c.LogMaxMB, "position": &c.Position,
+		"hotkey": &c.Hotkey, "pack": &c.Pack, "scale": &c.Scale, "replyMode": &c.ReplyMode, "alwaysShowCaption": &c.AlwaysShowCaption, "captionDismissSecs": &c.CaptionDismissSecs, "captionFadeSecs": &c.CaptionFadeSecs, "replyHistoryMins": &c.ReplyHistoryMins, "logMaxMB": &c.LogMaxMB, "position": &c.Position,
 		"proximityFade": &c.ProximityFade, "voice": &c.Voice, "canvas": &c.Canvas, "agent": &c.Agent,
 		"notifications": &c.Notifications,
 	}

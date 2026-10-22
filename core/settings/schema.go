@@ -369,6 +369,7 @@ var Fields = []FieldSpec{
 	spec("alwaysShowCaption", SectionPixie, "Always show what Pixie said", "Keeps Pixie's last words under it, with how long ago. Off, they show while Pixie talks and when you hover near Pixie.", boolKind, ApplyLive),
 	spec("captionDismissSecs", SectionPixie, "Put away what Pixie said after", "Seconds after Pixie said it; 0 keeps it until something new. The ✕ on it puts it away at once.", intKind(0, 86400, false), ApplyLive),
 	spec("captionFadeSecs", SectionPixie, "Fade the earlier caption after", "When you or Pixie start talking, the last caption moves up and fades this many seconds later; 0 shows only the latest.", intKind(0, 60, false), ApplyLive),
+	spec("replyHistoryMins", SectionPixie, "Keep Pixie's replies for", "Minutes to keep Pixie's earlier replies, to step back through with the arrows on the reply; 0 keeps only the latest.", intKind(0, 60, false), ApplyLive),
 	spec("proximityFade.enabled", SectionPixie, "Fade near the pointer", "Pixie fades as the pointer comes close, so it never blocks your work.", boolKind, ApplyLive),
 	spec("proximityFade.radius", SectionPixie, "Fade distance", "How far from Pixie, in points, the fading starts.", intKind(0, 1000, false), ApplyLive),
 	spec("position", SectionPixie, "Position", "Where Pixie was last dragged; written by the app.", managedKind, ApplyLive),
