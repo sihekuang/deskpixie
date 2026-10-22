@@ -45,6 +45,41 @@ public struct QuickChatModel: Equatable, Sendable {
     public private(set) var isCaption = false
     /// The caption is your own words (#251), not Pixie's.
     public private(set) var isYou = false
+    /// The bubble above the caption (#254): the other side's last words, until they fade.
+    public struct Earlier: Equatable, Sendable {
+        public let text: String
+        public let isYou: Bool
+        /// When it moved up: it fades `fadeSecs` later.
+        public let at: Date
+        public init(text: String, isYou: Bool, at: Date) {
+            self.text = text
+            self.isYou = isYou
+            self.at = at
+        }
+    }
+
+    public enum EarlierPhase: Equatable, Sendable { case shown, fading, gone }
+
+    public private(set) var earlier: Earlier?
+    /// captionFadeSecs: how long the earlier bubble stays before it fades (0: only the latest).
+    public var fadeSecs = 4
+    /// How long the fade itself takes.
+    public static let fadeDuration: TimeInterval = 0.5
+
+    /// Shown, fading out, or gone by `now`.
+    public func earlierPhase(now: Date) -> EarlierPhase {
+        guard let earlier, fadeSecs > 0 else { return .gone }
+        let age = now.timeIntervalSince(earlier.at)
+        if age < TimeInterval(fadeSecs) { return .shown }
+        return age < TimeInterval(fadeSecs) + Self.fadeDuration ? .fading : .gone
+    }
+
+    /// The other side starts speaking: the caption up to now moves up (#254).
+    private mutating func moveUp(beforeYou you: Bool, now: Date) {
+        guard isCaption, isYou != you, !full.isEmpty else { return }
+        earlier = fadeSecs > 0 ? Earlier(text: full, isYou: isYou, at: now) : nil
+    }
+
     /// Pixie's words came as it said them (#253): its final transcript completes them, or, once
     /// you talk again, leaves your words be.
     private var awaitsFinal = false
@@ -102,6 +137,7 @@ public struct QuickChatModel: Equatable, Sendable {
         isCaption = false
         isYou = false
         awaitsFinal = false
+        earlier = nil
         captionLive = false
         saidAt = nil
         job = nil
@@ -123,6 +159,7 @@ public struct QuickChatModel: Equatable, Sendable {
         isCaption = false
         isYou = false
         awaitsFinal = false
+        earlier = nil
         captionLive = false
         if stopPending {
             stopPending = false
@@ -145,6 +182,7 @@ public struct QuickChatModel: Equatable, Sendable {
         isCaption = false
         isYou = false
         awaitsFinal = false
+        earlier = nil
         captionLive = false
         saidAt = Date()
         job = nil
@@ -169,6 +207,7 @@ public struct QuickChatModel: Equatable, Sendable {
             isCaption = false
             isYou = false
             awaitsFinal = false
+            earlier = nil
             captionLive = false
             full = ""
             shown = ""
@@ -203,6 +242,7 @@ public struct QuickChatModel: Equatable, Sendable {
         isCaption = false
         isYou = false
         awaitsFinal = false
+        earlier = nil
         captionLive = false
         saidAt = nil
         full = ""
@@ -237,6 +277,7 @@ public struct QuickChatModel: Equatable, Sendable {
             return true
         }
         guard takeCaption() else { return false }
+        moveUp(beforeYou: false, now: now)
         isCaption = true
         isYou = false
         captionLive = true
@@ -254,6 +295,7 @@ public struct QuickChatModel: Equatable, Sendable {
     public mutating func heard(_ text: String, now: Date = Date()) -> Bool {
         let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !words.isEmpty, takeCaption() else { return false }
+        moveUp(beforeYou: true, now: now)
         isCaption = true
         isYou = true
         captionLive = true
@@ -271,6 +313,7 @@ public struct QuickChatModel: Equatable, Sendable {
     public mutating func saying(_ text: String, now: Date = Date()) -> Bool {
         let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !words.isEmpty, takeCaption() else { return false }
+        moveUp(beforeYou: false, now: now)
         isCaption = true
         isYou = false
         awaitsFinal = true

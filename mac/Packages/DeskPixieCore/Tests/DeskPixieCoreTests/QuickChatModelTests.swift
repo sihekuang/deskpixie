@@ -16,11 +16,17 @@ final class QuickChatModelTests: XCTestCase {
         guard case .chatFocus? = d(#"{"kind":"chat.focus"}"#) else { return XCTFail("chat.focus") }
         guard case .replyMode(let m)? = d(#"{"kind":"replyMode","mode":"text"}"#) else { return XCTFail("replyMode") }
         XCTAssertEqual(m, "text")
-        guard case .captions(let on, let secs)? = d(#"{"kind":"captions","always":true,"dismissSecs":120}"#) else {
+        guard case .captions(let on, let secs, let fade)? = d(#"{"kind":"captions","always":true,"dismissSecs":120,"fadeSecs":7}"#) else {
             return XCTFail("captions")
         }
         XCTAssertTrue(on)
         XCTAssertEqual(secs, 120)
+        XCTAssertEqual(fade, 7)
+        // An older core sends no fadeSecs: the default.
+        guard case .captions(_, _, let old)? = d(#"{"kind":"captions","always":true,"dismissSecs":120}"#) else {
+            return XCTFail("captions without fadeSecs")
+        }
+        XCTAssertEqual(old, 4)
     }
 
     func test_send_thinks_with_stop_and_no_sending() {
@@ -274,6 +280,61 @@ final class QuickChatModelTests: XCTestCase {
         // The next reply that isn't streamed is typed out as before.
         XCTAssertTrue(m.caption(role: "assistant", text: "Rain."))
         XCTAssertEqual(m.shown, "")
+    }
+
+    // MARK: - two bubbles (#254)
+
+    /// When the other side speaks, the last bubble moves up and the new one shows below it.
+    func test_the_other_side_speaking_moves_the_last_bubble_up() {
+        let t0 = Date()
+        var m = QuickChatModel()
+        m.heard("what's the weather?", now: t0)
+        XCTAssertNil(m.earlier, "nothing before")
+        m.heard("what's the weather tomorrow?", now: t0)
+        XCTAssertNil(m.earlier, "the same speaker goes on in place")
+        m.saying("Rain", now: t0.addingTimeInterval(1))
+        XCTAssertEqual(m.earlier, QuickChatModel.Earlier(text: "what's the weather tomorrow?", isYou: true, at: t0.addingTimeInterval(1)))
+        m.saying("Rain tomorrow.", now: t0.addingTimeInterval(2))
+        XCTAssertEqual(m.earlier?.text, "what's the weather tomorrow?", "Pixie goes on in place")
+        m.heard("thanks", now: t0.addingTimeInterval(3))
+        XCTAssertEqual(m.earlier, QuickChatModel.Earlier(text: "Rain tomorrow.", isYou: false, at: t0.addingTimeInterval(3)))
+    }
+
+    /// The bubble on top stays 4 s, fades for half a second, then goes.
+    func test_the_bubble_on_top_fades_after_four_seconds() {
+        let t0 = Date()
+        var m = QuickChatModel()
+        m.heard("hi", now: t0)
+        m.saying("Hello!", now: t0)
+        XCTAssertEqual(m.earlierPhase(now: t0.addingTimeInterval(3.9)), .shown)
+        XCTAssertEqual(m.earlierPhase(now: t0.addingTimeInterval(4.1)), .fading)
+        XCTAssertEqual(m.earlierPhase(now: t0.addingTimeInterval(4.6)), .gone)
+        XCTAssertEqual(QuickChatModel().earlierPhase(now: t0), .gone)
+    }
+
+    /// The setting (captionFadeSecs) sets how long it stays; 0 shows only the latest.
+    func test_the_fade_time_is_the_setting() {
+        let t0 = Date()
+        var m = QuickChatModel()
+        m.fadeSecs = 10
+        m.heard("hi", now: t0)
+        m.saying("Hello!", now: t0)
+        XCTAssertEqual(m.earlierPhase(now: t0.addingTimeInterval(9)), .shown)
+        XCTAssertEqual(m.earlierPhase(now: t0.addingTimeInterval(10.1)), .fading)
+        m.fadeSecs = 0
+        XCTAssertEqual(m.earlierPhase(now: t0), .gone)
+        m.heard("bye", now: t0)
+        XCTAssertNil(m.earlier, "only the latest")
+    }
+
+    /// A typed message clears both bubbles.
+    func test_a_typed_message_clears_the_bubble_on_top() {
+        var m = QuickChatModel()
+        m.heard("hi")
+        m.saying("Hello!")
+        m.mode = "text"
+        m.sending()
+        XCTAssertNil(m.earlier)
     }
 
     /// Text mode: your spoken words never cover a typed message still at work.

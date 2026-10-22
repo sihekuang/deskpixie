@@ -91,3 +91,32 @@ func TestCaptionDismissSecsIsALivePixieNumber(t *testing.T) {
 		}
 	}
 }
+
+// #254: the earlier caption bubble fades this long after the other side spoke, 4 s by default
+// (0 shows only the latest).
+func TestCaptionFadeSecsIsALivePixieNumber(t *testing.T) {
+	if got := Default().CaptionFadeSecs; got != 4 {
+		t.Fatal(got)
+	}
+	c, err := ParseConfig([]byte(`{"hotkey":"ctrl+alt+Space"}`))
+	if err != nil || c.CaptionFadeSecs != 4 {
+		t.Fatal("an old settings.json gets the default:", c.CaptionFadeSecs, err)
+	}
+	f := FieldByPath("captionFadeSecs")
+	if f.Section != SectionPixie || f.Apply != ApplyLive || f.Kind.Type != KindInt {
+		t.Fatalf("%+v", f)
+	}
+	if r, ok := RouteFor("captionFadeSecs"); !ok || r != RouteCaptions {
+		t.Fatal(r, ok)
+	}
+	env := testEnv(t)
+	for secs, ok := range map[uint32]bool{0: true, 4: true, 60: true, 61: false} {
+		c := Default()
+		c.CaptionFadeSecs = secs
+		got := problems(c, env)
+		bad := len(got) == 1 && got[0][0] == "captionFadeSecs"
+		if ok && len(got) != 0 || !ok && !bad {
+			t.Errorf("%d: %v", secs, got)
+		}
+	}
+}
