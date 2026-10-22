@@ -31,6 +31,7 @@ type rtRig struct {
 	focus    *agenttest.FakeFocusSink
 	updates  *agenttest.RecordingUpdates
 	chat     *recChat
+	attach   *fakeAttach
 	store    *agenttest.MemStore
 	clock    *agenttest.ManualClock
 }
@@ -44,7 +45,7 @@ func build(t *testing.T, store *agenttest.MemStore, cfg RuntimeConfig, wrap func
 	clock := agenttest.ClockAt(1_000_000)
 	recipe := CoordinatorRecipe{Cwd: "/data/agent/workspace"}
 	r := &rtRig{host: host, voice: &agenttest.RecordingVoiceLink{}, alerts: &agenttest.RecordingNotifier{},
-		status: &agenttest.RecordingStatus{}, launcher: &agenttest.FakePlanner{}, focus: &agenttest.FakeFocusSink{}, updates: &agenttest.RecordingUpdates{}, chat: &recChat{}, store: store, clock: clock}
+		status: &agenttest.RecordingStatus{}, launcher: &agenttest.FakePlanner{}, focus: &agenttest.FakeFocusSink{}, updates: &agenttest.RecordingUpdates{}, chat: &recChat{}, attach: &fakeAttach{}, store: store, clock: clock}
 	var session SessionHost = host
 	if wrap != nil {
 		session = wrap(host)
@@ -55,7 +56,7 @@ func build(t *testing.T, store *agenttest.MemStore, cfg RuntimeConfig, wrap func
 	deps := Deps{
 		Host: NewAgentHost(session, clock, recipe), Voice: r.voice, Notifier: r.alerts, Pixie: r.alerts,
 		Status: r.status, Planner: launch, Focus: r.focus, TerminalDir: "/home/me/Projects", Store: store, Clock: clock, IDs: &agenttest.SeqIds{},
-		Updates: r.updates, Chat: r.chat,
+		Updates: r.updates, Chat: r.chat, Attachments: r.attach,
 	}
 	r.h = NewRuntime(deps, cfg)
 	go r.h.Run(t.Context())

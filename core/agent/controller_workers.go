@@ -530,3 +530,11 @@ func (c *AgentController) setRow(name string, status WorkerStatus, now Millis, f
 		c.saveJob(job, fx)
 	}
 }
+
+// WorktreeOf is a live worker's folder ("" if it has none yet).
+func (c *AgentController) WorktreeOf(name string) string {
+	if w := c.workers.Get(name); w != nil {
+		return w.Worktree
+	}
+	return ""
+}

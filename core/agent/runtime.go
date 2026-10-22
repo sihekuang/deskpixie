@@ -96,6 +96,8 @@ type Deps struct {
 	// Chat is the text box under Pixie (#221): typed jobs' lines go to it (nil: no text box, and
 	// typed messages are ordinary jobs).
 	Chat ChatSink
+	// Attachments wait for the next request or answer (#240); nil = none.
+	Attachments Attachments
 }
 
 // WorkerDeps are the worker adapters (spec §5.5), injected only when agent.workers.enabled.
@@ -449,6 +451,7 @@ func (h *AgentHandle) delegate(task, context string, typed bool) (JobID, error) 
 	if off {
 		return "", fmt.Errorf("Delegation is off (%s).", why)
 	}
+	task += h.attached() // only now that it can go
 	id := h.deps.IDs.JobID()
 	if note := h.requestNote(); note != "" {
 		context = strings.TrimSpace(context + "\n" + note)
@@ -521,7 +524,8 @@ func (h *AgentHandle) CancelAsked(jobID string) (JobID, string, error) {
 		id, err := h.Cancel(jobID)
 		return id, "", err
 	}
-	if _, _, err := h.AnswerAsked(string(id), stopAnswer); err != nil {
+	// A stop isn't a message: the waiting attachments stay for the next one.
+	if _, _, err := h.answerAsked(string(id), stopAnswer, false); err != nil {
 		return "", "", err
 	}
 	return id, "the coordinator, to work out what to stop", nil
@@ -538,6 +542,12 @@ func (h *AgentHandle) Answer(jobID, text string) (JobID, error) {
 // session whose turn asked the question Pixie relayed last, or the coordinator, to work out
 // which of several waiting questions it answers.
 func (h *AgentHandle) AnswerAsked(jobID, text string) (JobID, string, error) {
+	return h.answerAsked(jobID, text, true)
+}
+
+// answerAsked is AnswerAsked; withAttachments: the waiting attachments go with the answer
+// (given back if it can't go).
+func (h *AgentHandle) answerAsked(jobID, text string, withAttachments bool) (_ JobID, _ string, err error) {
 	var id JobID
 	if raw := strings.TrimSpace(jobID); raw != "" {
 		// A malformed id is ignored like an unknown one: the answer goes to whoever asked.
@@ -547,6 +557,15 @@ func (h *AgentHandle) AnswerAsked(jobID, text string) (JobID, string, error) {
 	}
 	if h.quitting() {
 		return "", "", errQuitting
+	}
+	if withAttachments {
+		paths := h.take()
+		defer func() {
+			if err != nil {
+				h.giveBack(paths)
+			}
+		}()
+		text += attachedLines(paths)
 	}
 	r := h.stepLocked(AnswerInput(id, text))
 	if r == nil || r.Kind != EfAnswerResult {
@@ -1692,6 +1711,14 @@ func (h *AgentHandle) runWorkerOp(e Effect) {
 	name := e.Name
 	switch e.Kind {
 	case EfPromptWorker:
+		text := e.Text
+		if h.deps.Attachments != nil {
+			// Its own copies of the job's attachments, in its folder (#240).
+			h.ctlMu.Lock()
+			dir := h.ctl.WorktreeOf(name)
+			h.ctlMu.Unlock()
+			text = h.deps.Attachments.ForWorker(text, dir)
+		}
 		_, err := within(h.ctx, OpLimit, func(c context.Context) (struct{}, error) {
 			if h.setReconnect(name, false) {
 				if _, err := ReconnectMcp(c, session, name); err != nil {
@@ -1700,7 +1727,7 @@ func (h *AgentHandle) runWorkerOp(e Effect) {
 					return struct{}{}, err
 				}
 			}
-			return struct{}{}, session.Prompt(c, name, e.Text)
+			return struct{}{}, session.Prompt(c, name, text)
 		})
 		if err != nil && !h.quitting() {
 			h.Input(WorkerPromptFailedInput(name, e.Text))

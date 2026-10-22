@@ -47,6 +47,13 @@ final class AgentRosterController {
     static let captionInterval: TimeInterval = 0.3
     static let captionLinger: TimeInterval = 3
     private var captionHide: Timer?
+    /// The attachments waiting for the next request (#240), and Cmd-V while the box is open.
+    private var attach: AttachmentsController!
+    private var pasteMonitor: Any?
+    /// Pixie's "Want me to take this?" for each new copy of an image or files.
+    private var watch = ClipboardWatch()
+    private var offer = CopyOffer()
+    private var watchTicks = 0
 
     init(engine: CoreEngine, worker: CoreWorker, pixie: PixieController) {
         self.engine = engine
@@ -60,8 +67,65 @@ final class AgentRosterController {
             MainActor.assumeIsolated { self?.poll() }
         }
         RunLoop.main.add(timer!, forMode: .common)
+        attach = AttachmentsController(engine: engine, worker: worker, clipboard: PasteboardClipboard()) { [weak self] in
+            self?.render()
+        }
+        pixie.view.onDrop = { [weak self] board in self?.attach.drop(board: board) ?? false }
         fetchCurrent()
         fetchMode()
+    }
+
+    // MARK: - attachments (#240)
+
+    /// The core's `attachments` event.
+    func apply(attachments items: [AttachmentItem]) { attach.apply(items) }
+
+    /// Pixie's take_clipboard (the `clipboard.read` event).
+    func takeClipboard(request: String) { attach.takeClipboard(request: request) }
+
+    var attachments: AttachmentsController { attach }
+
+    /// A click on Pixie's offer: what was copied, attached.
+    private func takeOffer() {
+        offer.take()
+        attach.attachClipboard()
+        // Text mode: the box opens with it; voice mode keeps the card under Pixie (#221's rule).
+        if chat.mode == "text" && !chat.open { openChat() } else { render() }
+    }
+
+    /// Every half second: a new copy brings the offer up.
+    private func watchClipboard(hovering: Bool) -> Bool {
+        watchTicks += 1
+        var changed = offer.expire(now: Date(), hovering: hovering)
+        guard watchTicks % 5 == 0 else { return changed }
+        attach.poll()
+        // A copy attached before this look (a quick Attach or Cmd-V) isn't offered again.
+        if watch.poll(changeCount: attach.clipboard.changeCount, kind: attach.clipboardKind) && !attach.currentUsed {
+            offer.show(attach.clipboardKind, now: Date())
+            changed = true
+        }
+        return changed
+    }
+
+    /// Cmd-V in the open box: attaches when the clipboard holds only an image or files.
+    private func pasteAttaches() -> Bool {
+        guard chat.open, panel.isKeyWindow, ClipboardRules.pasteAttaches(attach.clipboard.detectedTypes()) else { return false }
+        offer.take()
+        attach.attachClipboard()
+        return true
+    }
+
+    private var attachmentUI: AttachmentUI {
+        let a = attach!
+        return AttachmentUI(model: a.model, hint: a.hint,
+                            onAttachHint: { [weak self] in
+                                // The same copy: Pixie's offer goes too.
+                                self?.offer.take()
+                                a.attachClipboard()
+                            },
+                            onRemove: { a.remove($0) },
+                            onPick: { a.pick() },
+                            onDrop: { a.drop($0) })
     }
 
     func stop() {
@@ -174,6 +238,17 @@ final class AgentRosterController {
         render()
         panel.makeKey()
         chatState.focusRequests += 1
+        attach.poll()
+        if pasteMonitor == nil {
+            // Cmd-V with only an image or files on the clipboard attaches them; text pastes.
+            pasteMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                let isPaste = ClipboardRules.isPasteShortcut(flags: event.modifierFlags.rawValue,
+                                                             key: event.charactersIgnoringModifiers)
+                guard isPaste else { return event }
+                let took = MainActor.assumeIsolated { self?.pasteAttaches() ?? false }
+                return took ? nil : event
+            }
+        }
         if clickAway == nil {
             // A click in another app puts the box away (clicks on Pixie's own panels are local).
             clickAway = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
@@ -187,6 +262,10 @@ final class AgentRosterController {
             NSEvent.removeMonitor(m)
             clickAway = nil
         }
+        if let m = pasteMonitor {
+            NSEvent.removeMonitor(m)
+            pasteMonitor = nil
+        }
         guard chat.open else { return }
         chat.open = false
         panel.acceptsKey = false
@@ -196,8 +275,9 @@ final class AgentRosterController {
 
     private func send() {
         let text = chatState.draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard chat.canSend(text) else { return }
+        guard chat.canSend(text, attachments: attach.model.items.count) else { return }
         chatState.draft = ""
+        attach.sent()
         chat.sending()
         render()
         let engine = engine, worker = worker
@@ -293,6 +373,7 @@ final class AgentRosterController {
     private func poll() {
         let mouse = NSEvent.mouseLocation
         let overPanel = panel.isVisible && panel.frame.contains(mouse)
+        let offerChanged = watchClipboard(hovering: overPanel)
         // The list opens over the chip and closes when the pointer leaves the chip and the list;
         // never while the text box is open.
         var inside = false
@@ -308,7 +389,7 @@ final class AgentRosterController {
         // Put away once old enough (captionDismissSecs).
         let expired = chat.dismissIfOlder(than: dismissSecs, now: Date())
         let ago = cardUp ? chat.ago(now: Date()) : nil
-        if expired || inside != model.open || near != hovering || ago != agoShown {
+        if offerChanged || expired || inside != model.open || near != hovering || ago != agoShown {
             model.open = inside
             hovering = near
             render()
@@ -318,7 +399,8 @@ final class AgentRosterController {
     /// The card without the input line: a live caption, or the last words on hover or always;
     /// never with the list or the open text box.
     private var captionCard: Bool {
-        !chat.open && !model.open && chat.showsCard(hovering: hovering, always: alwaysCaption)
+        !chat.open && !model.open
+            && (chat.showsCard(hovering: hovering, always: alwaysCaption) || attach.model.chipsVisible)
     }
 
     private func render() {
@@ -348,7 +430,9 @@ final class AgentRosterController {
                 // After SwiftUI has laid the new lines out.
                 DispatchQueue.main.async { self?.layout() }
             },
-            onDismiss: { [weak self] in self?.dismissWords() })
+            onDismiss: { [weak self] in self?.dismissWords() },
+            attachments: attach == nil ? .none : attachmentUI,
+            offer: offer.kind, onOffer: { [weak self] in self?.takeOffer() })
             .onPreferenceChange(ChipFrameKey.self) { [weak self] frame in
                 MainActor.assumeIsolated { self?.chipFrame = frame }
             })
@@ -365,7 +449,7 @@ final class AgentRosterController {
             hide()
             return
         }
-        if !model.open && !cardUp { chipHeight = size.height }
+        if !model.open && !cardUp && offer.kind == nil { chipHeight = size.height }
         let top = ScreenDisplays.primaryMaxY
         let bit = pixie.panel.frame
         let screen = NSScreen.screens.first { $0.frame.contains(NSPoint(x: bit.midX, y: bit.midY)) }

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"github.com/sihekuang/deskpixie/core/attach"
 	"github.com/sihekuang/deskpixie/core/settings"
 	"github.com/sihekuang/deskpixie/core/tools"
 	"github.com/sihekuang/deskpixie/core/voice"
@@ -93,6 +94,8 @@ type Agent interface {
 	ChatStop()
 	// SetTextMode: replyMode is text (no conversation is opened for updates).
 	SetTextMode(on bool)
+	// Attachments wait for the next request (#240); nil when there is nowhere to keep them.
+	Attachments() *attach.Store
 	// Shutdown is the app's quit: deny pending permissions, stop the panes, clear the MCP
 	// configs, stop the session host and the hook server. Idempotent; blocks ~3 s at most.
 	Shutdown()

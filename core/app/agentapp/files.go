@@ -141,6 +141,9 @@ type Paths struct {
 	WorkerSettings string
 	// McpDir is <app_data>/agent/mcp: the 0600 --mcp-config files (coordinator.json, <worker>.json).
 	McpDir string
+	// Attachments is <app_data>/agent/workspace/attachments (#240): inside the coordinator's
+	// cwd, so it reads them without asking.
+	Attachments string
 	// Canvas is <app_data>/canvas (the canvas pages folder lives under it).
 	Canvas string
 }
@@ -151,6 +154,7 @@ func NewPaths(appData string) Paths {
 	return Paths{
 		Root:           root,
 		Workspace:      filepath.Join(root, "workspace"),
+		Attachments:    filepath.Join(root, "workspace", "attachments"),
 		Settings:       filepath.Join(root, "coordinator-settings.json"),
 		WorkerSettings: filepath.Join(root, "worker-settings.json"),
 		McpDir:         filepath.Join(root, "mcp"),

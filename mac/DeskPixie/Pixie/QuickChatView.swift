@@ -55,6 +55,8 @@ struct QuickChatCard: View {
     let onClose: () -> Void
     let onResize: () -> Void
     let onDismiss: () -> Void
+    /// The chips, the hint row, 📎 and drops (#240).
+    let attachments: AttachmentUI
 
     static let width: CGFloat = 260
     @FocusState private var focused: Bool
@@ -116,10 +118,40 @@ struct QuickChatCard: View {
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 8)
                 }
-                if showsInput { Divider().padding(.top, 2) }
+                if showsInput || attachments.model.chipsVisible { Divider().padding(.top, 2) }
+            }
+            if attachments.model.chipsVisible {
+                AttachmentChips(items: attachments.model.items, onRemove: attachments.onRemove)
+                    .padding(.horizontal, 8)
+                    .padding(.top, 2)
+            }
+            if let notice = attachments.model.notice {
+                Text(notice)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+            } else if showsInput, let hint = attachments.hint {
+                HStack(spacing: 4) {
+                    Image(systemName: "doc.on.clipboard")
+                    Text(hint)
+                    Text("·")
+                    Button("Attach", action: attachments.onAttachHint)
+                        .buttonStyle(.link)
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
             }
             if showsInput {
                 HStack(alignment: .bottom, spacing: 6) {
+                    Button(action: attachments.onPick) {
+                        Image(systemName: "paperclip")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Attach files")
+                    .accessibilityLabel("Attach files")
                     // Grows with what is typed, up to a few lines, then scrolls; Return sends.
                     TextField("Message Pixie", text: $state.draft, axis: .vertical)
                         .textFieldStyle(.plain)
@@ -138,10 +170,10 @@ struct QuickChatCard: View {
                     Button(action: onSend) {
                         Image(systemName: "arrow.up.circle.fill")
                             .font(.title3)
-                            .foregroundStyle(model.canSend(state.draft) ? .primary : .tertiary)
+                            .foregroundStyle(canSend ? .primary : .tertiary)
                     }
                     .buttonStyle(.plain)
-                    .disabled(!model.canSend(state.draft))
+                    .disabled(!canSend)
                     .help("Send")
                 }
                 .padding(.horizontal, 8)
@@ -152,9 +184,13 @@ struct QuickChatCard: View {
         .frame(width: Self.width, alignment: .leading)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.separator))
+        .onDrop(of: [.fileURL, .image], isTargeted: nil, perform: attachments.onDrop)
         .onAppear { if showsInput { focused = true } }
         .onChange(of: state.focusRequests) { focused = true }
         // The panel is sized from the view: a taller field needs a new frame.
         .onChange(of: state.draft) { onResize() }
+        .onChange(of: attachments.model) { onResize() }
     }
+
+    private var canSend: Bool { model.canSend(state.draft, attachments: attachments.model.items.count) }
 }

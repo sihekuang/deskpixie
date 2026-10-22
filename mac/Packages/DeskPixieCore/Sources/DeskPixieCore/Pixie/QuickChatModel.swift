@@ -86,8 +86,9 @@ public struct QuickChatModel: Equatable, Sendable {
         }
     }
 
-    public func canSend(_ draft: String) -> Bool {
-        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !showsStop
+    /// Words or attachments (#240) to send, and nothing at work.
+    public func canSend(_ draft: String, attachments: Int = 0) -> Bool {
+        (attachments > 0 || !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) && !showsStop
     }
 
     /// The message is on its way (before chat.send answers): thinking, and lines that come

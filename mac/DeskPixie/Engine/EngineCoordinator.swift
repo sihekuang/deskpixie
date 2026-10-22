@@ -517,6 +517,10 @@ final class EngineCoordinator {
             roster?.apply(view: view)
         case .chatLine(let line):
             roster?.apply(chatLine: line)
+        case .attachments(let items):
+            roster?.apply(attachments: items)
+        case .clipboardRead(let request):
+            roster?.takeClipboard(request: request)
         case .chatFocus:
             roster?.focusChat()
         case .replyMode(let mode):

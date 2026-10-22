@@ -383,3 +383,16 @@ final class QuickChatModelTests: XCTestCase {
         XCTAssertEqual(m.phase, .ready)
     }
 }
+
+/// #240: attachments alone can be sent.
+final class QuickChatAttachmentTests: XCTestCase {
+    func testCanSendWithAttachmentsAndNoText() {
+        let m = QuickChatModel()
+        XCTAssertTrue(m.canSend("", attachments: 1))
+        XCTAssertFalse(m.canSend("  ", attachments: 0))
+        XCTAssertTrue(m.canSend("hi"))
+        var busy = QuickChatModel()
+        busy.sending()
+        XCTAssertFalse(busy.canSend("", attachments: 1))
+    }
+}

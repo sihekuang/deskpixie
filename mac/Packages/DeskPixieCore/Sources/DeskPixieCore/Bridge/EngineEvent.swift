@@ -96,6 +96,10 @@ public enum EngineEvent: Sendable, Equatable {
     case replyMode(String)
     /// alwaysShowCaption or captionDismissSecs changed (#224).
     case captions(always: Bool, dismissSecs: Int)
+    /// The attachments waiting for the next request (#240), the whole set.
+    case attachments([AttachmentItem])
+    /// Pixie's take_clipboard: read the clipboard, add what's there, then call clipboard.done.
+    case clipboardRead(request: String)
 
     private struct Kind: Decodable { var kind: String }
 
@@ -116,6 +120,8 @@ public enum EngineEvent: Sendable, Equatable {
     private struct FocusPlanEvent: Decodable { var plan: FocusPlan }
     private struct ReplyModeEvent: Decodable { var mode: String }
     private struct CaptionsEvent: Decodable { var always: Bool; var dismissSecs: Int }
+    private struct AttachmentsEvent: Decodable { var items: [AttachmentItem] }
+    private struct ClipboardRead: Decodable { var request: String }
 
     /// Decodes one event JSON object; unknown kinds, malformed JSON and events missing a
     /// required field yield nil.
@@ -153,6 +159,8 @@ public enum EngineEvent: Sendable, Equatable {
         case "chat.focus": return .chatFocus
         case "replyMode": return get(ReplyModeEvent.self).map { .replyMode($0.mode) }
         case "captions": return get(CaptionsEvent.self).map { .captions(always: $0.always, dismissSecs: $0.dismissSecs) }
+        case "attachments": return get(AttachmentsEvent.self).map { .attachments($0.items) }
+        case "clipboard.read": return get(ClipboardRead.self).map { .clipboardRead(request: $0.request) }
         default: return nil
         }
     }

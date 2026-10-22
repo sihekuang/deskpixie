@@ -62,7 +62,10 @@ var errEmptyChat = errors.New("Type a message first.")
 func (h *AgentHandle) ChatSend(text string) (JobID, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
-		return "", errEmptyChat
+		if !h.hasAttachments() {
+			return "", errEmptyChat
+		}
+		text = attachedOnly
 	}
 	h.ctlMu.Lock()
 	if session, job := h.ctl.takeBoxAnswer(); session != "" {

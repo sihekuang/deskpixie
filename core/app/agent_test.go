@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sihekuang/deskpixie/core/attach"
 	"github.com/sihekuang/deskpixie/core/settings"
 	"github.com/sihekuang/deskpixie/core/tools/toolstest"
 	"github.com/sihekuang/deskpixie/core/voice"
@@ -42,6 +43,7 @@ type fakeAgent struct {
 	chatErr         error
 	stops           int
 	textModes       []bool
+	attach          *attach.Store
 }
 
 func (f *fakeAgent) Tools() []voice.Tool { return []voice.Tool{namedTool("delegate")} }
