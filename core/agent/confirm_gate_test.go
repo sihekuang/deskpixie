@@ -65,6 +65,34 @@ func TestGatedActions(t *testing.T) {
 		{"I need you to push.", []string{"push"}},
 		{"Let's push.", []string{"push"}},
 		{"After merging, push.", []string{"merge", "push"}},
+		// #255: "push" describing something that moves on screen, or naming a kind of thing, asks
+		// for nothing.
+		{"Can we have two separate bubbles, the one that's from me and the one that's from Pixie, and the latest one shows at the bottom and pushes the older one up, and the one on the top fades after four or five seconds?", nil},
+		{"on the Pixie one the one that's working on the caption can we maybe have two separate bubble the one that's from me and the one that's from Pixie and you know the latest one show on the bottom and it pushes up and the one that's on the top fades", nil},
+		{"A new row comes in at the top, pushing the others down.", nil},
+		{"Turn on push notifications for finished jobs.", nil},
+		{"Add push to talk.", nil},
+		// … while an instruction to push still asks, whatever follows it: asking once too often is
+		// the safe side.
+		{"Push it up.", []string{"push"}},
+		{"Push up the changes.", []string{"push"}},
+		{"Push the branch up to origin.", []string{"push"}},
+		{"Force push the branch.", []string{"push"}},
+		{"Let's get to your landing push. It looks good.", []string{"push"}},
+		{"Push the fix and then push the notification change too.", []string{"push"}},
+		{"Push your work up.", []string{"push"}},
+		{"Push the release up.", []string{"push"}},
+		{"Push it over to staging.", []string{"push"}},
+		{"Push it back.", []string{"push"}},
+		{"Push the update along.", []string{"push"}},
+		{"Push these up.", []string{"push"}},
+		{"Push the latest up and merge.", []string{"push", "merge"}},
+		{"Pushing it up now please.", []string{"push"}},
+		{"It pushes it up when done.", []string{"push"}},
+		{"Make sure it's pushed up.", []string{"push"}},
+		{"Keep pushing up the changes.", []string{"push"}},
+		{"Push back if you think the design is wrong.", []string{"push"}},
+		{"Push the older bubble down when a new one comes in.", []string{"push"}},
 	} {
 		if got := GatedActions(tc.text); !slices.Equal(got, tc.want) {
 			t.Errorf("GatedActions(%q) = %q, want %q", tc.text, got, tc.want)

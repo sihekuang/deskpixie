@@ -433,6 +433,47 @@ var gatedForms = map[string]string{
 	"deploy": "deploy", "deploys": "deploy", "deploying": "deploy",
 }
 
+// pushAside are the directions that make a described push move something rather than send
+// code (#255): "pushes the older one up".
+var pushAside = map[string]bool{"up": true, "down": true, "aside": true, "away": true, "back": true, "over": true, "around": true, "forward": true, "along": true}
+
+// pushNouns make "push" a kind of thing, not a step: "push notifications", "push to talk".
+var pushNouns = map[string]bool{"notification": true, "notifications": true, "button": true, "buttons": true}
+
+// codeWords make a push in their clause one of code.
+var codeWords = map[string]bool{"git": true, "branch": true, "branches": true, "remote": true, "origin": true, "upstream": true,
+	"github": true, "pr": true, "commit": true, "commits": true, "changes": true, "change": true, "code": true, "main": true,
+	"repo": true, "tag": true, "tags": true, "fix": true, "fixes": true}
+
+// pushObjects after a push are what gets sent: "pushes it up" is still git's idiom.
+var pushObjects = map[string]bool{"it": true, "them": true, "this": true, "that": true, "these": true, "those": true,
+	"everything": true, "all": true}
+
+// pushIsntCode: the push at words[i] names a kind of thing, or describes something moving on
+// screen ("it pushes up", "pushing the others down") with no code in its clause (#255). An
+// instruction ("push your work up", "push it back") always asks: asking once too often is the
+// safe side.
+func pushIsntCode(words []string, i int) bool {
+	rest := words[i+1:]
+	if len(rest) > 0 && pushNouns[rest[0]] || len(rest) > 1 && rest[0] == "to" && rest[1] == "talk" {
+		return true
+	}
+	if w := words[i]; w != "pushes" && w != "pushing" || len(rest) > 0 && pushObjects[rest[0]] {
+		return false
+	}
+	for _, w := range words {
+		if codeWords[w] {
+			return false
+		}
+	}
+	for _, w := range rest[:min(len(rest), 4)] {
+		if pushAside[w] {
+			return true
+		}
+	}
+	return false
+}
+
 // negators turn the rest of their clause into what not to do ("don't push", "without merging");
 // so do "instead of" and any "n't" word.
 var negators = map[string]bool{"not": true, "no": true, "never": true, "dont": true, "cannot": true, "without": true, "nor": true, "avoid": true}
@@ -527,7 +568,8 @@ func GatedActions(text string) []string {
 			reported := strings.HasSuffix(w, "ed") && firstPerson[subject] ||
 				strings.HasSuffix(w, "ing") && underWay[subject] ||
 				leadIns[prev] && strings.HasSuffix(w, "ing") && mine && !yours
-			if base, ok := gatedForms[w]; ok && !negated && !reported && !slices.Contains(out, base) {
+			if base, ok := gatedForms[w]; ok && !negated && !reported && !slices.Contains(out, base) &&
+				!(base == "push" && pushIsntCode(words, i)) {
 				out = append(out, base)
 			}
 		}
