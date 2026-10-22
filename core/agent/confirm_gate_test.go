@@ -43,6 +43,28 @@ func TestGatedActions(t *testing.T) {
 		{"Do the merge.", []string{"merge"}},
 		{"How about you merge it?", []string{"merge"}},
 		{"When can you push?", []string{"push"}},
+		// #246: the sender reporting their own step asks the session for nothing.
+		{"Heads-up: PR #243 is now merged into main. Before merging I merged main into your branch. Pull main before you change anything else.", nil},
+		{"I pushed the fix to origin, so pull before you start.", nil},
+		{"We're merging it here now; don't push to that branch meanwhile.", nil},
+		{"I'll deploy it myself tonight.", []string{"deploy"}}, // a plan asks all the same
+		{"I want you to merge it.", []string{"merge"}},
+		{"I merged main; now push your branch.", []string{"push"}},
+		{"We just pushed the fix; pull it.", nil},
+		{"I'm merging it here.", nil},
+		// Asks all the same: a plan, an opinion or an approval from the sender is a request.
+		{"We should merge it now.", []string{"merge"}},
+		{"I think we should push.", []string{"push"}},
+		{"We can merge now.", []string{"merge"}},
+		{"We push now.", []string{"push"}},
+		{"I'd merge it.", []string{"merge"}},
+		{"I say push it.", []string{"push"}},
+		{"I approve, merge it.", []string{"merge"}},
+		{"I've reviewed, merge and push.", []string{"merge", "push"}},
+		{"We merge and push.", []string{"merge", "push"}},
+		{"I need you to push.", []string{"push"}},
+		{"Let's push.", []string{"push"}},
+		{"After merging, push.", []string{"merge", "push"}},
 	} {
 		if got := GatedActions(tc.text); !slices.Equal(got, tc.want) {
 			t.Errorf("GatedActions(%q) = %q, want %q", tc.text, got, tc.want)

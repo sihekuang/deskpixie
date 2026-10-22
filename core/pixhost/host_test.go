@@ -326,6 +326,17 @@ func TestASessionIDArrivingLaterIsCheckedForDuplicates(t *testing.T) {
 	wire.Encode(a.c, wire.Msg{Kind: wire.KindEvent, Event: "session", SessionID: "s-1"})
 	b, _ := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api"})
 	eventually(t, "both listed", func() bool { return len(listed(t, h)) == 2 })
+	// a's id must land first, or b's could be taken as the first and a refused (#247's CI run).
+	eventually(t, "a's id known", func() bool {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		for _, s := range h.sessions {
+			if s.sessionID == "s-1" {
+				return true
+			}
+		}
+		return false
+	})
 	wire.Encode(b.c, wire.Msg{Kind: wire.KindEvent, Event: "session", SessionID: "s-1"})
 	b.c.SetReadDeadline(time.Now().Add(2 * time.Second))
 	if m, err := b.dec.Next(); err != nil || m.Kind != wire.KindRefused || m.Reason == "" {

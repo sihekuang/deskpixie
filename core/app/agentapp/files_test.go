@@ -501,3 +501,14 @@ func TestEffortArgsFollowTheCoordinatorAgent(t *testing.T) {
 		t.Fatal("blank is none:", got)
 	}
 }
+
+// #246: a session tool waiting on the person's confirm is answered at once; the coordinator
+// mustn't call it again, and says it goes as soon as they confirm.
+func TestTheCoordinatorKnowsASessionToolCanAwaitConfirmation(t *testing.T) {
+	md := RenderClaudeMd("/data/canvas", "")
+	for _, phrase := range []string{"`\"status\": \"awaiting_confirmation\"`", "don't call it again", "as soon as they confirm"} {
+		if !strings.Contains(md, phrase) {
+			t.Fatal(phrase)
+		}
+	}
+}
