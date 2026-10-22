@@ -28,8 +28,11 @@ public struct QuickChatModel: Equatable, Sendable {
     public private(set) var full = ""
     /// The typed job the box is showing (nil before the first send).
     public private(set) var job: String?
-    /// The box is open (text mode only); the controller sets it.
-    public var open = false
+    /// The box is open (text mode only); the controller sets it. Open, it shows any late answer
+    /// itself, so that answer no longer shows on its own once it closes (#259).
+    public var open = false {
+        didSet { if open { lateShown = false } }
+    }
     /// replyMode: "voice" or "text".
     public var mode = "voice"
 
@@ -105,7 +108,7 @@ public struct QuickChatModel: Equatable, Sendable {
 
     /// The card without the input line: a live caption, or the last words on hover or always.
     public func showsCard(hovering: Bool, always: Bool) -> Bool {
-        showsCaption || (lateShown && !isCaption && phase != .ready) || ((hovering || always) && hasLast)
+        showsCaption || (lateShown && !isCaption && !full.isEmpty && (phase == .answering || phase == .done)) || ((hovering || always) && hasLast)
     }
 
     /// How long ago it was said ("just now", "2m ago"), once it is all shown.

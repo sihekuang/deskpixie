@@ -573,6 +573,36 @@ final class QuickChatModelTests: XCTestCase {
         XCTAssertFalse(m.showsCard(hovering: false, always: false))
     }
 
+    /// #260 review: a late answer read in the reopened box goes with it; a working line after it,
+    /// or an empty answer, doesn't keep a card up on its own.
+    func test_a_late_answer_read_in_the_box_or_empty_or_working_doesnt_stay() {
+        var m = QuickChatModel()
+        m.mode = "text"
+        m.open = true
+        m.sent(job: "job_1")
+        m.apply(line("done", "Passed on."))
+        while m.tick() {}
+        m.open = false
+        m.apply(line("done", "The pears are ripe."))
+        while m.tick() {}
+        m.open = true
+        m.open = false
+        XCTAssertFalse(m.showsCard(hovering: false, always: false), "read in the box")
+        m.apply(line("done", "Now the plums."))
+        XCTAssertTrue(m.showsCard(hovering: false, always: false))
+        m.apply(line("working", "Still at it."))
+        XCTAssertFalse(m.showsCard(hovering: false, always: false), "a working line")
+        var e = QuickChatModel()
+        e.mode = "text"
+        e.open = true
+        e.sent(job: "job_1")
+        e.apply(line("done", "Passed on."))
+        while e.tick() {}
+        e.open = false
+        e.apply(line("done", ""))
+        XCTAssertFalse(e.showsCard(hovering: false, always: false), "an empty answer")
+    }
+
     /// Only a finished answer comes back on its own, and the next message ends it.
     func test_a_late_working_line_or_the_next_message_doesnt_show_it() {
         var m = QuickChatModel()
