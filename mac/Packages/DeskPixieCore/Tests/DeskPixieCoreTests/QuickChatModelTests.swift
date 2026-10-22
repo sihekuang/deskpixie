@@ -521,6 +521,78 @@ final class QuickChatModelTests: XCTestCase {
         }
     }
 
+    /// #259: a session's answer that comes once the box was closed (a click elsewhere, Escape, ✕)
+    /// shows on its own, not only on hover; it goes after the put-away time like any answer.
+    func test_a_late_answer_shows_on_its_own_once_the_box_is_closed() {
+        for putAway in ["close", "dismiss"] {
+            let t0 = Date()
+            var m = QuickChatModel()
+            m.mode = "text"
+            m.open = true
+            m.sent(job: "job_1")
+            m.apply(line("done", "Passed on to your session on fruit-stand."), now: t0)
+            while m.tick() {}
+            m.open = false
+            if putAway == "dismiss" { m.dismiss() }
+            XCTAssertFalse(m.showsCard(hovering: false, always: false), putAway)
+            m.apply(line("done", "The pears are ripe."), now: t0)
+            XCTAssertTrue(m.showsCard(hovering: false, always: false), "\(putAway): while it types out")
+            while m.tick() {}
+            XCTAssertEqual(m.shown, "The pears are ripe.", putAway)
+            XCTAssertTrue(m.showsCard(hovering: false, always: false), putAway)
+            XCTAssertTrue(m.dismissIfOlder(than: 120, now: t0.addingTimeInterval(120)), putAway)
+            XCTAssertFalse(m.showsCard(hovering: false, always: false), putAway)
+        }
+    }
+
+    /// An answer that came while the box was open was seen: closing the box puts it away as before.
+    func test_an_answer_seen_in_the_open_box_goes_with_it() {
+        var m = QuickChatModel()
+        m.mode = "text"
+        m.open = true
+        m.sent(job: "job_1")
+        m.apply(line("done", "Passed on."))
+        m.apply(line("done", "The pears are ripe."))
+        while m.tick() {}
+        m.open = false
+        XCTAssertFalse(m.showsCard(hovering: false, always: false))
+        XCTAssertTrue(m.showsCard(hovering: true, always: false), "hover still shows it")
+    }
+
+    /// The coordinator's closing line repeats the hand-off just after the box closed: nothing new,
+    /// so it doesn't come back on its own.
+    func test_a_repeat_of_what_was_shown_doesnt_bring_it_back() {
+        var m = QuickChatModel()
+        m.mode = "text"
+        m.open = true
+        m.sent(job: "job_1")
+        m.apply(line("done", "Passed on to your session."))
+        while m.tick() {}
+        m.open = false
+        m.apply(line("done", "Passed on to your session."))
+        XCTAssertFalse(m.showsCard(hovering: false, always: false))
+    }
+
+    /// Only a finished answer comes back on its own, and the next message ends it.
+    func test_a_late_working_line_or_the_next_message_doesnt_show_it() {
+        var m = QuickChatModel()
+        m.mode = "text"
+        m.open = true
+        m.sent(job: "job_1")
+        m.apply(line("done", "Passed on."))
+        while m.tick() {}
+        m.open = false
+        m.apply(line("working", "Still at it."))
+        XCTAssertFalse(m.showsCard(hovering: false, always: false))
+        m.apply(line("done", "Done now."))
+        XCTAssertTrue(m.showsCard(hovering: false, always: false))
+        m.sending()
+        m.sent(job: "job_2")
+        m.open = false
+        m.apply(line("done", "Done now.", job: "job_1"))
+        XCTAssertFalse(m.showsCard(hovering: false, always: false), "not an older message's answer")
+    }
+
     /// Only the last message's finished lines: not an older job's, and no working line.
     func test_a_put_away_card_ignores_other_jobs_and_working_lines() {
         var m = QuickChatModel()

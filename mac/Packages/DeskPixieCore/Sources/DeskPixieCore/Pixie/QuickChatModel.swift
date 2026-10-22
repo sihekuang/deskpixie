@@ -36,6 +36,9 @@ public struct QuickChatModel: Equatable, Sendable {
     /// The newest typed message's job, kept when the ✕ or a caption puts it away: a late answer
     /// to it (a session's reply, #241) still shows.
     private var lastJob: String?
+    /// The answer to the last message came while the box was closed (#259): it shows on its own,
+    /// as a caption would, until it is put away or the next message goes.
+    private var lateShown = false
     /// Lines that came for a job before chat.send said which job is ours (newest per job).
     private var early: [String: ChatLine] = [:]
     private var pending = false
@@ -102,7 +105,7 @@ public struct QuickChatModel: Equatable, Sendable {
 
     /// The card without the input line: a live caption, or the last words on hover or always.
     public func showsCard(hovering: Bool, always: Bool) -> Bool {
-        showsCaption || ((hovering || always) && hasLast)
+        showsCaption || (lateShown && !isCaption && phase != .ready) || ((hovering || always) && hasLast)
     }
 
     /// How long ago it was said ("just now", "2m ago"), once it is all shown.
@@ -142,6 +145,7 @@ public struct QuickChatModel: Equatable, Sendable {
         saidAt = nil
         job = nil
         lastJob = nil
+        lateShown = false
         pending = true
         stopPending = false
         early = [:]
@@ -156,6 +160,7 @@ public struct QuickChatModel: Equatable, Sendable {
     public mutating func sent(job: String) -> Bool {
         self.job = job
         lastJob = job
+        lateShown = false
         isCaption = false
         isYou = false
         awaitsFinal = false
@@ -179,6 +184,7 @@ public struct QuickChatModel: Equatable, Sendable {
 
     /// The message couldn't go: the reason is the answer.
     public mutating func failedToSend(_ reason: String) {
+        lateShown = false
         isCaption = false
         isYou = false
         awaitsFinal = false
@@ -227,6 +233,9 @@ public struct QuickChatModel: Equatable, Sendable {
             shown = ""
             phase = .answering
             saidAt = now
+            if !open {
+                lateShown = true // new words with the box closed: nothing else says them (#259)
+            }
         }
     }
 
@@ -239,6 +248,7 @@ public struct QuickChatModel: Equatable, Sendable {
     /// The ✕ (#224): the words go; hover and always show nothing until something new is said.
     public mutating func dismiss() {
         guard canDismiss else { return }
+        lateShown = false
         isCaption = false
         isYou = false
         awaitsFinal = false
