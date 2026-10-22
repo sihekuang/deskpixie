@@ -586,6 +586,9 @@ func (r *Runtime) run() {
 					who = "pixie"
 				}
 				r.cfg.Log.Printf("%s: %s", who, ev.Text)
+				if ev.Role == "user" {
+					r.userDone()
+				}
 				r.emit(UIEvent{Kind: "transcript", Role: ev.Role, Text: ev.Text})
 			case ev.Kind == EvError && !ev.Fatal:
 				log.Printf("voice: model warning: %s", ev.Message)
@@ -901,6 +904,9 @@ func (r *Runtime) invokeTool(callID, name string, args json.RawMessage) {
 // userStarted: the user's turn began; begun while Pixie was quiet, its words are theirs even
 // when they come once Pixie is answering (OpenAI Realtime transcribes a turn after it ends).
 func (r *Runtime) userStarted(now time.Time) { r.quietTurn = !r.echoing(now) }
+
+// userDone: the user's final words for the turn are in; heard words after them may be echo.
+func (r *Runtime) userDone() { r.quietTurn = false }
 
 // mouthClosed: Pixie's audible reply ended; what is heard next may be its echo.
 func (r *Runtime) mouthClosed(now time.Time) {

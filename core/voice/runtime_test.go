@@ -403,6 +403,11 @@ func TestHeardWordsOfATurnStartedInQuietShowWhilePixieAnswers(t *testing.T) {
 		t.Fatal("after the reply: echo again")
 	}
 	r.mouth = 2
+	r.userStarted(now)
+	r.userDone()
+	if r.admitsHeard(now) {
+		t.Fatal("your final words are in: what's heard next while Pixie speaks may be echo")
+	}
 	r.userStarted(now) // started while Pixie speaks: may be echo
 	if r.admitsHeard(now) {
 		t.Fatal("a turn started during Pixie's speech")

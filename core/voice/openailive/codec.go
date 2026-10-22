@@ -189,6 +189,9 @@ func (c *codec) decode(data []byte, now time.Time) []voice.Event {
 	case "session.output_audio.delta":
 		return c.onOutputAudio(m, now)
 	case "session.output_transcript.delta":
+		if c.muted { // a cancelled reply's tail
+			return nil
+		}
 		c.aText.WriteString(m.Delta)
 		if strings.TrimSpace(m.Delta) != "" { // the caption while Pixie speaks (#253)
 			return []voice.Event{{Kind: voice.EvAssistantSaying, Text: strings.TrimSpace(c.aText.String())}}

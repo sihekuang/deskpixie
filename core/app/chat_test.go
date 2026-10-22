@@ -127,7 +127,9 @@ func TestAlwaysShowCaptionTellsTheShell(t *testing.T) {
 	if s := h.set("alwaysShowCaption", true); s.SetError != nil && string(s.SetError) != "null" {
 		t.Fatal(string(s.SetError))
 	}
-	h.waitFor("captions", func(e event) bool { return e["always"] == true && e["dismissSecs"] == float64(120) && e["fadeSecs"] == float64(4) }, time.Second)
+	h.waitFor("captions", func(e event) bool {
+		return e["always"] == true && e["dismissSecs"] == float64(120) && e["fadeSecs"] == float64(4)
+	}, time.Second)
 	if len(f.textModes) != 1 {
 		t.Fatal("the agent was told again:", f.textModes)
 	}

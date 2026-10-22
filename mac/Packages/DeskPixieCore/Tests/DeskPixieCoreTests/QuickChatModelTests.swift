@@ -312,6 +312,25 @@ final class QuickChatModelTests: XCTestCase {
         XCTAssertEqual(QuickChatModel().earlierPhase(now: t0), .gone)
     }
 
+    /// A streamed reply that never got its final words doesn't swallow the next conversation's.
+    func test_an_unfinished_streamed_reply_ends_with_the_conversation() {
+        var m = QuickChatModel()
+        m.saying("It's sun")
+        m.conversationEnded()
+        m.heard("hi again")
+        XCTAssertTrue(m.caption(role: "assistant", text: "Hello!"))
+        XCTAssertFalse(m.isYou)
+    }
+
+    /// The last conversation's words, kept for hover, don't come back as the bubble on top.
+    func test_a_kept_caption_doesnt_move_up() {
+        var m = QuickChatModel()
+        m.saying("Bye!")
+        m.conversationEnded()
+        m.heard("hi again")
+        XCTAssertNil(m.earlier)
+    }
+
     /// The setting (captionFadeSecs) sets how long it stays; 0 shows only the latest.
     func test_the_fade_time_is_the_setting() {
         let t0 = Date()

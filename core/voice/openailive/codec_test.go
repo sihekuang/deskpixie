@@ -464,3 +464,23 @@ func TestPixiesWordsAreSaidAsTheyCome(t *testing.T) {
 		t.Fatal("nothing new said:", got)
 	}
 }
+
+// #253 review: a cancelled reply's tail is dropped, so it never shows as Pixie's words nor joins
+// the next reply.
+func TestACancelledRepliesTailIsNotSaid(t *testing.T) {
+	c := newCodec()
+	out := func(t string) []byte {
+		return msg(map[string]any{"type": "session.output_transcript.delta", "delta": t})
+	}
+	c.decode(outDelta(loud, 0), at(0))
+	c.decode(out("It's"), at(10))
+	c.encode(voice.Command{Kind: voice.CmdCancelResponse}, at(20))
+	for _, e := range c.decode(out(" sunny and warm"), at(30)) {
+		if e.Kind == voice.EvAssistantSaying {
+			t.Fatal("the dropped tail:", e.Text)
+		}
+	}
+	if c.aText.Len() != 0 {
+		t.Fatal("the tail joins the next reply:", c.aText.String())
+	}
+}

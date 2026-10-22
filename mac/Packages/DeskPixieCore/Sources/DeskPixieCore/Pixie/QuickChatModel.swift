@@ -76,7 +76,7 @@ public struct QuickChatModel: Equatable, Sendable {
 
     /// The other side starts speaking: the caption up to now moves up (#254).
     private mutating func moveUp(beforeYou you: Bool, now: Date) {
-        guard isCaption, isYou != you, !full.isEmpty else { return }
+        guard isCaption, captionLive, isYou != you, !full.isEmpty else { return }
         earlier = fadeSecs > 0 ? Earlier(text: full, isYou: isYou, at: now) : nil
     }
 
@@ -334,6 +334,7 @@ public struct QuickChatModel: Equatable, Sendable {
     /// The voice conversation ended: the caption stops showing on its own, all of it shown, and
     /// is kept for hover or always-show (#224).
     public mutating func conversationEnded() {
+        awaitsFinal = false // a streamed reply cut short gets no final words (#253)
         guard isCaption else { return }
         captionLive = false
         if phase == .answering {
