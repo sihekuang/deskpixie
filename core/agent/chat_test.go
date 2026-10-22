@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -32,7 +33,8 @@ func wantChat(t *testing.T, fx []Effect, want ...ChatLine) {
 		t.Fatalf("chat lines %v, want %v (%s)", got, want, fmtEffects(fx))
 	}
 	for i := range want {
-		if got[i] != want[i] {
+		// The sessions a line is about are checked on their own (#261).
+		if got[i].Job != want[i].Job || got[i].Status != want[i].Status || got[i].Text != want[i].Text {
 			t.Fatalf("chat lines %v, want %v", got, want)
 		}
 	}
@@ -337,5 +339,30 @@ func TestALateSendAfterItsRequestEndedIsALineOfItsOwn(t *testing.T) {
 	fx = c.Step(LateSessionSentInput("", "repo-claude", landing, "", "No session repo-claude."), T0+6)
 	if !strings.Contains(fmtEffects(fx), "Couldn't reach your session on "+landing+": No session repo-claude.") {
 		t.Fatal(fmtEffects(fx))
+	}
+}
+
+// #261: a typed message's lines name the sessions they are about, for the card's buttons: the
+// session it was passed to, from the hand-off on, and the session whose answer shows.
+func TestATypedMessagesLinesNameItsSessions(t *testing.T) {
+	c := handedOffTyped(t)
+	fx := sessionTurn(c, pixieTurn("The redirect loop is fixed."), T0+20)
+	if got := chats(fx); len(got) != 1 || !slices.Equal(got[0].Sessions, []string{"api-claude"}) {
+		t.Fatalf("session's answer: %+v", got)
+	}
+	c = typedOnJob1()
+	if got := chats(c.Step(SessionSentInput("repo-claude", landing), T0+5)); len(got) != 1 || !slices.Equal(got[0].Sessions, []string{"repo-claude"}) {
+		t.Fatalf("hand-off: %+v", got)
+	}
+	c.Step(SessionSentInput("web-claude", "the docs site"), T0+6)
+	fx = stop(c, `<spoken ref="job_000000000001" status="done">Passed both on.</spoken>`, T0+10)
+	if got := chats(fx); len(got) != 1 || !slices.Equal(got[0].Sessions, []string{"repo-claude", "web-claude"}) {
+		t.Fatalf("the reply after two hand-offs: %+v", got)
+	}
+	// A message handed to no session names none.
+	c = typedOnJob1()
+	fx = stop(c, `<spoken ref="job_000000000001" status="done">Two are running.</spoken>`, T0+10)
+	if got := chats(fx); len(got) != 1 || got[0].Sessions != nil {
+		t.Fatalf("no session: %+v", got)
 	}
 }

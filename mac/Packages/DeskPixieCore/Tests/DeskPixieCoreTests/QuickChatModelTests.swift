@@ -648,4 +648,50 @@ final class QuickChatAttachmentTests: XCTestCase {
         busy.sending()
         XCTAssertFalse(busy.canSend("", attachments: 1))
     }
+
+    // MARK: - buttons to the sessions (#261)
+
+    /// A typed message's line names the sessions it is about; the next message starts with none.
+    func test_a_typed_answer_carries_its_sessions() {
+        var m = QuickChatModel()
+        m.mode = "text"
+        m.sent(job: "job_1")
+        m.apply(ChatLine(job: "job_1", status: "working", text: "Passed on to fruit-stand.", sessions: ["fruit-claude"]))
+        XCTAssertEqual(m.sessions, ["fruit-claude"])
+        m.apply(ChatLine(job: "job_1", status: "done", text: "Passed on to both.", sessions: ["fruit-claude", "web-claude"]))
+        XCTAssertEqual(m.sessions, ["fruit-claude", "web-claude"])
+        m.sending()
+        XCTAssertEqual(m.sessions, [])
+    }
+
+    /// Pixie's next reply is about the sessions it was just told of; your words and a reply about
+    /// nothing have none.
+    func test_pixies_reply_carries_the_sessions_it_was_told_of() {
+        var m = QuickChatModel()
+        m.about(["fruit-claude", "web-claude"])
+        XCTAssertEqual(m.sessions, [], "not before Pixie speaks")
+        m.saying("Fruit stand")
+        XCTAssertEqual(m.sessions, ["fruit-claude", "web-claude"])
+        m.saying("Fruit stand is done.")
+        XCTAssertEqual(m.sessions, ["fruit-claude", "web-claude"], "the same reply goes on")
+        m.caption(role: "assistant", text: "Fruit stand is done.")
+        XCTAssertEqual(m.sessions, ["fruit-claude", "web-claude"], "its final words")
+        m.heard("thanks")
+        XCTAssertEqual(m.sessions, [], "your words")
+        m.saying("You're welcome.")
+        XCTAssertEqual(m.sessions, [], "a reply about nothing")
+        m.caption(role: "assistant", text: "You're welcome.")
+        m.about(["api-claude"])
+        m.caption(role: "assistant", text: "The API is up.")
+        XCTAssertEqual(m.sessions, ["api-claude"], "a reply typed out, not streamed")
+    }
+
+    /// Sessions Pixie was told of but never spoke about go with the conversation.
+    func test_unspoken_sessions_end_with_the_conversation() {
+        var m = QuickChatModel()
+        m.about(["fruit-claude"])
+        m.conversationEnded()
+        m.saying("Hi again.")
+        XCTAssertEqual(m.sessions, [])
+    }
 }

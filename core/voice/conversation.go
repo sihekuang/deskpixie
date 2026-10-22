@@ -922,7 +922,7 @@ func (c *Conversation) withdrawClaimFix(tool string) {
 		return
 	}
 	for i, n := range c.injects {
-		if n == c.claimFix {
+		if n.Text == c.claimFix.Text { // its own correction: never about a session
 			c.injects = append(c.injects[:i:i], c.injects[i+1:]...)
 			break
 		}

@@ -387,6 +387,23 @@ final class AgentRosterController {
         }
     }
 
+    /// Pixie was told of these sessions (#261): its next reply offers buttons to them.
+    func about(_ names: [String]) {
+        chat.about(names)
+    }
+
+    /// A session button in the card (#261): its terminal tab, as its row in the list brings up.
+    private func focusSession(_ name: String) {
+        let engine = engine
+        worker.async {
+            do {
+                _ = try engine.call("agent.focusSession", FocusAgentArgs(name: name))
+            } catch {
+                Self.log.error("agent.focusSession: \(String(describing: error), privacy: .public)")
+            }
+        }
+    }
+
     private func clicked(_ r: RosterRow) {
         guard AgentRosterModel.clickable(r) else { return }
         // Your own session: the core finds the tab it runs in (#148); Pixie's agents: their pane.
@@ -482,6 +499,8 @@ final class AgentRosterController {
             },
             onDismiss: { [weak self] in self?.dismissWords() },
             attachments: attach == nil ? .none : attachmentUI,
+            sessionButtons: AgentRosterModel.buttons(for: chat.sessions, in: model.view),
+            onSession: { [weak self] in self?.focusSession($0) },
             offer: offer.kind, onOffer: { [weak self] in self?.takeOffer() })
             .onPreferenceChange(ChipFrameKey.self) { [weak self] frame in
                 MainActor.assumeIsolated { self?.chipFrame = frame }

@@ -27,6 +27,9 @@ struct AgentRosterView: View {
     let onResize: () -> Void
     let onDismiss: () -> Void
     let attachments: AttachmentUI
+    /// The caption's buttons to sessions (#261), and what a click does.
+    var sessionButtons: [RosterRow] = []
+    var onSession: (String) -> Void = { _ in }
     /// Pixie's "Want me to take this?" for a new copy (#240), nil when not up.
     let offer: ClipboardKind?
     let onOffer: () -> Void
@@ -63,7 +66,7 @@ struct AgentRosterView: View {
     private var card: some View {
         QuickChatCard(model: chat, state: chatState, showsInput: chatOpen, ago: ago,
                       onSend: onSend, onStop: onStop, onClose: onCloseChat, onResize: onResize, onDismiss: onDismiss,
-                      attachments: attachments)
+                      attachments: attachments, sessions: sessionButtons, onSession: onSession)
     }
 
     /// The other side's last words, above the caption until they fade (#254).

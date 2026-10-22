@@ -54,14 +54,16 @@ const micQueueFrames = 32
 const EchoTail = 1500 * time.Millisecond
 
 // UIEvent is what the runtime tells the app. Kinds: "state", "mouth", "mic", "status",
-// "transcript", "heard" (the user's words so far, #251), "saying" (Pixie's, #253), "error",
-// "metrics".
+// "transcript", "heard" (the user's words so far, #251), "saying" (Pixie's, #253), "about" (the
+// sessions Pixie is about to speak of, #261), "error", "metrics".
 type UIEvent struct {
 	Kind  string `json:"kind"`
 	State string `json:"state,omitempty"`
 	Level int    `json:"level,omitempty"`
 	Text  string `json:"text,omitempty"`
 	Role  string `json:"role,omitempty"`
+	// Sessions ("about"): the user's sessions Pixie is about to speak of (#261).
+	Sessions []string `json:"sessions,omitempty"`
 }
 
 // RuntimeConfig is what NewRuntime needs besides its collaborators.
@@ -614,6 +616,9 @@ func debugEnabled() bool {
 func (r *Runtime) onControl(c control) {
 	switch c.kind {
 	case ctlInject:
+		if len(c.notice.Sessions) > 0 {
+			r.emit(UIEvent{Kind: "about", Sessions: c.notice.Sessions}) // the caption's buttons (#261)
+		}
 		r.input(InjectInput(c.notice))
 	case ctlHoldOpen:
 		r.input(HoldOpenInput(c.on))
