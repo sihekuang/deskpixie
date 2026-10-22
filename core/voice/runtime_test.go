@@ -388,6 +388,27 @@ func TestHeardWordsAreEchoWhilePixieSpeaksAndJustAfter(t *testing.T) {
 	}
 }
 
+// A turn you started while Pixie was quiet stays yours: OpenAI Realtime transcribes it only once
+// you stop, when Pixie may already be answering. It shows until that reply ends (live check).
+func TestHeardWordsOfATurnStartedInQuietShowWhilePixieAnswers(t *testing.T) {
+	now := time.Now()
+	r := &Runtime{}
+	r.userStarted(now)
+	r.mouth = 2 // Pixie answers before the words come
+	if !r.admitsHeard(now) {
+		t.Fatal("your turn's words")
+	}
+	r.mouthClosed(now)
+	if r.admitsHeard(now.Add(EchoTail / 2)) {
+		t.Fatal("after the reply: echo again")
+	}
+	r.mouth = 2
+	r.userStarted(now) // started while Pixie speaks: may be echo
+	if r.admitsHeard(now) {
+		t.Fatal("a turn started during Pixie's speech")
+	}
+}
+
 func TestRuntimeHotkeyAgainEndsAndClosesSession(t *testing.T) {
 	r, m, ui := newTestRuntime(t, "sk-test")
 	startListening(t, r, m, ui)

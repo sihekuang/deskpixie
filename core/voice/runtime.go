@@ -230,6 +230,7 @@ type Runtime struct {
 	meter         *MouthMeter
 	mouth         int
 	mouthEnded    time.Time // when the mouth last closed: echo may follow (EchoTail)
+	quietTurn     bool      // the user's turn started while Pixie was quiet: its words are theirs
 	session       Session
 	events        <-chan Event
 	gen           uint64 // incremented on every Connect; results of older attempts are closed
@@ -566,10 +567,12 @@ func (r *Runtime) run() {
 			case ev.Kind == EvUserHeard:
 				// The live caption only (#251): the conversation acts on the final transcript.
 				// Words heard while Pixie speaks, or just after, may be its own voice: not shown.
-				if !r.echoing(time.Now()) {
+				if r.admitsHeard(time.Now()) {
 					r.emit(UIEvent{Kind: "heard", Text: ev.Text})
 				}
 				continue
+			case ev.Kind == EvSpeechStarted:
+				r.userStarted(time.Now())
 			case ev.Kind == EvTranscript:
 				if debugEnabled() {
 					log.Printf("[voice] %s: %s", ev.Role, ev.Text)
@@ -891,6 +894,19 @@ func (r *Runtime) invokeTool(callID, name string, args json.RawMessage) {
 	go func() { deliver(tool.Invoke(ctx, args)) }()
 }
 
+// userStarted: the user's turn began; begun while Pixie was quiet, its words are theirs even
+// when they come once Pixie is answering (OpenAI Realtime transcribes a turn after it ends).
+func (r *Runtime) userStarted(now time.Time) { r.quietTurn = !r.echoing(now) }
+
+// mouthClosed: Pixie's audible reply ended; what is heard next may be its echo.
+func (r *Runtime) mouthClosed(now time.Time) {
+	r.mouthEnded = now
+	r.quietTurn = false
+}
+
+// admitsHeard: heard words show, unless they may be Pixie's own voice coming back (#251).
+func (r *Runtime) admitsHeard(now time.Time) bool { return r.quietTurn || !r.echoing(now) }
+
 // echoing: Pixie is audibly speaking, or stopped less than EchoTail ago.
 func (r *Runtime) echoing(now time.Time) bool {
 	return r.mouth > 0 || (!r.mouthEnded.IsZero() && now.Sub(r.mouthEnded) < EchoTail)
@@ -905,7 +921,7 @@ func (r *Runtime) updateMouth() {
 	}
 	if level != r.mouth {
 		if level == 0 && r.mouth > 0 {
-			r.mouthEnded = time.Now()
+			r.mouthClosed(time.Now())
 		}
 		r.mouth = level
 		r.emit(UIEvent{Kind: "mouth", Level: level})
