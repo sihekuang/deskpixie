@@ -218,7 +218,9 @@ func TestBridgePushAudioNeverBlocks(t *testing.T) {
 			dropped++
 		}
 	}
-	if el := time.Since(start); el > 100*time.Millisecond {
+	// A push that waited would hang here (nothing drains the queue), not run a little slow: 1 s
+	// for 200 s of audio catches that without measuring how busy the machine is.
+	if el := time.Since(start); el > time.Second {
 		t.Fatalf("10 000 pushes took %v", el)
 	}
 	if got := e.rec.Snapshot().MicDrops; got != uint64(dropped) {
