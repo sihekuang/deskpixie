@@ -433,6 +433,44 @@ var gatedForms = map[string]string{
 	"deploy": "deploy", "deploys": "deploy", "deploying": "deploy",
 }
 
+// pushAside are the directions that make "push" move something rather than send code (#255):
+// "pushes the older one up", "push back if …". "out" isn't one: "push out the update" ships it.
+var pushAside = map[string]bool{"up": true, "down": true, "aside": true, "away": true, "back": true, "over": true, "around": true, "forward": true, "along": true}
+
+// pushNouns make "push" a kind of thing, not a step: "push notifications", "push to talk".
+var pushNouns = map[string]bool{"notification": true, "notifications": true, "button": true, "buttons": true}
+
+// codeWords make a push in their clause one of code, whatever direction it goes.
+var codeWords = map[string]bool{"git": true, "branch": true, "branches": true, "remote": true, "origin": true, "upstream": true,
+	"github": true, "pr": true, "commit": true, "commits": true, "changes": true, "change": true, "code": true, "main": true,
+	"repo": true, "tag": true, "tags": true, "fix": true, "fixes": true}
+
+// pushIsntCode: the push at words[i] moves something on screen or names a kind of thing, with no
+// code in its clause (#255). "Push it up" and "push up the changes" are still git's idiom.
+func pushIsntCode(words []string, i int) bool {
+	rest := words[i+1:]
+	if len(rest) > 0 && pushNouns[rest[0]] || len(rest) > 1 && rest[0] == "to" && rest[1] == "talk" {
+		return true
+	}
+	for _, w := range words {
+		if codeWords[w] {
+			return false
+		}
+	}
+	for j, w := range rest[:min(len(rest), 4)] {
+		if !pushAside[w] {
+			continue
+		}
+		// "push up" and "push it up" (an instruction with only a pronoun between) send code.
+		idiom := words[i] == "push" && w == "up" && (j == 0 || j == 1 && pronouns[rest[0]])
+		return !idiom
+	}
+	return false
+}
+
+// pronouns may stand between "push" and "up" in git's "push it up".
+var pronouns = map[string]bool{"it": true, "them": true, "this": true, "that": true, "everything": true}
+
 // negators turn the rest of their clause into what not to do ("don't push", "without merging");
 // so do "instead of" and any "n't" word.
 var negators = map[string]bool{"not": true, "no": true, "never": true, "dont": true, "cannot": true, "without": true, "nor": true, "avoid": true}
@@ -527,7 +565,8 @@ func GatedActions(text string) []string {
 			reported := strings.HasSuffix(w, "ed") && firstPerson[subject] ||
 				strings.HasSuffix(w, "ing") && underWay[subject] ||
 				leadIns[prev] && strings.HasSuffix(w, "ing") && mine && !yours
-			if base, ok := gatedForms[w]; ok && !negated && !reported && !slices.Contains(out, base) {
+			if base, ok := gatedForms[w]; ok && !negated && !reported && !slices.Contains(out, base) &&
+				!(base == "push" && pushIsntCode(words, i)) {
 				out = append(out, base)
 			}
 		}
