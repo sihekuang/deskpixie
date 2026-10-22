@@ -401,6 +401,14 @@ func (c *codec) serverContent(sc any, out []voice.Event) []voice.Event {
 			out = append(out, voice.Event{Kind: voice.EvUserHeard, Text: strings.TrimSpace(c.userText.String())})
 		}
 	}
+	// The live caption only (#251): a speculative hypothesis of what is being said now, after
+	// the words already final. Turns and the final transcript come from inputTranscription.
+	if t, ok := str(get(sc, "interimInputTranscription", "text")); ok && strings.TrimSpace(t) != "" {
+		if late := !c.closedAt.IsZero() && c.now.Sub(c.closedAt) < lateTranscriptGrace; !late {
+			heard := strings.TrimSpace(strings.TrimSpace(c.userText.String()) + " " + strings.TrimSpace(t))
+			out = append(out, voice.Event{Kind: voice.EvUserHeard, Text: heard})
+		}
+	}
 	if parts, ok := get(sc, "modelTurn", "parts").([]any); ok {
 		for _, part := range parts {
 			if get(part, "thought") == true {

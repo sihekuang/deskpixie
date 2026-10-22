@@ -315,6 +315,30 @@ func TestTheUsersWordsAreHeardAsTheyCome(t *testing.T) {
 	}
 }
 
+// #251: Gemini's interim hypothesis (serverContent.interimInputTranscription, "updated while the
+// speaker is actively talking") shows after the words already final; it never ends up in the
+// final transcript, which is built from inputTranscription alone.
+func TestAnInterimHypothesisIsHeardAfterTheFinalWords(t *testing.T) {
+	c := ready(t)
+	interim := func(s string) string {
+		return `{"serverContent":{"interimInputTranscription":{"text":"` + s + `"}}}`
+	}
+	if got := heardTexts(c.decode(interim("What's"))); !reflect.DeepEqual(got, []string{"What's"}) {
+		t.Fatal(got)
+	}
+	if got := heardTexts(c.decode(interim("What's two plus"))); !reflect.DeepEqual(got, []string{"What's two plus"}) {
+		t.Fatal("each hypothesis replaces the last:", got)
+	}
+	c.decode(`{"serverContent":{"inputTranscription":{"text":"What's two plus two?"}}}`)
+	if got := heardTexts(c.decode(interim("And"))); !reflect.DeepEqual(got, []string{"What's two plus two? And"}) {
+		t.Fatal("after the final words:", got)
+	}
+	if got := heardTexts(c.decode(interim(" "))); got != nil {
+		t.Fatal("nothing new heard:", got)
+	}
+	want(t, c.decode(turnComplete), eUser("What's two plus two?"))
+}
+
 // #251 review: a late scrap of the last turn's words is not heard: it would cover Pixie's reply.
 func TestALateTranscriptIsNotHeard(t *testing.T) {
 	t0 := time.Now()
