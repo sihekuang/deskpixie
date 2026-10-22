@@ -183,6 +183,33 @@ func TestAgainWhileAwaitingConfirmAsksOnceAndSendsOnce(t *testing.T) {
 	}
 }
 
+// #249: the coordinator ends its request once told the confirm waits; the confirm outlives it and
+// the message goes when you confirm (closing the request used to deny it, silently).
+func TestALateConfirmOutlivesTheRequestThatAskedIt(t *testing.T) {
+	r, user := pixRig(t)
+	SetConfirmWaitForTest(r.h, 100*time.Millisecond)
+	if _, err := r.h.Delegate("tell my login session to push", ""); err != nil {
+		t.Fatal(err)
+	}
+	settle()
+	got := <-messageCall(r, "Go ahead and git push.")
+	if v, _ := got.Value.(map[string]any); v["status"] != "awaiting_confirmation" {
+		t.Fatalf("%+v", got)
+	}
+	stopHook(r, `<spoken ref="job_000000000001" status="done">It waits for you to confirm the push.</spoken>`)
+	settle()
+	if len(user.Prompts()) != 0 {
+		t.Fatal("sent before you confirmed")
+	}
+	if len(r.h.Updates()) == 0 || r.h.Updates()[len(r.h.Updates())-1].Token != "hawk" {
+		t.Fatalf("the confirm left the bubble: %+v", r.h.Updates())
+	}
+	r.h.Voice(VoiceSignal{Kind: voice.SigUserSaid, Text: "confirm hawk"})
+	if !eventually(func() bool { return len(user.Prompts()) == 1 }) {
+		t.Fatalf("not sent once you confirmed: %+v", user.Prompts())
+	}
+}
+
 func TestNoToALateConfirmKeepsTheMessageUnsent(t *testing.T) {
 	r, user := pixRig(t)
 	SetConfirmWaitForTest(r.h, 100*time.Millisecond)

@@ -1350,11 +1350,24 @@ func (h *AgentHandle) confirmSession(name, toolName string, input map[string]any
 	}
 	cancel()
 	rx := make(chan Decision, 1)
-	h.hook(HookEvent{Kind: HookPermission, Agent: Coordinator, ToolName: toolName, ToolInput: input, Reply: rx})
+	if h.quitting() {
+		return Deny("The app quit."), nil, true
+	}
+	// As h.hook's HookPermission, keeping the id: a confirm left waiting is detached from its job.
+	id := h.nextRequest.Add(1)
+	h.repliesMu.Lock()
+	h.replies[id] = rx
+	h.repliesMu.Unlock()
+	h.Input(PermissionInput(id, Coordinator, toolName, input))
+	if h.quitting() {
+		h.denyAllWaiting()
+	}
 	select {
 	case d := <-rx:
 		return d, nil, true
 	case <-t.C:
+		// #249: the coordinator ends its request now; this confirm must outlive it.
+		h.Input(DetachConfirmInput(id))
 		return Decision{}, rx, false
 	case <-h.ctx.Done():
 		return Deny("The app quit."), nil, true

@@ -150,6 +150,7 @@ const (
 	InUpdatesSeen                          // IDs: the updates bubble showed these lines long enough to count as heard
 	InPresence                             // Away: the user is away (screen locked, displays asleep or idle) or back
 	InMode                                 // Agent, Mode: the permission_mode a Claude agent's hook reported
+	InDetachConfirm                        // RequestID: a session tool's confirm the coordinator's call no longer waits on (#249): it outlives its job
 	InDecide                               // Token, Allow: a tap on Allow or Deny in the updates bubble
 	InChoose                               // Token, Option: a tap on a session menu's option in the updates bubble (#105)
 	InSessionAnswerFailed                  // Name, Text: EfAnswerSession could not be typed (#105)
@@ -239,6 +240,11 @@ func PaneInput(ev PaneEvent) Input { return Input{Kind: InPane, Pane: ev} }
 func StopInput(agent, message string) Input {
 	return Input{Kind: InStop, Agent: agent, Message: message}
 }
+
+// DetachConfirmInput: request id was answered "awaiting_confirmation" (#249); closing its job
+// must not deny it.
+func DetachConfirmInput(id RequestID) Input { return Input{Kind: InDetachConfirm, RequestID: id} }
+
 func PermissionInput(id RequestID, agent, toolName string, toolInput any) Input {
 	return Input{Kind: InPermission, RequestID: id, Agent: agent, ToolName: toolName, ToolInput: toolInput}
 }
@@ -776,6 +782,10 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 		c.openRefused(now, &fx)
 	case InUpdatesSeen:
 		c.updatesSeen(in.IDs, in.Clicked, &fx)
+	case InDetachConfirm:
+		if job := c.confirms.Detach(in.RequestID); job != "" {
+			c.resumeJob(job, now, &fx)
+		}
 	case InDecide:
 		// A token already decided (by voice or an earlier tap) or expired settles nothing.
 		if d, ok := c.confirms.DecideToken(in.Token, in.Allow); ok {

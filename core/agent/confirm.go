@@ -219,6 +219,18 @@ func (c *Confirmations) Remove(id RequestID) (Pending, bool) {
 	return p, true
 }
 
+// Detach makes request id belong to no job (#249): it outlives the job that asked it. The job
+// it belonged to ("" = none, or no such request).
+func (c *Confirmations) Detach(id RequestID) JobID {
+	at := slices.IndexFunc(c.pending, func(p Pending) bool { return p.ID == id })
+	if at < 0 {
+		return ""
+	}
+	job := c.pending[at].Job
+	c.pending[at].Job = ""
+	return job
+}
+
 // DecideToken settles the request with token from a tap on Pixie's bubble (#97): the same
 // outcome as the confirm word (allow) or a refusal (deny). Unknown or used tokens do nothing.
 func (c *Confirmations) DecideToken(token string, allow bool) (Decided, bool) {
