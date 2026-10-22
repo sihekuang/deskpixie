@@ -16,14 +16,14 @@ final class QuickChatModelTests: XCTestCase {
         guard case .chatFocus? = d(#"{"kind":"chat.focus"}"#) else { return XCTFail("chat.focus") }
         guard case .replyMode(let m)? = d(#"{"kind":"replyMode","mode":"text"}"#) else { return XCTFail("replyMode") }
         XCTAssertEqual(m, "text")
-        guard case .captions(let on, let secs, let fade)? = d(#"{"kind":"captions","always":true,"dismissSecs":120,"fadeSecs":7}"#) else {
+        guard case .captions(let on, let secs, let fade, _)? = d(#"{"kind":"captions","always":true,"dismissSecs":120,"fadeSecs":7}"#) else {
             return XCTFail("captions")
         }
         XCTAssertTrue(on)
         XCTAssertEqual(secs, 120)
         XCTAssertEqual(fade, 7)
         // An older core sends no fadeSecs: the default.
-        guard case .captions(_, _, let old)? = d(#"{"kind":"captions","always":true,"dismissSecs":120}"#) else {
+        guard case .captions(_, _, let old, _)? = d(#"{"kind":"captions","always":true,"dismissSecs":120}"#) else {
             return XCTFail("captions without fadeSecs")
         }
         XCTAssertEqual(old, 4)

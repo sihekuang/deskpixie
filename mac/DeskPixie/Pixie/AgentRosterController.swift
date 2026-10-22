@@ -150,12 +150,24 @@ final class AgentRosterController {
         render()
     }
 
-    /// The always-show switch, the put-away time and the earlier bubble's fade time (the
-    /// `captions` event or the first read, #224, #254).
-    func apply(captions always: Bool, dismissSecs: Int, fadeSecs: Int) {
+    /// The always-show switch, the put-away time, the earlier bubble's fade time and how long
+    /// replies are kept (the `captions` event or the first read, #224, #254, #263).
+    func apply(captions always: Bool, dismissSecs: Int, fadeSecs: Int, historyMins: Int) {
         alwaysCaption = always
         self.dismissSecs = dismissSecs
         chat.fadeSecs = fadeSecs
+        chat.historySecs = historyMins * 60
+        chat.prune(now: Date())
+        render()
+    }
+
+    /// The card's arrows (#263): an earlier or later reply, or » to the newest.
+    private func step(_ step: ReplyStep) {
+        switch step {
+        case .back: chat.back(now: Date())
+        case .forward: chat.forward()
+        case .newest: chat.toNewest()
+        }
         render()
     }
 
@@ -240,6 +252,7 @@ final class AgentRosterController {
             self.alwaysCaption = reply.alwaysShowCaption ?? false
             self.dismissSecs = reply.captionDismissSecs ?? 120
             self.chat.fadeSecs = reply.captionFadeSecs ?? 4
+            self.chat.historySecs = (reply.replyHistoryMins ?? 5) * 60
             self.apply(mode: reply.mode)
         }
     }
@@ -436,8 +449,9 @@ final class AgentRosterController {
                 || (overPanel && captionCard))
         // Put away once old enough (captionDismissSecs).
         let expired = chat.dismissIfOlder(than: dismissSecs, now: Date())
+        let pruned = chat.prune(now: Date())
         let ago = cardUp ? chat.ago(now: Date()) : nil
-        if offerChanged || expired || inside != model.open || near != hovering || ago != agoShown {
+        if offerChanged || expired || pruned || inside != model.open || near != hovering || ago != agoShown {
             model.open = inside
             hovering = near
             render()
@@ -452,6 +466,8 @@ final class AgentRosterController {
     }
 
     private func render() {
+        // Away from the card you're no longer looking back: it opens on the newest (#263).
+        if !cardUp { chat.toNewest() }
         setRoot()
         layout()
         scheduleEarlier()
@@ -498,8 +514,9 @@ final class AgentRosterController {
                 DispatchQueue.main.async { self?.layout() }
             },
             onDismiss: { [weak self] in self?.dismissWords() },
+            onStep: { [weak self] in self?.step($0) },
             attachments: attach == nil ? .none : attachmentUI,
-            sessionButtons: AgentRosterModel.buttons(for: chat.sessions, in: model.view),
+            sessionButtons: AgentRosterModel.buttons(for: chat.shownSessions, in: model.view),
             onSession: { [weak self] in self?.focusSession($0) },
             offer: offer.kind, onOffer: { [weak self] in self?.takeOffer() })
             .onPreferenceChange(ChipFrameKey.self) { [weak self] frame in
@@ -571,6 +588,7 @@ final class AgentRosterController {
         var alwaysShowCaption: Bool?
         var captionDismissSecs: Int?
         var captionFadeSecs: Int?
+        var replyHistoryMins: Int?
     }
     private struct SendArgs: Encodable, Sendable { let text: String }
     private struct SendReply: Decodable { var job: String }

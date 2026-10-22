@@ -120,3 +120,32 @@ func TestCaptionFadeSecsIsALivePixieNumber(t *testing.T) {
 		}
 	}
 }
+
+// #263: Pixie's earlier replies are kept this long, to step back through on the card, 5 min by
+// default (0 keeps only the latest).
+func TestReplyHistoryMinsIsALivePixieNumber(t *testing.T) {
+	if got := Default().ReplyHistoryMins; got != 5 {
+		t.Fatal(got)
+	}
+	c, err := ParseConfig([]byte(`{"hotkey":"ctrl+alt+Space"}`))
+	if err != nil || c.ReplyHistoryMins != 5 {
+		t.Fatal("an old settings.json gets the default:", c.ReplyHistoryMins, err)
+	}
+	f := FieldByPath("replyHistoryMins")
+	if f.Section != SectionPixie || f.Apply != ApplyLive || f.Kind.Type != KindInt {
+		t.Fatalf("%+v", f)
+	}
+	if r, ok := RouteFor("replyHistoryMins"); !ok || r != RouteCaptions {
+		t.Fatal(r, ok)
+	}
+	env := testEnv(t)
+	for mins, ok := range map[uint32]bool{0: true, 5: true, 60: true, 61: false} {
+		c := Default()
+		c.ReplyHistoryMins = mins
+		got := problems(c, env)
+		bad := len(got) == 1 && got[0][0] == "replyHistoryMins"
+		if ok && len(got) != 0 || !ok && !bad {
+			t.Errorf("%d: %v", mins, got)
+		}
+	}
+}

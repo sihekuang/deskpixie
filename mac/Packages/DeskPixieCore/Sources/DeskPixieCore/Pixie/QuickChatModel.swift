@@ -113,6 +113,98 @@ public struct QuickChatModel: Equatable, Sendable {
 
     public init() {}
 
+    // MARK: Pixie's earlier replies (#263)
+
+    /// One of Pixie's replies, kept to step back to.
+    public struct Reply: Equatable, Sendable {
+        public let text: String
+        public let sessions: [String]
+        public let at: Date
+        public init(text: String, sessions: [String], at: Date) {
+            self.text = text
+            self.sessions = sessions
+            self.at = at
+        }
+    }
+
+    /// Where the card is among the replies: `index` of `count`, the newest last.
+    public struct Position: Equatable, Sendable {
+        public let index: Int
+        public let count: Int
+        public init(index: Int, count: Int) {
+            self.index = index
+            self.count = count
+        }
+    }
+
+    /// replyHistoryMins in seconds: replies older than this drop off (0 keeps only the latest).
+    public var historySecs = 300
+    /// Pixie's replies before the one shown, oldest first.
+    public private(set) var history: [Reply] = []
+    /// The reply you stepped back to (an index into `history`); nil shows the newest.
+    private var viewing: Int?
+    /// A new reply came while you looked back: » goes to it.
+    public private(set) var newerWaiting = false
+
+    public var viewed: Reply? { viewing.map { history[$0] } }
+    /// Nil with nothing to step back to (no arrows).
+    public var position: Position? {
+        history.isEmpty ? nil : Position(index: (viewing ?? history.count) + 1, count: history.count + 1)
+    }
+    public var canBack: Bool { !history.isEmpty && viewing != 0 }
+    public var canForward: Bool { viewing != nil }
+    /// What the card shows: the reply you stepped back to, else the newest.
+    public var shownText: String { viewed?.text ?? shown }
+    public var shownSessions: [String] { viewed?.sessions ?? sessions }
+
+    public mutating func back(now: Date) {
+        prune(now: now)
+        guard canBack else { return }
+        viewing = (viewing ?? history.count) - 1
+    }
+
+    public mutating func forward() {
+        guard let viewing else { return }
+        if viewing + 1 < history.count {
+            self.viewing = viewing + 1
+        } else {
+            toNewest()
+        }
+    }
+
+    /// » (or the card going away, or your own words): the newest again.
+    public mutating func toNewest() {
+        viewing = nil
+        newerWaiting = false
+    }
+
+    /// Drops replies older than `historySecs`, the one you look at too. True when any went.
+    @discardableResult
+    public mutating func prune(now: Date) -> Bool {
+        let keep = history.drop { now.timeIntervalSince($0.at) > TimeInterval(historySecs) || historySecs == 0 }
+        let gone = history.count - keep.count
+        guard gone > 0 else { return false }
+        history = Array(keep)
+        if let v = viewing {
+            if v - gone >= 0 {
+                viewing = v - gone
+            } else {
+                toNewest()
+            }
+        }
+        return true
+    }
+
+    /// A new reply replaces what is shown: Pixie's words go into the history (not yours, nor a
+    /// line about work still running). Looking back, you stay there and » offers the new one.
+    private mutating func keep(now: Date) {
+        if !isYou, !full.isEmpty, let saidAt, phase == .done || phase == .answering {
+            history.append(Reply(text: full, sessions: sessions, at: saidAt))
+        }
+        if viewing != nil { newerWaiting = true }
+        prune(now: now)
+    }
+
     public var showsStop: Bool { phase == .thinking || (phase == .answering && !isCaption) }
 
     /// A live caption is up (voice mode draws the card for it alone).
@@ -130,8 +222,13 @@ public struct QuickChatModel: Equatable, Sendable {
 
     /// How long ago it was said ("just now", "2m ago"), once it is all shown.
     public func ago(now: Date) -> String? {
+        if let viewed { return Self.ago(viewed.at, now: now) }
         guard let saidAt, phase == .done else { return nil }
-        let s = max(0, Int(now.timeIntervalSince(saidAt)))
+        return Self.ago(saidAt, now: now)
+    }
+
+    private static func ago(_ at: Date, now: Date) -> String {
+        let s = max(0, Int(now.timeIntervalSince(at)))
         switch s {
         case ..<60: return "just now"
         case ..<3600: return "\(s / 60)m ago"
@@ -156,7 +253,9 @@ public struct QuickChatModel: Equatable, Sendable {
 
     /// The message is on its way (before chat.send answers): thinking, and lines that come
     /// meanwhile are kept until the job is known.
-    public mutating func sending() {
+    public mutating func sending(now: Date = Date()) {
+        keep(now: now)
+        toNewest()
         isCaption = false
         isYou = false
         awaitsFinal = false
@@ -232,6 +331,7 @@ public struct QuickChatModel: Equatable, Sendable {
            isCaption || line.job != job || phase == .ready {
             // #241: a late answer to the last message brings the card back with it (not after
             // Stop: the cancel's own line doesn't replace "Stopped.").
+            keep(now: now)
             job = line.job
             isCaption = false
             isYou = false
@@ -253,6 +353,7 @@ public struct QuickChatModel: Equatable, Sendable {
             phase = .done
             saidAt = now
         } else {
+            keep(now: now)
             full = line.text
             shown = ""
             phase = .answering
@@ -270,8 +371,10 @@ public struct QuickChatModel: Equatable, Sendable {
     }
 
     /// The ✕ (#224): the words go; hover and always show nothing until something new is said.
-    public mutating func dismiss() {
+    public mutating func dismiss(now: Date = Date()) {
         guard canDismiss else { return }
+        keep(now: now)
+        toNewest()
         lateShown = false
         sessions = []
         isCaption = false
@@ -288,9 +391,9 @@ public struct QuickChatModel: Equatable, Sendable {
     /// Puts the words away `secs` after they were said (0 keeps them), never while the
     /// conversation they came from goes on. True when it did.
     public mutating func dismissIfOlder(than secs: Int, now: Date) -> Bool {
-        guard secs > 0, let saidAt, !(isCaption && captionLive), canDismiss,
+        guard secs > 0, let saidAt, !(isCaption && captionLive), canDismiss, viewing == nil,
               now.timeIntervalSince(saidAt) >= TimeInterval(secs) else { return false }
-        dismiss()
+        dismiss(now: now)
         return true
     }
 
@@ -312,6 +415,7 @@ public struct QuickChatModel: Equatable, Sendable {
             return true
         }
         guard takeCaption() else { return false }
+        keep(now: now)
         newReply()
         moveUp(beforeYou: false, now: now)
         isCaption = true
@@ -331,6 +435,8 @@ public struct QuickChatModel: Equatable, Sendable {
     public mutating func heard(_ text: String, now: Date = Date()) -> Bool {
         let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !words.isEmpty, takeCaption() else { return false }
+        keep(now: now)
+        toNewest()
         moveUp(beforeYou: true, now: now)
         sessions = []
         isCaption = true
@@ -350,7 +456,10 @@ public struct QuickChatModel: Equatable, Sendable {
     public mutating func saying(_ text: String, now: Date = Date()) -> Bool {
         let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !words.isEmpty, takeCaption() else { return false }
-        if !awaitsFinal || isYou || !isCaption { newReply() }
+        if !awaitsFinal || isYou || !isCaption {
+            keep(now: now)
+            newReply()
+        }
         moveUp(beforeYou: false, now: now)
         isCaption = true
         isYou = false
