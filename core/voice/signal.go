@@ -4,6 +4,9 @@ package voice
 // Port of voice-core types.rs `Notice`.
 type Notice struct {
 	Text string
+	// Sessions: the user's sessions the notice is about, for buttons that go to them (#261);
+	// never said.
+	Sessions []string
 }
 
 // SignalKind enumerates what the voice loop tells the rest of the app.

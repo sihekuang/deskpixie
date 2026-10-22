@@ -2,6 +2,7 @@ package voice
 
 import (
 	"context"
+	"reflect"
 	"slices"
 	"sync"
 	"testing"
@@ -104,7 +105,9 @@ func (l *uiLog) states() []string {
 	}
 	return out
 }
-func (l *uiLog) has(want UIEvent) bool { return slices.Contains(l.all(), want) }
+func (l *uiLog) has(want UIEvent) bool {
+	return slices.ContainsFunc(l.all(), func(e UIEvent) bool { return reflect.DeepEqual(e, want) })
+}
 
 func eventually(t *testing.T, what string, cond func() bool) {
 	t.Helper()
@@ -412,6 +415,21 @@ func TestHeardWordsOfATurnStartedInQuietShowWhilePixieAnswers(t *testing.T) {
 	if r.admitsHeard(now) {
 		t.Fatal("a turn started during Pixie's speech")
 	}
+}
+
+// #261: a notice about sessions names them for the caption's buttons before Pixie speaks of them.
+func TestRuntimeANoticeAboutSessionsNamesThem(t *testing.T) {
+	r, m, ui := newTestRuntime(t, "sk-test")
+	startListening(t, r, m, ui)
+	r.Inject(Notice{Text: "Session update: fruit-stand is done.", Sessions: []string{"fruit-claude", "web-claude"}})
+	eventually(t, "about", func() bool {
+		for _, e := range ui.all() {
+			if e.Kind == "about" && slices.Equal(e.Sessions, []string{"fruit-claude", "web-claude"}) {
+				return true
+			}
+		}
+		return false
+	})
 }
 
 // #253: Pixie's words so far go to the caption as they come.

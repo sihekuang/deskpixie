@@ -108,6 +108,18 @@ public struct AgentRosterModel: Sendable, Equatable {
         Section(title: title, rows: Array(rows.prefix(Self.maxRows)), more: max(0, rows.count - Self.maxRows))
     }
 
+    /// The caption's buttons (#261): the named sessions of yours still open and reachable, in the
+    /// order named, each once.
+    public static func buttons(for names: [String], in view: RosterView) -> [RosterRow] {
+        var out: [RosterRow] = []
+        for name in names where !out.contains(where: { $0.name == name }) {
+            if let r = view.yours.first(where: { $0.name == name }), r.kind == "session", clickable(r) {
+                out.append(r)
+            }
+        }
+        return out
+    }
+
     /// Pixie's agents always; your sessions only when reachable with a known app.
     public static func clickable(_ r: RosterRow) -> Bool {
         r.kind != "session" || r.reachable

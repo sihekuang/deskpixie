@@ -3,6 +3,7 @@ package agent
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -15,6 +16,8 @@ type ChatLine struct {
 	// Status: working | question | done | failed.
 	Status string `json:"status"`
 	Text   string `json:"text"`
+	// Sessions: the sessions the line is about, for the card's buttons that go to them (#261).
+	Sessions []string `json:"sessions,omitempty"`
 }
 
 // ChatSink is the text box: it gets each line for a typed job.
@@ -45,7 +48,7 @@ func (c *AgentController) chatLine(line Line) ChatLine {
 		// A permission request: allowed from the bubble or the notification, not by a spoken word.
 		text = strings.TrimSpace(strings.TrimSuffix(text, fmt.Sprintf("Say confirm %s.", *line.Token))) + " " + permissionHint
 	}
-	return ChatLine{Job: line.Job, Status: status, Text: text}
+	return ChatLine{Job: line.Job, Status: status, Text: text, Sessions: c.lineSessions(line)}
 }
 
 // permissionHint ends a permission request in the text box.
@@ -117,4 +120,25 @@ func (c *AgentController) deliverUnsolicited(text string, now Millis, fx *[]Effe
 		return
 	}
 	c.deliver(NewLine(LineUnsolicited, text), now, fx)
+}
+
+// lineSessions: the sessions a typed job's line is about (#261): those the job was passed to,
+// and the one the line itself is from.
+func (c *AgentController) lineSessions(line Line) []string {
+	out := slices.Clone(c.jobSessions[line.Job])
+	if line.Session != "" && !slices.Contains(out, line.Session) {
+		out = append(out, line.Session)
+	}
+	return out
+}
+
+// sessionsOf: the sessions lines are about, each once, in order (#261).
+func sessionsOf(lines []Line) []string {
+	var out []string
+	for _, l := range lines {
+		if l.Session != "" && !slices.Contains(out, l.Session) {
+			out = append(out, l.Session)
+		}
+	}
+	return out
 }

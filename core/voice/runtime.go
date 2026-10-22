@@ -54,14 +54,16 @@ const micQueueFrames = 32
 const EchoTail = 1500 * time.Millisecond
 
 // UIEvent is what the runtime tells the app. Kinds: "state", "mouth", "mic", "status",
-// "transcript", "heard" (the user's words so far, #251), "saying" (Pixie's, #253), "error",
-// "metrics".
+// "transcript", "heard" (the user's words so far, #251), "saying" (Pixie's, #253), "about" (the
+// sessions Pixie is about to speak of, #261), "error", "metrics".
 type UIEvent struct {
 	Kind  string `json:"kind"`
 	State string `json:"state,omitempty"`
 	Level int    `json:"level,omitempty"`
 	Text  string `json:"text,omitempty"`
 	Role  string `json:"role,omitempty"`
+	// Sessions ("about"): the user's sessions Pixie is about to speak of (#261).
+	Sessions []string `json:"sessions,omitempty"`
 }
 
 // RuntimeConfig is what NewRuntime needs besides its collaborators.
@@ -829,6 +831,10 @@ func (r *Runtime) apply(fx Effect) {
 	case EfStatus:
 		r.emit(UIEvent{Kind: "status", Text: fx.Status})
 	case EfInject:
+		if len(fx.Sessions) > 0 {
+			// Pixie is given the notice now: its reply is about these sessions (#261).
+			r.emit(UIEvent{Kind: "about", Sessions: fx.Sessions})
+		}
 		r.send(Command{Kind: CmdInject, Text: fx.Text, Respond: true})
 	case EfSignal:
 		r.publish(fx.Signal)

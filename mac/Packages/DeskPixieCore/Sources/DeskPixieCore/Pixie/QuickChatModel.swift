@@ -6,12 +6,24 @@ public struct ChatLine: Decodable, Sendable, Equatable {
     public let job: String
     public let status: String
     public let text: String
+    /// The sessions the line is about (#261): the card's buttons that go to them.
+    public let sessions: [String]
 
-    public init(job: String, status: String, text: String) {
+    public init(job: String, status: String, text: String, sessions: [String] = []) {
         self.job = job
         self.status = status
         self.text = text
+        self.sessions = sessions
     }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(job: try c.decode(String.self, forKey: .job), status: try c.decode(String.self, forKey: .status),
+                  text: try c.decode(String.self, forKey: .text),
+                  sessions: try c.decodeIfPresent([String].self, forKey: .sessions) ?? [])
+    }
+
+    private enum CodingKeys: String, CodingKey { case job, status, text, sessions }
 }
 
 /// The text box under Pixie (#221, spec docs/superpowers/specs/2026-10-21-text-mode-design.md
@@ -39,6 +51,11 @@ public struct QuickChatModel: Equatable, Sendable {
     /// The newest typed message's job, kept when the ✕ or a caption puts it away: a late answer
     /// to it (a session's reply, #241) still shows.
     private var lastJob: String?
+    /// The sessions what is shown is about (#261): the card's buttons that go to them.
+    public private(set) var sessions: [String] = []
+    /// The sessions Pixie was just told of: its next reply is about them (#261).
+    private var aboutNext: [String] = []
+
     /// The answer to the last message came while the box was closed (#259): it shows on its own,
     /// as a caption would, until it is put away or the next message goes.
     private var lateShown = false
@@ -149,6 +166,7 @@ public struct QuickChatModel: Equatable, Sendable {
         job = nil
         lastJob = nil
         lateShown = false
+        sessions = []
         pending = true
         stopPending = false
         early = [:]
@@ -164,6 +182,7 @@ public struct QuickChatModel: Equatable, Sendable {
         self.job = job
         lastJob = job
         lateShown = false
+        sessions = []
         isCaption = false
         isYou = false
         awaitsFinal = false
@@ -188,6 +207,7 @@ public struct QuickChatModel: Equatable, Sendable {
     /// The message couldn't go: the reason is the answer.
     public mutating func failedToSend(_ reason: String) {
         lateShown = false
+        sessions = []
         isCaption = false
         isYou = false
         awaitsFinal = false
@@ -223,6 +243,7 @@ public struct QuickChatModel: Equatable, Sendable {
             phase = .done
         }
         guard !isCaption, line.job == job, phase == .thinking || phase == .answering || phase == .done else { return }
+        sessions = line.sessions
         if line.status == "working" {
             full = line.text
             shown = line.text
@@ -252,6 +273,7 @@ public struct QuickChatModel: Equatable, Sendable {
     public mutating func dismiss() {
         guard canDismiss else { return }
         lateShown = false
+        sessions = []
         isCaption = false
         isYou = false
         awaitsFinal = false
@@ -290,6 +312,7 @@ public struct QuickChatModel: Equatable, Sendable {
             return true
         }
         guard takeCaption() else { return false }
+        newReply()
         moveUp(beforeYou: false, now: now)
         isCaption = true
         isYou = false
@@ -309,6 +332,7 @@ public struct QuickChatModel: Equatable, Sendable {
         let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !words.isEmpty, takeCaption() else { return false }
         moveUp(beforeYou: true, now: now)
+        sessions = []
         isCaption = true
         isYou = true
         captionLive = true
@@ -326,6 +350,7 @@ public struct QuickChatModel: Equatable, Sendable {
     public mutating func saying(_ text: String, now: Date = Date()) -> Bool {
         let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !words.isEmpty, takeCaption() else { return false }
+        if !awaitsFinal || isYou || !isCaption { newReply() }
         moveUp(beforeYou: false, now: now)
         isCaption = true
         isYou = false
@@ -339,6 +364,17 @@ public struct QuickChatModel: Equatable, Sendable {
         return true
     }
 
+    /// Pixie was told of these sessions (#261): its next reply, when it starts, is about them.
+    public mutating func about(_ names: [String]) {
+        aboutNext = names
+    }
+
+    /// Pixie starts a new reply: it is about the sessions it was just told of (#261).
+    private mutating func newReply() {
+        sessions = aboutNext
+        aboutNext = []
+    }
+
     /// A caption may show: in text mode, not over a typed message still at work.
     private func takeCaption() -> Bool {
         !(mode == "text" && !isCaption && (pending || phase == .thinking || phase == .answering))
@@ -348,6 +384,7 @@ public struct QuickChatModel: Equatable, Sendable {
     /// is kept for hover or always-show (#224).
     public mutating func conversationEnded() {
         awaitsFinal = false // a streamed reply cut short gets no final words (#253)
+        aboutNext = []
         guard isCaption else { return }
         captionLive = false
         if phase == .answering {

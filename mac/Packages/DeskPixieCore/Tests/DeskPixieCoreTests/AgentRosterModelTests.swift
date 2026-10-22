@@ -81,4 +81,16 @@ final class AgentRosterModelTests: XCTestCase {
         let json = #"{"agents":[],"yours":[],"agent_count":0,"your_count":0}"#
         XCTAssertFalse(try JSONDecoder().decode(RosterView.self, from: Data(json.utf8)).busy)
     }
+
+    /// #261: the caption's buttons are the named sessions still open and reachable, in the
+    /// order named; Pixie's own agents and closed sessions get none.
+    func test_the_captions_buttons_are_the_named_sessions_you_can_reach() {
+        let view = RosterView(agents: [row("w1")],
+                              yours: [row("fruit-claude", kind: "session"), row("web-claude", kind: "session"),
+                                      row("gone-claude", kind: "session", reachable: false)],
+                              agentCount: 1, yourCount: 2)
+        let got = AgentRosterModel.buttons(for: ["web-claude", "w1", "gone-claude", "fruit-claude", "unknown"], in: view)
+        XCTAssertEqual(got.map(\.name), ["web-claude", "fruit-claude"])
+        XCTAssertEqual(AgentRosterModel.buttons(for: [], in: view), [])
+    }
 }

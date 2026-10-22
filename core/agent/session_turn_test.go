@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -164,4 +165,34 @@ func TestAnOlderPixIsNotToldAgainAfterARestart(t *testing.T) {
 	}
 	later := T0 + OutdatedRetellMs
 	wantContains(t, restarted(later).Step(PaneInput(ev), later), eNotify("landing runs an older pix than the app: restart it with pix claude --resume to update it."))
+}
+
+// #261: what Pixie is told about a session names it, so the caption can offer to go there.
+func TestASessionUpdateForPixieNamesItsSession(t *testing.T) {
+	c := turnCtl(nil)
+	openVoice(c)
+	var got []string
+	for _, e := range sessionTurn(c, longTurn, T0) {
+		if e.Kind == EfInject {
+			got = e.Notice.Sessions
+		}
+	}
+	if !slices.Equal(got, []string{"api-claude"}) {
+		t.Fatal(got)
+	}
+}
+
+// #261 review: news replayed when a conversation opens still names its sessions.
+func TestReplayedSessionNewsNamesItsSession(t *testing.T) {
+	c := turnCtl(nil)
+	sessionTurn(c, longTurn, T0) // no conversation: it waits in the outbox
+	var got []string
+	for _, e := range c.Step(voiceOpened(), T0+5) {
+		if e.Kind == EfInject {
+			got = e.Notice.Sessions
+		}
+	}
+	if !slices.Equal(got, []string{"api-claude"}) {
+		t.Fatal(got)
+	}
 }

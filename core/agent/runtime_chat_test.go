@@ -1,6 +1,7 @@
 package agent_test
 
 import (
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -44,7 +45,7 @@ func TestChatSendDelegatesATypedJob(t *testing.T) {
 		}
 		stopHook(r, `<spoken ref="job_000000000001" status="done">Two are running.</spoken>`)
 		settle()
-		if got := r.chat.Lines(); len(got) != 1 || got[0] != (ChatLine{Job: JobID("job_000000000001"), Status: "done", Text: "Two are running."}) {
+		if got := r.chat.Lines(); len(got) != 1 || !reflect.DeepEqual(got[0], ChatLine{Job: JobID("job_000000000001"), Status: "done", Text: "Two are running."}) {
 			t.Fatal(got)
 		}
 		if hasAlert(r.alerts.Alerts(), agenttest.NotifyAlert("Pixie", "Two are running.")) {

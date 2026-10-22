@@ -484,6 +484,8 @@ type AgentController struct {
 	// typedTo: the typed job last handed to each of your sessions; that session's told turns
 	// go to the text box while it shows that job (#241).
 	typedTo map[string]JobID
+	// jobSessions: the sessions each job was passed to, in order (#261).
+	jobSessions map[JobID][]string
 	// boxAsker: the session whose question the box shows, answered from the box (#241).
 	boxAsker string
 	// boxAnswered: the typed job a session already answered in the box; the coordinator's
@@ -515,21 +517,22 @@ type AgentController struct {
 
 func NewAgentController(settings Settings) *AgentController {
 	return &AgentController{
-		router:    NewRouter(settings.NotifyPerMinute),
-		confirms:  NewConfirmations(settings.PermissionTimeoutMs),
-		narrator:  NewNarrator(NarrateIntervalMs),
-		updates:   NewUpdatesWith(settings.UpdateQuietMs),
-		settings:  settings,
-		jobs:      NewJobTable(),
-		inbox:     NewInbox(),
-		outbox:    NewOutbox(),
-		memories:  NewMemoryLog(),
-		workers:   NewWorkers(),
-		handedOff: map[JobID]bool{},
-		typedTo:   map[string]JobID{},
-		typed:     map[JobID]bool{},
-		opener:    newOpener(settings.NotifyPerMinute),
-		modes:     map[string]bool{},
+		router:      NewRouter(settings.NotifyPerMinute),
+		confirms:    NewConfirmations(settings.PermissionTimeoutMs),
+		narrator:    NewNarrator(NarrateIntervalMs),
+		updates:     NewUpdatesWith(settings.UpdateQuietMs),
+		settings:    settings,
+		jobs:        NewJobTable(),
+		inbox:       NewInbox(),
+		outbox:      NewOutbox(),
+		memories:    NewMemoryLog(),
+		workers:     NewWorkers(),
+		handedOff:   map[JobID]bool{},
+		typedTo:     map[string]JobID{},
+		jobSessions: map[JobID][]string{},
+		typed:       map[JobID]bool{},
+		opener:      newOpener(settings.NotifyPerMinute),
+		modes:       map[string]bool{},
 	}
 }
 
@@ -850,7 +853,7 @@ func (c *AgentController) voiceOpened(fx *[]Effect) {
 	var digest []Line
 	for _, l := range c.outbox.Undelivered() {
 		if l.Token == nil || c.confirms.IsPendingToken(*l.Token) {
-			digest = append(digest, Line{Text: l.Text, Kind: l.Kind, Token: l.Token, Job: l.Job, Worker: l.Worker})
+			digest = append(digest, Line{Text: l.Text, Kind: l.Kind, Token: l.Token, Job: l.Job, Worker: l.Worker, Session: l.Session})
 		}
 	}
 	notice, records := c.outbox.Replay(c.confirms.IsPendingToken)
@@ -858,8 +861,8 @@ func (c *AgentController) voiceOpened(fx *[]Effect) {
 		*fx = append(*fx, Effect{Kind: EfAppend, File: OutboxFile, Line: line})
 	}
 	if notice != nil {
-		c.remember(*notice, digest)
-		*fx = append(*fx, Effect{Kind: EfInject, Notice: *notice})
+		n := c.remember(*notice, digest)
+		*fx = append(*fx, Effect{Kind: EfInject, Notice: n})
 	}
 }
 
@@ -1687,6 +1690,9 @@ func sessionSentText(description, waiting string) (text, brief, title string) {
 
 // tellSessionSent puts a message's delivery on job, whose answer the session's reply now is.
 func (c *AgentController) tellSessionSent(job JobID, name, description, waiting string, now Millis, fx *[]Effect) {
+	if name != "" && !slices.Contains(c.jobSessions[job], name) {
+		c.jobSessions[job] = append(c.jobSessions[job], name)
+	}
 	if c.typed[job] {
 		c.typedTo[name] = job
 	} else {
@@ -1795,7 +1801,7 @@ func (c *AgentController) onSessionTurn(name string, t SessionTurn, now Millis, 
 				status, c.boxAsker = "question", name
 			}
 			c.boxAnswered = job
-			*fx = append(*fx, Effect{Kind: EfChat, Chat: ChatLine{Job: job, Status: status, Text: SessionTurnBrief(gist)}})
+			*fx = append(*fx, Effect{Kind: EfChat, Chat: ChatLine{Job: job, Status: status, Text: SessionTurnBrief(gist), Sessions: []string{name}}})
 			return
 		}
 	}
@@ -1815,7 +1821,7 @@ func (c *AgentController) onSessionTurn(name string, t SessionTurn, now Millis, 
 func (c *AgentController) deliverUpdate(line Line, now Millis, fx *[]Effect) {
 	for _, d := range c.router.RouteUpdate(c.voiceOpen, line, now) {
 		if d.Kind == DeliverInject {
-			c.remember(d.Notice, []Line{line})
+			d.Notice = c.remember(d.Notice, []Line{line})
 		}
 		c.applyDelivery(d, now, fx)
 	}
@@ -1859,7 +1865,7 @@ func (c *AgentController) tick(now Millis, fx *[]Effect) {
 	c.flushUpdates(now, fx)
 	for _, d := range c.router.Tick(c.voiceOpen, now) {
 		if d.Kind == DeliverInject {
-			c.remember(d.Notice, d.Lines)
+			d.Notice = c.remember(d.Notice, d.Lines)
 		}
 		c.applyDelivery(d, now, fx)
 	}
@@ -1920,7 +1926,7 @@ func (c *AgentController) deliver(line Line, now Millis, fx *[]Effect) bool {
 	reached := false
 	for _, d := range c.router.Route(c.voiceOpen, line, now) {
 		if d.Kind == DeliverInject {
-			c.remember(d.Notice, []Line{line})
+			d.Notice = c.remember(d.Notice, []Line{line})
 		}
 		reached = reached || d.Kind == DeliverInject || d.Kind == DeliverNotify
 		c.applyDelivery(d, now, fx)
@@ -1928,11 +1934,15 @@ func (c *AgentController) deliver(line Line, now Millis, fx *[]Effect) bool {
 	return reached
 }
 
-func (c *AgentController) remember(n Notice, lines []Line) {
+// remember keeps the lines a notice carries (to route them again if it bounces), and returns it
+// naming the sessions they are about (#261).
+func (c *AgentController) remember(n Notice, lines []Line) Notice {
+	n.Sessions = sessionsOf(lines)
 	c.injected = append(c.injected, injectedNotice{n.Text, lines})
 	if len(c.injected) > 64 {
 		c.injected = c.injected[1:]
 	}
+	return n
 }
 
 // reroute: a notice that did not reach the user: route the lines it carried again, closed,

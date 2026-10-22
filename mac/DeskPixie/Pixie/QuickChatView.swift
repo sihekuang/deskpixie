@@ -57,6 +57,9 @@ struct QuickChatCard: View {
     let onDismiss: () -> Void
     /// The chips, the hint row, 📎 and drops (#240).
     let attachments: AttachmentUI
+    /// Buttons to the sessions the words are about (#261), and what a click does.
+    var sessions: [RosterRow] = []
+    var onSession: (String) -> Void = { _ in }
 
     static let width: CGFloat = 260
     @FocusState private var focused: Bool
@@ -95,6 +98,11 @@ struct QuickChatCard: View {
                     .frame(maxHeight: 180)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 8)
+                }
+                if !sessions.isEmpty {
+                    SessionButtons(sessions: sessions, onSession: onSession)
+                        .padding(.horizontal, 8)
+                        .padding(.top, 2)
                 }
                 if model.phase == .stopped {
                     Text("Stopped.")
@@ -194,4 +202,38 @@ struct QuickChatCard: View {
     }
 
     private var canSend: Bool { model.canSend(state.draft, attachments: attachments.model.items.count) }
+}
+
+/// One button per session the words are about (#261): a click brings up its terminal tab, as
+/// its row in the session list does. They wrap onto more lines rather than squeeze.
+struct SessionButtons: View {
+    let sessions: [RosterRow]
+    let onSession: (String) -> Void
+
+    var body: some View {
+        FlowLayout(spacing: 6) {
+            ForEach(sessions) { r in
+                Button { onSession(r.name) } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "terminal")
+                        Text(r.label)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        Image(systemName: "arrow.up.right")
+                            .font(.caption2.weight(.bold))
+                    }
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .frame(maxWidth: QuickChatCard.width - 16, alignment: .leading)
+                    .background(Capsule().fill(.regularMaterial))
+                    .overlay(Capsule().strokeBorder(.separator))
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .help("Go to \(r.label)")
+                .accessibilityLabel("Go to \(r.label)")
+            }
+        }
+    }
 }

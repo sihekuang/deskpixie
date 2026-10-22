@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -539,7 +540,7 @@ func TestSignalsReportOpenAndCloseWithUndeliveredNotices(t *testing.T) {
 		r.r.Inject(voice.Notice{Text: "too late"})
 		wait(100)
 		if s := recvSignal(t, signals); s.Kind != voice.SigClosed ||
-			!slices.Equal(s.Undelivered, []voice.Notice{{Text: "too late"}}) {
+			!reflect.DeepEqual(s.Undelivered, []voice.Notice{{Text: "too late"}}) {
 			t.Fatalf("got %+v", s)
 		}
 	})

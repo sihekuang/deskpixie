@@ -125,6 +125,8 @@ func plain(fx []Effect) []Effect {
 	out := make([]Effect, len(fx))
 	for i, e := range fx {
 		e.Update = nil
+		e.Notice.Sessions = nil // checked on their own (#261)
+		e.Chat.Sessions = nil
 		out[i] = e
 	}
 	return out

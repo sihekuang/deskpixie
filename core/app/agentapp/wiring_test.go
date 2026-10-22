@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -289,7 +290,7 @@ func TestEndToEndATypedMessageAnswersInTheTextBox(t *testing.T) {
 	})
 	waitFor(t, "the answer in the box", func() bool {
 		for _, l := range f.rec.chatLines() {
-			if c, ok := l.(agent.ChatLine); ok && c == (agent.ChatLine{Job: agent.JobID(id), Status: "done", Text: "There are twelve open issues."}) {
+			if c, ok := l.(agent.ChatLine); ok && reflect.DeepEqual(c, agent.ChatLine{Job: agent.JobID(id), Status: "done", Text: "There are twelve open issues."}) {
 				return true
 			}
 		}
