@@ -359,6 +359,69 @@ func TestRuntimeTranscriptIsEmitted(t *testing.T) {
 	})
 }
 
+// #251: the user's words so far go to the live caption as they come.
+func TestRuntimeHeardWordsAreEmitted(t *testing.T) {
+	r, m, ui := newTestRuntime(t, "sk-test")
+	startListening(t, r, m, ui)
+	m.sess.events <- Event{Kind: EvUserHeard, Text: "hi Pix"}
+	eventually(t, "heard", func() bool { return ui.has(UIEvent{Kind: "heard", Text: "hi Pix"}) })
+}
+
+// #251 review: while Pixie is audibly speaking, and EchoTail after, heard words may be Pixie's
+// own voice coming back through the mic: not shown.
+func TestHeardWordsAreEchoWhilePixieSpeaksAndJustAfter(t *testing.T) {
+	now := time.Now()
+	r := &Runtime{}
+	if r.echoing(now) {
+		t.Fatal("quiet")
+	}
+	r.mouth = 2
+	if !r.echoing(now) {
+		t.Fatal("speaking")
+	}
+	r.mouth, r.mouthEnded = 0, now
+	if !r.echoing(now.Add(EchoTail / 2)) {
+		t.Fatal("just after")
+	}
+	if r.echoing(now.Add(EchoTail)) {
+		t.Fatal("long after")
+	}
+}
+
+// A turn you started while Pixie was quiet stays yours: OpenAI Realtime transcribes it only once
+// you stop, when Pixie may already be answering. It shows until that reply ends (live check).
+func TestHeardWordsOfATurnStartedInQuietShowWhilePixieAnswers(t *testing.T) {
+	now := time.Now()
+	r := &Runtime{}
+	r.userStarted(now)
+	r.mouth = 2 // Pixie answers before the words come
+	if !r.admitsHeard(now) {
+		t.Fatal("your turn's words")
+	}
+	r.mouthClosed(now)
+	if r.admitsHeard(now.Add(EchoTail / 2)) {
+		t.Fatal("after the reply: echo again")
+	}
+	r.mouth = 2
+	r.userStarted(now)
+	r.userDone()
+	if r.admitsHeard(now) {
+		t.Fatal("your final words are in: what's heard next while Pixie speaks may be echo")
+	}
+	r.userStarted(now) // started while Pixie speaks: may be echo
+	if r.admitsHeard(now) {
+		t.Fatal("a turn started during Pixie's speech")
+	}
+}
+
+// #253: Pixie's words so far go to the caption as they come.
+func TestRuntimeSayingWordsAreEmitted(t *testing.T) {
+	r, m, ui := newTestRuntime(t, "sk-test")
+	startListening(t, r, m, ui)
+	m.sess.events <- Event{Kind: EvAssistantSaying, Text: "It's sun"}
+	eventually(t, "saying", func() bool { return ui.has(UIEvent{Kind: "saying", Text: "It's sun"}) })
+}
+
 func TestRuntimeHotkeyAgainEndsAndClosesSession(t *testing.T) {
 	r, m, ui := newTestRuntime(t, "sk-test")
 	startListening(t, r, m, ui)

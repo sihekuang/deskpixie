@@ -54,7 +54,7 @@ func RouteFor(path string) (Route, bool) {
 		return RouteNotifications, true
 	case "replyMode":
 		return RouteReplyMode, true
-	case "alwaysShowCaption", "captionDismissSecs":
+	case "alwaysShowCaption", "captionDismissSecs", "captionFadeSecs":
 		return RouteCaptions, true
 	case "position":
 		return RouteResetPosition, true

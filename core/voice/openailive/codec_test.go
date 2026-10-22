@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -49,9 +50,13 @@ func kinds(evs []voice.Event) []voice.EventKind {
 	return out
 }
 
+// wantKinds skips EvUserHeard and EvAssistantSaying, the live caption's words so far (#251,
+// #253): TestTheUsersWordsAreHeardAsTheyCome and TestPixiesWordsAreSaidAsTheyCome check those.
 func wantKinds(t *testing.T, evs []voice.Event, want ...voice.EventKind) {
 	t.Helper()
-	got := kinds(evs)
+	got := slices.DeleteFunc(kinds(evs), func(k voice.EventKind) bool {
+		return k == voice.EvUserHeard || k == voice.EvAssistantSaying
+	})
 	if len(got) != len(want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
@@ -410,3 +415,72 @@ func TestCapabilities(t *testing.T) {
 }
 
 func b64(b []byte) string { return base64.StdEncoding.EncodeToString(b) }
+
+// heardTexts are the EvUserHeard texts in evs: the user's words so far (#251).
+func heardTexts(evs []voice.Event) []string {
+	var out []string
+	for _, e := range evs {
+		if e.Kind == voice.EvUserHeard {
+			out = append(out, e.Text)
+		}
+	}
+	return out
+}
+
+func TestTheUsersWordsAreHeardAsTheyCome(t *testing.T) {
+	c := newCodec()
+	if got := heardTexts(c.decode(inText("what time"), at(100))); !slices.Equal(got, []string{"what time"}) {
+		t.Fatal(got)
+	}
+	if got := heardTexts(c.decode(inText(" is it"), at(200))); !slices.Equal(got, []string{"what time is it"}) {
+		t.Fatal(got)
+	}
+	if got := heardTexts(c.decode(inText(" "), at(300))); got != nil {
+		t.Fatal("nothing new heard:", got)
+	}
+}
+
+func TestPixiesWordsAreSaidAsTheyCome(t *testing.T) {
+	c := newCodec()
+	out := func(t string) []byte {
+		return msg(map[string]any{"type": "session.output_transcript.delta", "delta": t})
+	}
+	said := func(evs []voice.Event) []string {
+		var got []string
+		for _, e := range evs {
+			if e.Kind == voice.EvAssistantSaying {
+				got = append(got, e.Text)
+			}
+		}
+		return got
+	}
+	if got := said(c.decode(out("It's"), at(100))); !slices.Equal(got, []string{"It's"}) {
+		t.Fatal(got)
+	}
+	if got := said(c.decode(out(" sunny"), at(200))); !slices.Equal(got, []string{"It's sunny"}) {
+		t.Fatal(got)
+	}
+	if got := said(c.decode(out(" "), at(300))); got != nil {
+		t.Fatal("nothing new said:", got)
+	}
+}
+
+// #253 review: a cancelled reply's tail is dropped, so it never shows as Pixie's words nor joins
+// the next reply.
+func TestACancelledRepliesTailIsNotSaid(t *testing.T) {
+	c := newCodec()
+	out := func(t string) []byte {
+		return msg(map[string]any{"type": "session.output_transcript.delta", "delta": t})
+	}
+	c.decode(outDelta(loud, 0), at(0))
+	c.decode(out("It's"), at(10))
+	c.encode(voice.Command{Kind: voice.CmdCancelResponse}, at(20))
+	for _, e := range c.decode(out(" sunny and warm"), at(30)) {
+		if e.Kind == voice.EvAssistantSaying {
+			t.Fatal("the dropped tail:", e.Text)
+		}
+	}
+	if c.aText.Len() != 0 {
+		t.Fatal("the tail joins the next reply:", c.aText.String())
+	}
+}

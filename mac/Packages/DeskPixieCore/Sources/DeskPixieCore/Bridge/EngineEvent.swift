@@ -63,6 +63,10 @@ public enum EngineEvent: Sendable, Equatable {
     case mouth(Int)
     case status(String)
     case transcript(role: String, text: String)
+    /// The user's words so far while they talk (#251), for the live caption.
+    case heard(String)
+    /// Pixie's words so far while it speaks (#253), for the caption.
+    case saying(String)
     case error(String)
     case mic(start: Bool)
     case metrics(String)
@@ -95,7 +99,7 @@ public enum EngineEvent: Sendable, Equatable {
     /// replyMode changed: "voice" or "text".
     case replyMode(String)
     /// alwaysShowCaption or captionDismissSecs changed (#224).
-    case captions(always: Bool, dismissSecs: Int)
+    case captions(always: Bool, dismissSecs: Int, fadeSecs: Int)
     /// The attachments waiting for the next request (#240), the whole set.
     case attachments([AttachmentItem])
     /// Pixie's take_clipboard: read the clipboard, add what's there, then call clipboard.done.
@@ -119,7 +123,7 @@ public enum EngineEvent: Sendable, Equatable {
     private struct Agents: Decodable { var roster: RosterView }
     private struct FocusPlanEvent: Decodable { var plan: FocusPlan }
     private struct ReplyModeEvent: Decodable { var mode: String }
-    private struct CaptionsEvent: Decodable { var always: Bool; var dismissSecs: Int }
+    private struct CaptionsEvent: Decodable { var always: Bool; var dismissSecs: Int; var fadeSecs: Int? }
     private struct AttachmentsEvent: Decodable { var items: [AttachmentItem] }
     private struct ClipboardRead: Decodable { var request: String }
 
@@ -130,13 +134,15 @@ public enum EngineEvent: Sendable, Equatable {
         guard let k = try? dec.decode(Kind.self, from: json) else { return nil }
         func get<T: Decodable>(_: T.Type) -> T? { try? dec.decode(T.self, from: json) }
         switch k.kind {
-        case "state", "mouth", "status", "transcript", "error", "mic", "metrics":
+        case "state", "mouth", "status", "transcript", "heard", "saying", "error", "mic", "metrics":
             guard let w = get(Voice.self) else { return nil }
             switch k.kind {
             case "state": return .state(w.state ?? "")
             case "mouth": return .mouth(w.level ?? 0)
             case "status": return .status(w.text ?? "")
             case "transcript": return .transcript(role: w.role ?? "", text: w.text ?? "")
+            case "heard": return .heard(w.text ?? "")
+            case "saying": return .saying(w.text ?? "")
             case "error": return .error(w.text ?? "")
             case "mic": return .mic(start: w.text == "start")
             default: return .metrics(w.text ?? "")
@@ -158,7 +164,7 @@ public enum EngineEvent: Sendable, Equatable {
         case "chat.line": return get(ChatLine.self).map { .chatLine($0) }
         case "chat.focus": return .chatFocus
         case "replyMode": return get(ReplyModeEvent.self).map { .replyMode($0.mode) }
-        case "captions": return get(CaptionsEvent.self).map { .captions(always: $0.always, dismissSecs: $0.dismissSecs) }
+        case "captions": return get(CaptionsEvent.self).map { .captions(always: $0.always, dismissSecs: $0.dismissSecs, fadeSecs: $0.fadeSecs ?? 4) }
         case "attachments": return get(AttachmentsEvent.self).map { .attachments($0.items) }
         case "clipboard.read": return get(ClipboardRead.self).map { .clipboardRead(request: $0.request) }
         default: return nil

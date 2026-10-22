@@ -90,6 +90,8 @@ func show(evs []voice.Event) []string {
 			out = append(out, eAudio(e.Audio...))
 		case voice.EvTranscript:
 			out = append(out, "Transcript "+e.Role+": "+e.Text)
+		case voice.EvUserHeard, voice.EvAssistantSaying:
+			// The live caption's words so far (#251, #253): their own tests below.
 		case voice.EvToolCall:
 			out = append(out, eTool(e.CallID, e.ToolName, string(e.Args)))
 		case voice.EvError:
@@ -281,6 +283,107 @@ func TestAPlainTurnWithoutVoiceActivityDerivesSpeechEvents(t *testing.T) {
 		t.Fatal("response should be closed")
 	}
 	want(t, c.decode(turnComplete)) // a second turnComplete closes nothing
+}
+
+// heardTexts are the EvUserHeard texts in evs: the user's words so far (#251).
+func heardTexts(evs []voice.Event) []string {
+	var out []string
+	for _, e := range evs {
+		if e.Kind == voice.EvUserHeard {
+			out = append(out, e.Text)
+		}
+	}
+	return out
+}
+
+// #251: each piece of the user's transcript reports their words so far, for the live caption;
+// the turn still ends with the one final transcript.
+func TestTheUsersWordsAreHeardAsTheyCome(t *testing.T) {
+	c := ready(t)
+	if got := heardTexts(c.decode(`{"serverContent":{"inputTranscription":{"text":"What's two"}}}`)); !reflect.DeepEqual(got, []string{"What's two"}) {
+		t.Fatal(got)
+	}
+	if got := heardTexts(c.decode(`{"serverContent":{"inputTranscription":{"text":" plus two?"}}}`)); !reflect.DeepEqual(got, []string{"What's two plus two?"}) {
+		t.Fatal(got)
+	}
+	if got := heardTexts(c.decode(`{"serverContent":{"inputTranscription":{"text":" "}}}`)); got != nil {
+		t.Fatal("nothing new heard:", got)
+	}
+	want(t, c.decode(turnComplete), eUser("What's two plus two?"))
+	if got := heardTexts(c.decode(`{"serverContent":{"inputTranscription":{"text":"And three"}}}`)); !reflect.DeepEqual(got, []string{"And three"}) {
+		t.Fatal("the next turn starts afresh:", got)
+	}
+}
+
+// #251: Gemini's interim hypothesis (serverContent.interimInputTranscription, "updated while the
+// speaker is actively talking") shows after the words already final; it never ends up in the
+// final transcript, which is built from inputTranscription alone.
+func TestAnInterimHypothesisIsHeardAfterTheFinalWords(t *testing.T) {
+	c := ready(t)
+	interim := func(s string) string {
+		return `{"serverContent":{"interimInputTranscription":{"text":"` + s + `"}}}`
+	}
+	if got := heardTexts(c.decode(interim("What's"))); !reflect.DeepEqual(got, []string{"What's"}) {
+		t.Fatal(got)
+	}
+	if got := heardTexts(c.decode(interim("What's two plus"))); !reflect.DeepEqual(got, []string{"What's two plus"}) {
+		t.Fatal("each hypothesis replaces the last:", got)
+	}
+	c.decode(`{"serverContent":{"inputTranscription":{"text":"What's two plus two?"}}}`)
+	if got := heardTexts(c.decode(interim("And"))); !reflect.DeepEqual(got, []string{"What's two plus two? And"}) {
+		t.Fatal("after the final words:", got)
+	}
+	if got := heardTexts(c.decode(interim(" "))); got != nil {
+		t.Fatal("nothing new heard:", got)
+	}
+	want(t, c.decode(turnComplete), eUser("What's two plus two?"))
+}
+
+// sayingTexts are the EvAssistantSaying texts in evs: Pixie's words so far (#253).
+func sayingTexts(evs []voice.Event) []string {
+	var out []string
+	for _, e := range evs {
+		if e.Kind == voice.EvAssistantSaying {
+			out = append(out, e.Text)
+		}
+	}
+	return out
+}
+
+// #253: each piece of Pixie's reply transcript reports its words so far, for the caption while
+// Pixie speaks; the reply still ends with the one final transcript.
+func TestPixiesWordsAreSaidAsTheyCome(t *testing.T) {
+	c := ready(t)
+	c.decode(audioMsg([]int16{5}))
+	if got := sayingTexts(c.decode(`{"serverContent":{"outputTranscription":{"text":"Four"}}}`)); !reflect.DeepEqual(got, []string{"Four"}) {
+		t.Fatal(got)
+	}
+	if got := sayingTexts(c.decode(`{"serverContent":{"outputTranscription":{"text":" it is!"}}}`)); !reflect.DeepEqual(got, []string{"Four it is!"}) {
+		t.Fatal(got)
+	}
+	if got := sayingTexts(c.decode(`{"serverContent":{"outputTranscription":{"text":" "}}}`)); got != nil {
+		t.Fatal("nothing new said:", got)
+	}
+	want(t, c.decode(turnComplete), eAssistant("Four it is!"), eDone)
+	c.decode(audioMsg([]int16{5}))
+	if got := sayingTexts(c.decode(`{"serverContent":{"outputTranscription":{"text":"Next"}}}`)); !reflect.DeepEqual(got, []string{"Next"}) {
+		t.Fatal("the next reply starts afresh:", got)
+	}
+}
+
+// #251 review: a late scrap of the last turn's words is not heard: it would cover Pixie's reply.
+func TestALateTranscriptIsNotHeard(t *testing.T) {
+	t0 := time.Now()
+	c := ready(t)
+	c.decodeAt(audioMsg([]int16{1}), t0)
+	c.decodeAt(turnComplete, t0)
+	words := `{"serverContent":{"inputTranscription":{"text":"tail"}}}`
+	if got := heardTexts(c.decodeAt(words, t0.Add(lateTranscriptGrace/2))); got != nil {
+		t.Fatal(got)
+	}
+	if got := heardTexts(c.decodeAt(`{"serverContent":{"inputTranscription":{"text":"new words"}}}`, t0.Add(2*lateTranscriptGrace))); !reflect.DeepEqual(got, []string{"new words"}) {
+		t.Fatal("a new turn is heard, without the late scrap:", got)
+	}
 }
 
 func TestTranscriptionRightAfterAReplyIsLateNotNewSpeech(t *testing.T) {

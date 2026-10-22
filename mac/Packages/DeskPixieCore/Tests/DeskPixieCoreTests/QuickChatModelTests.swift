@@ -16,11 +16,17 @@ final class QuickChatModelTests: XCTestCase {
         guard case .chatFocus? = d(#"{"kind":"chat.focus"}"#) else { return XCTFail("chat.focus") }
         guard case .replyMode(let m)? = d(#"{"kind":"replyMode","mode":"text"}"#) else { return XCTFail("replyMode") }
         XCTAssertEqual(m, "text")
-        guard case .captions(let on, let secs)? = d(#"{"kind":"captions","always":true,"dismissSecs":120}"#) else {
+        guard case .captions(let on, let secs, let fade)? = d(#"{"kind":"captions","always":true,"dismissSecs":120,"fadeSecs":7}"#) else {
             return XCTFail("captions")
         }
         XCTAssertTrue(on)
         XCTAssertEqual(secs, 120)
+        XCTAssertEqual(fade, 7)
+        // An older core sends no fadeSecs: the default.
+        guard case .captions(_, _, let old)? = d(#"{"kind":"captions","always":true,"dismissSecs":120}"#) else {
+            return XCTFail("captions without fadeSecs")
+        }
+        XCTAssertEqual(old, 4)
     }
 
     func test_send_thinks_with_stop_and_no_sending() {
@@ -207,12 +213,157 @@ final class QuickChatModelTests: XCTestCase {
         XCTAssertEqual(m.phase, .done)
     }
 
-    /// Only Pixie's side, and only words.
+    /// Only Pixie's side, and only words: your words show as they're heard, not from the final
+    /// transcript, which can come after Pixie's reply (#251 review).
     func test_caption_ignores_the_user_and_empty_text() {
         var m = QuickChatModel()
         XCTAssertFalse(m.caption(role: "user", text: "what's the weather"))
         XCTAssertFalse(m.caption(role: "assistant", text: "   "))
+        XCTAssertFalse(m.heard("  "))
         XCTAssertFalse(m.showsCaption)
+    }
+
+    /// #251: while you talk, your words so far replace Pixie's last reply, all at once (no typing
+    /// out), and follow you as you go on.
+    func test_your_words_show_live_over_pixies_last_reply() {
+        var m = QuickChatModel()
+        m.caption(role: "assistant", text: "It is sunny today.")
+        while m.tick() {}
+        XCTAssertTrue(m.heard("what about"))
+        XCTAssertTrue(m.isYou)
+        XCTAssertTrue(m.showsCaption)
+        XCTAssertEqual(m.shown, "what about")
+        XCTAssertEqual(m.phase, .done)
+        XCTAssertFalse(m.tick(), "nothing to type out")
+        XCTAssertTrue(m.heard("what about tomorrow?"))
+        XCTAssertEqual(m.shown, "what about tomorrow?")
+    }
+
+    /// Your words stay until Pixie answers; the reply then replaces them, typed out, and your
+    /// final transcript arriving after it leaves the reply be.
+    func test_your_words_stay_until_pixie_answers() {
+        var m = QuickChatModel()
+        m.heard("what about tomorrow?")
+        XCTAssertTrue(m.caption(role: "assistant", text: "Rain tomorrow."))
+        XCTAssertFalse(m.caption(role: "user", text: "What about tomorrow?"))
+        XCTAssertFalse(m.isYou)
+        XCTAssertEqual(m.shown, "")
+        while m.tick() {}
+        XCTAssertEqual(m.shown, "Rain tomorrow.")
+    }
+
+    /// #253: Pixie's words show as it says them, all at once, replacing yours; its final
+    /// transcript then completes them without typing them out again.
+    func test_pixies_words_show_as_it_speaks() {
+        var m = QuickChatModel()
+        m.heard("what's the weather?")
+        XCTAssertTrue(m.saying("It's"))
+        XCTAssertFalse(m.isYou)
+        XCTAssertTrue(m.showsCaption)
+        XCTAssertEqual(m.shown, "It's")
+        XCTAssertTrue(m.saying("It's sunny"))
+        XCTAssertEqual(m.shown, "It's sunny")
+        XCTAssertFalse(m.tick(), "nothing to type out")
+        XCTAssertTrue(m.caption(role: "assistant", text: "It's sunny today."))
+        XCTAssertEqual(m.shown, "It's sunny today.")
+        XCTAssertEqual(m.phase, .done)
+    }
+
+    /// You talk again before Pixie's final transcript comes: it doesn't cover your words.
+    func test_pixies_late_final_words_dont_cover_yours() {
+        var m = QuickChatModel()
+        m.saying("It's sunny")
+        m.heard("and tomorrow?")
+        XCTAssertFalse(m.caption(role: "assistant", text: "It's sunny today."))
+        XCTAssertTrue(m.isYou)
+        XCTAssertEqual(m.shown, "and tomorrow?")
+        // The next reply that isn't streamed is typed out as before.
+        XCTAssertTrue(m.caption(role: "assistant", text: "Rain."))
+        XCTAssertEqual(m.shown, "")
+    }
+
+    // MARK: - two bubbles (#254)
+
+    /// When the other side speaks, the last bubble moves up and the new one shows below it.
+    func test_the_other_side_speaking_moves_the_last_bubble_up() {
+        let t0 = Date()
+        var m = QuickChatModel()
+        m.heard("what's the weather?", now: t0)
+        XCTAssertNil(m.earlier, "nothing before")
+        m.heard("what's the weather tomorrow?", now: t0)
+        XCTAssertNil(m.earlier, "the same speaker goes on in place")
+        m.saying("Rain", now: t0.addingTimeInterval(1))
+        XCTAssertEqual(m.earlier, QuickChatModel.Earlier(text: "what's the weather tomorrow?", isYou: true, at: t0.addingTimeInterval(1)))
+        m.saying("Rain tomorrow.", now: t0.addingTimeInterval(2))
+        XCTAssertEqual(m.earlier?.text, "what's the weather tomorrow?", "Pixie goes on in place")
+        m.heard("thanks", now: t0.addingTimeInterval(3))
+        XCTAssertEqual(m.earlier, QuickChatModel.Earlier(text: "Rain tomorrow.", isYou: false, at: t0.addingTimeInterval(3)))
+    }
+
+    /// The bubble on top stays 4 s, fades for half a second, then goes.
+    func test_the_bubble_on_top_fades_after_four_seconds() {
+        let t0 = Date()
+        var m = QuickChatModel()
+        m.heard("hi", now: t0)
+        m.saying("Hello!", now: t0)
+        XCTAssertEqual(m.earlierPhase(now: t0.addingTimeInterval(3.9)), .shown)
+        XCTAssertEqual(m.earlierPhase(now: t0.addingTimeInterval(4.1)), .fading)
+        XCTAssertEqual(m.earlierPhase(now: t0.addingTimeInterval(4.6)), .gone)
+        XCTAssertEqual(QuickChatModel().earlierPhase(now: t0), .gone)
+    }
+
+    /// A streamed reply that never got its final words doesn't swallow the next conversation's.
+    func test_an_unfinished_streamed_reply_ends_with_the_conversation() {
+        var m = QuickChatModel()
+        m.saying("It's sun")
+        m.conversationEnded()
+        m.heard("hi again")
+        XCTAssertTrue(m.caption(role: "assistant", text: "Hello!"))
+        XCTAssertFalse(m.isYou)
+    }
+
+    /// The last conversation's words, kept for hover, don't come back as the bubble on top.
+    func test_a_kept_caption_doesnt_move_up() {
+        var m = QuickChatModel()
+        m.saying("Bye!")
+        m.conversationEnded()
+        m.heard("hi again")
+        XCTAssertNil(m.earlier)
+    }
+
+    /// The setting (captionFadeSecs) sets how long it stays; 0 shows only the latest.
+    func test_the_fade_time_is_the_setting() {
+        let t0 = Date()
+        var m = QuickChatModel()
+        m.fadeSecs = 10
+        m.heard("hi", now: t0)
+        m.saying("Hello!", now: t0)
+        XCTAssertEqual(m.earlierPhase(now: t0.addingTimeInterval(9)), .shown)
+        XCTAssertEqual(m.earlierPhase(now: t0.addingTimeInterval(10.1)), .fading)
+        m.fadeSecs = 0
+        XCTAssertEqual(m.earlierPhase(now: t0), .gone)
+        m.heard("bye", now: t0)
+        XCTAssertNil(m.earlier, "only the latest")
+    }
+
+    /// A typed message clears both bubbles.
+    func test_a_typed_message_clears_the_bubble_on_top() {
+        var m = QuickChatModel()
+        m.heard("hi")
+        m.saying("Hello!")
+        m.mode = "text"
+        m.sending()
+        XCTAssertNil(m.earlier)
+    }
+
+    /// Text mode: your spoken words never cover a typed message still at work.
+    func test_text_mode_keeps_a_typed_message_over_your_words() {
+        var m = QuickChatModel()
+        m.mode = "text"
+        m.sending()
+        XCTAssertFalse(m.heard("hello"))
+        XCTAssertFalse(m.saying("Hi"))
+        XCTAssertFalse(m.isYou)
     }
 
     /// A new reply replaces the last; the conversation ending puts the caption away.

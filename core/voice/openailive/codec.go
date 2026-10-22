@@ -189,7 +189,13 @@ func (c *codec) decode(data []byte, now time.Time) []voice.Event {
 	case "session.output_audio.delta":
 		return c.onOutputAudio(m, now)
 	case "session.output_transcript.delta":
+		if c.muted { // a cancelled reply's tail
+			return nil
+		}
 		c.aText.WriteString(m.Delta)
+		if strings.TrimSpace(m.Delta) != "" { // the caption while Pixie speaks (#253)
+			return []voice.Event{{Kind: voice.EvAssistantSaying, Text: strings.TrimSpace(c.aText.String())}}
+		}
 	case "session.input_transcript.delta":
 		if strings.TrimSpace(m.Delta) == "" && !c.uOpen {
 			return nil
@@ -197,15 +203,19 @@ func (c *codec) decode(data []byte, now time.Time) []voice.Event {
 		c.uText.WriteString(m.Delta)
 		c.uLast = now
 		c.muted = false
+		var heard []voice.Event // the live caption's words so far (#251)
+		if strings.TrimSpace(m.Delta) != "" {
+			heard = []voice.Event{{Kind: voice.EvUserHeard, Text: strings.TrimSpace(c.uText.String())}}
+		}
 		if c.uOpen {
-			return nil
+			return heard
 		}
 		c.uOpen = true
 		if c.aOpen {
 			c.uDeferred = true // GPT-Live decides whether this interrupts it
-			return nil
+			return heard
 		}
-		return []voice.Event{{Kind: voice.EvSpeechStarted}}
+		return append([]voice.Event{{Kind: voice.EvSpeechStarted}}, heard...)
 	case "session.delegation.created":
 		switch {
 		case m.Delegation.Target == "responses":

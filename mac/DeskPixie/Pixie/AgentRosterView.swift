@@ -17,6 +17,9 @@ struct AgentRosterView: View {
     let captionCard: Bool
     /// "2m ago" for the card's header.
     let ago: String?
+    /// The other side's last words above the caption, and how far they've faded (#254).
+    let earlier: QuickChatModel.Earlier?
+    let earlierPhase: QuickChatModel.EarlierPhase
     let onMode: (String) -> Void
     let onSend: () -> Void
     let onStop: () -> Void
@@ -33,7 +36,7 @@ struct AgentRosterView: View {
     var body: some View {
         VStack(spacing: 4) {
             if model.open && !below { list }
-            if showsCard && !below { card }
+            if showsCard && !below { earlierBubble; card }
             if let offer, !below { offerBubble(offer) }
             HStack(spacing: 6) {
                 if model.visible {
@@ -48,7 +51,7 @@ struct AgentRosterView: View {
             .fixedSize()
             if model.open && below { list }
             if let offer, below { offerBubble(offer) }
-            if showsCard && below { card }
+            if showsCard && below { earlierBubble; card }
         }
         .fixedSize()
     }
@@ -61,6 +64,28 @@ struct AgentRosterView: View {
         QuickChatCard(model: chat, state: chatState, showsInput: chatOpen, ago: ago,
                       onSend: onSend, onStop: onStop, onClose: onCloseChat, onResize: onResize, onDismiss: onDismiss,
                       attachments: attachments)
+    }
+
+    /// The other side's last words, above the caption until they fade (#254).
+    @ViewBuilder private var earlierBubble: some View {
+        if let earlier, earlierPhase != .gone, !chatOpen {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(earlier.isYou ? "You" : "Pixie")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(earlier.text)
+                    .font(.callout)
+                    .lineLimit(3)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .frame(width: QuickChatCard.width, alignment: .leading)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.separator))
+            .opacity(earlierPhase == .fading ? 0 : 1)
+            .animation(.easeOut(duration: QuickChatModel.fadeDuration), value: earlierPhase)
+        }
     }
 
     private func offerBubble(_ kind: ClipboardKind) -> some View {

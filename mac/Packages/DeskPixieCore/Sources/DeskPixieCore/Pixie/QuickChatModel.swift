@@ -43,6 +43,46 @@ public struct QuickChatModel: Equatable, Sendable {
     private var stopPending = false
     /// What is shown is a caption (Pixie's spoken words), not a typed message's answer.
     public private(set) var isCaption = false
+    /// The caption is your own words (#251), not Pixie's.
+    public private(set) var isYou = false
+    /// The bubble above the caption (#254): the other side's last words, until they fade.
+    public struct Earlier: Equatable, Sendable {
+        public let text: String
+        public let isYou: Bool
+        /// When it moved up: it fades `fadeSecs` later.
+        public let at: Date
+        public init(text: String, isYou: Bool, at: Date) {
+            self.text = text
+            self.isYou = isYou
+            self.at = at
+        }
+    }
+
+    public enum EarlierPhase: Equatable, Sendable { case shown, fading, gone }
+
+    public private(set) var earlier: Earlier?
+    /// captionFadeSecs: how long the earlier bubble stays before it fades (0: only the latest).
+    public var fadeSecs = 4
+    /// How long the fade itself takes.
+    public static let fadeDuration: TimeInterval = 0.5
+
+    /// Shown, fading out, or gone by `now`.
+    public func earlierPhase(now: Date) -> EarlierPhase {
+        guard let earlier, fadeSecs > 0 else { return .gone }
+        let age = now.timeIntervalSince(earlier.at)
+        if age < TimeInterval(fadeSecs) { return .shown }
+        return age < TimeInterval(fadeSecs) + Self.fadeDuration ? .fading : .gone
+    }
+
+    /// The other side starts speaking: the caption up to now moves up (#254).
+    private mutating func moveUp(beforeYou you: Bool, now: Date) {
+        guard isCaption, captionLive, isYou != you, !full.isEmpty else { return }
+        earlier = fadeSecs > 0 ? Earlier(text: full, isYou: isYou, at: now) : nil
+    }
+
+    /// Pixie's words came as it said them (#253): its final transcript completes them, or, once
+    /// you talk again, leaves your words be.
+    private var awaitsFinal = false
     /// The caption's conversation is still going (it shows on its own until it ends).
     private var captionLive = false
     /// When what is shown was said: the card's "2m ago" (#224).
@@ -95,6 +135,9 @@ public struct QuickChatModel: Equatable, Sendable {
     /// meanwhile are kept until the job is known.
     public mutating func sending() {
         isCaption = false
+        isYou = false
+        awaitsFinal = false
+        earlier = nil
         captionLive = false
         saidAt = nil
         job = nil
@@ -114,6 +157,9 @@ public struct QuickChatModel: Equatable, Sendable {
         self.job = job
         lastJob = job
         isCaption = false
+        isYou = false
+        awaitsFinal = false
+        earlier = nil
         captionLive = false
         if stopPending {
             stopPending = false
@@ -134,6 +180,9 @@ public struct QuickChatModel: Equatable, Sendable {
     /// The message couldn't go: the reason is the answer.
     public mutating func failedToSend(_ reason: String) {
         isCaption = false
+        isYou = false
+        awaitsFinal = false
+        earlier = nil
         captionLive = false
         saidAt = Date()
         job = nil
@@ -156,6 +205,9 @@ public struct QuickChatModel: Equatable, Sendable {
             // Stop: the cancel's own line doesn't replace "Stopped.").
             job = line.job
             isCaption = false
+            isYou = false
+            awaitsFinal = false
+            earlier = nil
             captionLive = false
             full = ""
             shown = ""
@@ -188,6 +240,9 @@ public struct QuickChatModel: Equatable, Sendable {
     public mutating func dismiss() {
         guard canDismiss else { return }
         isCaption = false
+        isYou = false
+        awaitsFinal = false
+        earlier = nil
         captionLive = false
         saidAt = nil
         full = ""
@@ -204,17 +259,27 @@ public struct QuickChatModel: Equatable, Sendable {
         return true
     }
 
-    /// What Pixie said aloud (the voice model's transcript). Only Pixie's side; a new caption
-    /// replaces the last. In text mode it never covers a typed message still at work. True when
-    /// it shows.
+    /// What Pixie said aloud (the voice model's transcript), typed out. Only Pixie's side: your
+    /// words show as they're heard (`heard`); your final transcript can come after the reply. A
+    /// new caption replaces the last. In text mode it never covers a typed message still at work.
+    /// True when it shows.
     @discardableResult
     public mutating func caption(role: String, text: String, now: Date = Date()) -> Bool {
         let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard role == "assistant", !words.isEmpty else { return false }
-        if mode == "text" && !isCaption && (pending || phase == .thinking || phase == .answering) {
-            return false
+        if awaitsFinal {
+            // Already shown as it was said (#253): complete it, unless you have talked since.
+            awaitsFinal = false
+            guard isCaption, !isYou else { return false }
+            full = words
+            shown = words
+            phase = .done
+            return true
         }
+        guard takeCaption() else { return false }
+        moveUp(beforeYou: false, now: now)
         isCaption = true
+        isYou = false
         captionLive = true
         saidAt = now
         job = nil
@@ -224,9 +289,52 @@ public struct QuickChatModel: Equatable, Sendable {
         return true
     }
 
+    /// Your words so far while you talk (#251): they replace the caption at once, with nothing to
+    /// type out, until Pixie answers. True when they show.
+    @discardableResult
+    public mutating func heard(_ text: String, now: Date = Date()) -> Bool {
+        let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !words.isEmpty, takeCaption() else { return false }
+        moveUp(beforeYou: true, now: now)
+        isCaption = true
+        isYou = true
+        captionLive = true
+        saidAt = now
+        job = nil
+        full = words
+        shown = words
+        phase = .done
+        return true
+    }
+
+    /// Pixie's words so far while it speaks (#253): they replace the caption at once, with
+    /// nothing to type out; its final transcript completes them. True when they show.
+    @discardableResult
+    public mutating func saying(_ text: String, now: Date = Date()) -> Bool {
+        let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !words.isEmpty, takeCaption() else { return false }
+        moveUp(beforeYou: false, now: now)
+        isCaption = true
+        isYou = false
+        awaitsFinal = true
+        captionLive = true
+        saidAt = now
+        job = nil
+        full = words
+        shown = words
+        phase = .done
+        return true
+    }
+
+    /// A caption may show: in text mode, not over a typed message still at work.
+    private func takeCaption() -> Bool {
+        !(mode == "text" && !isCaption && (pending || phase == .thinking || phase == .answering))
+    }
+
     /// The voice conversation ended: the caption stops showing on its own, all of it shown, and
     /// is kept for hover or always-show (#224).
     public mutating func conversationEnded() {
+        awaitsFinal = false // a streamed reply cut short gets no final words (#253)
         guard isCaption else { return }
         captionLive = false
         if phase == .answering {

@@ -489,6 +489,10 @@ final class EngineCoordinator {
         case .transcript(let role, let text):
             Self.log.info("\(role, privacy: .public): \(text, privacy: .private)")
             roster?.caption(role: role, text: text)
+        case .heard(let text):
+            roster?.heard(text)
+        case .saying(let text):
+            roster?.saying(text)
         case .metrics(let json):
             Self.metricsLog.notice("\(json, privacy: .public)")
         case .tray:
@@ -525,8 +529,8 @@ final class EngineCoordinator {
             roster?.focusChat()
         case .replyMode(let mode):
             roster?.apply(mode: mode)
-        case .captions(let always, let secs):
-            roster?.apply(captions: always, dismissSecs: secs)
+        case .captions(let always, let secs, let fade):
+            roster?.apply(captions: always, dismissSecs: secs, fadeSecs: fade)
         case .showPane(let r):
             bubble?.showPane(r)
         case .focusPlan(let plan):

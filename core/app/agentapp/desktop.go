@@ -130,7 +130,7 @@ func call(f func()) {
 // ---------- echo.rs ----------
 
 // EchoTail: user words this soon after Pixie stopped speaking are still treated as possible echo.
-const EchoTail = 1500 * time.Millisecond
+const EchoTail = voice.EchoTail
 
 // EchoGate (defence in depth): Pixie's own speech, picked up by the mic and transcribed as the
 // user's words, must never reach the delegation controller (where it could say a confirm

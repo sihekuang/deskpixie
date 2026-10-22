@@ -142,6 +142,47 @@ func TestTranscriptsForBothSides(t *testing.T) {
 		voice.Event{Kind: voice.EvTranscript, Role: "user", Text: "two plus two"})
 }
 
+// #251: each piece of an utterance's transcript reports the words so far, per item, for the
+// live caption; completed still gives the one final transcript and starts the item afresh.
+func TestTheUsersWordsAreHeardAsTheyCome(t *testing.T) {
+	d := &decoder{}
+	delta := func(item, text string) []voice.Event {
+		return d.decode([]byte(`{"type":"conversation.item.input_audio_transcription.delta","item_id":"` + item + `","content_index":0,"delta":"` + text + `"}`))
+	}
+	evEq(t, delta("i", "two"), voice.Event{Kind: voice.EvUserHeard, Text: "two"})
+	evEq(t, delta("i", " plus two"), voice.Event{Kind: voice.EvUserHeard, Text: "two plus two"})
+	evEq(t, delta("i", " "))
+	evEq(t, delta("j", "and"), voice.Event{Kind: voice.EvUserHeard, Text: "and"})
+	evEq(t, d.decode([]byte(`{"type":"conversation.item.input_audio_transcription.completed","item_id":"i","content_index":0,"transcript":"two plus two"}`)),
+		voice.Event{Kind: voice.EvTranscript, Role: "user", Text: "two plus two"})
+	evEq(t, delta("i", "again"), voice.Event{Kind: voice.EvUserHeard, Text: "again"})
+	// A space on its own is kept for the next word.
+	delta("k", "hello")
+	evEq(t, delta("k", " "))
+	evEq(t, delta("k", "world"), voice.Event{Kind: voice.EvUserHeard, Text: "hello world"})
+	// A failed transcription starts its item afresh too.
+	d.decode([]byte(`{"type":"conversation.item.input_audio_transcription.failed","item_id":"k","content_index":0}`))
+	evEq(t, delta("k", "anew"), voice.Event{Kind: voice.EvUserHeard, Text: "anew"})
+}
+
+// #253: each piece of Pixie's reply transcript reports its words so far; done still gives the
+// one final transcript and starts the next reply afresh.
+func TestPixiesWordsAreSaidAsTheyCome(t *testing.T) {
+	d := &decoder{}
+	delta := func(text string) []voice.Event {
+		return d.decode([]byte(`{"type":"response.output_audio_transcript.delta","item_id":"a","content_index":0,"delta":"` + text + `"}`))
+	}
+	evEq(t, delta("Four"), voice.Event{Kind: voice.EvAssistantSaying, Text: "Four"})
+	evEq(t, delta(" "))
+	evEq(t, delta("it is!"), voice.Event{Kind: voice.EvAssistantSaying, Text: "Four it is!"})
+	evEq(t, d.decode([]byte(`{"type":"response.output_audio_transcript.done","item_id":"a","transcript":"Four it is!"}`)),
+		voice.Event{Kind: voice.EvTranscript, Role: "assistant", Text: "Four it is!"})
+	evEq(t, delta("Next"), voice.Event{Kind: voice.EvAssistantSaying, Text: "Next"})
+	// A cut-off reply never sends done: the next response starts afresh all the same.
+	d.decode([]byte(`{"type":"response.created","response":{"id":"r2","status":"in_progress"}}`))
+	evEq(t, delta("Fresh"), voice.Event{Kind: voice.EvAssistantSaying, Text: "Fresh"})
+}
+
 func TestResponseDoneEmitsToolCallsFirst(t *testing.T) {
 	d := &decoder{}
 	d.decode([]byte(`{"type":"response.created","response":{"id":"r","status":"in_progress"}}`))

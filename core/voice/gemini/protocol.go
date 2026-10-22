@@ -397,6 +397,17 @@ func (c *codec) serverContent(sc any, out []voice.Event) []voice.Event {
 			c.userHeardAt = c.now
 		}
 		c.userText.WriteString(t)
+		if strings.TrimSpace(t) != "" && !late { // a late scrap would cover Pixie's reply
+			out = append(out, voice.Event{Kind: voice.EvUserHeard, Text: strings.TrimSpace(c.userText.String())})
+		}
+	}
+	// The live caption only (#251): a speculative hypothesis of what is being said now, after
+	// the words already final. Turns and the final transcript come from inputTranscription.
+	if t, ok := str(get(sc, "interimInputTranscription", "text")); ok && strings.TrimSpace(t) != "" {
+		if late := !c.closedAt.IsZero() && c.now.Sub(c.closedAt) < lateTranscriptGrace; !late {
+			heard := strings.TrimSpace(strings.TrimSpace(c.userText.String()) + " " + strings.TrimSpace(t))
+			out = append(out, voice.Event{Kind: voice.EvUserHeard, Text: heard})
+		}
 	}
 	if parts, ok := get(sc, "modelTurn", "parts").([]any); ok {
 		for _, part := range parts {
@@ -429,6 +440,9 @@ func (c *codec) serverContent(sc any, out []voice.Event) []voice.Event {
 	if t, ok := str(get(sc, "outputTranscription", "text")); ok && c.mute == muteOff {
 		out = c.openResponse(out)
 		c.assistantText.WriteString(t)
+		if strings.TrimSpace(t) != "" {
+			out = append(out, voice.Event{Kind: voice.EvAssistantSaying, Text: strings.TrimSpace(c.assistantText.String())})
+		}
 	}
 	if get(sc, "turnComplete") == true {
 		// An Inject that came too late to interrupt anything: the next interrupt is the user's.

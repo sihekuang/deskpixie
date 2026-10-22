@@ -40,7 +40,7 @@ func (a *App) registerChat(r Registrar) {
 	r.Register("chat.mode", func(json.RawMessage) (any, error) {
 		cur := a.store.Current()
 		return map[string]any{"mode": cur.ReplyMode, "alwaysShowCaption": cur.AlwaysShowCaption,
-			"captionDismissSecs": cur.CaptionDismissSecs}, nil
+			"captionDismissSecs": cur.CaptionDismissSecs, "captionFadeSecs": cur.CaptionFadeSecs}, nil
 	})
 }
 

@@ -64,7 +64,7 @@ func TestChatStopCallsTheAgent(t *testing.T) {
 func TestChatModeReportsTheSettingAndTheAgentStartsInIt(t *testing.T) {
 	f := &fakeAgent{tray: AgentTray{Enabled: true}}
 	h := newHarness(t, withAgent(f), withSettings(func(c *settings.Config) { c.ReplyMode = settings.ReplyText }))
-	if out := h.call("chat.mode", nil); string(out) != `{"alwaysShowCaption":false,"captionDismissSecs":120,"mode":"text"}` {
+	if out := h.call("chat.mode", nil); string(out) != `{"alwaysShowCaption":false,"captionDismissSecs":120,"captionFadeSecs":4,"mode":"text"}` {
 		t.Fatal(string(out))
 	}
 	if !slices.Equal(f.textModes, []bool{true}) {
@@ -106,7 +106,7 @@ func TestSwitchingReplyModeTellsTheAgentAndTheShell(t *testing.T) {
 	if !slices.Equal(f.textModes, []bool{false, true}) {
 		t.Fatal(f.textModes)
 	}
-	if out := h.call("chat.mode", nil); string(out) != `{"alwaysShowCaption":false,"captionDismissSecs":120,"mode":"text"}` {
+	if out := h.call("chat.mode", nil); string(out) != `{"alwaysShowCaption":false,"captionDismissSecs":120,"captionFadeSecs":4,"mode":"text"}` {
 		t.Fatal(string(out))
 	}
 }
@@ -127,11 +127,13 @@ func TestAlwaysShowCaptionTellsTheShell(t *testing.T) {
 	if s := h.set("alwaysShowCaption", true); s.SetError != nil && string(s.SetError) != "null" {
 		t.Fatal(string(s.SetError))
 	}
-	h.waitFor("captions", func(e event) bool { return e["always"] == true && e["dismissSecs"] == float64(120) }, time.Second)
+	h.waitFor("captions", func(e event) bool {
+		return e["always"] == true && e["dismissSecs"] == float64(120) && e["fadeSecs"] == float64(4)
+	}, time.Second)
 	if len(f.textModes) != 1 {
 		t.Fatal("the agent was told again:", f.textModes)
 	}
-	if out := h.call("chat.mode", nil); string(out) != `{"alwaysShowCaption":true,"captionDismissSecs":120,"mode":"voice"}` {
+	if out := h.call("chat.mode", nil); string(out) != `{"alwaysShowCaption":true,"captionDismissSecs":120,"captionFadeSecs":4,"mode":"voice"}` {
 		t.Fatal(string(out))
 	}
 }

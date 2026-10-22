@@ -49,8 +49,13 @@ func withFacts(instructions, facts string) string {
 // drops frames (counted by MicDrops) rather than block the audio thread.
 const micQueueFrames = 32
 
+// EchoTail: user words this soon after Pixie stopped speaking may still be Pixie's own voice
+// coming back through the mic.
+const EchoTail = 1500 * time.Millisecond
+
 // UIEvent is what the runtime tells the app. Kinds: "state", "mouth", "mic", "status",
-// "transcript", "error", "metrics".
+// "transcript", "heard" (the user's words so far, #251), "saying" (Pixie's, #253), "error",
+// "metrics".
 type UIEvent struct {
 	Kind  string `json:"kind"`
 	State string `json:"state,omitempty"`
@@ -225,6 +230,8 @@ type Runtime struct {
 	conv          *Conversation
 	meter         *MouthMeter
 	mouth         int
+	mouthEnded    time.Time // when the mouth last closed: echo may follow (EchoTail)
+	quietTurn     bool      // the user's turn started while Pixie was quiet: its words are theirs
 	session       Session
 	events        <-chan Event
 	gen           uint64 // incremented on every Connect; results of older attempts are closed
@@ -558,6 +565,18 @@ func (r *Runtime) run() {
 				continue
 			}
 			switch {
+			case ev.Kind == EvUserHeard:
+				// The live caption only (#251): the conversation acts on the final transcript.
+				// Words heard while Pixie speaks, or just after, may be its own voice: not shown.
+				if r.admitsHeard(time.Now()) {
+					r.emit(UIEvent{Kind: "heard", Text: ev.Text})
+				}
+				continue
+			case ev.Kind == EvAssistantSaying:
+				r.emit(UIEvent{Kind: "saying", Text: ev.Text}) // the caption while Pixie speaks (#253)
+				continue
+			case ev.Kind == EvSpeechStarted:
+				r.userStarted(time.Now())
 			case ev.Kind == EvTranscript:
 				if debugEnabled() {
 					log.Printf("[voice] %s: %s", ev.Role, ev.Text)
@@ -567,6 +586,9 @@ func (r *Runtime) run() {
 					who = "pixie"
 				}
 				r.cfg.Log.Printf("%s: %s", who, ev.Text)
+				if ev.Role == "user" {
+					r.userDone()
+				}
 				r.emit(UIEvent{Kind: "transcript", Role: ev.Role, Text: ev.Text})
 			case ev.Kind == EvError && !ev.Fatal:
 				log.Printf("voice: model warning: %s", ev.Message)
@@ -879,6 +901,27 @@ func (r *Runtime) invokeTool(callID, name string, args json.RawMessage) {
 	go func() { deliver(tool.Invoke(ctx, args)) }()
 }
 
+// userStarted: the user's turn began; begun while Pixie was quiet, its words are theirs even
+// when they come once Pixie is answering (OpenAI Realtime transcribes a turn after it ends).
+func (r *Runtime) userStarted(now time.Time) { r.quietTurn = !r.echoing(now) }
+
+// userDone: the user's final words for the turn are in; heard words after them may be echo.
+func (r *Runtime) userDone() { r.quietTurn = false }
+
+// mouthClosed: Pixie's audible reply ended; what is heard next may be its echo.
+func (r *Runtime) mouthClosed(now time.Time) {
+	r.mouthEnded = now
+	r.quietTurn = false
+}
+
+// admitsHeard: heard words show, unless they may be Pixie's own voice coming back (#251).
+func (r *Runtime) admitsHeard(now time.Time) bool { return r.quietTurn || !r.echoing(now) }
+
+// echoing: Pixie is audibly speaking, or stopped less than EchoTail ago.
+func (r *Runtime) echoing(now time.Time) bool {
+	return r.mouth > 0 || (!r.mouthEnded.IsZero() && now.Sub(r.mouthEnded) < EchoTail)
+}
+
 func (r *Runtime) updateMouth() {
 	level := 0
 	if r.conv.Phase() == PhaseSpeaking {
@@ -887,6 +930,9 @@ func (r *Runtime) updateMouth() {
 		r.meter.Reset()
 	}
 	if level != r.mouth {
+		if level == 0 && r.mouth > 0 {
+			r.mouthClosed(time.Now())
+		}
 		r.mouth = level
 		r.emit(UIEvent{Kind: "mouth", Level: level})
 	}

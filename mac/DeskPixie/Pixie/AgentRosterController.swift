@@ -47,6 +47,8 @@ final class AgentRosterController {
     static let captionInterval: TimeInterval = 0.3
     static let captionLinger: TimeInterval = 3
     private var captionHide: Timer?
+    /// Redraws when the earlier bubble starts to fade and when it's gone (#254).
+    private var earlierTimer: Timer?
     /// The attachments waiting for the next request (#240), and Cmd-V while the box is open.
     private var attach: AttachmentsController!
     private var pasteMonitor: Any?
@@ -148,10 +150,12 @@ final class AgentRosterController {
         render()
     }
 
-    /// The always-show switch and the put-away time (the `captions` event or the first read, #224).
-    func apply(captions always: Bool, dismissSecs: Int) {
+    /// The always-show switch, the put-away time and the earlier bubble's fade time (the
+    /// `captions` event or the first read, #224, #254).
+    func apply(captions always: Bool, dismissSecs: Int, fadeSecs: Int) {
         alwaysCaption = always
         self.dismissSecs = dismissSecs
+        chat.fadeSecs = fadeSecs
         render()
     }
 
@@ -170,6 +174,31 @@ final class AgentRosterController {
         render()
     }
 
+    /// Your words so far while you talk (#251): shown at once, over Pixie's last reply. Not once
+    /// the conversation has closed: they would keep the caption up for good.
+    func heard(_ text: String) {
+        guard conversationOpen, chat.heard(text) else { return }
+        captionHide?.invalidate()
+        captionHide = nil
+        typeTimer?.invalidate()
+        typeTimer = nil
+        render()
+    }
+
+    /// Pixie's words so far while it speaks (#253): shown at once, as they come. Not once the
+    /// conversation has closed, as for `heard`.
+    func saying(_ text: String) {
+        guard conversationOpen, chat.saying(text) else { return }
+        captionHide?.invalidate()
+        captionHide = nil
+        typeTimer?.invalidate()
+        typeTimer = nil
+        render()
+    }
+
+    /// A voice conversation is open (`conversation(open:)`).
+    private var conversationOpen = false
+
     /// What Pixie said aloud (#224): a caption where the text box goes (voice mode: on its own).
     func caption(role: String, text: String) {
         guard chat.caption(role: role, text: text) else { return }
@@ -183,6 +212,7 @@ final class AgentRosterController {
 
     /// The voice conversation opened or ended (the mic): an ended one's caption goes a moment later.
     func conversation(open: Bool) {
+        conversationOpen = open
         captionHide?.invalidate()
         captionHide = nil
         guard !open else { return }
@@ -209,6 +239,7 @@ final class AgentRosterController {
             guard let self, let reply = reply ?? nil else { return }
             self.alwaysCaption = reply.alwaysShowCaption ?? false
             self.dismissSecs = reply.captionDismissSecs ?? 120
+            self.chat.fadeSecs = reply.captionFadeSecs ?? 4
             self.apply(mode: reply.mode)
         }
     }
@@ -406,6 +437,24 @@ final class AgentRosterController {
     private func render() {
         setRoot()
         layout()
+        scheduleEarlier()
+    }
+
+    /// The earlier bubble fades `fadeSecs` after it moved up, then goes: redraw at each step.
+    private func scheduleEarlier() {
+        earlierTimer?.invalidate()
+        earlierTimer = nil
+        guard let earlier = chat.earlier else { return }
+        let fadeAt = earlier.at.addingTimeInterval(TimeInterval(chat.fadeSecs))
+        let next: Date
+        switch chat.earlierPhase(now: Date()) {
+        case .shown: next = fadeAt
+        case .fading: next = fadeAt.addingTimeInterval(QuickChatModel.fadeDuration)
+        case .gone: return
+        }
+        earlierTimer = Timer.scheduledTimer(withTimeInterval: max(0.05, next.timeIntervalSinceNow), repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.render() }
+        }
     }
 
     private func setRoot() {
@@ -422,6 +471,7 @@ final class AgentRosterController {
             },
             onRow: { [weak self] in self?.clicked($0) },
             chat: chat, chatState: chatState, captionCard: captionCard, ago: agoShown,
+            earlier: chat.earlier, earlierPhase: chat.earlierPhase(now: Date()),
             onMode: { [weak self] in self?.pick($0) },
             onSend: { [weak self] in self?.send() },
             onStop: { [weak self] in self?.stopChat() },
@@ -501,6 +551,7 @@ final class AgentRosterController {
         var mode: String
         var alwaysShowCaption: Bool?
         var captionDismissSecs: Int?
+        var captionFadeSecs: Int?
     }
     private struct SendArgs: Encodable, Sendable { let text: String }
     private struct SendReply: Decodable { var job: String }
