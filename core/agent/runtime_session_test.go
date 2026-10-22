@@ -2,9 +2,11 @@ package agent_test
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	. "github.com/sihekuang/deskpixie/core/agent"
 	"github.com/sihekuang/deskpixie/core/agent/agenttest"
@@ -108,6 +110,54 @@ func TestAMessageThatPushesOrMergesAsksFirst(t *testing.T) {
 	}
 	if p := user.Prompts(); len(p) != 1 || !strings.Contains(p[0].Text, "merge it") {
 		t.Fatalf("%+v", p)
+	}
+}
+
+// #246: the coordinator's tool call gives up after about a minute, so a confirm that takes longer
+// is answered at once (not sent yet, don't send again) and the message goes out when you confirm.
+func TestAMessageWaitingOnYourConfirmIsAnsweredInTimeAndSentWhenYouConfirm(t *testing.T) {
+	r, user := pixRig(t)
+	SetConfirmWaitForTest(r.h, 100*time.Millisecond)
+	reply := messageCall(r, "Go ahead and git push.")
+	got := <-reply
+	v, _ := got.Value.(map[string]any)
+	if got.Err != nil || v["status"] != "awaiting_confirmation" || !strings.Contains(fmt.Sprint(v["note"]), "Don't call it again") {
+		t.Fatalf("%+v", got)
+	}
+	if len(user.Prompts()) != 0 {
+		t.Fatal("sent before you confirmed")
+	}
+	r.h.Voice(VoiceSignal{Kind: voice.SigUserSaid, Text: "confirm hawk"})
+	if !eventually(func() bool { return len(user.Prompts()) == 1 }) {
+		t.Fatalf("not sent once you confirmed: %+v", user.Prompts())
+	}
+}
+
+func TestClosingWaitsOnALateConfirmAndClosesOnceYouConfirm(t *testing.T) {
+	r, user := pixRig(t)
+	SetConfirmWaitForTest(r.h, 100*time.Millisecond)
+	got := <-closeCall(r)
+	if v, _ := got.Value.(map[string]any); got.Err != nil || v["status"] != "awaiting_confirmation" {
+		t.Fatalf("%+v", got)
+	}
+	if _, ok := user.StatusOf("focus-claude"); !ok {
+		t.Fatal("closed before you confirmed")
+	}
+	r.h.Voice(VoiceSignal{Kind: voice.SigUserSaid, Text: "confirm hawk"})
+	if !eventually(func() bool { _, ok := user.StatusOf("focus-claude"); return !ok }) {
+		t.Fatal("not closed once you confirmed")
+	}
+}
+
+func TestNoToALateConfirmKeepsTheMessageUnsent(t *testing.T) {
+	r, user := pixRig(t)
+	SetConfirmWaitForTest(r.h, 100*time.Millisecond)
+	<-messageCall(r, "Go ahead and git push.")
+	r.h.Voice(VoiceSignal{Kind: voice.SigUserSaid, Text: "no hawk"})
+	settle()
+	settle()
+	if len(user.Prompts()) != 0 {
+		t.Fatal("sent although you said no")
 	}
 }
 

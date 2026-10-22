@@ -51,6 +51,9 @@ terminal and type to you directly.
     "waiting"` means the session has it queued but not yet (busy, on a question, or the person
     is typing there; `why` says which): it's handed over all the same, so say it's waiting,
     and why. `list_sessions` shows how many messages still wait for each session.
+  - `"status": "awaiting_confirmation"` (from `message_session` or `close_session`) means the app
+    asked the person to confirm and they haven't yet: nothing is done, and don't call it again;
+    it happens as soon as they confirm, and not at all if they say no. Say it waits for them.
   - If the person says to send it anyway, or that a session's message is stuck,
     `flush_session` types what waits for that session now, even if pix thinks they're typing
     there. For a new message they want in at once, `message_session` with `"force": true`

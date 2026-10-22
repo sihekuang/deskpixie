@@ -428,6 +428,17 @@ var negators = map[string]bool{"not": true, "no": true, "never": true, "dont": t
 // affirmers after a negator undo it: "don't forget to push" asks for the push.
 var affirmers = map[string]bool{"forget": true, "hesitate": true, "fail": true, "neglect": true}
 
+// firstPerson words are the sender as the subject: "I merged it", "we're pushing" report the
+// sender's own step, not one asked of the session (#246).
+var firstPerson = map[string]bool{"i": true, "i'm": true, "i've": true, "i'll": true, "i'd": true,
+	"we": true, "we're": true, "we've": true, "we'll": true, "we'd": true}
+
+// youWords make a clause about the session: "I want you to merge" still asks.
+var youWords = map[string]bool{"you": true, "you're": true, "you've": true, "you'll": true, "you'd": true}
+
+// leadIns start a step named by its -ing form: "before merging I merged main" is the sender's.
+var leadIns = map[string]bool{"before": true, "after": true, "while": true}
+
 // negationEnds start a new instruction inside a clause: "don't wait, just push".
 var negationEnds = map[string]bool{"but": true, "then": true, "just": true, "instead": true}
 
@@ -464,11 +475,18 @@ func GatedActions(text string) []string {
 		if c.question && asksWhereThingsStand(words) {
 			continue
 		}
+		mine, yours := false, false
+		for _, w := range words {
+			mine, yours = mine || firstPerson[w], yours || youWords[w]
+		}
 		negated := false
 		for i, w := range words {
-			prev, next := "", ""
+			prev, prev2, next := "", "", ""
 			if i > 0 {
 				prev = words[i-1]
+			}
+			if i > 1 {
+				prev2 = words[i-2]
 			}
 			if i+1 < len(words) {
 				next = words[i+1]
@@ -482,7 +500,10 @@ func GatedActions(text string) []string {
 			case negationEnds[w]:
 				negated = false
 			}
-			if base, ok := gatedForms[w]; ok && !negated && !slices.Contains(out, base) {
+			// The sender's own step (#246): "I pushed", "I just pushed", "before merging I …".
+			reported := firstPerson[prev] || firstPerson[prev2] && !youWords[prev] ||
+				leadIns[prev] && strings.HasSuffix(w, "ing") && mine && !yours
+			if base, ok := gatedForms[w]; ok && !negated && !reported && !slices.Contains(out, base) {
 				out = append(out, base)
 			}
 		}

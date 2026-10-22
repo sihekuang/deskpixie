@@ -43,6 +43,13 @@ func TestGatedActions(t *testing.T) {
 		{"Do the merge.", []string{"merge"}},
 		{"How about you merge it?", []string{"merge"}},
 		{"When can you push?", []string{"push"}},
+		// #246: the sender reporting their own step asks the session for nothing.
+		{"Heads-up: PR #243 is now merged into main. Before merging I merged main into your branch. Pull main before you change anything else.", nil},
+		{"I pushed the fix to origin, so pull before you start.", nil},
+		{"We're merging it here now; don't push to that branch meanwhile.", nil},
+		{"I'll deploy it myself tonight.", nil},
+		{"I want you to merge it.", []string{"merge"}},
+		{"I merged main; now push your branch.", []string{"push"}},
 	} {
 		if got := GatedActions(tc.text); !slices.Equal(got, tc.want) {
 			t.Errorf("GatedActions(%q) = %q, want %q", tc.text, got, tc.want)

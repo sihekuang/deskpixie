@@ -1,6 +1,9 @@
 package agent
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // Test-only views of runtime internals (Rust's tests reach these as pub(crate)).
 
@@ -22,3 +25,6 @@ func ExistingUserSessionsForTest(ctx context.Context, host SessionHost, repoFold
 func ExistingSessionMessageForTest(matches []AgentInfo, repoFolder string) string {
 	return existingSessionMessage(matches, repoFolder)
 }
+
+// SetConfirmWaitForTest shortens how long a session tool waits for a confirm before it answers.
+func SetConfirmWaitForTest(h *AgentHandle, d time.Duration) { h.confirmWait = d }
