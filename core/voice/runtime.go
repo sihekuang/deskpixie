@@ -54,7 +54,8 @@ const micQueueFrames = 32
 const EchoTail = 1500 * time.Millisecond
 
 // UIEvent is what the runtime tells the app. Kinds: "state", "mouth", "mic", "status",
-// "transcript", "heard" (the user's words so far, #251), "error", "metrics".
+// "transcript", "heard" (the user's words so far, #251), "saying" (Pixie's, #253), "error",
+// "metrics".
 type UIEvent struct {
 	Kind  string `json:"kind"`
 	State string `json:"state,omitempty"`
@@ -570,6 +571,9 @@ func (r *Runtime) run() {
 				if r.admitsHeard(time.Now()) {
 					r.emit(UIEvent{Kind: "heard", Text: ev.Text})
 				}
+				continue
+			case ev.Kind == EvAssistantSaying:
+				r.emit(UIEvent{Kind: "saying", Text: ev.Text}) // the caption while Pixie speaks (#253)
 				continue
 			case ev.Kind == EvSpeechStarted:
 				r.userStarted(time.Now())

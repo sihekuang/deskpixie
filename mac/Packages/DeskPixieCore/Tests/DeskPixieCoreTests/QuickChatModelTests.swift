@@ -246,12 +246,43 @@ final class QuickChatModelTests: XCTestCase {
         XCTAssertEqual(m.shown, "Rain tomorrow.")
     }
 
+    /// #253: Pixie's words show as it says them, all at once, replacing yours; its final
+    /// transcript then completes them without typing them out again.
+    func test_pixies_words_show_as_it_speaks() {
+        var m = QuickChatModel()
+        m.heard("what's the weather?")
+        XCTAssertTrue(m.saying("It's"))
+        XCTAssertFalse(m.isYou)
+        XCTAssertTrue(m.showsCaption)
+        XCTAssertEqual(m.shown, "It's")
+        XCTAssertTrue(m.saying("It's sunny"))
+        XCTAssertEqual(m.shown, "It's sunny")
+        XCTAssertFalse(m.tick(), "nothing to type out")
+        XCTAssertTrue(m.caption(role: "assistant", text: "It's sunny today."))
+        XCTAssertEqual(m.shown, "It's sunny today.")
+        XCTAssertEqual(m.phase, .done)
+    }
+
+    /// You talk again before Pixie's final transcript comes: it doesn't cover your words.
+    func test_pixies_late_final_words_dont_cover_yours() {
+        var m = QuickChatModel()
+        m.saying("It's sunny")
+        m.heard("and tomorrow?")
+        XCTAssertFalse(m.caption(role: "assistant", text: "It's sunny today."))
+        XCTAssertTrue(m.isYou)
+        XCTAssertEqual(m.shown, "and tomorrow?")
+        // The next reply that isn't streamed is typed out as before.
+        XCTAssertTrue(m.caption(role: "assistant", text: "Rain."))
+        XCTAssertEqual(m.shown, "")
+    }
+
     /// Text mode: your spoken words never cover a typed message still at work.
     func test_text_mode_keeps_a_typed_message_over_your_words() {
         var m = QuickChatModel()
         m.mode = "text"
         m.sending()
         XCTAssertFalse(m.heard("hello"))
+        XCTAssertFalse(m.saying("Hi"))
         XCTAssertFalse(m.isYou)
     }
 

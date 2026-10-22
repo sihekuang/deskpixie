@@ -50,11 +50,13 @@ func kinds(evs []voice.Event) []voice.EventKind {
 	return out
 }
 
-// wantKinds skips EvUserHeard, the live caption's words so far (#251):
-// TestTheUsersWordsAreHeardAsTheyCome checks those.
+// wantKinds skips EvUserHeard and EvAssistantSaying, the live caption's words so far (#251,
+// #253): TestTheUsersWordsAreHeardAsTheyCome and TestPixiesWordsAreSaidAsTheyCome check those.
 func wantKinds(t *testing.T, evs []voice.Event, want ...voice.EventKind) {
 	t.Helper()
-	got := slices.DeleteFunc(kinds(evs), func(k voice.EventKind) bool { return k == voice.EvUserHeard })
+	got := slices.DeleteFunc(kinds(evs), func(k voice.EventKind) bool {
+		return k == voice.EvUserHeard || k == voice.EvAssistantSaying
+	})
 	if len(got) != len(want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
@@ -435,5 +437,30 @@ func TestTheUsersWordsAreHeardAsTheyCome(t *testing.T) {
 	}
 	if got := heardTexts(c.decode(inText(" "), at(300))); got != nil {
 		t.Fatal("nothing new heard:", got)
+	}
+}
+
+func TestPixiesWordsAreSaidAsTheyCome(t *testing.T) {
+	c := newCodec()
+	out := func(t string) []byte {
+		return msg(map[string]any{"type": "session.output_transcript.delta", "delta": t})
+	}
+	said := func(evs []voice.Event) []string {
+		var got []string
+		for _, e := range evs {
+			if e.Kind == voice.EvAssistantSaying {
+				got = append(got, e.Text)
+			}
+		}
+		return got
+	}
+	if got := said(c.decode(out("It's"), at(100))); !slices.Equal(got, []string{"It's"}) {
+		t.Fatal(got)
+	}
+	if got := said(c.decode(out(" sunny"), at(200))); !slices.Equal(got, []string{"It's sunny"}) {
+		t.Fatal(got)
+	}
+	if got := said(c.decode(out(" "), at(300))); got != nil {
+		t.Fatal("nothing new said:", got)
 	}
 }

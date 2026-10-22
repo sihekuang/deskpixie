@@ -90,8 +90,8 @@ func show(evs []voice.Event) []string {
 			out = append(out, eAudio(e.Audio...))
 		case voice.EvTranscript:
 			out = append(out, "Transcript "+e.Role+": "+e.Text)
-		case voice.EvUserHeard:
-			// The live caption's words so far (#251): TestTheUsersWordsAreHeardAsTheyCome.
+		case voice.EvUserHeard, voice.EvAssistantSaying:
+			// The live caption's words so far (#251, #253): their own tests below.
 		case voice.EvToolCall:
 			out = append(out, eTool(e.CallID, e.ToolName, string(e.Args)))
 		case voice.EvError:
@@ -337,6 +337,38 @@ func TestAnInterimHypothesisIsHeardAfterTheFinalWords(t *testing.T) {
 		t.Fatal("nothing new heard:", got)
 	}
 	want(t, c.decode(turnComplete), eUser("What's two plus two?"))
+}
+
+// sayingTexts are the EvAssistantSaying texts in evs: Pixie's words so far (#253).
+func sayingTexts(evs []voice.Event) []string {
+	var out []string
+	for _, e := range evs {
+		if e.Kind == voice.EvAssistantSaying {
+			out = append(out, e.Text)
+		}
+	}
+	return out
+}
+
+// #253: each piece of Pixie's reply transcript reports its words so far, for the caption while
+// Pixie speaks; the reply still ends with the one final transcript.
+func TestPixiesWordsAreSaidAsTheyCome(t *testing.T) {
+	c := ready(t)
+	c.decode(audioMsg([]int16{5}))
+	if got := sayingTexts(c.decode(`{"serverContent":{"outputTranscription":{"text":"Four"}}}`)); !reflect.DeepEqual(got, []string{"Four"}) {
+		t.Fatal(got)
+	}
+	if got := sayingTexts(c.decode(`{"serverContent":{"outputTranscription":{"text":" it is!"}}}`)); !reflect.DeepEqual(got, []string{"Four it is!"}) {
+		t.Fatal(got)
+	}
+	if got := sayingTexts(c.decode(`{"serverContent":{"outputTranscription":{"text":" "}}}`)); got != nil {
+		t.Fatal("nothing new said:", got)
+	}
+	want(t, c.decode(turnComplete), eAssistant("Four it is!"), eDone)
+	c.decode(audioMsg([]int16{5}))
+	if got := sayingTexts(c.decode(`{"serverContent":{"outputTranscription":{"text":"Next"}}}`)); !reflect.DeepEqual(got, []string{"Next"}) {
+		t.Fatal("the next reply starts afresh:", got)
+	}
 }
 
 // #251 review: a late scrap of the last turn's words is not heard: it would cover Pixie's reply.

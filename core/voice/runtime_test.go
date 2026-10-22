@@ -409,6 +409,14 @@ func TestHeardWordsOfATurnStartedInQuietShowWhilePixieAnswers(t *testing.T) {
 	}
 }
 
+// #253: Pixie's words so far go to the caption as they come.
+func TestRuntimeSayingWordsAreEmitted(t *testing.T) {
+	r, m, ui := newTestRuntime(t, "sk-test")
+	startListening(t, r, m, ui)
+	m.sess.events <- Event{Kind: EvAssistantSaying, Text: "It's sun"}
+	eventually(t, "saying", func() bool { return ui.has(UIEvent{Kind: "saying", Text: "It's sun"}) })
+}
+
 func TestRuntimeHotkeyAgainEndsAndClosesSession(t *testing.T) {
 	r, m, ui := newTestRuntime(t, "sk-test")
 	startListening(t, r, m, ui)

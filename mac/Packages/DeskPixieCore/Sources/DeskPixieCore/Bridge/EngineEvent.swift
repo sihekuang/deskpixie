@@ -65,6 +65,8 @@ public enum EngineEvent: Sendable, Equatable {
     case transcript(role: String, text: String)
     /// The user's words so far while they talk (#251), for the live caption.
     case heard(String)
+    /// Pixie's words so far while it speaks (#253), for the caption.
+    case saying(String)
     case error(String)
     case mic(start: Bool)
     case metrics(String)
@@ -132,7 +134,7 @@ public enum EngineEvent: Sendable, Equatable {
         guard let k = try? dec.decode(Kind.self, from: json) else { return nil }
         func get<T: Decodable>(_: T.Type) -> T? { try? dec.decode(T.self, from: json) }
         switch k.kind {
-        case "state", "mouth", "status", "transcript", "heard", "error", "mic", "metrics":
+        case "state", "mouth", "status", "transcript", "heard", "saying", "error", "mic", "metrics":
             guard let w = get(Voice.self) else { return nil }
             switch k.kind {
             case "state": return .state(w.state ?? "")
@@ -140,6 +142,7 @@ public enum EngineEvent: Sendable, Equatable {
             case "status": return .status(w.text ?? "")
             case "transcript": return .transcript(role: w.role ?? "", text: w.text ?? "")
             case "heard": return .heard(w.text ?? "")
+            case "saying": return .saying(w.text ?? "")
             case "error": return .error(w.text ?? "")
             case "mic": return .mic(start: w.text == "start")
             default: return .metrics(w.text ?? "")

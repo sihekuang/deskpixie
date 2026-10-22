@@ -181,6 +181,17 @@ final class AgentRosterController {
         render()
     }
 
+    /// Pixie's words so far while it speaks (#253): shown at once, as they come. Not once the
+    /// conversation has closed, as for `heard`.
+    func saying(_ text: String) {
+        guard conversationOpen, chat.saying(text) else { return }
+        captionHide?.invalidate()
+        captionHide = nil
+        typeTimer?.invalidate()
+        typeTimer = nil
+        render()
+    }
+
     /// A voice conversation is open (`conversation(open:)`).
     private var conversationOpen = false
 

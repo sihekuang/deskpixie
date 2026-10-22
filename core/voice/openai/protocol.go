@@ -72,6 +72,8 @@ type decoder struct {
 	pendingByte    []byte // odd trailing byte of the previous delta
 	// heard: each utterance's transcript so far, by item, for the live caption (#251).
 	heard map[string]string
+	// saying: Pixie's reply transcript so far, for the caption while it speaks (#253).
+	saying strings.Builder
 }
 
 func (d *decoder) deltaToPCM(b64 string) ([]int16, bool) {
@@ -132,6 +134,7 @@ func (d *decoder) decode(text []byte) []voice.Event {
 	case "response.created":
 		d.responseActive = true
 		d.currentItem = ""
+		d.saying.Reset() // a cut-off reply may never send its transcript's done
 		d.pendingByte = nil
 		return []voice.Event{{Kind: voice.EvResponseCreated}}
 	case "response.output_audio.delta":
@@ -141,7 +144,14 @@ func (d *decoder) decode(text []byte) []voice.Event {
 			return []voice.Event{{Kind: voice.EvError, Message: "bad audio delta"}}
 		}
 		return []voice.Event{{Kind: voice.EvAudioDelta, Audio: pcm}}
+	case "response.output_audio_transcript.delta":
+		d.saying.WriteString(m.Delta)
+		if strings.TrimSpace(m.Delta) == "" {
+			return nil
+		}
+		return []voice.Event{{Kind: voice.EvAssistantSaying, Text: strings.TrimSpace(d.saying.String())}}
 	case "response.output_audio_transcript.done":
+		d.saying.Reset()
 		return []voice.Event{{Kind: voice.EvTranscript, Role: "assistant", Text: m.Transcript}}
 	case "conversation.item.input_audio_transcription.delta":
 		if d.heard == nil {

@@ -491,6 +491,8 @@ final class EngineCoordinator {
             roster?.caption(role: role, text: text)
         case .heard(let text):
             roster?.heard(text)
+        case .saying(let text):
+            roster?.saying(text)
         case .metrics(let json):
             Self.metricsLog.notice("\(json, privacy: .public)")
         case .tray:

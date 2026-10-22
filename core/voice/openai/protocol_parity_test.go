@@ -165,6 +165,24 @@ func TestTheUsersWordsAreHeardAsTheyCome(t *testing.T) {
 	evEq(t, delta("k", "anew"), voice.Event{Kind: voice.EvUserHeard, Text: "anew"})
 }
 
+// #253: each piece of Pixie's reply transcript reports its words so far; done still gives the
+// one final transcript and starts the next reply afresh.
+func TestPixiesWordsAreSaidAsTheyCome(t *testing.T) {
+	d := &decoder{}
+	delta := func(text string) []voice.Event {
+		return d.decode([]byte(`{"type":"response.output_audio_transcript.delta","item_id":"a","content_index":0,"delta":"` + text + `"}`))
+	}
+	evEq(t, delta("Four"), voice.Event{Kind: voice.EvAssistantSaying, Text: "Four"})
+	evEq(t, delta(" "))
+	evEq(t, delta("it is!"), voice.Event{Kind: voice.EvAssistantSaying, Text: "Four it is!"})
+	evEq(t, d.decode([]byte(`{"type":"response.output_audio_transcript.done","item_id":"a","transcript":"Four it is!"}`)),
+		voice.Event{Kind: voice.EvTranscript, Role: "assistant", Text: "Four it is!"})
+	evEq(t, delta("Next"), voice.Event{Kind: voice.EvAssistantSaying, Text: "Next"})
+	// A cut-off reply never sends done: the next response starts afresh all the same.
+	d.decode([]byte(`{"type":"response.created","response":{"id":"r2","status":"in_progress"}}`))
+	evEq(t, delta("Fresh"), voice.Event{Kind: voice.EvAssistantSaying, Text: "Fresh"})
+}
+
 func TestResponseDoneEmitsToolCallsFirst(t *testing.T) {
 	d := &decoder{}
 	d.decode([]byte(`{"type":"response.created","response":{"id":"r","status":"in_progress"}}`))

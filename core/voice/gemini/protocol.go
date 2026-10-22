@@ -440,6 +440,9 @@ func (c *codec) serverContent(sc any, out []voice.Event) []voice.Event {
 	if t, ok := str(get(sc, "outputTranscription", "text")); ok && c.mute == muteOff {
 		out = c.openResponse(out)
 		c.assistantText.WriteString(t)
+		if strings.TrimSpace(t) != "" {
+			out = append(out, voice.Event{Kind: voice.EvAssistantSaying, Text: strings.TrimSpace(c.assistantText.String())})
+		}
 	}
 	if get(sc, "turnComplete") == true {
 		// An Inject that came too late to interrupt anything: the next interrupt is the user's.

@@ -45,6 +45,9 @@ public struct QuickChatModel: Equatable, Sendable {
     public private(set) var isCaption = false
     /// The caption is your own words (#251), not Pixie's.
     public private(set) var isYou = false
+    /// Pixie's words came as it said them (#253): its final transcript completes them, or, once
+    /// you talk again, leaves your words be.
+    private var awaitsFinal = false
     /// The caption's conversation is still going (it shows on its own until it ends).
     private var captionLive = false
     /// When what is shown was said: the card's "2m ago" (#224).
@@ -98,6 +101,7 @@ public struct QuickChatModel: Equatable, Sendable {
     public mutating func sending() {
         isCaption = false
         isYou = false
+        awaitsFinal = false
         captionLive = false
         saidAt = nil
         job = nil
@@ -118,6 +122,7 @@ public struct QuickChatModel: Equatable, Sendable {
         lastJob = job
         isCaption = false
         isYou = false
+        awaitsFinal = false
         captionLive = false
         if stopPending {
             stopPending = false
@@ -139,6 +144,7 @@ public struct QuickChatModel: Equatable, Sendable {
     public mutating func failedToSend(_ reason: String) {
         isCaption = false
         isYou = false
+        awaitsFinal = false
         captionLive = false
         saidAt = Date()
         job = nil
@@ -162,6 +168,7 @@ public struct QuickChatModel: Equatable, Sendable {
             job = line.job
             isCaption = false
             isYou = false
+            awaitsFinal = false
             captionLive = false
             full = ""
             shown = ""
@@ -195,6 +202,7 @@ public struct QuickChatModel: Equatable, Sendable {
         guard canDismiss else { return }
         isCaption = false
         isYou = false
+        awaitsFinal = false
         captionLive = false
         saidAt = nil
         full = ""
@@ -218,7 +226,17 @@ public struct QuickChatModel: Equatable, Sendable {
     @discardableResult
     public mutating func caption(role: String, text: String, now: Date = Date()) -> Bool {
         let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard role == "assistant", !words.isEmpty, takeCaption() else { return false }
+        guard role == "assistant", !words.isEmpty else { return false }
+        if awaitsFinal {
+            // Already shown as it was said (#253): complete it, unless you have talked since.
+            awaitsFinal = false
+            guard isCaption, !isYou else { return false }
+            full = words
+            shown = words
+            phase = .done
+            return true
+        }
+        guard takeCaption() else { return false }
         isCaption = true
         isYou = false
         captionLive = true
@@ -238,6 +256,24 @@ public struct QuickChatModel: Equatable, Sendable {
         guard !words.isEmpty, takeCaption() else { return false }
         isCaption = true
         isYou = true
+        captionLive = true
+        saidAt = now
+        job = nil
+        full = words
+        shown = words
+        phase = .done
+        return true
+    }
+
+    /// Pixie's words so far while it speaks (#253): they replace the caption at once, with
+    /// nothing to type out; its final transcript completes them. True when they show.
+    @discardableResult
+    public mutating func saying(_ text: String, now: Date = Date()) -> Bool {
+        let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !words.isEmpty, takeCaption() else { return false }
+        isCaption = true
+        isYou = false
+        awaitsFinal = true
         captionLive = true
         saidAt = now
         job = nil
