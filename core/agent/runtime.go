@@ -32,7 +32,7 @@ const (
 	// ConfirmWait: the longest a session tool waits for your confirm before it answers "not sent
 	// yet" (#246); the coordinator's tool call gives up after about a minute, and the host call
 	// (OpLimit) still has to fit.
-	ConfirmWait = 30 * time.Second
+	ConfirmWait = 25 * time.Second
 	// StartOpLimit: the longest a coordinator start may take (server start, the pane-busy
 	// retry and the ready poll).
 	StartOpLimit = 90 * time.Second
@@ -170,8 +170,11 @@ type AgentHandle struct {
 	forceSend bool
 	// confirmWait: ConfirmWait (tests shorten it).
 	confirmWait time.Duration
-	ctx         context.Context
-	cancel      context.CancelFunc
+	// awaiting: session tool calls waiting on your late confirm (#246), so a repeat asks nothing.
+	awaitMu  sync.Mutex
+	awaiting map[string]bool
+	ctx      context.Context
+	cancel   context.CancelFunc
 
 	ctlMu sync.Mutex
 	ctl   *AgentController
@@ -1201,20 +1204,28 @@ func (h *AgentHandle) mcp(agent string, call McpCall) McpReply {
 			call.Force = true
 		}
 		if tool != "" {
+			awaiting := McpReply{Value: map[string]any{"name": call.Name, "status": "awaiting_confirmation", "note": AwaitingConfirmNote}}
+			key := fmt.Sprintf("%v\x00%s\x00%s", call.Kind, call.Name, call.Text)
+			if !h.await(key, true) {
+				return awaiting // already asked; it happens once you confirm
+			}
+			job := h.inFlightJob()
 			d, later, answered := h.confirmSession(call.Name, tool, input)
 			if !answered {
 				// #246: answered before the coordinator's call gives up; done once you confirm.
 				go func() {
+					defer h.await(key, false)
 					select {
 					case d := <-later:
 						if d.Allow {
-							h.runSessionTool(call)
+							h.runLateSessionTool(call, job)
 						}
 					case <-h.ctx.Done():
 					}
 				}()
-				return McpReply{Value: map[string]any{"name": call.Name, "status": "awaiting_confirmation", "note": AwaitingConfirmNote}}
+				return awaiting
 			}
+			h.await(key, false)
 			if !d.Allow {
 				return McpReply{Err: errors.New(d.Message)}
 			}
@@ -1251,6 +1262,52 @@ func (h *AgentHandle) runSessionTool(call McpCall) McpReply {
 	return r
 }
 
+// runLateSessionTool is runSessionTool for a call already answered "awaiting_confirmation"
+// (#246): what it did goes on job, the request then in flight, or to you directly.
+func (h *AgentHandle) runLateSessionTool(call McpCall, job JobID) {
+	ctx, cancel := context.WithTimeout(h.ctx, OpLimit)
+	defer cancel()
+	r := sessionTool(ctx, h.deps.Host.Session(), call, h.maskPending)
+	if call.Kind != CallMessageSession && call.Kind != CallFlushSession && r.Err == nil {
+		return
+	}
+	why, errText := "", ""
+	if r.Err != nil {
+		errText = r.Err.Error()
+	} else if v, _ := r.Value.(map[string]any); v["status"] == "waiting" {
+		why, _ = v["reason"].(string)
+	}
+	h.Input(LateSessionSentInput(job, call.Name, h.sessionDescription(call.Name), why, errText))
+}
+
+// await marks key waiting on a late confirm (on) or done (off); false if it already waited.
+func (h *AgentHandle) await(key string, on bool) bool {
+	h.awaitMu.Lock()
+	defer h.awaitMu.Unlock()
+	if !on {
+		delete(h.awaiting, key)
+		return true
+	}
+	if h.awaiting[key] {
+		return false
+	}
+	if h.awaiting == nil {
+		h.awaiting = map[string]bool{}
+	}
+	h.awaiting[key] = true
+	return true
+}
+
+// inFlightJob is the one open request the coordinator is working on ("" = none, or several).
+func (h *AgentHandle) inFlightJob() JobID {
+	h.ctlMu.Lock()
+	defer h.ctlMu.Unlock()
+	if refs := unique(h.ctl.inbox.InFlightRefs()); len(refs) == 1 && h.ctl.jobs.IsOpen(refs[0]) {
+		return refs[0]
+	}
+	return ""
+}
+
 // sessionDescription is how the roster describes your session name ("" = not listed).
 func (h *AgentHandle) sessionDescription(name string) string {
 	for _, row := range h.Roster().Yours {
@@ -1280,6 +1337,8 @@ func (h *AgentHandle) confirmSession(name, toolName string, input map[string]any
 	if !ok || !c.Secondary().Owns(name) {
 		return Allow(), nil, true
 	}
+	t := time.NewTimer(h.confirmWait) // from the call's start: the List below counts too
+	defer t.Stop()
 	input["name"] = name
 	ctx, cancel := context.WithTimeout(h.ctx, OpLimit)
 	if list, err := c.Secondary().List(ctx); err == nil {
@@ -1292,8 +1351,6 @@ func (h *AgentHandle) confirmSession(name, toolName string, input map[string]any
 	cancel()
 	rx := make(chan Decision, 1)
 	h.hook(HookEvent{Kind: HookPermission, Agent: Coordinator, ToolName: toolName, ToolInput: input, Reply: rx})
-	t := time.NewTimer(h.confirmWait)
-	defer t.Stop()
 	select {
 	case d := <-rx:
 		return d, nil, true

@@ -428,10 +428,16 @@ var negators = map[string]bool{"not": true, "no": true, "never": true, "dont": t
 // affirmers after a negator undo it: "don't forget to push" asks for the push.
 var affirmers = map[string]bool{"forget": true, "hesitate": true, "fail": true, "neglect": true}
 
-// firstPerson words are the sender as the subject: "I merged it", "we're pushing" report the
-// sender's own step, not one asked of the session (#246).
-var firstPerson = map[string]bool{"i": true, "i'm": true, "i've": true, "i'll": true, "i'd": true,
-	"we": true, "we're": true, "we've": true, "we'll": true, "we'd": true}
+// firstPerson words are the sender as the subject. Only a step already done ("I pushed", "we've
+// pushed") or under way ("I'm merging") is the sender's own report (#246); a plan, an opinion
+// or an approval ("we should merge", "I'd push", "I say push it") still asks.
+var firstPerson = map[string]bool{"i": true, "we": true, "i've": true, "we've": true, "i'm": true, "we're": true}
+
+// underWay are the first-person words an -ing form after them is the sender's: "I'm merging".
+var underWay = map[string]bool{"i'm": true, "we're": true}
+
+// fillers may sit between the sender and their step: "we just pushed".
+var fillers = map[string]bool{"just": true, "already": true, "also": true, "now": true}
 
 // youWords make a clause about the session: "I want you to merge" still asks.
 var youWords = map[string]bool{"you": true, "you're": true, "you've": true, "you'll": true, "you'd": true}
@@ -477,7 +483,7 @@ func GatedActions(text string) []string {
 		}
 		mine, yours := false, false
 		for _, w := range words {
-			mine, yours = mine || firstPerson[w], yours || youWords[w]
+			mine, yours = mine || firstPerson[w] || underWay[w], yours || youWords[w]
 		}
 		negated := false
 		for i, w := range words {
@@ -500,8 +506,14 @@ func GatedActions(text string) []string {
 			case negationEnds[w]:
 				negated = false
 			}
-			// The sender's own step (#246): "I pushed", "I just pushed", "before merging I …".
-			reported := firstPerson[prev] || firstPerson[prev2] && !youWords[prev] ||
+			// The sender's own step (#246): "I pushed", "we just pushed", "I'm merging",
+			// "before merging I …".
+			subject := prev
+			if fillers[prev] {
+				subject = prev2
+			}
+			reported := strings.HasSuffix(w, "ed") && firstPerson[subject] ||
+				strings.HasSuffix(w, "ing") && underWay[subject] ||
 				leadIns[prev] && strings.HasSuffix(w, "ing") && mine && !yours
 			if base, ok := gatedForms[w]; ok && !negated && !reported && !slices.Contains(out, base) {
 				out = append(out, base)

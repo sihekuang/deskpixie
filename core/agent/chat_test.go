@@ -318,3 +318,24 @@ func TestAVoiceHandOffForgetsATypedOneToTheSameSession(t *testing.T) {
 		}
 	}
 }
+
+// #246: a message sent after you confirmed late goes on the request that asked for it, even
+// while the coordinator works on nothing; once that request is over, it's a line of its own.
+func TestALateSendGoesOnTheRequestThatAskedForIt(t *testing.T) {
+	c := typedOnJob1()
+	passed := "Passed on to your session on " + landing + "."
+	wantChat(t, c.Step(LateSessionSentInput(job(1), "repo-claude", landing, "", ""), T0+5), ChatLine{Job: job(1), Status: "working", Text: passed})
+}
+
+func TestALateSendAfterItsRequestEndedIsALineOfItsOwn(t *testing.T) {
+	c := typedOnJob1()
+	c.Step(CancelInput(job(1)), T0+1)
+	fx := c.Step(LateSessionSentInput(job(1), "repo-claude", landing, "", ""), T0+5)
+	if len(chats(fx)) != 0 || !strings.Contains(fmtEffects(fx), "Passed on to your session on "+landing) {
+		t.Fatal(fmtEffects(fx))
+	}
+	fx = c.Step(LateSessionSentInput("", "repo-claude", landing, "", "No session repo-claude."), T0+6)
+	if !strings.Contains(fmtEffects(fx), "Couldn't reach your session on "+landing+": No session repo-claude.") {
+		t.Fatal(fmtEffects(fx))
+	}
+}

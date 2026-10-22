@@ -154,6 +154,7 @@ const (
 	InChoose                               // Token, Option: a tap on a session menu's option in the updates bubble (#105)
 	InSessionAnswerFailed                  // Name, Text: EfAnswerSession could not be typed (#105)
 	InSubmit                               // Agent, Message: a Claude agent took a prompt (its UserPromptSubmit hook); Message is the prompt
+	InLateSessionSent                      // Job, Name, Text, Message, Reason: a session tool done after its call was answered (#246); Job: the request then in flight ("" = none); Reason: its error
 	InSessionSent                          // Name, Text, Message: the coordinator's message_session reached your session Name, described Text (#177); Message: why it waits ("" = typed, #183)
 	InTextMode                             // Away: text mode on (#221): no conversation is opened for updates
 )
@@ -300,6 +301,13 @@ func SessionSentInput(name, description string) Input {
 
 // SessionWaitingInput: the message reached pix but waits (#183), for reason "working",
 // "blocked" or "typing".
+// LateSessionSentInput: a message_session (or close_session) the person confirmed after the
+// coordinator's call was answered (#246) was done: typed, waiting (why), or failed (errText).
+// job is the request in flight when it was asked ("" = none).
+func LateSessionSentInput(job JobID, name, description, why, errText string) Input {
+	return Input{Kind: InLateSessionSent, Job: job, Name: name, Text: description, Message: why, Reason: errText}
+}
+
 func SessionWaitingInput(name, description, reason string) Input {
 	return Input{Kind: InSessionSent, Name: name, Text: description, Message: reason}
 }
@@ -671,6 +679,8 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 		}
 	case InSessionSent:
 		c.onSessionSent(in.Name, in.Text, in.Message, now, &fx)
+	case InLateSessionSent:
+		c.onLateSessionSent(in.Job, in.Name, in.Text, in.Message, in.Reason, now, &fx)
 	case InStop:
 		if in.Agent == Coordinator {
 			c.onStop(in.Message, now, &fx)
@@ -1613,18 +1623,35 @@ func (c *AgentController) onSessionSent(name, description, waiting string, now M
 	if len(refs) != 1 || !c.jobs.IsOpen(refs[0]) {
 		return
 	}
-	job := refs[0]
-	if c.typed[job] {
-		c.typedTo[name] = job
-	} else {
-		delete(c.typedTo, name) // its answer is for this request now, not an earlier typed one
+	c.tellSessionSent(refs[0], name, description, waiting, now, fx)
+}
+
+// onLateSessionSent tells a session tool done after you confirmed late (#246) on the request
+// that asked for it, or as a line of its own once that request is over.
+func (c *AgentController) onLateSessionSent(job JobID, name, description, waiting, errText string, now Millis, fx *[]Effect) {
+	if errText == "" && job != "" && c.jobs.IsOpen(job) {
+		c.tellSessionSent(job, name, description, waiting, now, fx)
+		return
 	}
+	text, _, _ := sessionSentText(description, waiting)
+	if errText != "" {
+		session := "your session"
+		if d := oneLine(description); d != "" {
+			session = "your session on " + strings.TrimSuffix(d, ".")
+		}
+		text = "Couldn't reach " + session + ": " + errText
+	}
+	c.deliver(NewLine(LineInfo, maskPendingTokens(text, c.pendingTokens())), now, fx)
+}
+
+// sessionSentText says a message reached a session described description, or why it waits.
+func sessionSentText(description, waiting string) (text, brief, title string) {
 	session, title := "your session", "Your session"
 	if d := oneLine(description); d != "" {
 		title = strings.TrimSuffix(d, ".")
 		session = "your session on " + title
 	}
-	text, brief := "Passed on to "+session+".", "Message passed on."
+	text, brief = "Passed on to "+session+".", "Message passed on."
 	if waiting != "" {
 		// #183: pix holds it; say so, and why.
 		why := map[string]string{
@@ -1645,6 +1672,17 @@ func (c *AgentController) onSessionSent(name, description, waiting string, now M
 			brief = "Message held for now."
 		}
 	}
+	return text, brief, title
+}
+
+// tellSessionSent puts a message's delivery on job, whose answer the session's reply now is.
+func (c *AgentController) tellSessionSent(job JobID, name, description, waiting string, now Millis, fx *[]Effect) {
+	if c.typed[job] {
+		c.typedTo[name] = job
+	} else {
+		delete(c.typedTo, name) // its answer is for this request now, not an earlier typed one
+	}
+	text, brief, title := sessionSentText(description, waiting)
 	c.handedOff[job] = true
 	tokens := c.pendingTokens()
 	text = maskPendingTokens(text, tokens) // kept masked too: a typed job's box shows it again (#231)

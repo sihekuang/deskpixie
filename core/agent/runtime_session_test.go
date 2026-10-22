@@ -149,6 +149,40 @@ func TestClosingWaitsOnALateConfirmAndClosesOnceYouConfirm(t *testing.T) {
 	}
 }
 
+// A late send is told on the request that asked for it, or on its own once that request is over.
+func TestALateSendIsToldEvenAfterTheRequestEnded(t *testing.T) {
+	r, user := pixRig(t)
+	SetConfirmWaitForTest(r.h, 100*time.Millisecond)
+	<-messageCall(r, "Go ahead and git push.")
+	r.h.Voice(VoiceSignal{Kind: voice.SigUserSaid, Text: "confirm hawk"})
+	if !eventually(func() bool { return len(user.Prompts()) == 1 }) {
+		t.Fatal("not sent")
+	}
+	if !eventually(func() bool { return strings.Contains(toldText(r), "Passed on to your session") }) {
+		t.Fatal(toldText(r))
+	}
+}
+
+// Calling again while the first waits on your confirm asks nothing more, and sends once.
+func TestAgainWhileAwaitingConfirmAsksOnceAndSendsOnce(t *testing.T) {
+	r, user := pixRig(t)
+	SetConfirmWaitForTest(r.h, 100*time.Millisecond)
+	<-messageCall(r, "Go ahead and git push.")
+	got := <-messageCall(r, "Go ahead and git push.")
+	if v, _ := got.Value.(map[string]any); got.Err != nil || v["status"] != "awaiting_confirmation" {
+		t.Fatalf("%+v", got)
+	}
+	r.h.Voice(VoiceSignal{Kind: voice.SigUserSaid, Text: "confirm hawk"})
+	settle()
+	settle()
+	if p := user.Prompts(); len(p) != 1 {
+		t.Fatalf("%+v", p)
+	}
+	if n := strings.Count(fmt.Sprint(r.voice.Calls()), "Coordinator question:"); n != 1 {
+		t.Fatalf("asked %d times: %v", n, r.voice.Calls())
+	}
+}
+
 func TestNoToALateConfirmKeepsTheMessageUnsent(t *testing.T) {
 	r, user := pixRig(t)
 	SetConfirmWaitForTest(r.h, 100*time.Millisecond)
@@ -278,4 +312,9 @@ func TestAlwaysForceSendFlushesEveryMessage(t *testing.T) {
 			t.Fatalf("on=%v: flushed %v, %v", on, d.flushed, got.Value)
 		}
 	}
+}
+
+// toldText is everything said or shown to you so far: spoken lines and the updates bubble.
+func toldText(r *rtRig) string {
+	return fmt.Sprint(r.voice.Calls()) + fmt.Sprintf("%+v", r.h.Updates())
 }
