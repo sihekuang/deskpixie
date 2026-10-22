@@ -346,6 +346,42 @@ final class QuickChatModelTests: XCTestCase {
         XCTAssertFalse(m.showsCard(hovering: true, always: true))
         XCTAssertFalse(m.dismissIfOlder(than: 120, now: t0.addingTimeInterval(500)), "nothing left")
     }
+
+    /// #241: a session's answer can come minutes after the hand-off; it shows even if the card
+    /// was put away (✕ or the timer) or a caption took its place, since nothing else says it.
+    func test_a_late_answer_to_the_last_message_comes_back() {
+        for putAway in ["dismiss", "caption"] {
+            var m = QuickChatModel()
+            m.mode = "text"
+            m.sent(job: "job_1")
+            m.apply(line("done", "Passed on to your session on api."))
+            while m.tick() {}
+            if putAway == "dismiss" {
+                m.dismiss()
+            } else {
+                m.caption(role: "assistant", text: "Hello there.")
+            }
+            m.apply(line("done", "The redirect loop is fixed."))
+            XCTAssertFalse(m.isCaption, putAway)
+            XCTAssertEqual(m.job, "job_1", putAway)
+            while m.tick() {}
+            XCTAssertEqual(m.phase, .done, putAway)
+            XCTAssertEqual(m.shown, "The redirect loop is fixed.", putAway)
+        }
+    }
+
+    /// Only the last message's finished lines: not an older job's, and no working line.
+    func test_a_put_away_card_ignores_other_jobs_and_working_lines() {
+        var m = QuickChatModel()
+        m.sent(job: "job_1")
+        m.apply(line("done", "Passed on."))
+        while m.tick() {}
+        m.dismiss()
+        m.apply(line("working", "Still at it."))
+        XCTAssertEqual(m.phase, .ready)
+        m.apply(line("done", "Old news.", job: "job_0"))
+        XCTAssertEqual(m.phase, .ready)
+    }
 }
 
 /// #240: attachments alone can be sent.

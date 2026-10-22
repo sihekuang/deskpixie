@@ -68,6 +68,12 @@ func (h *AgentHandle) ChatSend(text string) (JobID, error) {
 		text = attachedOnly
 	}
 	h.ctlMu.Lock()
+	if session, job := h.ctl.takeBoxAnswer(); session != "" {
+		// #241: the box shows that session's question: the words are its answer.
+		h.ctlMu.Unlock()
+		_, _, err := h.AnswerAsked("", text)
+		return job, err
+	}
 	last := h.ctl.LastTyped()
 	j, ok := h.ctl.jobs.Get(last)
 	waiting := last != "" && ok && j.Status == JobQuestion && h.ctl.jobs.IsOpen(last)

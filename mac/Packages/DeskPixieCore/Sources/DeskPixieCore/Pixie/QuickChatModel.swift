@@ -33,6 +33,9 @@ public struct QuickChatModel: Equatable, Sendable {
     /// replyMode: "voice" or "text".
     public var mode = "voice"
 
+    /// The newest typed message's job, kept when the ✕ or a caption puts it away: a late answer
+    /// to it (a session's reply, #241) still shows.
+    private var lastJob: String?
     /// Lines that came for a job before chat.send said which job is ours (newest per job).
     private var early: [String: ChatLine] = [:]
     private var pending = false
@@ -95,6 +98,7 @@ public struct QuickChatModel: Equatable, Sendable {
         captionLive = false
         saidAt = nil
         job = nil
+        lastJob = nil
         pending = true
         stopPending = false
         early = [:]
@@ -108,6 +112,7 @@ public struct QuickChatModel: Equatable, Sendable {
     @discardableResult
     public mutating func sent(job: String) -> Bool {
         self.job = job
+        lastJob = job
         isCaption = false
         captionLive = false
         if stopPending {
@@ -144,6 +149,17 @@ public struct QuickChatModel: Equatable, Sendable {
         if pending {
             early[line.job] = line
             return
+        }
+        if line.job == lastJob, line.status != "working",
+           isCaption || line.job != job || phase == .ready {
+            // #241: a late answer to the last message brings the card back with it (not after
+            // Stop: the cancel's own line doesn't replace "Stopped.").
+            job = line.job
+            isCaption = false
+            captionLive = false
+            full = ""
+            shown = ""
+            phase = .done
         }
         guard !isCaption, line.job == job, phase == .thinking || phase == .answering || phase == .done else { return }
         if line.status == "working" {
