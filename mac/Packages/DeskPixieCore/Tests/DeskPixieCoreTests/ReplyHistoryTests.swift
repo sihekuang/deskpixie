@@ -161,4 +161,55 @@ final class ReplyHistoryTests: XCTestCase {
         m.toNewest()
         XCTAssertTrue(m.dismissIfOlder(than: 60, now: t0 + 500))
     }
+
+    /// After ✕ or the put-away, the kept replies stay in reach: hovering shows "Earlier replies"
+    /// with ‹ (no count), and stepping forward from the newest kept one goes back to that.
+    func test_put_away_words_leave_the_history_in_reach() {
+        var m = three()
+        m.conversationEnded()
+        XCTAssertTrue(m.dismissIfOlder(than: 60, now: t0 + 100))
+        XCTAssertFalse(m.showsCard(hovering: false, always: true), "always-show doesn't bring them back")
+        XCTAssertTrue(m.showsCard(hovering: true, always: false))
+        XCTAssertTrue(m.showsEarlierOnly)
+        XCTAssertNil(m.position)
+        XCTAssertTrue(m.canBack)
+        XCTAssertFalse(m.canForward)
+
+        m.back(now: t0 + 110)
+        XCTAssertEqual(m.shownText, "Three.")
+        XCTAssertEqual(m.position, .init(index: 3, count: 3))
+        XCTAssertFalse(m.showsEarlierOnly)
+        m.back(now: t0 + 110)
+        XCTAssertEqual(m.shownText, "Two.")
+        m.forward()
+        m.forward()
+        XCTAssertTrue(m.showsEarlierOnly, "past the newest kept one: nothing current")
+
+        XCTAssertTrue(m.prune(now: t0 + 1000))
+        XCTAssertFalse(m.showsCard(hovering: true, always: false), "once they've dropped off, nothing")
+        XCTAssertFalse(m.showsEarlierOnly)
+    }
+
+    /// The same words again while they're still typing out are the same reply, kept once.
+    func test_a_repeat_while_typing_is_kept_once() {
+        var m = QuickChatModel()
+        m.historySecs = 300
+        m.sending(now: t0)
+        m.sent(job: "job_1")
+        m.apply(ChatLine(job: "job_1", status: "question", text: "Apples or pears?"), now: t0 + 1)
+        m.apply(ChatLine(job: "job_1", status: "done", text: "Apples or pears?"), now: t0 + 2)
+        XCTAssertEqual(m.history, [])
+        m.caption(role: "assistant", text: "Next.", now: t0 + 3)
+        XCTAssertEqual(m.history.map(\.text), ["Apples or pears?"])
+    }
+
+    /// Why a message couldn't go isn't one of Pixie's replies.
+    func test_a_failed_send_is_not_kept() {
+        var m = QuickChatModel()
+        m.historySecs = 300
+        m.sending(now: t0)
+        m.failedToSend("Pixie isn't running.")
+        m.sending(now: t0 + 1)
+        XCTAssertEqual(m.history, [])
+    }
 }

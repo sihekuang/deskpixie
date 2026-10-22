@@ -454,7 +454,7 @@ final class QuickChatModelTests: XCTestCase {
 
     // MARK: - putting it away (#224)
 
-    /// The ✕: the words go, hover and always show nothing until something new is said.
+    /// The ✕: the words go; always-show shows nothing until something new is said.
     func test_dismiss_puts_the_words_away() {
         var m = QuickChatModel()
         m.caption(role: "assistant", text: "Hi.")
@@ -462,7 +462,9 @@ final class QuickChatModelTests: XCTestCase {
         m.conversationEnded()
         XCTAssertTrue(m.canDismiss)
         m.dismiss()
-        XCTAssertFalse(m.showsCard(hovering: true, always: true))
+        XCTAssertFalse(m.showsCard(hovering: false, always: true))
+        XCTAssertTrue(m.showsEarlierOnly, "hover offers only the way back to them (#263)")
+        XCTAssertEqual(m.shownText, "")
         XCTAssertFalse(m.canDismiss)
         XCTAssertNil(m.ago(now: Date()))
         XCTAssertTrue(m.caption(role: "assistant", text: "New."), "the next words show again")
@@ -494,7 +496,8 @@ final class QuickChatModelTests: XCTestCase {
         XCTAssertFalse(m.dismissIfOlder(than: 0, now: t0.addingTimeInterval(500)), "0 keeps it")
         XCTAssertFalse(m.dismissIfOlder(than: 120, now: t0.addingTimeInterval(119)))
         XCTAssertTrue(m.dismissIfOlder(than: 120, now: t0.addingTimeInterval(120)))
-        XCTAssertFalse(m.showsCard(hovering: true, always: true))
+        XCTAssertFalse(m.showsCard(hovering: false, always: true))
+        XCTAssertTrue(m.showsEarlierOnly, "hover offers only the way back to them (#263)")
         XCTAssertFalse(m.dismissIfOlder(than: 120, now: t0.addingTimeInterval(500)), "nothing left")
     }
 

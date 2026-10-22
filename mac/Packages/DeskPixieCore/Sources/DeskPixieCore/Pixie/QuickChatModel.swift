@@ -147,9 +147,15 @@ public struct QuickChatModel: Equatable, Sendable {
     public private(set) var newerWaiting = false
 
     public var viewed: Reply? { viewing.map { history[$0] } }
-    /// Nil with nothing to step back to (no arrows).
+    /// Words are up (or on their way); not once they're put away.
+    private var hasCurrent: Bool { phase != .ready }
+    /// Nothing current, but replies kept to step back to: the card says "Earlier replies" with ‹.
+    public var showsEarlierOnly: Bool { !hasCurrent && viewing == nil && !history.isEmpty }
+    /// Nil with nothing to step back to (no arrows), or with nothing current and not looking back.
     public var position: Position? {
-        history.isEmpty ? nil : Position(index: (viewing ?? history.count) + 1, count: history.count + 1)
+        guard !history.isEmpty else { return nil }
+        guard hasCurrent else { return viewing.map { Position(index: $0 + 1, count: history.count) } }
+        return Position(index: (viewing ?? history.count) + 1, count: history.count + 1)
     }
     public var canBack: Bool { !history.isEmpty && viewing != 0 }
     public var canForward: Bool { viewing != nil }
@@ -198,7 +204,8 @@ public struct QuickChatModel: Equatable, Sendable {
     /// A new reply replaces what is shown: Pixie's words go into the history (not yours, nor a
     /// line about work still running). Looking back, you stay there and » offers the new one.
     private mutating func keep(now: Date) {
-        if !isYou, !full.isEmpty, let saidAt, phase == .done || phase == .answering {
+        // A typed message's answer or a caption: not why a message couldn't go (no job).
+        if !isYou, !full.isEmpty, let saidAt, phase == .done || phase == .answering, isCaption || job != nil {
             history.append(Reply(text: full, sessions: sessions, at: saidAt))
         }
         if viewing != nil { newerWaiting = true }
@@ -217,7 +224,7 @@ public struct QuickChatModel: Equatable, Sendable {
 
     /// The card without the input line: a live caption, or the last words on hover or always.
     public func showsCard(hovering: Bool, always: Bool) -> Bool {
-        showsCaption || (lateShown && !isCaption && !full.isEmpty && (phase == .answering || phase == .done)) || ((hovering || always) && hasLast)
+        (hovering && !history.isEmpty) || showsCaption || (lateShown && !isCaption && !full.isEmpty && (phase == .answering || phase == .done)) || ((hovering || always) && hasLast)
     }
 
     /// How long ago it was said ("just now", "2m ago"), once it is all shown.
@@ -352,6 +359,8 @@ public struct QuickChatModel: Equatable, Sendable {
             // Only the end of what it already shows (a hand-off, #231): no typing it out again.
             phase = .done
             saidAt = now
+        } else if line.text == full && phase == .answering {
+            saidAt = now // the same words while they type out: the same reply
         } else {
             keep(now: now)
             full = line.text

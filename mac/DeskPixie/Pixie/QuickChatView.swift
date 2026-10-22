@@ -67,13 +67,13 @@ struct QuickChatCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            if !model.shownText.isEmpty || model.phase != .ready {
+            if !model.shownText.isEmpty || model.phase != .ready || model.showsEarlierOnly {
                 HStack(spacing: 4) {
-                    let who = model.isYou && model.viewed == nil ? "You" : "Pixie"
+                    let who = model.showsEarlierOnly ? "Earlier replies" : model.isYou && model.viewed == nil ? "You" : "Pixie"
                     Text(ago.map { "\(who) · \($0)" } ?? who)
                     Spacer(minLength: 4)
-                    if let position = model.position {
-                        ReplyArrows(model: model, position: position, onStep: onStep)
+                    if model.position != nil || model.showsEarlierOnly {
+                        ReplyArrows(model: model, position: model.position, onStep: onStep)
                     }
                     if model.canDismiss {
                         // Puts the words away (#224); the setting does it on its own after a while.
@@ -212,20 +212,23 @@ struct QuickChatCard: View {
 enum ReplyStep { case back, forward, newest }
 
 /// ‹ 2/3 › on the card (#263): step through Pixie's recent replies. While you look back a new
-/// reply leaves you there and » goes to it.
+/// reply leaves you there and » goes to it. With nothing current, only ‹.
 struct ReplyArrows: View {
     let model: QuickChatModel
-    let position: QuickChatModel.Position
+    /// Nil with nothing current and not looking back: only ‹ to the kept replies.
+    let position: QuickChatModel.Position?
     let onStep: (ReplyStep) -> Void
 
     var body: some View {
         HStack(spacing: 2) {
             arrow("chevron.left", "Earlier reply", enabled: model.canBack) { onStep(.back) }
-            Text("\(position.index)/\(position.count)")
-                .monospacedDigit()
-                .frame(minWidth: 26)
-                .accessibilityLabel("Reply \(position.index) of \(position.count)")
-            arrow("chevron.right", "Later reply", enabled: model.canForward) { onStep(.forward) }
+            if let position {
+                Text("\(position.index)/\(position.count)")
+                    .monospacedDigit()
+                    .frame(minWidth: 26)
+                    .accessibilityLabel("Reply \(position.index) of \(position.count)")
+                arrow("chevron.right", "Later reply", enabled: model.canForward) { onStep(.forward) }
+            }
             if model.newerWaiting {
                 Button { onStep(.newest) } label: {
                     Image(systemName: "chevron.right.2")
