@@ -156,6 +156,13 @@ func TestTheUsersWordsAreHeardAsTheyCome(t *testing.T) {
 	evEq(t, d.decode([]byte(`{"type":"conversation.item.input_audio_transcription.completed","item_id":"i","content_index":0,"transcript":"two plus two"}`)),
 		voice.Event{Kind: voice.EvTranscript, Role: "user", Text: "two plus two"})
 	evEq(t, delta("i", "again"), voice.Event{Kind: voice.EvUserHeard, Text: "again"})
+	// A space on its own is kept for the next word.
+	delta("k", "hello")
+	evEq(t, delta("k", " "))
+	evEq(t, delta("k", "world"), voice.Event{Kind: voice.EvUserHeard, Text: "hello world"})
+	// A failed transcription starts its item afresh too.
+	d.decode([]byte(`{"type":"conversation.item.input_audio_transcription.failed","item_id":"k","content_index":0}`))
+	evEq(t, delta("k", "anew"), voice.Event{Kind: voice.EvUserHeard, Text: "anew"})
 }
 
 func TestResponseDoneEmitsToolCallsFirst(t *testing.T) {

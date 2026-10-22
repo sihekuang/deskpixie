@@ -315,6 +315,21 @@ func TestTheUsersWordsAreHeardAsTheyCome(t *testing.T) {
 	}
 }
 
+// #251 review: a late scrap of the last turn's words is not heard: it would cover Pixie's reply.
+func TestALateTranscriptIsNotHeard(t *testing.T) {
+	t0 := time.Now()
+	c := ready(t)
+	c.decodeAt(audioMsg([]int16{1}), t0)
+	c.decodeAt(turnComplete, t0)
+	words := `{"serverContent":{"inputTranscription":{"text":"tail"}}}`
+	if got := heardTexts(c.decodeAt(words, t0.Add(lateTranscriptGrace/2))); got != nil {
+		t.Fatal(got)
+	}
+	if got := heardTexts(c.decodeAt(`{"serverContent":{"inputTranscription":{"text":"new words"}}}`, t0.Add(2*lateTranscriptGrace))); !reflect.DeepEqual(got, []string{"new words"}) {
+		t.Fatal("a new turn is heard, without the late scrap:", got)
+	}
+}
+
 func TestTranscriptionRightAfterAReplyIsLateNotNewSpeech(t *testing.T) {
 	t0 := time.Now()
 	c := ready(t)

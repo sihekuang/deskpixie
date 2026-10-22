@@ -397,7 +397,7 @@ func (c *codec) serverContent(sc any, out []voice.Event) []voice.Event {
 			c.userHeardAt = c.now
 		}
 		c.userText.WriteString(t)
-		if strings.TrimSpace(t) != "" {
+		if strings.TrimSpace(t) != "" && !late { // a late scrap would cover Pixie's reply
 			out = append(out, voice.Event{Kind: voice.EvUserHeard, Text: strings.TrimSpace(c.userText.String())})
 		}
 	}

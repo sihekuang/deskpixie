@@ -211,12 +211,12 @@ public struct QuickChatModel: Equatable, Sendable {
         return true
     }
 
-    /// What was said aloud (the voice model's transcript): Pixie's reply, typed out, or your
-    /// own final words, shown as `heard`. A new caption replaces the last. In text mode it never
-    /// covers a typed message still at work. True when it shows.
+    /// What Pixie said aloud (the voice model's transcript), typed out. Only Pixie's side: your
+    /// words show as they're heard (`heard`); your final transcript can come after the reply. A
+    /// new caption replaces the last. In text mode it never covers a typed message still at work.
+    /// True when it shows.
     @discardableResult
     public mutating func caption(role: String, text: String, now: Date = Date()) -> Bool {
-        if role == "user" { return heard(text, now: now) }
         let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard role == "assistant", !words.isEmpty, takeCaption() else { return false }
         isCaption = true

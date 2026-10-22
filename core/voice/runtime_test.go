@@ -367,6 +367,27 @@ func TestRuntimeHeardWordsAreEmitted(t *testing.T) {
 	eventually(t, "heard", func() bool { return ui.has(UIEvent{Kind: "heard", Text: "hi Pix"}) })
 }
 
+// #251 review: while Pixie is audibly speaking, and EchoTail after, heard words may be Pixie's
+// own voice coming back through the mic: not shown.
+func TestHeardWordsAreEchoWhilePixieSpeaksAndJustAfter(t *testing.T) {
+	now := time.Now()
+	r := &Runtime{}
+	if r.echoing(now) {
+		t.Fatal("quiet")
+	}
+	r.mouth = 2
+	if !r.echoing(now) {
+		t.Fatal("speaking")
+	}
+	r.mouth, r.mouthEnded = 0, now
+	if !r.echoing(now.Add(EchoTail / 2)) {
+		t.Fatal("just after")
+	}
+	if r.echoing(now.Add(EchoTail)) {
+		t.Fatal("long after")
+	}
+}
+
 func TestRuntimeHotkeyAgainEndsAndClosesSession(t *testing.T) {
 	r, m, ui := newTestRuntime(t, "sk-test")
 	startListening(t, r, m, ui)

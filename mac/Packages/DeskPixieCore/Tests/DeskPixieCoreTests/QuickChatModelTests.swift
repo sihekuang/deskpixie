@@ -207,9 +207,11 @@ final class QuickChatModelTests: XCTestCase {
         XCTAssertEqual(m.phase, .done)
     }
 
-    /// Only words.
-    func test_caption_ignores_empty_text() {
+    /// Only Pixie's side, and only words: your words show as they're heard, not from the final
+    /// transcript, which can come after Pixie's reply (#251 review).
+    func test_caption_ignores_the_user_and_empty_text() {
         var m = QuickChatModel()
+        XCTAssertFalse(m.caption(role: "user", text: "what's the weather"))
         XCTAssertFalse(m.caption(role: "assistant", text: "   "))
         XCTAssertFalse(m.heard("  "))
         XCTAssertFalse(m.showsCaption)
@@ -231,14 +233,13 @@ final class QuickChatModelTests: XCTestCase {
         XCTAssertEqual(m.shown, "what about tomorrow?")
     }
 
-    /// Your final transcript shows the same way; Pixie's reply then replaces it, typed out.
-    func test_your_final_words_stay_until_pixie_answers() {
+    /// Your words stay until Pixie answers; the reply then replaces them, typed out, and your
+    /// final transcript arriving after it leaves the reply be.
+    func test_your_words_stay_until_pixie_answers() {
         var m = QuickChatModel()
-        m.heard("what about")
-        XCTAssertTrue(m.caption(role: "user", text: "What about tomorrow?"))
-        XCTAssertTrue(m.isYou)
-        XCTAssertEqual(m.shown, "What about tomorrow?")
+        m.heard("what about tomorrow?")
         XCTAssertTrue(m.caption(role: "assistant", text: "Rain tomorrow."))
+        XCTAssertFalse(m.caption(role: "user", text: "What about tomorrow?"))
         XCTAssertFalse(m.isYou)
         XCTAssertEqual(m.shown, "")
         while m.tick() {}

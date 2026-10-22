@@ -170,15 +170,19 @@ final class AgentRosterController {
         render()
     }
 
-    /// Your words so far while you talk (#251): shown at once, over Pixie's last reply.
+    /// Your words so far while you talk (#251): shown at once, over Pixie's last reply. Not once
+    /// the conversation has closed: they would keep the caption up for good.
     func heard(_ text: String) {
-        guard chat.heard(text) else { return }
+        guard conversationOpen, chat.heard(text) else { return }
         captionHide?.invalidate()
         captionHide = nil
         typeTimer?.invalidate()
         typeTimer = nil
         render()
     }
+
+    /// A voice conversation is open (`conversation(open:)`).
+    private var conversationOpen = false
 
     /// What Pixie said aloud (#224): a caption where the text box goes (voice mode: on its own).
     func caption(role: String, text: String) {
@@ -193,6 +197,7 @@ final class AgentRosterController {
 
     /// The voice conversation opened or ended (the mic): an ended one's caption goes a moment later.
     func conversation(open: Bool) {
+        conversationOpen = open
         captionHide?.invalidate()
         captionHide = nil
         guard !open else { return }

@@ -49,8 +49,12 @@ func withFacts(instructions, facts string) string {
 // drops frames (counted by MicDrops) rather than block the audio thread.
 const micQueueFrames = 32
 
+// EchoTail: user words this soon after Pixie stopped speaking may still be Pixie's own voice
+// coming back through the mic.
+const EchoTail = 1500 * time.Millisecond
+
 // UIEvent is what the runtime tells the app. Kinds: "state", "mouth", "mic", "status",
-// "transcript", "error", "metrics".
+// "transcript", "heard" (the user's words so far, #251), "error", "metrics".
 type UIEvent struct {
 	Kind  string `json:"kind"`
 	State string `json:"state,omitempty"`
@@ -225,6 +229,7 @@ type Runtime struct {
 	conv          *Conversation
 	meter         *MouthMeter
 	mouth         int
+	mouthEnded    time.Time // when the mouth last closed: echo may follow (EchoTail)
 	session       Session
 	events        <-chan Event
 	gen           uint64 // incremented on every Connect; results of older attempts are closed
@@ -560,7 +565,10 @@ func (r *Runtime) run() {
 			switch {
 			case ev.Kind == EvUserHeard:
 				// The live caption only (#251): the conversation acts on the final transcript.
-				r.emit(UIEvent{Kind: "heard", Text: ev.Text})
+				// Words heard while Pixie speaks, or just after, may be its own voice: not shown.
+				if !r.echoing(time.Now()) {
+					r.emit(UIEvent{Kind: "heard", Text: ev.Text})
+				}
 				continue
 			case ev.Kind == EvTranscript:
 				if debugEnabled() {
@@ -883,6 +891,11 @@ func (r *Runtime) invokeTool(callID, name string, args json.RawMessage) {
 	go func() { deliver(tool.Invoke(ctx, args)) }()
 }
 
+// echoing: Pixie is audibly speaking, or stopped less than EchoTail ago.
+func (r *Runtime) echoing(now time.Time) bool {
+	return r.mouth > 0 || (!r.mouthEnded.IsZero() && now.Sub(r.mouthEnded) < EchoTail)
+}
+
 func (r *Runtime) updateMouth() {
 	level := 0
 	if r.conv.Phase() == PhaseSpeaking {
@@ -891,6 +904,9 @@ func (r *Runtime) updateMouth() {
 		r.meter.Reset()
 	}
 	if level != r.mouth {
+		if level == 0 && r.mouth > 0 {
+			r.mouthEnded = time.Now()
+		}
 		r.mouth = level
 		r.emit(UIEvent{Kind: "mouth", Level: level})
 	}
