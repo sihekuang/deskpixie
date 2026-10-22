@@ -616,9 +616,6 @@ func debugEnabled() bool {
 func (r *Runtime) onControl(c control) {
 	switch c.kind {
 	case ctlInject:
-		if len(c.notice.Sessions) > 0 {
-			r.emit(UIEvent{Kind: "about", Sessions: c.notice.Sessions}) // the caption's buttons (#261)
-		}
 		r.input(InjectInput(c.notice))
 	case ctlHoldOpen:
 		r.input(HoldOpenInput(c.on))
@@ -834,6 +831,10 @@ func (r *Runtime) apply(fx Effect) {
 	case EfStatus:
 		r.emit(UIEvent{Kind: "status", Text: fx.Status})
 	case EfInject:
+		if len(fx.Sessions) > 0 {
+			// Pixie is given the notice now: its reply is about these sessions (#261).
+			r.emit(UIEvent{Kind: "about", Sessions: fx.Sessions})
+		}
 		r.send(Command{Kind: CmdInject, Text: fx.Text, Respond: true})
 	case EfSignal:
 		r.publish(fx.Signal)

@@ -853,7 +853,7 @@ func (c *AgentController) voiceOpened(fx *[]Effect) {
 	var digest []Line
 	for _, l := range c.outbox.Undelivered() {
 		if l.Token == nil || c.confirms.IsPendingToken(*l.Token) {
-			digest = append(digest, Line{Text: l.Text, Kind: l.Kind, Token: l.Token, Job: l.Job, Worker: l.Worker})
+			digest = append(digest, Line{Text: l.Text, Kind: l.Kind, Token: l.Token, Job: l.Job, Worker: l.Worker, Session: l.Session})
 		}
 	}
 	notice, records := c.outbox.Replay(c.confirms.IsPendingToken)

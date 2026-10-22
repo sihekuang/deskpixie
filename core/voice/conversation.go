@@ -153,11 +153,13 @@ type Effect struct {
 	Args     json.RawMessage // EfInvokeTool
 	// Canned (EfInvokeTool): don't run the tool, answer the call with this output (a delegate
 	// call in a turn the app already handed off).
-	Canned  json.RawMessage
-	State   PixieState // EfPixie
-	Status  string     // EfStatus
-	Text    string     // EfInject; EfHandOff: the task
-	Context string     // EfHandOff
+	Canned json.RawMessage
+	State  PixieState // EfPixie
+	Status string     // EfStatus
+	Text   string     // EfInject; EfHandOff: the task
+	// Sessions (EfInject): the user's sessions the notice is about, for the caption (#261).
+	Sessions []string
+	Context  string // EfHandOff
 	// Claim (EfHandOff): Pixie already said it handed it off, so a successful hand-off says
 	// nothing more (#72).
 	Claim bool
@@ -722,7 +724,7 @@ func (c *Conversation) tryInject(now time.Time, fx []Effect) []Effect {
 	c.phase = PhaseThinking
 	c.thinkingSince = now
 	c.turnReplySeen = false
-	return append(fx, Effect{Kind: EfInject, Text: n.Text}, pixieFx(StateThinking))
+	return append(fx, Effect{Kind: EfInject, Text: n.Text, Sessions: n.Sessions}, pixieFx(StateThinking))
 }
 
 // closedSignal drains the queued notices into a SigClosed signal.

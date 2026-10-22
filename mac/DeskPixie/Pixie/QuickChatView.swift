@@ -226,7 +226,6 @@ struct SessionButtons: View {
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
                     .frame(maxWidth: QuickChatCard.width - 16, alignment: .leading)
-                    .fixedSize(horizontal: true, vertical: false)
                     .background(Capsule().fill(.regularMaterial))
                     .overlay(Capsule().strokeBorder(.separator))
                     .contentShape(Capsule())

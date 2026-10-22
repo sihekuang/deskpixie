@@ -744,3 +744,16 @@ func TestEndAfterReply(t *testing.T) {
 		phase(t, c, PhaseListening)
 	})
 }
+
+// #261 review: the caption's buttons follow the notice Pixie is given, not one still waiting.
+func TestAnInjectNamesItsSessionsWhenItGoesOutNotWhenQueued(t *testing.T) {
+	now := t0()
+	c := listening(now)
+	model(c, evSpeechStarted, now)
+	empty(t, c.Step(InjectInput(Notice{Text: "Session update: fruit is done.", Sessions: []string{"fruit-claude"}}), now))
+	model(c, evSpeechStopped, ms(now, 200))
+	model(c, evResponseCreated, ms(now, 300))
+	model(c, evResponseDone, ms(now, 400))
+	eq(t, tick(c, true, ms(now, 500)),
+		Effect{Kind: EfInject, Text: "Session update: fruit is done.", Sessions: []string{"fruit-claude"}}, pixie(StateThinking))
+}

@@ -181,3 +181,18 @@ func TestASessionUpdateForPixieNamesItsSession(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+// #261 review: news replayed when a conversation opens still names its sessions.
+func TestReplayedSessionNewsNamesItsSession(t *testing.T) {
+	c := turnCtl(nil)
+	sessionTurn(c, longTurn, T0) // no conversation: it waits in the outbox
+	var got []string
+	for _, e := range c.Step(voiceOpened(), T0+5) {
+		if e.Kind == EfInject {
+			got = e.Notice.Sessions
+		}
+	}
+	if !slices.Equal(got, []string{"api-claude"}) {
+		t.Fatal(got)
+	}
+}
