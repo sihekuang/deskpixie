@@ -142,6 +142,22 @@ func TestTranscriptsForBothSides(t *testing.T) {
 		voice.Event{Kind: voice.EvTranscript, Role: "user", Text: "two plus two"})
 }
 
+// #251: each piece of an utterance's transcript reports the words so far, per item, for the
+// live caption; completed still gives the one final transcript and starts the item afresh.
+func TestTheUsersWordsAreHeardAsTheyCome(t *testing.T) {
+	d := &decoder{}
+	delta := func(item, text string) []voice.Event {
+		return d.decode([]byte(`{"type":"conversation.item.input_audio_transcription.delta","item_id":"` + item + `","content_index":0,"delta":"` + text + `"}`))
+	}
+	evEq(t, delta("i", "two"), voice.Event{Kind: voice.EvUserHeard, Text: "two"})
+	evEq(t, delta("i", " plus two"), voice.Event{Kind: voice.EvUserHeard, Text: "two plus two"})
+	evEq(t, delta("i", " "))
+	evEq(t, delta("j", "and"), voice.Event{Kind: voice.EvUserHeard, Text: "and"})
+	evEq(t, d.decode([]byte(`{"type":"conversation.item.input_audio_transcription.completed","item_id":"i","content_index":0,"transcript":"two plus two"}`)),
+		voice.Event{Kind: voice.EvTranscript, Role: "user", Text: "two plus two"})
+	evEq(t, delta("i", "again"), voice.Event{Kind: voice.EvUserHeard, Text: "again"})
+}
+
 func TestResponseDoneEmitsToolCallsFirst(t *testing.T) {
 	d := &decoder{}
 	d.decode([]byte(`{"type":"response.created","response":{"id":"r","status":"in_progress"}}`))

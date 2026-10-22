@@ -9,6 +9,7 @@ final class EngineEventTests: XCTestCase {
         XCTAssertEqual(d(#"{"kind":"mouth","level":3}"#), .mouth(3))
         XCTAssertEqual(d(#"{"kind":"status","text":"OPENAI_API_KEY not set"}"#), .status("OPENAI_API_KEY not set"))
         XCTAssertEqual(d(#"{"kind":"transcript","role":"user","text":"hi"}"#), .transcript(role: "user", text: "hi"))
+        XCTAssertEqual(d(#"{"kind":"heard","text":"hi Pix"}"#), .heard("hi Pix"))
         XCTAssertEqual(d(#"{"kind":"error","text":"boom"}"#), .error("boom"))
         XCTAssertEqual(d(#"{"kind":"mic","text":"start"}"#), .mic(start: true))
         XCTAssertEqual(d(#"{"kind":"mic","text":"stop"}"#), .mic(start: false))

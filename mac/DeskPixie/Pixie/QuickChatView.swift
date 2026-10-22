@@ -65,7 +65,8 @@ struct QuickChatCard: View {
         VStack(alignment: .leading, spacing: 4) {
             if !model.shown.isEmpty || model.phase != .ready {
                 HStack(spacing: 4) {
-                    Text(ago.map { "Pixie · \($0)" } ?? "Pixie")
+                    let who = model.isYou ? "You" : "Pixie"
+                    Text(ago.map { "\(who) · \($0)" } ?? who)
                     Spacer(minLength: 4)
                     if model.canDismiss {
                         // Puts the words away (#224); the setting does it on its own after a while.

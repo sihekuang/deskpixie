@@ -397,6 +397,9 @@ func (c *codec) serverContent(sc any, out []voice.Event) []voice.Event {
 			c.userHeardAt = c.now
 		}
 		c.userText.WriteString(t)
+		if strings.TrimSpace(t) != "" {
+			out = append(out, voice.Event{Kind: voice.EvUserHeard, Text: strings.TrimSpace(c.userText.String())})
+		}
 	}
 	if parts, ok := get(sc, "modelTurn", "parts").([]any); ok {
 		for _, part := range parts {

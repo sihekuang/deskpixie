@@ -43,6 +43,8 @@ public struct QuickChatModel: Equatable, Sendable {
     private var stopPending = false
     /// What is shown is a caption (Pixie's spoken words), not a typed message's answer.
     public private(set) var isCaption = false
+    /// The caption is your own words (#251), not Pixie's.
+    public private(set) var isYou = false
     /// The caption's conversation is still going (it shows on its own until it ends).
     private var captionLive = false
     /// When what is shown was said: the card's "2m ago" (#224).
@@ -95,6 +97,7 @@ public struct QuickChatModel: Equatable, Sendable {
     /// meanwhile are kept until the job is known.
     public mutating func sending() {
         isCaption = false
+        isYou = false
         captionLive = false
         saidAt = nil
         job = nil
@@ -114,6 +117,7 @@ public struct QuickChatModel: Equatable, Sendable {
         self.job = job
         lastJob = job
         isCaption = false
+        isYou = false
         captionLive = false
         if stopPending {
             stopPending = false
@@ -134,6 +138,7 @@ public struct QuickChatModel: Equatable, Sendable {
     /// The message couldn't go: the reason is the answer.
     public mutating func failedToSend(_ reason: String) {
         isCaption = false
+        isYou = false
         captionLive = false
         saidAt = Date()
         job = nil
@@ -156,6 +161,7 @@ public struct QuickChatModel: Equatable, Sendable {
             // Stop: the cancel's own line doesn't replace "Stopped.").
             job = line.job
             isCaption = false
+            isYou = false
             captionLive = false
             full = ""
             shown = ""
@@ -188,6 +194,7 @@ public struct QuickChatModel: Equatable, Sendable {
     public mutating func dismiss() {
         guard canDismiss else { return }
         isCaption = false
+        isYou = false
         captionLive = false
         saidAt = nil
         full = ""
@@ -204,17 +211,16 @@ public struct QuickChatModel: Equatable, Sendable {
         return true
     }
 
-    /// What Pixie said aloud (the voice model's transcript). Only Pixie's side; a new caption
-    /// replaces the last. In text mode it never covers a typed message still at work. True when
-    /// it shows.
+    /// What was said aloud (the voice model's transcript): Pixie's reply, typed out, or your
+    /// own final words, shown as `heard`. A new caption replaces the last. In text mode it never
+    /// covers a typed message still at work. True when it shows.
     @discardableResult
     public mutating func caption(role: String, text: String, now: Date = Date()) -> Bool {
+        if role == "user" { return heard(text, now: now) }
         let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard role == "assistant", !words.isEmpty else { return false }
-        if mode == "text" && !isCaption && (pending || phase == .thinking || phase == .answering) {
-            return false
-        }
+        guard role == "assistant", !words.isEmpty, takeCaption() else { return false }
         isCaption = true
+        isYou = false
         captionLive = true
         saidAt = now
         job = nil
@@ -222,6 +228,28 @@ public struct QuickChatModel: Equatable, Sendable {
         shown = ""
         phase = .answering
         return true
+    }
+
+    /// Your words so far while you talk (#251): they replace the caption at once, with nothing to
+    /// type out, until Pixie answers. True when they show.
+    @discardableResult
+    public mutating func heard(_ text: String, now: Date = Date()) -> Bool {
+        let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !words.isEmpty, takeCaption() else { return false }
+        isCaption = true
+        isYou = true
+        captionLive = true
+        saidAt = now
+        job = nil
+        full = words
+        shown = words
+        phase = .done
+        return true
+    }
+
+    /// A caption may show: in text mode, not over a typed message still at work.
+    private func takeCaption() -> Bool {
+        !(mode == "text" && !isCaption && (pending || phase == .thinking || phase == .answering))
     }
 
     /// The voice conversation ended: the caption stops showing on its own, all of it shown, and

@@ -59,6 +59,9 @@ const (
 	EvToolCall
 	EvTranscript
 	EvError
+	// EvUserHeard: the user's words so far in a turn still going on (#251), for the live
+	// caption; its EvTranscript still ends the turn. Nothing else acts on it.
+	EvUserHeard
 )
 
 // Event is what a session reports. Adapters emit a response's tool calls before its EvResponseDone.
@@ -69,7 +72,7 @@ type Event struct {
 	ToolName string          // EvToolCall
 	Args     json.RawMessage // EvToolCall
 	Role     string          // EvTranscript: "user" | "assistant"
-	Text     string          // EvTranscript
+	Text     string          // EvTranscript, EvUserHeard
 	Fatal    bool            // EvError
 	Message  string          // EvError
 	Failure  *Failure        // EvError with Fatal: the status line to show; nil = FailModelError

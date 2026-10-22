@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/sihekuang/deskpixie/core/audio"
 	"github.com/sihekuang/deskpixie/core/voice"
@@ -69,6 +70,8 @@ type decoder struct {
 	currentItem    string
 	responseActive bool
 	pendingByte    []byte // odd trailing byte of the previous delta
+	// heard: each utterance's transcript so far, by item, for the live caption (#251).
+	heard map[string]string
 }
 
 func (d *decoder) deltaToPCM(b64 string) ([]int16, bool) {
@@ -140,7 +143,17 @@ func (d *decoder) decode(text []byte) []voice.Event {
 		return []voice.Event{{Kind: voice.EvAudioDelta, Audio: pcm}}
 	case "response.output_audio_transcript.done":
 		return []voice.Event{{Kind: voice.EvTranscript, Role: "assistant", Text: m.Transcript}}
+	case "conversation.item.input_audio_transcription.delta":
+		if strings.TrimSpace(m.Delta) == "" {
+			return nil
+		}
+		if d.heard == nil {
+			d.heard = map[string]string{}
+		}
+		d.heard[m.ItemID] += m.Delta
+		return []voice.Event{{Kind: voice.EvUserHeard, Text: strings.TrimSpace(d.heard[m.ItemID])}}
 	case "conversation.item.input_audio_transcription.completed":
+		delete(d.heard, m.ItemID)
 		return []voice.Event{{Kind: voice.EvTranscript, Role: "user", Text: m.Transcript}}
 	case "response.done":
 		d.responseActive = false

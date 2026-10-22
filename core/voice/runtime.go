@@ -558,6 +558,10 @@ func (r *Runtime) run() {
 				continue
 			}
 			switch {
+			case ev.Kind == EvUserHeard:
+				// The live caption only (#251): the conversation acts on the final transcript.
+				r.emit(UIEvent{Kind: "heard", Text: ev.Text})
+				continue
 			case ev.Kind == EvTranscript:
 				if debugEnabled() {
 					log.Printf("[voice] %s: %s", ev.Role, ev.Text)

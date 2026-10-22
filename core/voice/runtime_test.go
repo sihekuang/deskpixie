@@ -359,6 +359,14 @@ func TestRuntimeTranscriptIsEmitted(t *testing.T) {
 	})
 }
 
+// #251: the user's words so far go to the live caption as they come.
+func TestRuntimeHeardWordsAreEmitted(t *testing.T) {
+	r, m, ui := newTestRuntime(t, "sk-test")
+	startListening(t, r, m, ui)
+	m.sess.events <- Event{Kind: EvUserHeard, Text: "hi Pix"}
+	eventually(t, "heard", func() bool { return ui.has(UIEvent{Kind: "heard", Text: "hi Pix"}) })
+}
+
 func TestRuntimeHotkeyAgainEndsAndClosesSession(t *testing.T) {
 	r, m, ui := newTestRuntime(t, "sk-test")
 	startListening(t, r, m, ui)

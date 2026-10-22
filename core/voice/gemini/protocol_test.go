@@ -90,6 +90,8 @@ func show(evs []voice.Event) []string {
 			out = append(out, eAudio(e.Audio...))
 		case voice.EvTranscript:
 			out = append(out, "Transcript "+e.Role+": "+e.Text)
+		case voice.EvUserHeard:
+			// The live caption's words so far (#251): TestTheUsersWordsAreHeardAsTheyCome.
 		case voice.EvToolCall:
 			out = append(out, eTool(e.CallID, e.ToolName, string(e.Args)))
 		case voice.EvError:
@@ -281,6 +283,36 @@ func TestAPlainTurnWithoutVoiceActivityDerivesSpeechEvents(t *testing.T) {
 		t.Fatal("response should be closed")
 	}
 	want(t, c.decode(turnComplete)) // a second turnComplete closes nothing
+}
+
+// heardTexts are the EvUserHeard texts in evs: the user's words so far (#251).
+func heardTexts(evs []voice.Event) []string {
+	var out []string
+	for _, e := range evs {
+		if e.Kind == voice.EvUserHeard {
+			out = append(out, e.Text)
+		}
+	}
+	return out
+}
+
+// #251: each piece of the user's transcript reports their words so far, for the live caption;
+// the turn still ends with the one final transcript.
+func TestTheUsersWordsAreHeardAsTheyCome(t *testing.T) {
+	c := ready(t)
+	if got := heardTexts(c.decode(`{"serverContent":{"inputTranscription":{"text":"What's two"}}}`)); !reflect.DeepEqual(got, []string{"What's two"}) {
+		t.Fatal(got)
+	}
+	if got := heardTexts(c.decode(`{"serverContent":{"inputTranscription":{"text":" plus two?"}}}`)); !reflect.DeepEqual(got, []string{"What's two plus two?"}) {
+		t.Fatal(got)
+	}
+	if got := heardTexts(c.decode(`{"serverContent":{"inputTranscription":{"text":" "}}}`)); got != nil {
+		t.Fatal("nothing new heard:", got)
+	}
+	want(t, c.decode(turnComplete), eUser("What's two plus two?"))
+	if got := heardTexts(c.decode(`{"serverContent":{"inputTranscription":{"text":"And three"}}}`)); !reflect.DeepEqual(got, []string{"And three"}) {
+		t.Fatal("the next turn starts afresh:", got)
+	}
 }
 
 func TestTranscriptionRightAfterAReplyIsLateNotNewSpeech(t *testing.T) {

@@ -170,6 +170,16 @@ final class AgentRosterController {
         render()
     }
 
+    /// Your words so far while you talk (#251): shown at once, over Pixie's last reply.
+    func heard(_ text: String) {
+        guard chat.heard(text) else { return }
+        captionHide?.invalidate()
+        captionHide = nil
+        typeTimer?.invalidate()
+        typeTimer = nil
+        render()
+    }
+
     /// What Pixie said aloud (#224): a caption where the text box goes (voice mode: on its own).
     func caption(role: String, text: String) {
         guard chat.caption(role: role, text: text) else { return }

@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -49,9 +50,11 @@ func kinds(evs []voice.Event) []voice.EventKind {
 	return out
 }
 
+// wantKinds skips EvUserHeard, the live caption's words so far (#251):
+// TestTheUsersWordsAreHeardAsTheyCome checks those.
 func wantKinds(t *testing.T, evs []voice.Event, want ...voice.EventKind) {
 	t.Helper()
-	got := kinds(evs)
+	got := slices.DeleteFunc(kinds(evs), func(k voice.EventKind) bool { return k == voice.EvUserHeard })
 	if len(got) != len(want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
@@ -410,3 +413,27 @@ func TestCapabilities(t *testing.T) {
 }
 
 func b64(b []byte) string { return base64.StdEncoding.EncodeToString(b) }
+
+// heardTexts are the EvUserHeard texts in evs: the user's words so far (#251).
+func heardTexts(evs []voice.Event) []string {
+	var out []string
+	for _, e := range evs {
+		if e.Kind == voice.EvUserHeard {
+			out = append(out, e.Text)
+		}
+	}
+	return out
+}
+
+func TestTheUsersWordsAreHeardAsTheyCome(t *testing.T) {
+	c := newCodec()
+	if got := heardTexts(c.decode(inText("what time"), at(100))); !slices.Equal(got, []string{"what time"}) {
+		t.Fatal(got)
+	}
+	if got := heardTexts(c.decode(inText(" is it"), at(200))); !slices.Equal(got, []string{"what time is it"}) {
+		t.Fatal(got)
+	}
+	if got := heardTexts(c.decode(inText(" "), at(300))); got != nil {
+		t.Fatal("nothing new heard:", got)
+	}
+}

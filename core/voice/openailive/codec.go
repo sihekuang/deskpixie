@@ -197,15 +197,19 @@ func (c *codec) decode(data []byte, now time.Time) []voice.Event {
 		c.uText.WriteString(m.Delta)
 		c.uLast = now
 		c.muted = false
+		var heard []voice.Event // the live caption's words so far (#251)
+		if strings.TrimSpace(m.Delta) != "" {
+			heard = []voice.Event{{Kind: voice.EvUserHeard, Text: strings.TrimSpace(c.uText.String())}}
+		}
 		if c.uOpen {
-			return nil
+			return heard
 		}
 		c.uOpen = true
 		if c.aOpen {
 			c.uDeferred = true // GPT-Live decides whether this interrupts it
-			return nil
+			return heard
 		}
-		return []voice.Event{{Kind: voice.EvSpeechStarted}}
+		return append([]voice.Event{{Kind: voice.EvSpeechStarted}}, heard...)
 	case "session.delegation.created":
 		switch {
 		case m.Delegation.Target == "responses":
