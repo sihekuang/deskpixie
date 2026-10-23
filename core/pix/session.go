@@ -221,8 +221,8 @@ func newSession(o sessionOpts) *Session {
 			}
 			vt = s.screenFor(vt)
 			vt.Write(b)
+			s.noteScreen(vt) // before watch: the question it may send is answered against this screen
 			shown.watch(s, out, vt)
-			s.noteScreen(vt)
 		}
 	case "claude":
 		s.runner.OnOutput = func(b []byte) {
@@ -236,8 +236,8 @@ func newSession(o sessionOpts) *Session {
 			}
 			vt = s.screenFor(vt)
 			vt.Write(b)
+			s.noteScreen(vt) // before watch: the question it may send is answered against this screen
 			shown.watch(s, out, vt)
-			s.noteScreen(vt)
 		}
 	}
 	return s
