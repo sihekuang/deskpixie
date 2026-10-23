@@ -633,8 +633,9 @@ func (h *AgentHandle) Decide(token string, allow bool) { h.Input(DecideInput(tok
 // Choose is a tap on option (from 1) of a session menu in the updates bubble (#105).
 func (h *AgentHandle) Choose(token string, option int) { h.Input(ChooseInput(token, option)) }
 
-// answerSession types your answer into a pix session's prompt (#105); a failure is told.
-func (h *AgentHandle) answerSession(name, id, answer string) {
+// answerSession types your answer into a pix session's prompt (#105): taken, said is told; a
+// failure is told instead. Both are logged (#268).
+func (h *AgentHandle) answerSession(name, id, answer, said string) {
 	err := errors.New("your sessions can't be answered from Pixie.")
 	if c, ok := h.deps.Host.Session().(*CompositeHost); ok {
 		if a, ok := c.Secondary().(SessionAnswerer); ok {
@@ -658,7 +659,10 @@ func (h *AgentHandle) answerSession(name, id, answer string) {
 			}
 		}
 		h.Input(SessionAnswerFailedInput(name, why))
+		return
 	}
+	log.Printf("agent: answered %s's question %s with %s", name, id, answer)
+	h.Input(SessionAnsweredInput(name, said))
 }
 
 // tellSession types your answer into session name, which ended its turn on a question (#161),
@@ -1906,7 +1910,7 @@ func (h *AgentHandle) apply(e Effect) {
 	case EfInterrupt:
 		h.queueOp(hostOp{kind: opInterrupt})
 	case EfAnswerSession:
-		go h.answerSession(e.Name, e.Text, e.Answer)
+		go h.answerSession(e.Name, e.Text, e.Answer, e.Line)
 	case EfTellSession:
 		go h.tellSession(e.Name, e.Text)
 	case EfChat:

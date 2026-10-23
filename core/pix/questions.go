@@ -199,12 +199,58 @@ func (s *Session) answer(id, choice string) wire.Msg {
 		return wire.Msg{Err: "That isn't one of its answers."}
 	}
 	s.q = nil
+	l := &landing{marker: q.marker, done: make(chan struct{})}
+	s.landing = l
 	s.mu.Unlock()
 	if err := s.runner.WriteToAgent(keys); err != nil {
+		s.dropLanding(l)
 		return wire.Msg{Err: err.Error()}
+	}
+	// It counts once the prompt left the screen: keys the agent didn't take leave it there (#268).
+	t := time.NewTimer(answerWait)
+	defer t.Stop()
+	select {
+	case <-l.done:
+	case <-t.C:
+		s.dropLanding(l)
+		return wire.Msg{Err: "The session didn't take the answer."}
 	}
 	s.client.Send(wire.Msg{Kind: wire.KindEvent, Event: "question-gone", ID: id})
 	return wire.Msg{}
+}
+
+// answerWait: how long an answer typed from Pixie has to take its prompt off the screen.
+var answerWait = 3 * time.Second
+
+// landing is an answer typed from Pixie: done closes when its prompt's marker is off the screen.
+type landing struct {
+	marker string
+	done   chan struct{}
+}
+
+// checkLanded closes the typed answer's done once its prompt is no longer on screen (PTY reader
+// goroutine only).
+func (s *Session) checkLanded(vt *screen) {
+	s.mu.Lock()
+	l := s.landing
+	s.mu.Unlock()
+	if l == nil || strings.Contains(noSpace(strings.Join(vt.Lines(), "")), noSpace(l.marker)) {
+		return
+	}
+	s.mu.Lock()
+	if s.landing == l {
+		s.landing = nil
+		close(l.done)
+	}
+	s.mu.Unlock()
+}
+
+func (s *Session) dropLanding(l *landing) {
+	s.mu.Lock()
+	if s.landing == l {
+		s.landing = nil
+	}
+	s.mu.Unlock()
 }
 
 // keys are what answers q with choice: a permission's Yes is Claude's first option (1) or

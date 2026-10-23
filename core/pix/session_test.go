@@ -504,10 +504,16 @@ func TestCodexDescriptionFromItsTurn(t *testing.T) {
 
 // #105: prompts a session waits on, answered from Pixie.
 
-// keyHarness runs an agent that prints, in hex, the first byte typed into it.
+// keyHarness runs an agent that prints, in hex, the first byte typed into it on a cleared
+// screen, as an agent taking an answer redraws without its prompt.
 func keyHarness(t *testing.T, tool string) *harness {
 	t.Helper()
-	h := newHarness(t, tool, Launch{Path: "/bin/sh", Args: []string{"-c", "stty raw -echo; head -c 1 | od -An -tx1; sleep 30"}})
+	return agentHarness(t, tool, `stty raw -echo; b=$(head -c 1 | od -An -tx1); printf '\033[2J\033[H%s\r\n' "$b"; sleep 30`)
+}
+
+func agentHarness(t *testing.T, tool, script string) *harness {
+	t.Helper()
+	h := newHarness(t, tool, Launch{Path: "/bin/sh", Args: []string{"-c", script}})
 	waitEvent(t, h.d.events, "connected", func(m wire.Msg) bool { return m.Event == "status" })
 	t.Cleanup(func() { h.s.runner.Hangup(); h.s.finish() })
 	return h
@@ -598,6 +604,44 @@ func TestAClaudeMenuIsAnsweredWithItsDigit(t *testing.T) {
 		t.Fatal(err)
 	}
 	typed(t, h, '2')
+}
+
+// #268: an answer counts once its prompt left the screen; one the agent didn't take (the
+// prompt stays) is refused, so Pixie says to answer it in the terminal.
+func TestAnAnswerTheAgentDoesntTakeIsRefused(t *testing.T) {
+	defer func(w time.Duration) { answerWait = w }(answerWait)
+	answerWait = 300 * time.Millisecond
+	h := agentHarness(t, "claude", "stty raw -echo; head -c 1 >/dev/null; sleep 30") // takes the key, draws nothing
+	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "npm test"}})
+	h.s.runner.OnOutput([]byte(bashDialog))
+	q := askedQuestion(t, h)
+	if err := answer(t, h, q.ID, "yes"); err != "The session didn't take the answer." {
+		t.Fatalf("%q", err)
+	}
+	if err := answer(t, h, q.ID, "yes"); !strings.Contains(err, "no longer waiting") {
+		t.Fatalf("typed once: %q", err)
+	}
+}
+
+func TestAnAnswerCountsOnceThePromptLeftTheScreen(t *testing.T) {
+	h := agentHarness(t, "claude", "stty raw -echo; head -c 1 >/dev/null; sleep 30")
+	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "npm test"}})
+	h.s.runner.OnOutput([]byte(bashDialog))
+	q := askedQuestion(t, h)
+	got := make(chan string, 1)
+	go func() { got <- answer(t, h, q.ID, "yes") }()
+	select {
+	case err := <-got:
+		t.Fatalf("answered before the prompt left the screen: %q", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	h.s.runner.OnOutput([]byte("\x1b[2J\x1b[H⏺ Bash(npm test)\r\n")) // the dialog is replaced
+	if err := <-got; err != "" {
+		t.Fatal(err)
+	}
+	if err := answer(t, h, q.ID, "yes"); !strings.Contains(err, "no longer waiting") {
+		t.Fatalf("answered once: %q", err)
+	}
 }
 
 func TestAMenuOfSeveralQuestionsIsOnlyAnnounced(t *testing.T) {

@@ -88,6 +88,7 @@ type Session struct {
 	flushMu   sync.Mutex // one typing of the queue at a time
 	posted    []string   // Pixie's messages not yet seen as prompts (normalized)
 	q         *question  // the prompt waiting on you that Pixie may answer (#105)
+	landing   *landing   // an answer typed from Pixie, until its prompt leaves the screen (#268)
 	qseq      int
 
 	turnStart     time.Time        // when this turn went working (zero: none seen)
@@ -220,6 +221,7 @@ func newSession(o sessionOpts) *Session {
 			vt = s.screenFor(vt)
 			vt.Write(b)
 			shown.watch(s, out, vt)
+			s.checkLanded(vt)
 		}
 	case "claude":
 		s.runner.OnOutput = func(b []byte) {
@@ -234,6 +236,7 @@ func newSession(o sessionOpts) *Session {
 			vt = s.screenFor(vt)
 			vt.Write(b)
 			shown.watch(s, out, vt)
+			s.checkLanded(vt)
 		}
 	}
 	return s
@@ -366,7 +369,11 @@ func (s *Session) command(m wire.Msg) wire.Msg {
 	if r.Err != "" {
 		s.o.log.Printf("command %s: %s", m.Command, r.Err)
 	} else {
-		s.o.log.Printf("command %s", m.Command) // never its text
+		if m.Command == "answer" {
+			s.o.log.Printf("command answer %s with %s", m.Text, m.Source) // a question id and a choice
+		} else {
+			s.o.log.Printf("command %s", m.Command) // never its text
+		}
 	}
 	return r
 }
