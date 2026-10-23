@@ -60,6 +60,9 @@ Everything your pixie does comes from one PNG, a grid of equal cells:
   pass through them to the window below, so only your character can be dragged.
 - **Any cell size.** The built-in pixies use 32×32 cells with 8 frames per row, so their sheets
   are 256 pixels wide. The sheet can be at most 4096×4096 pixels and 16 MB.
+- **Leave the bottom rows empty.** The bob (below) moves the body down by `px` pixels, and
+  anything drawn in the last `px` rows of a cell is cut off. The built-in pixies leave two
+  empty rows at the bottom of each cell.
 
 Dino's sheet (32×32 cells, 7 rows):
 
