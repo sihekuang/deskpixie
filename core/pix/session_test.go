@@ -28,6 +28,8 @@ type fakeDaemon struct {
 	events chan wire.Msg
 	// outdated: registered replies say this pix is older than the app's (#189).
 	outdated atomic.Bool
+	// holdMs: registered replies say how long a question waits for Pixie (#268).
+	holdMs atomic.Int64
 }
 
 func newFakeDaemon(t *testing.T, refuse string) (*fakeDaemon, string) {
@@ -55,7 +57,7 @@ func newFakeDaemon(t *testing.T, refuse string) (*fakeDaemon, string) {
 							wire.Encode(c, wire.Msg{Kind: wire.KindRefused, Reason: refuse})
 							continue
 						}
-						wire.Encode(c, wire.Msg{Kind: wire.KindRegistered, Address: "repo-claude", Outdated: d.outdated.Load()})
+						wire.Encode(c, wire.Msg{Kind: wire.KindRegistered, Address: "repo-claude", Outdated: d.outdated.Load(), DurationMs: d.holdMs.Load()})
 						d.conn <- c
 					}
 					d.events <- m

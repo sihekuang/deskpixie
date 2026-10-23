@@ -674,6 +674,17 @@ func TestFlushSaysTypedOrWhyItStillWaits(t *testing.T) {
 	}
 }
 
+// #268: the app tells each pix how long a question waits in its hook for Pixie's answer.
+func TestRegisteredSaysHowLongAQuestionWaits(t *testing.T) {
+	h, sock := newHost(t)
+	_, before := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/a"})
+	h.SetQuestionWait(20 * time.Second)
+	_, after := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/b"})
+	if before.DurationMs != 0 || after.DurationMs != 20_000 {
+		t.Fatalf("%+v %+v", before, after)
+	}
+}
+
 // #189: pix says which build it is when it registers. One older than the pix the app ships (or
 // from before builds, with none) is registered all the same, marked outdated: in its reply, in
 // List, and in what a message to it returns. With no build of its own, the app marks none.

@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"time"
 )
 
 // Instruction is the one line pix adds to the agent's instructions.
@@ -41,8 +42,12 @@ func PlanLaunch(tool string, userArgs []string, self, sock, dir string) (Launch,
 	case "claude":
 		hooks := map[string]any{}
 		for _, ev := range hookEvents {
+			timeout := 5
+			if holds(ev) { // its question may wait for Pixie's answer (#268)
+				timeout = int((MaxHold + 30*time.Second).Seconds())
+			}
 			entry := map[string]any{"hooks": []any{map[string]any{
-				"type": "command", "command": strconv.Quote(self) + " hook " + ev, "timeout": 5,
+				"type": "command", "command": strconv.Quote(self) + " hook " + ev, "timeout": timeout,
 			}}}
 			if m := hookMatchers[ev]; m != "" {
 				entry["matcher"] = m
