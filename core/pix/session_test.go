@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -606,15 +607,36 @@ func TestAClaudeMenuIsAnsweredWithItsDigit(t *testing.T) {
 	typed(t, h, '2')
 }
 
+// screensHarness runs an agent that draws first a moment after it starts, takes one key, then
+// draws after (if any) once wait passed: it draws everything itself, so nothing writes to the
+// screen beside pix's PTY reader.
+func screensHarness(t *testing.T, first, after string, wait time.Duration) *harness {
+	t.Helper()
+	dir := t.TempDir()
+	write := func(name, text string) string {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	return agentHarness(t, "claude", fmt.Sprintf("stty raw -echo; sleep 0.3; cat %q; head -c 1 >/dev/null; sleep %.2f; cat %q; sleep 30",
+		write("first", first), wait.Seconds(), write("after", after)))
+}
+
+func askBash(t *testing.T, h *harness, command string) wire.Msg {
+	t.Helper()
+	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": command}})
+	return askedQuestion(t, h)
+}
+
 // #268: an answer counts once its prompt left the screen; one the agent didn't take (the
 // prompt stays) is refused, so Pixie says to answer it in the terminal.
 func TestAnAnswerTheAgentDoesntTakeIsRefused(t *testing.T) {
 	defer func(w time.Duration) { answerWait = w }(answerWait)
 	answerWait = 300 * time.Millisecond
-	h := agentHarness(t, "claude", "stty raw -echo; head -c 1 >/dev/null; sleep 30") // takes the key, draws nothing
-	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "npm test"}})
-	h.s.runner.OnOutput([]byte(bashDialog))
-	q := askedQuestion(t, h)
+	h := screensHarness(t, bashDialog, "", 0) // takes the key, draws nothing
+	q := askBash(t, h, "npm test")
 	if err := answer(t, h, q.ID, "yes"); err != "The session didn't take the answer." {
 		t.Fatalf("%q", err)
 	}
@@ -624,23 +646,38 @@ func TestAnAnswerTheAgentDoesntTakeIsRefused(t *testing.T) {
 }
 
 func TestAnAnswerCountsOnceThePromptLeftTheScreen(t *testing.T) {
-	h := agentHarness(t, "claude", "stty raw -echo; head -c 1 >/dev/null; sleep 30")
-	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "npm test"}})
-	h.s.runner.OnOutput([]byte(bashDialog))
-	q := askedQuestion(t, h)
-	got := make(chan string, 1)
-	go func() { got <- answer(t, h, q.ID, "yes") }()
-	select {
-	case err := <-got:
-		t.Fatalf("answered before the prompt left the screen: %q", err)
-	case <-time.After(300 * time.Millisecond):
-	}
-	h.s.runner.OnOutput([]byte("\x1b[2J\x1b[H⏺ Bash(npm test)\r\n")) // the dialog is replaced
-	if err := <-got; err != "" {
+	h := screensHarness(t, bashDialog, "\x1b[2J\x1b[H* Bash(npm test)\r\n", 500*time.Millisecond)
+	q := askBash(t, h, "npm test")
+	start := time.Now()
+	if err := answer(t, h, q.ID, "yes"); err != "" {
 		t.Fatal(err)
+	}
+	if d := time.Since(start); d < 400*time.Millisecond {
+		t.Fatalf("answered after %v, before the prompt left the screen", d)
 	}
 	if err := answer(t, h, q.ID, "yes"); !strings.Contains(err, "no longer waiting") {
 		t.Fatalf("answered once: %q", err)
+	}
+}
+
+// Claude's next dialog with the same question right after it ("Do you want to proceed?" for the
+// next command): the first one's answer still landed (review of #268).
+func TestTheNextDialogWithTheSameMarkerStillCountsAsTaken(t *testing.T) {
+	next := "\x1b[2J\x1b[H" + strings.ReplaceAll(bashDialog, "npm test", "npm run build")
+	h := screensHarness(t, bashDialog, next, 0)
+	q := askBash(t, h, "npm test")
+	if err := answer(t, h, q.ID, "yes"); err != "" {
+		t.Fatal(err)
+	}
+}
+
+// A prompt that showed but is no longer drawn (the screen was cleared or redrawn without it) is
+// not typed into: its leaving couldn't tell whether the answer was taken.
+func TestAPromptNoLongerDrawnIsNotTypedInto(t *testing.T) {
+	h := screensHarness(t, bashDialog+"\x1b[2J\x1b[H", "", 0)
+	q := askBash(t, h, "npm test")
+	if err := answer(t, h, q.ID, "yes"); err != "The question isn't on screen." {
+		t.Fatalf("%q", err)
 	}
 }
 

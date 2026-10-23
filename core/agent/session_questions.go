@@ -115,15 +115,29 @@ func (c *AgentController) onChoose(token string, option int, now Millis, fx *[]E
 		c.tapNotWaiting(token, now, fx)
 		return
 	}
+	c.noteTap(token, now)
 	c.answerSession(p, strconv.Itoa(option), now, fx)
+}
+
+// RecentTapMs: a tap this soon after one settled its token is the same click, doubled.
+const RecentTapMs Millis = 5000
+
+func (c *AgentController) noteTap(token string, now Millis) {
+	if c.tapped == nil {
+		c.tapped = map[string]Millis{}
+	}
+	c.tapped[token] = now
 }
 
 // tapNotWaiting: a tap on token settled nothing. One no longer waiting (answered, gone, or from
 // before a restart) is said and logged (#268); a waiting one tapped wrong (Allow on a menu, an
-// option it hasn't) the bubble never offers, so it stays quiet.
+// option it hasn't) the bubble never offers, and a double click's second tap, stay quiet.
 func (c *AgentController) tapNotWaiting(token string, now Millis, fx *[]Effect) {
 	if c.confirms.IsPendingToken(token) {
 		return
+	}
+	if at, ok := c.tapped[token]; ok && now < at+RecentTapMs {
+		return // the second tap of a double click
 	}
 	*fx = append(*fx, logEffect(fmt.Sprintf("agent: a tap on %q: that question isn't waiting any more", token)))
 	c.deliver(NewLine(LineInfo, "That question isn't waiting any more."), now, fx)

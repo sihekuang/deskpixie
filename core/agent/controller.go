@@ -499,6 +499,9 @@ type AgentController struct {
 	boxAnswered JobID
 	// sessionSeq numbers session prompts' request ids (#105).
 	sessionSeq uint64
+	// tapped: when a tap on Pixie's bubble settled each token, so a double click's second tap
+	// stays quiet (#268).
+	tapped map[string]Millis
 	// restartAt: when the coordinator is started again after an exit or a failed start (#118);
 	// startFailures: failed starts in a row, for the backoff.
 	restartAt     optMs
@@ -798,6 +801,7 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 	case InDecide:
 		// A token already decided (by voice or an earlier tap) or expired settles nothing.
 		if d, ok := c.confirms.DecideToken(in.Token, in.Allow); ok {
+			c.noteTap(in.Token, now)
 			c.applyDecided(d, now, &fx)
 		} else {
 			c.tapNotWaiting(in.Token, now, &fx)

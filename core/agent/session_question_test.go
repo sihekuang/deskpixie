@@ -171,6 +171,9 @@ func TestAPickIsSaidOnlyOnceTheSessionTookIt(t *testing.T) {
 	if b := bubbleOf(fx); len(b) != 0 {
 		t.Fatalf("not said before the session took it: %+v", b)
 	}
+	if fx := c.Step(ChooseInput(token, 1), T0+2); len(answers(fx)) != 0 || len(effectsOfKind(fx, EfNotify)) != 0 {
+		t.Fatalf("a double click's second tap stays quiet: %s", fmtEffects(fx))
+	}
 	fx = c.Step(SessionAnswerFailedInput(sessionName, "The session didn't take the answer."), T0+2)
 	if b := bubbleOf(fx); len(b) != 1 || strings.Contains(b[0].Text, "picked") ||
 		b[0].Text != "Couldn't answer in api-claude: The session didn't take the answer. Answer it in its terminal." {
