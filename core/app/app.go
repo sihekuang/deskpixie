@@ -119,6 +119,8 @@ type App struct {
 	userPixies string
 	// packProblems are the pixies that didn't load, as the tray shows them.
 	packProblems []string
+	// sheets are the loaded packs' sheets as read at the last load.
+	sheets map[string]sheetFile
 	// shown is what the last pack payload (the `pack` event, dp_pack_json) was drawn from.
 	shown *packStamp
 	store *settings.FileStore
@@ -652,9 +654,9 @@ func (a *App) packPayload(scale uint32) map[string]any {
 		a.mu.Unlock()
 	}
 	f := map[string]any{"pack": p, "sheetPath": p.SheetPath, "scale": scale}
-	if stamp != nil && !stamp.mtime.IsZero() {
+	if stamp != nil && !stamp.sheet.mtime.IsZero() {
 		// A sheet redrawn in place has the same path: this tells the shell to read it again.
-		f["sheetVersion"] = stamp.mtime.UnixNano()
+		f["sheetVersion"] = stamp.sheet.mtime.UnixNano()
 	}
 	if mask != "" {
 		f["hitMask"] = mask
@@ -720,13 +722,22 @@ func (a *App) loadPacks(cfg settings.Config) {
 	home, _ := os.UserHomeDir()
 	roots, user := PackRoots(a.paths.BundledPixies, a.paths.AppSupport, cfg.PixiesFolder, home)
 	found, err := packs.Load(roots...)
-	var problems []string
-	for _, r := range packs.Rejections(err) {
-		problems = append(problems, PackProblem(r))
+	problems := PackProblems(packs.Rejections(err))
+	// The sheets as read now: a sheet redrawn later is picked up by the next load, with its
+	// hit mask, never half-way by a payload in between.
+	sheets := map[string]sheetFile{}
+	for id, p := range found {
+		if fi, err := os.Stat(p.SheetPath); err == nil {
+			sheets[id] = sheetFile{fi.Size(), fi.ModTime()}
+		}
 	}
 	a.mu.Lock()
-	a.roots, a.userPixies, a.packs, a.packProblems = roots, user, found, problems
+	a.roots, a.userPixies, a.packs, a.packProblems, a.sheets = roots, user, found, problems, sheets
 	a.hitMasks = map[string]string{}
+	if _, ok := found[cfg.Pack]; ok {
+		// A pack in a folder hand-edited in with it was refused before the folder was read.
+		a.wanted = cfg.Pack
+	}
 	a.mu.Unlock()
 }
 
@@ -743,25 +754,26 @@ func (a *App) reloadPacks(cfg settings.Config) {
 	}
 }
 
-// packStamp is what the pack shown is drawn from.
-type packStamp struct {
-	pack  packs.Pack
+// sheetFile is a sheet's size and modification time when it was loaded.
+type sheetFile struct {
 	size  int64
 	mtime time.Time
 }
 
+// packStamp is what the pack shown is drawn from.
+type packStamp struct {
+	pack  packs.Pack
+	sheet sheetFile
+}
+
 func (a *App) shownStamp() *packStamp {
 	a.mu.Lock()
+	defer a.mu.Unlock()
 	p, ok := a.currentPackLocked()
-	a.mu.Unlock()
 	if !ok {
 		return nil
 	}
-	st := packStamp{pack: *p}
-	if fi, err := os.Stat(p.SheetPath); err == nil {
-		st.size, st.mtime = fi.Size(), fi.ModTime()
-	}
-	return &st
+	return &packStamp{pack: *p, sheet: a.sheets[p.ID]}
 }
 
 // setScale: Tray ▸ Size.

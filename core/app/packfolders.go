@@ -62,7 +62,26 @@ func PackRoots(bundled, appSupport string, folder *string, home string) (roots [
 	return append(roots, users...), users[len(users)-1]
 }
 
-// PackProblem is the tray's line for a pixie that didn't load.
-func PackProblem(r *packs.Rejected) string {
-	return fmt.Sprintf("%s didn't load: %v", r.ID, r.Err)
+// The tray shows at most MaxPackProblems pixies that didn't load, each cut to MaxProblemLen
+// characters, so a folder full of other things doesn't fill the menu.
+const (
+	MaxPackProblems = 5
+	MaxProblemLen   = 120
+)
+
+// PackProblems are the tray's lines for the pixies that didn't load: "<id> didn't load:
+// <why>", then "N more didn't load" past MaxPackProblems.
+func PackProblems(rs []*packs.Rejected) []string {
+	var out []string
+	for i, r := range rs {
+		if i == MaxPackProblems {
+			return append(out, fmt.Sprintf("%d more didn't load", len(rs)-i))
+		}
+		line := []rune(fmt.Sprintf("%s didn't load: %v", r.ID, r.Err))
+		if len(line) > MaxProblemLen {
+			line = append(line[:MaxProblemLen-1], '…')
+		}
+		out = append(out, string(line))
+	}
+	return out
 }

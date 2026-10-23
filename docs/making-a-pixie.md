@@ -86,19 +86,20 @@ DeskPixie shows one animation at a time, by what Pixie is doing:
 | `listening` | Pixie is listening to you. | Yes |
 | `thinking` | You've stopped talking and Pixie is working on an answer, or it's connecting. | Yes |
 | `delegating` | A session is working on something Pixie handed off. | No: uses `thinking` |
-| `happy` | A handed-off task is done, or a canvas page opened. Plays once. | No: uses `idle` |
+| `happy` | A handed-off task is done, or a canvas page opened. | No: uses `idle` |
 | `error` | Something went wrong: a failed task, or voice couldn't start. | No: uses `idle` |
 
-Looping animations repeat. One with `"loop": false` (like `happy`) plays once and then Pixie
-goes back to `idle`.
+Most animations repeat for as long as Pixie is in that state. `happy` and `error` are short:
+give them `"loop": false` (as the built-in pixies do) and they play once, then Pixie goes back
+to what it was doing. If they loop, they repeat for about 2 seconds instead.
 
 ## The mouth
 
-While Pixie talks, a mouth is drawn on top of the body, and it opens wider as the voice gets
-louder:
+A mouth is always drawn on top of the body, in every animation. While Pixie talks it opens
+wider as the voice gets louder:
 
 - The mouth row holds `levels` shapes, one per cell from the left. The first is the closed
-  mouth, which also shows when Pixie is quiet. The last is the widest open.
+  mouth, shown whenever Pixie is quiet. The last is the widest open.
 - Only the top-left `size` pixels of each mouth cell are used.
 - `anchor` is where the mouth's top-left corner goes inside the body cell, in pixels from the
   cell's top-left.
@@ -139,9 +140,9 @@ Dino's, in full:
 | `cell` | Yes | `[width, height]` of one cell, in pixels. |
 | `sheet` | Yes | The PNG's file name, inside the pixie's folder. |
 | `fps` | Yes | Frames per second, 1 to 60. |
-| `bob` | No | A gentle up-and-down: the body moves down `px` pixels (at most 16) every other `frames` frames. Leave it out for none. |
+| `bob` | No | A gentle up-and-down: the body sits `px` pixels lower (at most 16) for `frames` frames, then back up for `frames` frames. Leave it out for none. |
 | `states` | Yes | The animations (above). Each has `row` (from 0, top) and `frames`. |
-| `states.*.loop` | No | `false` plays once and goes back to `idle`. Default `true`. |
+| `states.*.loop` | No | `false` plays once, then Pixie goes back to what it was doing. Default `true`. |
 | `states.*.bob` | No | `false` turns the bob off for this animation. Default `true`. |
 | `states.*.faceDy` | No | Moves the mouth up or down per frame: one number per frame. |
 | `mouth` | Yes | `row`, `anchor` `[x, y]`, `size` `[width, height]`, and `levels` (2 or more). |
@@ -151,7 +152,7 @@ Other fields are ignored, so you can keep notes in the file, for example `"autho
 ## When a pixie doesn't load
 
 A pixie that can't be read doesn't show up in the list. The menu bar's **Pixie** menu says
-which one and why, for example:
+which one and why (the first five, then how many more), for example:
 
 ```
 my-owl didn't load: mouth.row: row 9 exceeds sheet rows (7)

@@ -1,11 +1,15 @@
 package app
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sihekuang/deskpixie/core/packs"
+	"github.com/sihekuang/deskpixie/core/settings"
 )
 
 func packIDs(s AppState) []string {
@@ -169,5 +173,109 @@ func TestReloadRedrawsOnlyWhenThePixieShownChanged(t *testing.T) {
 	h.action("reload")
 	if n := len(h.kinds(h.take(), "pack")); n != 1 {
 		t.Fatalf("%d pack events after the manifest changed", n)
+	}
+}
+
+// A sheet redrawn in place is only picked up by a reload, and then in full: the sheet and its
+// hit mask together. A size change before the reload doesn't half-pick it up (review of #266).
+func TestARedrawnSheetIsPickedUpByTheReloadNotBefore(t *testing.T) {
+	root := t.TempDir()
+	writePack(t, root, "bit", 4)
+	h := newHarness(t, withBundled(root))
+	h.take()
+	later := time.Now().Add(time.Minute)
+	if err := os.Chtimes(filepath.Join(root, "bit", "sheet.png"), later, later); err != nil {
+		t.Fatal(err)
+	}
+	h.action("size:6")
+	ev := h.kinds(h.take(), "pack")
+	if len(ev) != 1 {
+		t.Fatalf("%d pack events for the size", len(ev))
+	}
+	if v, _ := ev[0]["sheetVersion"].(float64); int64(v)/1e9 == later.Unix() {
+		t.Fatal("the redrawn sheet was sent before a reload read it")
+	}
+	h.action("reload")
+	ev = h.kinds(h.take(), "pack")
+	if len(ev) != 1 {
+		t.Fatalf("%d pack events for the reload", len(ev))
+	}
+	if v, _ := ev[0]["sheetVersion"].(float64); int64(v)/1e9 != later.Unix() {
+		t.Fatalf("sheetVersion %v", ev[0]["sheetVersion"])
+	}
+}
+
+// A pack and a folder hand-edited together: the pack in the new folder is shown once the
+// folder is read, though pack is applied first.
+func TestAPackInTheNewFolderIsShownWhenTheFolderIsRead(t *testing.T) {
+	h := newHarness(t)
+	art := t.TempDir()
+	writePack(t, art, "mycat", 4)
+	c := h.app.store.Current()
+	c.PixiesFolder, c.Pack = &art, "mycat"
+	h.take()
+	h.app.reloadPacks(c)
+	if h.state().Pack != "mycat" {
+		t.Fatalf("shown %q", h.state().Pack)
+	}
+}
+
+// The chosen folder deleted while one of its pixies is shown: a reload falls back to the
+// app's own folder and the default pixie is drawn.
+func TestADeletedFolderFallsBackOnReload(t *testing.T) {
+	art := t.TempDir()
+	writePack(t, art, "mycat", 4)
+	h := newHarness(t, withSettings(func(c *settings.Config) { c.PixiesFolder, c.Pack = &art, "mycat" }))
+	if h.state().Pack != "mycat" {
+		t.Fatal(h.state().Pack)
+	}
+	if err := os.RemoveAll(art); err != nil {
+		t.Fatal(err)
+	}
+	h.take()
+	h.action("reload")
+	ev := h.kinds(h.take(), "pack")
+	if len(ev) != 1 || ev[0]["pack"].(map[string]any)["name"] != "Bit" || h.state().Pack != "bit" {
+		t.Fatalf("events %v, shown %q", ev, h.state().Pack)
+	}
+	h.action("pixies:folder")
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.runs) != 1 || h.runs[0][1] != filepath.Join(h.dir, UserPacksDir) {
+		t.Fatalf("runs %v", h.runs)
+	}
+}
+
+// Open Pixies Folder with a file where the folder should be says so instead of opening it.
+func TestOpenPixiesFolderWithAFileInTheWay(t *testing.T) {
+	h := newHarness(t)
+	own := filepath.Join(h.dir, UserPacksDir)
+	if err := os.RemoveAll(own); err != nil {
+		t.Fatal(err)
+	}
+	write(t, own, "not a folder")
+	if _, err := h.callErr("app.action", map[string]string{"id": "pixies:folder"}); err == nil {
+		t.Fatal("no error")
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.runs) != 0 {
+		t.Fatalf("runs %v", h.runs)
+	}
+}
+
+// A folder full of other things doesn't fill the menu: the first few, then how many more.
+func TestManyProblemsAreCapped(t *testing.T) {
+	var rs []*packs.Rejected
+	for i := 0; i < 8; i++ {
+		rs = append(rs, &packs.Rejected{ID: "f" + itoa(i), Err: errors.New("pixie.json: cannot read: not found")})
+	}
+	rs = append(rs, &packs.Rejected{ID: "long", Err: errors.New(strings.Repeat("x", 300))})
+	got := PackProblems(rs)
+	if len(got) != MaxPackProblems+1 || got[MaxPackProblems] != "4 more didn't load" {
+		t.Fatalf("%q", got)
+	}
+	if one := PackProblems(rs[8:]); len([]rune(one[0])) > MaxProblemLen || !strings.HasSuffix(one[0], "…") {
+		t.Fatalf("%q", one)
 	}
 }
