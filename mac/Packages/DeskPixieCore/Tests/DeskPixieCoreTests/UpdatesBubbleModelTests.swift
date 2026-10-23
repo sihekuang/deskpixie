@@ -187,7 +187,10 @@ final class UpdatesBubbleModelTests: XCTestCase {
         XCTAssertTrue(m.acceptsDecision(token: "lynx", now: 11.8))
     }
 
-    func testButtonsThatReappearAreGuardedAgain() {
+    /// #268: buttons you open the bubble onto (hovering its badge) take your tap at once: a quick
+    /// move and click was dropped without a sign. Only buttons that appear by themselves (a pop,
+    /// a new question) are guarded.
+    func testButtonsYouHoverOpenTakeATapAtOnce() {
         var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
         m.apply([question(1, "hawk")], now: 10, pop: .allowed)
         m.pointerEntered(now: 12); m.pointerLeft()                 // hovered and left: the badge
@@ -195,8 +198,16 @@ final class UpdatesBubbleModelTests: XCTestCase {
         XCTAssertEqual(m.phase, .badge)
         XCTAssertFalse(m.acceptsDecision(token: "hawk", now: 17.5)) // no buttons on a badge
         m.pointerEntered(now: 20)
-        XCTAssertFalse(m.acceptsDecision(token: "hawk", now: 20.2))
-        XCTAssertTrue(m.acceptsDecision(token: "hawk", now: 20.8))
+        XCTAssertTrue(m.acceptsDecision(token: "hawk", now: 20.1))
+    }
+
+    func testAQuestionArrivingWhileOpenIsStillGuarded() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        m.apply([line(1)], now: 10, pop: .allowed)
+        m.pointerEntered(now: 11)
+        m.apply([line(1), question(2, "hawk")], now: 12, pop: .allowed) // appears under the pointer
+        XCTAssertFalse(m.acceptsDecision(token: "hawk", now: 12.2))
+        XCTAssertTrue(m.acceptsDecision(token: "hawk", now: 12.8))
     }
 
     func testATapOnAQuestionNotShownIsIgnored() {

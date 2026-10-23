@@ -100,8 +100,8 @@ public struct UpdatesBubbleModel: Sendable {
         case expanded(since: TimeInterval)
     }
 
-    /// How long Allow and Deny ignore taps after a question's buttons appear (#97), so a click
-    /// landing as the bubble pops never approves.
+    /// How long Allow and Deny ignore taps after a question's buttons appear by themselves (#97),
+    /// so a click landing as the bubble pops never approves.
     public static let decisionGuard: TimeInterval = 0.75
 
     /// Below this opacity the bubble is too faded to count as looked at.
@@ -208,7 +208,9 @@ public struct UpdatesBubbleModel: Sendable {
         guard !lines.isEmpty || isPopped else { return }
         phase = .expanded(since: now)
         frozen = lines.reversed()
-        noteDecisions(now)
+        // Opened by you: the buttons you see take your tap at once (#268); only buttons that
+        // appear by themselves (a pop, a new question) are guarded.
+        noteDecisions(now, shownAt: now - Self.decisionGuard)
     }
 
     /// The pointer left: back to the badge, or hidden when nothing unheard is left.
@@ -281,8 +283,9 @@ public struct UpdatesBubbleModel: Sendable {
     }
 
     /// Stamps the questions whose Allow and Deny show now (the bubble is open and the row is
-    /// listed) and forgets the rest, so buttons that reappear are guarded again.
-    private mutating func noteDecisions(_ now: TimeInterval) {
+    /// listed) as shown at `shownAt` (now by default) and forgets the rest, so buttons that
+    /// reappear are guarded again unless you opened the bubble onto them.
+    private mutating func noteDecisions(_ now: TimeInterval, shownAt: TimeInterval? = nil) {
         guard isExpanded || isPopped else {
             decisionsSince = [:]
             return
@@ -290,7 +293,7 @@ public struct UpdatesBubbleModel: Sendable {
         let showing = Set(shown.filter { $0.offersDecision || $0.offersOptions }.compactMap(\.token))
         decisionsSince = decisionsSince.filter { showing.contains($0.key) }
         for token in showing where decisionsSince[token] == nil {
-            decisionsSince[token] = now
+            decisionsSince[token] = shownAt ?? now
         }
     }
 }
