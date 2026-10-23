@@ -45,6 +45,8 @@ public struct TrayAppState: Decodable, Sendable, Equatable {
     public var state: String
     public var packs: [PackRef]
     public var pack: String
+    /// The pixies that didn't load and why, one line each (#266).
+    public var packProblems: [String]
     public var scale: Int?
     public var fade: Bool
     public var talking: Bool
@@ -55,7 +57,7 @@ public struct TrayAppState: Decodable, Sendable, Equatable {
     public var agentModeFix: ModeFix?
 
     private enum CodingKeys: String, CodingKey {
-        case state, packs, pack, scale, fade, talking, canvasRecent, agent, statusLines, hotkey, agentModeFix
+        case state, packs, pack, packProblems, scale, fade, talking, canvasRecent, agent, statusLines, hotkey, agentModeFix
     }
 
     public init(from decoder: Decoder) throws {
@@ -63,6 +65,7 @@ public struct TrayAppState: Decodable, Sendable, Equatable {
         state = try c.decodeIfPresent(String.self, forKey: .state) ?? ""
         packs = try c.decodeIfPresent([PackRef].self, forKey: .packs) ?? []
         pack = try c.decodeIfPresent(String.self, forKey: .pack) ?? ""
+        packProblems = try c.decodeIfPresent([String].self, forKey: .packProblems) ?? []
         scale = try c.decodeIfPresent(Int.self, forKey: .scale)
         fade = try c.decodeIfPresent(Bool.self, forKey: .fade) ?? false
         talking = try c.decodeIfPresent(Bool.self, forKey: .talking) ?? false
@@ -177,6 +180,22 @@ public enum TrayMenu {
         }
     }
 
+    /// Tray ▸ Pixie: the pixies, the ones that didn't load and why, then your pixies folder
+    /// (#266).
+    static func pixieItems(_ s: TrayAppState) -> [TrayItem] {
+        var items: [TrayItem] = s.packs.map {
+            .action(Row(id: "pack:\($0.id)", title: $0.name, checked: $0.id == s.pack))
+        }
+        if !s.packProblems.isEmpty {
+            items.append(.separator)
+            items += s.packProblems.map { .label($0) }
+        }
+        items += [.separator,
+                  .action(Row(id: "pixies:folder", title: "Open Pixies Folder")),
+                  .action(Row(id: "reload", title: "Reload Pixies"))]
+        return items
+    }
+
     /// The whole menu. `s == nil` (app.state unavailable) leaves only the app's own items.
     /// `localStatusLines` are Swift-side problems (hotkey, audio, engine) shown first.
     /// `starting`: the core is still configuring, so Settings… (which reads the core
@@ -204,9 +223,7 @@ public enum TrayMenu {
                                   items: sizeItems(scale: s.scale ?? defaultScale).map { .action($0) }))
             items.append(.action(Row(id: "reset-position", title: "Reset position")))
             if !s.packs.isEmpty {
-                items.append(.submenu(title: "Pixie", enabled: true, items: s.packs.map {
-                    .action(Row(id: "pack:\($0.id)", title: $0.name, checked: $0.id == s.pack))
-                }))
+                items.append(.submenu(title: "Pixie", enabled: true, items: pixieItems(s)))
             }
             items.append(.submenu(title: "Canvas", enabled: true, items: [
                 .action(Row(id: "canvas:open", title: "Open canvas")),

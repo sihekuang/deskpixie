@@ -26,6 +26,8 @@ macOS app (`mac/`).
   the front ("show me the deskpixie session").
 - **Show, not just tell.** The coordinator can open canvas pages (charts, diagrams, comparisons)
   next to Pixie.
+- **Make your own pixie.** Draw a sprite sheet, put it in your pixies folder, and pick it in
+  Settings. See [docs/making-a-pixie.md](docs/making-a-pixie.md).
 
 ## Requirements
 
@@ -88,7 +90,7 @@ services (voice providers, Claude Code, Herdr) are opt-in with `-tags live`.
 | `core/` | The Go core: voice providers and conversation (`voice/`), the coordinator and workers (`agent/`), Herdr and tmux hosts, the `pix` command (`pix/`, `cmd/pix`), Pixie's own tools, audio. |
 | `mac/` | The Swift macOS app: Pixie's window, the menu bar, Settings, onboarding, audio I/O. |
 | `design-system/` | The canvas pages' styles, scripts and examples. |
-| `pixies/` | Pixie's character sprite sheets. |
+| `pixies/` | Pixie's character sprite sheets. To make your own, see [docs/making-a-pixie.md](docs/making-a-pixie.md). |
 | `docs/` | Specs, plans and decisions (`docs/decisions.md`). |
 
 This repo is the port of ai-mascot (Rust/Tauri). See `docs/specs/2026-10-13-deskpixie-port-design.md`.

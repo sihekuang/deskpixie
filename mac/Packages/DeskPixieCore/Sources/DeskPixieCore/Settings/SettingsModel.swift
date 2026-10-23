@@ -58,16 +58,24 @@ public final class SettingsModel {
 
     /// The window opened: read the snapshot and the key status.
     public func load() {
+        reloadPixies()
         fetch { try client.snapshot() }
         readKeyStatus()
         refreshProjectsFolder()
     }
 
-    /// The window became key: pick up hand edits and a key added to `.env`.
+    /// The window became key: pick up hand edits, a key added to `.env` and a new pixie.
     public func focusGained() {
+        reloadPixies()
         fetch { try client.reload() }
         readKeyStatus()
         refreshProjectsFolder()
+    }
+
+    /// A pixie added to your pixies folder joins the Pixie list before the snapshot is read
+    /// (#266). A failure only means the list is as it was.
+    private func reloadPixies() {
+        try? client.reloadPixies()
     }
 
     /// The path that holds the projects folder setting.

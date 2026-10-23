@@ -56,6 +56,26 @@ final class EngineEventTests: XCTestCase {
         XCTAssertEqual(ev.scale, 6)
         XCTAssertEqual(ev.hitMask, Data([1, 2, 3]))
         XCTAssertEqual(ev.pack, PackPayload.decode(fixture)?.pack)
+        XCTAssertNil(ev.sheetVersion, "an older core sends none")
+    }
+
+    func testARedrawnSheetIsReadAgain() throws {
+        // #266: the same path with a newer modification time means the art changed.
+        let url = try XCTUnwrap(Bundle.module.url(forResource: "bit-pack", withExtension: "json", subdirectory: "Fixtures"))
+        var obj = try XCTUnwrap(JSONSerialization.jsonObject(with: try Data(contentsOf: url)) as? [String: Any])
+        obj["kind"] = "pack"
+        obj["scale"] = 8
+        obj["sheetVersion"] = 1_792_000_000_000_000_000 as Int64
+        guard case .pack(let ev)? = EngineEvent.decode(try JSONSerialization.data(withJSONObject: obj)) else {
+            return XCTFail("not a pack event")
+        }
+        XCTAssertEqual(ev.sheetVersion, 1_792_000_000_000_000_000)
+        XCTAssertFalse(ev.needsSheet(currentPath: ev.sheetPath, currentVersion: 1_792_000_000_000_000_000))
+        XCTAssertTrue(ev.needsSheet(currentPath: ev.sheetPath, currentVersion: 1_791_000_000_000_000_000))
+        XCTAssertTrue(ev.needsSheet(currentPath: "/other/sheet.png", currentVersion: 1_792_000_000_000_000_000))
+        obj.removeValue(forKey: "kind")
+        let payload = try XCTUnwrap(PackPayload.decode(try JSONSerialization.data(withJSONObject: obj)))
+        XCTAssertEqual(payload.sheetVersion, 1_792_000_000_000_000_000)
     }
 
     func testParityKindsWithMissingRequiredFieldsAreNil() {

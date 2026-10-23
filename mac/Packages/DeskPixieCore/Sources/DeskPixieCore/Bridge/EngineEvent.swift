@@ -48,12 +48,22 @@ public struct PackEvent: Decodable, Sendable, Equatable {
     public let scale: Int
     /// Union hit mask: one bit per pixel of a cell (w×h, row-major), base64 on the wire.
     public let hitMask: Data?
+    /// The sheet file's modification time: a sheet redrawn at the same path is read again
+    /// when it changes (#266).
+    public let sheetVersion: Int64?
 
-    public init(pack: Pack, sheetPath: String, scale: Int, hitMask: Data?) {
+    public init(pack: Pack, sheetPath: String, scale: Int, hitMask: Data?, sheetVersion: Int64? = nil) {
         self.pack = pack
         self.sheetPath = sheetPath
         self.scale = scale
         self.hitMask = hitMask
+        self.sheetVersion = sheetVersion
+    }
+
+    /// Whether the sheet must be read again rather than reusing the one at `path` read at
+    /// `version`.
+    public func needsSheet(currentPath: String?, currentVersion: Int64?) -> Bool {
+        sheetPath != currentPath || sheetVersion != currentVersion
     }
 }
 

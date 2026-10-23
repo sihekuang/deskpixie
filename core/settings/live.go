@@ -9,6 +9,8 @@ const (
 	RouteHotkey Route = iota + 1
 	// RoutePack: Tray ▸ Pixie.
 	RoutePack
+	// RoutePixiesFolder: the pixies are read again from the new folder (Tray ▸ Reload Pixies).
+	RoutePixiesFolder
 	// RouteScale: Tray ▸ Size.
 	RouteScale
 	// RouteReadEachTick: the proximity loop reads proximityFade on every tick: nothing to do.
@@ -39,6 +41,8 @@ func RouteFor(path string) (Route, bool) {
 		return RouteHotkey, true
 	case "pack":
 		return RoutePack, true
+	case "pixiesFolder":
+		return RoutePixiesFolder, true
 	case "scale":
 		return RouteScale, true
 	case "proximityFade.enabled", "proximityFade.radius", "logMaxMB":

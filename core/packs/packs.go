@@ -93,6 +93,9 @@ func Load(roots ...string) (map[string]Pack, error) {
 		}
 		var dirs []string
 		for _, e := range entries {
+			if strings.HasPrefix(e.Name(), ".") { // .git and the like in a folder of art
+				continue
+			}
 			p := filepath.Join(root, e.Name())
 			if st, err := os.Stat(p); err == nil && st.IsDir() {
 				dirs = append(dirs, p)
@@ -102,7 +105,7 @@ func Load(roots ...string) (map[string]Pack, error) {
 		for _, dir := range dirs {
 			p, err := loadPack(dir)
 			if err != nil {
-				rejected = append(rejected, fmt.Errorf("pixie pack %s: %w", dir, err))
+				rejected = append(rejected, &Rejected{ID: filepath.Base(dir), Dir: dir, Err: err})
 				log.Printf("packs: rejected %s: %v", dir, err) // as log_rejected in packs.rs
 				continue
 			}
@@ -110,6 +113,29 @@ func Load(roots ...string) (map[string]Pack, error) {
 		}
 	}
 	return packs, errors.Join(rejected...)
+}
+
+// Rejected is a pack folder that didn't load, and why (#266).
+type Rejected struct {
+	ID  string // the folder's name
+	Dir string
+	Err error
+}
+
+func (r *Rejected) Error() string { return fmt.Sprintf("pixie pack %s: %v", r.Dir, r.Err) }
+func (r *Rejected) Unwrap() error { return r.Err }
+
+// Rejections are the packs in an error from Load, in the order they were read.
+func Rejections(err error) []*Rejected {
+	var out []*Rejected
+	if j, ok := err.(interface{ Unwrap() []error }); ok {
+		for _, e := range j.Unwrap() {
+			if r, ok := e.(*Rejected); ok {
+				out = append(out, r)
+			}
+		}
+	}
+	return out
 }
 
 // Select picks the wanted pack, else "bit", else the first valid pack by id.
@@ -291,6 +317,9 @@ func loadPack(dir string) (Pack, error) {
 			name, data, err = LegacyManifest, old, oerr
 		}
 	}
+	if errors.Is(err, os.ErrNotExist) {
+		return Pack{}, fmt.Errorf("%s: cannot read: not found", name)
+	}
 	if err != nil {
 		return Pack{}, fmt.Errorf("%s: cannot read: %w", name, err)
 	}
@@ -303,16 +332,19 @@ func loadPack(dir string) (Pack, error) {
 	}
 	sheet := filepath.Join(abs, filepath.FromSlash(*m.Sheet))
 	if st, err := os.Stat(sheet); err == nil && st.Size() > MaxSheetBytes {
-		return Pack{}, fmt.Errorf("sheet: %s is larger than %d bytes", sheet, MaxSheetBytes)
+		return Pack{}, fmt.Errorf("sheet: %s is larger than %d bytes", *m.Sheet, MaxSheetBytes)
 	}
 	f, err := os.Open(sheet)
+	if errors.Is(err, os.ErrNotExist) {
+		return Pack{}, fmt.Errorf("sheet: %s not found", *m.Sheet)
+	}
 	if err != nil {
-		return Pack{}, fmt.Errorf("sheet: cannot read %s: %w", sheet, err)
+		return Pack{}, fmt.Errorf("sheet: cannot read %s: %w", *m.Sheet, err)
 	}
 	cfg, _, err := image.DecodeConfig(f)
 	_ = f.Close()
 	if err != nil {
-		return Pack{}, fmt.Errorf("sheet: cannot read %s: %w", sheet, err)
+		return Pack{}, fmt.Errorf("sheet: %s is not a PNG: %w", *m.Sheet, err)
 	}
 	if errs := validate(m, cfg.Width, cfg.Height); len(errs) > 0 {
 		return Pack{}, errors.New(strings.Join(errs, "; "))

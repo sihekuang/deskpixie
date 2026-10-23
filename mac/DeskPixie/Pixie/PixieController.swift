@@ -29,6 +29,7 @@ final class PixieController {
     private(set) var pack: Pack
     private(set) var sheet: SpriteSheet
     private var currentSheetPath: String?
+    private var currentSheetVersion: Int64?
     private(set) var scale: Int
     /// Pixie's pixels in any frame (the `pack` event's mask, or built from the sheet at launch).
     private(set) var hitMask: HitMask
@@ -68,10 +69,11 @@ final class PixieController {
     private var expireTimer: Timer?
     private var moveObserver: NSObjectProtocol?
 
-    init(engine: CoreEngine, pack: Pack, sheet: SpriteSheet, sheetPath: String?, scale: Int, hitMask: HitMask?,
-         settings: PixieSettings) {
+    init(engine: CoreEngine, pack: Pack, sheet: SpriteSheet, sheetPath: String?, sheetVersion: Int64? = nil, scale: Int,
+         hitMask: HitMask?, settings: PixieSettings) {
         self.engine = engine
         currentSheetPath = sheetPath
+        currentSheetVersion = sheetVersion
         self.pack = pack
         self.sheet = sheet
         self.scale = scale
@@ -116,7 +118,8 @@ final class PixieController {
             HitMask(width: payload.pack.cellWidth, height: payload.pack.cellHeight, bits: $0)
         }
         log.info("ready: \(payload.pack.name, privacy: .public) \(payload.pack.cellWidth)x\(payload.pack.cellHeight) scale \(scale)")
-        return PixieController(engine: engine, pack: payload.pack, sheet: sheet, sheetPath: payload.sheetPath, scale: scale,
+        return PixieController(engine: engine, pack: payload.pack, sheet: sheet, sheetPath: payload.sheetPath,
+                                sheetVersion: payload.sheetVersion, scale: scale,
                                 hitMask: mask, settings: settings)
     }
 
@@ -164,7 +167,7 @@ final class PixieController {
     /// moved top-left is then saved like a drag. A sheet that cannot be read keeps the old pack.
     func applyPack(_ ev: PackEvent) {
         let newSheet: SpriteSheet
-        if ev.sheetPath == currentSheetPath {
+        if !ev.needsSheet(currentPath: currentSheetPath, currentVersion: currentSheetVersion) {
             newSheet = sheet
         } else {
             guard let s = SpriteSheet(url: URL(fileURLWithPath: ev.sheetPath)) else {
@@ -178,6 +181,7 @@ final class PixieController {
         pack = ev.pack
         sheet = newSheet
         currentSheetPath = ev.sheetPath
+        currentSheetVersion = ev.sheetVersion
         scale = ev.scale > 0 ? ev.scale : scale
         hitMask = HitMask.forEvent(ev) ?? HitMask.union(pack: pack, sheet: sheet)
         player = PixiePlayer(state: pack.states[player.state] != nil ? player.state : "idle")

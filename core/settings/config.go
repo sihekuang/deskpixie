@@ -34,7 +34,10 @@ var SizePresets = []SizePreset{{"Small", 4}, {"Medium", 6}, {"Large", 8}, {"Huge
 type Config struct {
 	Hotkey string `json:"hotkey"`
 	Pack   string `json:"pack"`
-	Scale  uint32 `json:"scale"`
+	// PixiesFolder is the folder of the user's own pixies, one folder each (#266); nil reads
+	// <AppSupport>/pixies. The bundled pixies are always read too.
+	PixiesFolder *string `json:"pixiesFolder"`
+	Scale        uint32  `json:"scale"`
 	// ReplyMode is how you talk to Pixie: "voice" (as always) or "text" (a quick message box
 	// under Pixie that goes straight to the coordinator, #221).
 	ReplyMode string `json:"replyMode"`
@@ -228,6 +231,7 @@ func clonePtr[T any](p *T) *T {
 func (c Config) Clone() Config {
 	out := c
 	out.Position = clonePtr(c.Position)
+	out.PixiesFolder = clonePtr(c.PixiesFolder)
 	out.Voice.PersonaPath = clonePtr(c.Voice.PersonaPath)
 	out.Voice.InputDevice = clonePtr(c.Voice.InputDevice)
 	out.Voice.OutputDevice = clonePtr(c.Voice.OutputDevice)
@@ -258,6 +262,7 @@ func (c Config) Equal(o Config) bool {
 type configFields struct {
 	Hotkey             string               `json:"hotkey"`
 	Pack               string               `json:"pack"`
+	PixiesFolder       *string              `json:"pixiesFolder"`
 	Scale              uint32               `json:"scale"`
 	ReplyMode          string               `json:"replyMode"`
 	AlwaysShowCaption  bool                 `json:"alwaysShowCaption"`
@@ -274,7 +279,7 @@ type configFields struct {
 }
 
 var knownKeys = map[string]bool{
-	"hotkey": true, "pack": true, "scale": true, "replyMode": true, "alwaysShowCaption": true, "captionDismissSecs": true, "captionFadeSecs": true, "replyHistoryMins": true, "logMaxMB": true, "position": true, "proximityFade": true,
+	"hotkey": true, "pack": true, "pixiesFolder": true, "scale": true, "replyMode": true, "alwaysShowCaption": true, "captionDismissSecs": true, "captionFadeSecs": true, "replyHistoryMins": true, "logMaxMB": true, "position": true, "proximityFade": true,
 	"voice": true, "canvas": true, "agent": true, "notifications": true,
 }
 
@@ -284,7 +289,7 @@ func (c Config) MarshalJSON() ([]byte, error) {
 	if kinds == nil {
 		kinds = []string{}
 	}
-	f := configFields{c.Hotkey, c.Pack, c.Scale, c.ReplyMode, c.AlwaysShowCaption, c.CaptionDismissSecs, c.CaptionFadeSecs, c.ReplyHistoryMins, c.LogMaxMB, c.Position, c.ProximityFade, c.Voice, c.Canvas, c.Agent, c.Notifications}
+	f := configFields{c.Hotkey, c.Pack, c.PixiesFolder, c.Scale, c.ReplyMode, c.AlwaysShowCaption, c.CaptionDismissSecs, c.CaptionFadeSecs, c.ReplyHistoryMins, c.LogMaxMB, c.Position, c.ProximityFade, c.Voice, c.Canvas, c.Agent, c.Notifications}
 	f.Agent.Workers.Kinds = kinds
 	b, err := json.Marshal(f)
 	if err != nil || len(c.Extra) == 0 {
@@ -325,7 +330,7 @@ func (c *Config) UnmarshalJSON(b []byte) error {
 		return errors.New("invalid type: null, expected struct Config")
 	}
 	targets := map[string]any{
-		"hotkey": &c.Hotkey, "pack": &c.Pack, "scale": &c.Scale, "replyMode": &c.ReplyMode, "alwaysShowCaption": &c.AlwaysShowCaption, "captionDismissSecs": &c.CaptionDismissSecs, "captionFadeSecs": &c.CaptionFadeSecs, "replyHistoryMins": &c.ReplyHistoryMins, "logMaxMB": &c.LogMaxMB, "position": &c.Position,
+		"hotkey": &c.Hotkey, "pack": &c.Pack, "pixiesFolder": &c.PixiesFolder, "scale": &c.Scale, "replyMode": &c.ReplyMode, "alwaysShowCaption": &c.AlwaysShowCaption, "captionDismissSecs": &c.CaptionDismissSecs, "captionFadeSecs": &c.CaptionFadeSecs, "replyHistoryMins": &c.ReplyHistoryMins, "logMaxMB": &c.LogMaxMB, "position": &c.Position,
 		"proximityFade": &c.ProximityFade, "voice": &c.Voice, "canvas": &c.Canvas, "agent": &c.Agent,
 		"notifications": &c.Notifications,
 	}
@@ -422,6 +427,7 @@ func (c Config) Normalized() Config {
 	if out.Scale > MaxScale {
 		out.Scale = MaxScale
 	}
+	blankToNil(&out.PixiesFolder)
 	blankToNil(&out.Voice.PersonaPath)
 	if out.Voice.HomeCity != nil {
 		city := strings.TrimSpace(*out.Voice.HomeCity)

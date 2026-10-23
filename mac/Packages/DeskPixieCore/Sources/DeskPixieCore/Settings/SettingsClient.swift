@@ -19,6 +19,9 @@ public protocol SettingsClient {
     func restart() throws
     /// `app.action {id: "agent:restart"}`: restarts the coordinator (#179; the view asks first).
     func restartCoordinator() throws
+    /// `app.action {id: "reload"}`: reads the pixies again, so one just added to your pixies
+    /// folder is in the Pixie list (#266).
+    func reloadPixies() throws
     /// `logs.export {path, app, os}`: the core writes the logs' zip at path (#225).
     func exportLogs(to path: String, app: String, os: String) throws
     /// `setup.projectsFolder`: the projects folder checked on disk, changing nothing (#216).
@@ -76,6 +79,10 @@ public struct EngineSettingsClient: SettingsClient, Sendable {
 
     public func restartCoordinator() throws {
         _ = try engine.call("app.action", ActionArgs(id: CoordinatorRestart.actionID))
+    }
+
+    public func reloadPixies() throws {
+        _ = try engine.call("app.action", ActionArgs(id: "reload"))
     }
 
     private struct ExportArgs: Encodable {
