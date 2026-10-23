@@ -33,6 +33,10 @@ type UpdateItem struct {
 	// Options: a session menu's choices (#105): the bubble shows one button each instead of
 	// Allow and Deny, answered with agent.choose.
 	Options []string `json:"options,omitempty"`
+	// Details and Typed (#268): each option's description, and that the menu also takes a
+	// typed answer (agent.typedAnswer) and "Chat about this" (agent.chatAbout).
+	Details []string `json:"details,omitempty"`
+	Typed   bool     `json:"typed,omitempty"`
 	// Note: shown small under the line, never said (a session dialog's command, #105).
 	Note string `json:"note,omitempty"`
 }
@@ -56,7 +60,9 @@ func (c *AgentController) bubbleItems() []UpdateItem {
 				item.Brief = QuestionBrief(l.Text)
 			}
 			item.Token = *l.Token
-			item.Options = c.confirms.OptionsOf(*l.Token)
+			if p, ok := c.confirms.PendingOf(*l.Token); ok {
+				item.Options, item.Details, item.Typed = p.Options, p.Details, p.Typed
+			}
 		}
 		items = append(items, item)
 	}

@@ -65,6 +65,10 @@ type Msg struct {
 	Command string   `json:"command,omitempty"`
 	Text    string   `json:"text,omitempty"`
 	Keys    []string `json:"keys,omitempty"`
+	// Details and Typed (a menu's question, #268): each option's description ("" none), and
+	// that it also takes a typed answer and "Chat about this" (held in its hook).
+	Details []string `json:"details,omitempty"`
+	Typed   bool     `json:"typed,omitempty"`
 	Err     string   `json:"err,omitempty"`
 	// Build (register) is pix's build, BuildOf its binary (#189); Outdated (registered): it is
 	// not the build of the pix this app ships.

@@ -153,6 +153,8 @@ const (
 	InDetachConfirm                        // RequestID: a session tool's confirm the coordinator's call no longer waits on (#249): it outlives its job
 	InDecide                               // Token, Allow: a tap on Allow or Deny in the updates bubble
 	InChoose                               // Token, Option: a tap on a session menu's option in the updates bubble (#105)
+	InTypedAnswer                          // Token, Text: an answer typed in the bubble for a session menu (#268)
+	InChatAbout                            // Token: "Chat about this" on a session menu (#268)
 	InSessionAnswerFailed                  // Name, Text: EfAnswerSession could not be typed (#105)
 	InSessionAnswered                      // Name, Text: EfAnswerSession was taken by the session; Text is its Line (#268)
 	InSubmit                               // Agent, Message: a Claude agent took a prompt (its UserPromptSubmit hook); Message is the prompt
@@ -282,6 +284,14 @@ func DecideInput(token string, allow bool) Input {
 	return Input{Kind: InDecide, Token: token, Allow: allow}
 }
 
+// TypedAnswerInput is text typed in the bubble as the answer to the session menu with token (#268).
+func TypedAnswerInput(token, text string) Input {
+	return Input{Kind: InTypedAnswer, Token: token, Text: text}
+}
+
+// ChatAboutInput is "Chat about this" on the session menu with token (#268).
+func ChatAboutInput(token string) Input { return Input{Kind: InChatAbout, Token: token} }
+
 // ChooseInput is a tap on option (from 1) of the session menu with this token (#105).
 func ChooseInput(token string, option int) Input {
 	return Input{Kind: InChoose, Token: token, Option: option}
@@ -388,7 +398,8 @@ type Effect struct {
 	Tab      TabLabel
 	Agent    string
 	Manual   bool
-	// Answer (EfAnswerSession): "yes", "no" or a menu option's number.
+	// Answer (EfAnswerSession): "yes", "no", a menu option's number, or (a menu held in its
+	// hook, #268) "text:" and the typed answer, or "chat".
 	Answer string
 	// Update (EfNotify): the bubble line the notification is about, nil when none (#199): a
 	// click on the notification does what a click on the line does.
@@ -808,6 +819,10 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 		}
 	case InChoose:
 		c.onChoose(in.Token, in.Option, now, &fx)
+	case InTypedAnswer:
+		c.onTypedAnswer(in.Token, in.Text, now, &fx)
+	case InChatAbout:
+		c.onChatAbout(in.Token, now, &fx)
 	case InSessionAnswered:
 		c.deliver(NewLine(LineInfo, in.Text), now, &fx)
 	case InSessionAnswerFailed:

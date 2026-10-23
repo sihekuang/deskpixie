@@ -361,6 +361,10 @@ type SessionQuestion struct {
 	Options []string
 	Body    string
 	Prompt  string
+	// Details and Typed (a menu, #268): each option's description ("" none), and that it also
+	// takes a typed answer and "Chat about this".
+	Details []string
+	Typed   bool
 }
 
 // Origin says who started an agent: Pixie (in Herdr or tmux) or you (with pix, #89).

@@ -68,6 +68,10 @@ type Agent interface {
 	Decide(token string, allow bool)
 	// Choose: a tap on option (from 1) of a session menu in the bubble (#105).
 	Choose(token string, option int)
+	// TypedAnswer and ChatAbout: an answer typed in the bubble, or "Chat about this", for a
+	// session menu that takes one (#268).
+	TypedAnswer(token, text string)
+	ChatAbout(token string)
 	// UpdatesSeen: the updates bubble showed these lines long enough to count as heard.
 	UpdatesSeen(ids []uint64)
 	// UpdatesDismissed: the user clicked these lines away (#199): a job's question goes too.

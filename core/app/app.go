@@ -1288,6 +1288,31 @@ func (a *App) Register(r Registrar) {
 		}
 		return struct{}{}, nil
 	})
+	r.Register("agent.typedAnswer", func(args json.RawMessage) (any, error) {
+		var in struct {
+			Token string `json:"token"`
+			Text  string `json:"text"`
+		}
+		if err := decodeArgs("agent.typedAnswer", args, &in); err != nil {
+			return nil, err
+		}
+		if a.agent != nil {
+			a.agent.TypedAnswer(in.Token, in.Text)
+		}
+		return struct{}{}, nil
+	})
+	r.Register("agent.chatAbout", func(args json.RawMessage) (any, error) {
+		var in struct {
+			Token string `json:"token"`
+		}
+		if err := decodeArgs("agent.chatAbout", args, &in); err != nil {
+			return nil, err
+		}
+		if a.agent != nil {
+			a.agent.ChatAbout(in.Token)
+		}
+		return struct{}{}, nil
+	})
 	r.Register("agent.focusJob", func(args json.RawMessage) (any, error) {
 		var in struct {
 			Job    string `json:"job"`

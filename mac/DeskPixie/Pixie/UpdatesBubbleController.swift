@@ -39,6 +39,10 @@ final class UpdatesBubbleController {
 
     private var timer: Timer?
     private var pointerInside = false
+    /// The typed answer's draft (#268), and the monitor that puts the field away on a click in
+    /// another app.
+    private let typed = BubbleTyping()
+    private var clickAway: Any?
     /// Counts `updates` events, so a slower `agent.updates` read never overwrites a newer list.
     private var eventsApplied = 0
 
@@ -71,7 +75,50 @@ final class UpdatesBubbleController {
     func apply(lines: [UpdateLine]) {
         eventsApplied += 1
         model.apply(lines, now: Self.now, pop: popPermission())
+        if model.typing == nil { releaseKey() } // its question went while you typed
         render()
+    }
+
+    // MARK: Typed answers (#268)
+
+    private func startTyping(_ token: String) {
+        guard model.acceptsDecision(token: token, now: Self.now, at: NSEvent.mouseLocation),
+              model.startTyping(token: token) else { return }
+        typed.draft = ""
+        panel.acceptsKey = true
+        render()
+        panel.makeKey()
+        typed.focusRequests += 1
+        if clickAway == nil {
+            clickAway = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+                MainActor.assumeIsolated { self?.stopTyping() }
+            }
+        }
+    }
+
+    private func sendTyped(_ token: String) {
+        let text = typed.draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard model.typing == token, !text.isEmpty else { return }
+        call("agent.typedAnswer", TypedArgs(token: token, text: text))
+        stopTyping()
+    }
+
+    private func stopTyping() {
+        releaseKey()
+        model.stopTyping(pointerInside: pointerInside)
+        render()
+    }
+
+    /// The field is gone: the panel goes back to never taking keys.
+    private func releaseKey() {
+        if let m = clickAway {
+            NSEvent.removeMonitor(m)
+            clickAway = nil
+        }
+        typed.draft = ""
+        guard panel.acceptsKey else { return }
+        panel.acceptsKey = false
+        if panel.isKeyWindow { panel.resignKey() }
     }
 
     /// `notifications.bubble.*` (live).
@@ -241,6 +288,14 @@ final class UpdatesBubbleController {
                 guard let self, self.panel.alphaValue >= UpdatesBubbleModel.hoverMinAlpha else { return }
                 self.model.pointerEntered(now: Self.now, at: NSEvent.mouseLocation)
                 self.render()
+            },
+            typing: model.typing, typed: typed,
+            onStartTyping: { [weak self] in self?.startTyping($0) },
+            onSendTyped: { [weak self] in self?.sendTyped($0) },
+            onStopTyping: { [weak self] in self?.stopTyping() },
+            onChat: { [weak self] token in
+                guard let self, self.model.acceptsDecision(token: token, now: Self.now, at: NSEvent.mouseLocation) else { return }
+                self.call("agent.chatAbout", ChatArgs(token: token))
             }))
         layout()
     }
@@ -298,6 +353,8 @@ final class UpdatesBubbleController {
     private struct SeenArgs: Encodable, Sendable { let ids: [UInt64]; var clicked = false }
     private struct DecideArgs: Encodable, Sendable { let token: String; let allow: Bool }
     private struct ChooseArgs: Encodable, Sendable { let token: String; let option: Int }
+    private struct TypedArgs: Encodable, Sendable { let token: String; let text: String }
+    private struct ChatArgs: Encodable, Sendable { let token: String }
     private struct FocusJobArgs: Encodable, Sendable { let job: String; let worker: String }
     private struct FocusSessionArgs: Encodable, Sendable { let name: String }
 }

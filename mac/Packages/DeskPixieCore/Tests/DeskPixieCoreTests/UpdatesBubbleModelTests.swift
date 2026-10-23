@@ -393,4 +393,64 @@ final class UpdatesBubbleModelTests: XCTestCase {
                       "already open under the pointer: it is drawn at full opacity")
         XCTAssertFalse(UpdatesBubbleModel.hoverCounts(pointerOnPanel: false, alpha: 1, alreadyInside: true))
     }
+
+    // MARK: typed answers (#268)
+
+    private func typedMenu(_ id: UInt64 = 1, _ token: String = "hawk") -> UpdateLine {
+        UpdateLine(id: id, text: "Which database?", kind: "question", at: Int64(id), job: nil, worker: nil,
+                   token: token, options: ["Postgres", "SQLite"], details: ["Relational", ""], typed: true)
+    }
+
+    /// A menu held in its session's hook offers a typed answer and "Chat about this"; its
+    /// options carry their descriptions.
+    func testAHeldMenuOffersATypedAnswer() throws {
+        let line = try JSONDecoder().decode(UpdateLine.self, from: Data(
+            #"{"id":9,"text":"proj is asking: Which database?","kind":"question","at":9,"token":"hawk","options":["Postgres","SQLite"],"details":["Relational",""],"typed":true}"#.utf8))
+        XCTAssertTrue(line.offersTyped)
+        XCTAssertEqual(line.details, ["Relational", ""])
+        XCTAssertEqual(line.detail(of: 0), "Relational")
+        XCTAssertNil(line.detail(of: 1), "an empty description shows nothing")
+        XCTAssertNil(line.detail(of: 5))
+        let keys = UpdateLine(id: 1, text: "Push main?", kind: "question", at: 1, job: nil, worker: nil,
+                              token: "hawk", options: ["Push", "Don't push"])
+        XCTAssertFalse(keys.offersTyped, "a menu answered by keys takes no typed answer")
+    }
+
+    /// While you type the answer the bubble stays open, even when the pointer leaves it.
+    func testTypingKeepsTheBubbleOpen() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        m.apply([typedMenu()], now: 10, pop: .allowed)
+        m.pointerEntered(now: 11)
+        XCTAssertTrue(m.startTyping(token: "hawk"))
+        XCTAssertEqual(m.typing, "hawk")
+        m.pointerLeft()
+        XCTAssertEqual(m.phase, .expanded(since: 11))
+        m.tick(now: 100)
+        XCTAssertEqual(m.phase, .expanded(since: 11))
+        m.stopTyping()
+        XCTAssertNil(m.typing)
+        XCTAssertEqual(m.phase, .badge, "put away with the pointer gone: back to the badge")
+    }
+
+    /// Only a menu that takes a typed answer can be typed into.
+    func testOnlyATypedMenuCanBeTypedInto() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        let keys = UpdateLine(id: 2, text: "Push main?", kind: "question", at: 2, job: nil, worker: nil,
+                              token: "owl", options: ["Push", "Don't push"])
+        m.apply([keys], now: 10, pop: .allowed)
+        m.pointerEntered(now: 11)
+        XCTAssertFalse(m.startTyping(token: "owl"))
+        XCTAssertFalse(m.startTyping(token: "nope"))
+        XCTAssertNil(m.typing)
+    }
+
+    /// The question stops waiting (answered in its terminal, or its wait ran out): typing ends.
+    func testTypingEndsWhenTheQuestionGoes() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        m.apply([typedMenu()], now: 10, pop: .allowed)
+        m.pointerEntered(now: 11)
+        XCTAssertTrue(m.startTyping(token: "hawk"))
+        m.apply([], now: 12, pop: .allowed)
+        XCTAssertNil(m.typing)
+    }
 }

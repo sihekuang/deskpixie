@@ -334,8 +334,9 @@ func (s *Session) answer(id, choice string) wire.Msg {
 }
 
 // hookAnswer is the reply of held question q's hook that answers it with choice: a menu's
-// option goes back in its tool input's answers; a permission's Yes, No, and "don't ask again"
-// (with the rules Claude suggested) are its decision. False for anything else.
+// option, a typed answer ("text:…") or "chat" goes back in its tool input's answers; a
+// permission's Yes, No, and "don't ask again" (with the rules Claude suggested) are its
+// decision. False for anything else.
 func (q *question) hookAnswer(choice string) (string, bool) {
 	label := choice
 	if n, err := strconv.Atoi(choice); err == nil {
@@ -345,10 +346,16 @@ func (q *question) hookAnswer(choice string) (string, bool) {
 		label = q.labels[n-1]
 	}
 	if q.kind == "menu" {
+		if typed, ok := strings.CutPrefix(choice, "text:"); ok && strings.TrimSpace(typed) != "" {
+			return menuReply(q.input, strings.TrimSpace(typed), "")
+		}
+		if choice == "chat" { // as its terminal's "Chat about this": an answer, not a refusal
+			return menuReply(q.input, "Chat about this", "The user wants to talk this over before answering. Ask them what to clarify.")
+		}
 		if _, err := strconv.Atoi(choice); err != nil {
 			return "", false
 		}
-		return menuReply(q.input, label)
+		return menuReply(q.input, label, "")
 	}
 	switch {
 	case label == "yes" || label == "Yes":
@@ -361,8 +368,9 @@ func (q *question) hookAnswer(choice string) (string, bool) {
 	return "", false
 }
 
-// menuReply answers AskUserQuestion's one question with label: its input as it came, plus answers.
-func menuReply(input map[string]any, label string) (string, bool) {
+// menuReply answers AskUserQuestion's one question with label (and notes, if any): its input as
+// it came, plus answers.
+func menuReply(input map[string]any, label, notes string) (string, bool) {
 	qs, _ := input["questions"].([]any)
 	if len(qs) == 0 {
 		return "", false
@@ -374,6 +382,9 @@ func menuReply(input map[string]any, label string) (string, bool) {
 		in[k] = v
 	}
 	in["answers"] = map[string]any{text: label}
+	if notes != "" {
+		in["annotations"] = map[string]any{text: map[string]any{"notes": notes}}
+	}
 	return hookOutput(map[string]any{"hookEventName": "PreToolUse", "permissionDecision": "allow", "updatedInput": in})
 }
 
@@ -488,34 +499,35 @@ func (w *questionWatch) watch(s *Session, out string, vt *screen) {
 // menuOf is the question of an AskUserQuestion input and its options when a digit answers it:
 // one question, one pick, at most 8 options (Claude adds "Type something" after them). Else
 // no options: you answer it in the terminal.
-func menuOf(input any) (string, []string) {
+func menuOf(input any) (string, []string, []string) {
 	m, _ := input.(map[string]any)
 	qs, _ := m["questions"].([]any)
 	if len(qs) == 0 {
-		return "", nil
+		return "", nil, nil
 	}
 	first, _ := qs[0].(map[string]any)
 	text, _ := first["question"].(string)
 	if len(qs) > 1 {
-		return fmt.Sprintf("%s (and %d more)", text, len(qs)-1), nil
+		return fmt.Sprintf("%s (and %d more)", text, len(qs)-1), nil, nil
 	}
 	if multi, _ := first["multiSelect"].(bool); multi {
-		return text, nil
+		return text, nil, nil
 	}
 	opts, _ := first["options"].([]any)
-	var labels []string
+	var labels, details []string
 	for _, o := range opts {
 		om, _ := o.(map[string]any)
 		label, _ := om["label"].(string)
 		if label == "" {
-			return text, nil
+			return text, nil, nil
 		}
-		labels = append(labels, label)
+		detail, _ := om["description"].(string)
+		labels, details = append(labels, label), append(details, detail)
 	}
 	if len(labels) > 8 {
-		return text, nil
+		return text, nil, nil
 	}
-	return text, labels
+	return text, labels, details
 }
 
 // onlyReports: b is the terminal reporting focus or the mouse, not a key of yours.

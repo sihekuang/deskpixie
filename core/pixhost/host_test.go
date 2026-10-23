@@ -685,6 +685,29 @@ func TestRegisteredSaysHowLongAQuestionWaits(t *testing.T) {
 	}
 }
 
+// #268: a held menu's option descriptions, and that it takes a typed answer, reach the core.
+func TestAQuestionCarriesItsDetailsAndTypedAnswer(t *testing.T) {
+	h, sock := newHost(t)
+	events := h.Subscribe()
+	p, r := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/a"})
+	wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "question", ID: "q1", Source: "menu", Text: "Which?",
+		Keys: []string{"A", "B"}, Details: []string{"first", ""}, Typed: true})
+	for {
+		select {
+		case ev := <-events:
+			if ev.Kind != agent.PaneEventQuestion {
+				continue
+			}
+			if q := ev.Question; ev.Agent != r.Address || !q.Typed || strings.Join(q.Details, "|") != "first|" {
+				t.Fatalf("%+v", q)
+			}
+			return
+		case <-time.After(2 * time.Second):
+			t.Fatal("no question")
+		}
+	}
+}
+
 // #189: pix says which build it is when it registers. One older than the pix the app ships (or
 // from before builds, with none) is registered all the same, marked outdated: in its reply, in
 // List, and in what a message to it returns. With no build of its own, the app marks none.

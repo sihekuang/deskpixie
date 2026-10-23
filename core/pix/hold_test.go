@@ -235,3 +235,43 @@ func TestTheHoldComesFromDeskPixie(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+// #268: a held menu also takes a typed answer and "Chat about this", as Claude's terminal does,
+// and Pixie gets each option's description.
+func TestAHeldMenuTakesATypedAnswerAndChat(t *testing.T) {
+	for _, c := range []struct{ choice, want, notes string }{
+		{"text:  Force push  ", "Force push", ""},
+		{"chat", "Chat about this", "clarify"},
+	} {
+		t.Run(c.choice, func(t *testing.T) {
+			h := holdHarness(t, 5*time.Second)
+			reply := hookAsync(h, "PreToolUse", pushMenu)
+			q := askedQuestion(t, h)
+			if !q.Typed || strings.Join(q.Details, "|") != "Send it|" {
+				t.Fatalf("%+v", q)
+			}
+			if err := answer(t, h, q.ID, "text:   "); !strings.Contains(err, "isn't one of its answers") {
+				t.Fatalf("an empty answer: %q", err)
+			}
+			if err := answer(t, h, q.ID, c.choice); err != "" {
+				t.Fatal(err)
+			}
+			out := hookReply(t, reply, time.Second)
+			in, _ := out["hookSpecificOutput"].(map[string]any)["updatedInput"].(map[string]any)
+			answers, _ := in["answers"].(map[string]any)
+			notes, _ := json.Marshal(in["annotations"])
+			if answers["Push main?"] != c.want || !strings.Contains(string(notes), c.notes) {
+				t.Fatalf("%v", in)
+			}
+		})
+	}
+}
+
+// Answered by keys, a menu can't take a typed answer: Pixie isn't offered one.
+func TestAMenuAnsweredByKeysTakesNoTypedAnswer(t *testing.T) {
+	h := holdHarness(t, 0)
+	h.s.Hook("PreToolUse", pushMenu)
+	if q := askedQuestion(t, h); q.Typed {
+		t.Fatalf("%+v", q)
+	}
+}
