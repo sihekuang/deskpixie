@@ -172,7 +172,7 @@ final class UpdatesBubbleController {
         var changed = false
         if inside != pointerInside {
             pointerInside = inside
-            if inside { model.pointerEntered(now: Self.now) } else { model.pointerLeft() }
+            if inside { model.pointerEntered(now: Self.now, at: NSEvent.mouseLocation) } else { model.pointerLeft() }
             changed = true
         }
         if let r = paneGate.due(now: Self.now, sinceLastKey: Self.sinceLastKey()) {
@@ -230,16 +230,16 @@ final class UpdatesBubbleController {
             },
             onDecide: { [weak self] token, allow in
                 // A tap within decisionGuard of the buttons appearing is a stray click: ignored.
-                guard let self, self.model.acceptsDecision(token: token, now: Self.now) else { return }
+                guard let self, self.model.acceptsDecision(token: token, now: Self.now, at: NSEvent.mouseLocation) else { return }
                 self.call("agent.decide", DecideArgs(token: token, allow: allow))
             },
             onChoose: { [weak self] token, option in
-                guard let self, self.model.acceptsDecision(token: token, now: Self.now) else { return }
+                guard let self, self.model.acceptsDecision(token: token, now: Self.now, at: NSEvent.mouseLocation) else { return }
                 self.call("agent.choose", ChooseArgs(token: token, option: option))
             },
             onBadge: { [weak self] in
                 guard let self, self.panel.alphaValue >= UpdatesBubbleModel.hoverMinAlpha else { return }
-                self.model.pointerEntered(now: Self.now)
+                self.model.pointerEntered(now: Self.now, at: NSEvent.mouseLocation)
                 self.render()
             }))
         layout()

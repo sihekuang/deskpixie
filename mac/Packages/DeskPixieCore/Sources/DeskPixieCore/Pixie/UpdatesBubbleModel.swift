@@ -133,6 +133,9 @@ public struct UpdatesBubbleModel: Sendable {
     private var applied = false
     /// When each question's Allow and Deny (by token) appeared; only while they are showing.
     private var decisionsSince: [String: TimeInterval] = [:]
+    /// Where the pointer opened the bubble, and the questions whose buttons came with it (#268).
+    private var openedAt: CGPoint?
+    private var hoverOpened: Set<String> = []
     /// Lines clicked away (#194): left out of the core's lists until it drops them too.
     private var dismissed: Set<UInt64> = []
 
@@ -203,14 +206,17 @@ public struct UpdatesBubbleModel: Sendable {
         if phase == .hidden { phase = .badge }
     }
 
-    /// The pointer entered the bubble or badge (a click also lands here): open it.
-    public mutating func pointerEntered(now: TimeInterval) {
+    /// The pointer entered the bubble or badge at `at` (a click also lands here): open it.
+    public mutating func pointerEntered(now: TimeInterval, at: CGPoint? = nil) {
         guard !lines.isEmpty || isPopped else { return }
         phase = .expanded(since: now)
         frozen = lines.reversed()
-        // Opened by you: the buttons you see take your tap at once (#268); only buttons that
-        // appear by themselves (a pop, a new question) are guarded.
-        noteDecisions(now, shownAt: now - Self.decisionGuard)
+        let before = Set(decisionsSince.keys)
+        noteDecisions(now)
+        // Opened by you: buttons that came with it take your tap at once once you moved to them
+        // (#268). Those already showing (a pop) and those arriving later stay guarded.
+        openedAt = at
+        hoverOpened = Set(decisionsSince.keys).subtracting(before)
     }
 
     /// The pointer left: back to the badge, or hidden when nothing unheard is left.
@@ -218,6 +224,7 @@ public struct UpdatesBubbleModel: Sendable {
         frozen = nil
         phase = lines.isEmpty ? .hidden : .badge
         decisionsSince = [:]
+        hoverOpened = []
     }
 
     /// Advances timers: a pop runs out to the badge (unless a question waits on you).
@@ -274,26 +281,33 @@ public struct UpdatesBubbleModel: Sendable {
         noteDecisions(now)
     }
 
-    /// Whether a tap on Allow or Deny for this question counts: only once its buttons have been
-    /// showing `decisionGuard` (a tap on buttons not showing never counts).
-    public mutating func acceptsDecision(token: String, now: TimeInterval) -> Bool {
+    /// Whether a tap at `at` on Allow or Deny for this question counts: once its buttons have been
+    /// showing `decisionGuard`, or at once on buttons you hovered the bubble open onto and then
+    /// moved to (a tap on buttons not showing never counts).
+    public mutating func acceptsDecision(token: String, now: TimeInterval, at: CGPoint? = nil) -> Bool {
         noteDecisions(now)
         guard let since = decisionsSince[token] else { return false }
-        return now - since >= Self.decisionGuard
+        if now - since >= Self.decisionGuard { return true }
+        guard hoverOpened.contains(token), let from = openedAt, let at else { return false }
+        return hypot(at.x - from.x, at.y - from.y) > Self.movedDistance
     }
 
+    /// How far the pointer moves after opening the bubble for a tap to count as aimed (points).
+    public static let movedDistance: CGFloat = 4
+
     /// Stamps the questions whose Allow and Deny show now (the bubble is open and the row is
-    /// listed) as shown at `shownAt` (now by default) and forgets the rest, so buttons that
-    /// reappear are guarded again unless you opened the bubble onto them.
-    private mutating func noteDecisions(_ now: TimeInterval, shownAt: TimeInterval? = nil) {
+    /// listed) and forgets the rest, so buttons that reappear are guarded again.
+    private mutating func noteDecisions(_ now: TimeInterval) {
         guard isExpanded || isPopped else {
             decisionsSince = [:]
+            hoverOpened = []
             return
         }
         let showing = Set(shown.filter { $0.offersDecision || $0.offersOptions }.compactMap(\.token))
         decisionsSince = decisionsSince.filter { showing.contains($0.key) }
+        hoverOpened.formIntersection(showing)
         for token in showing where decisionsSince[token] == nil {
-            decisionsSince[token] = shownAt ?? now
+            decisionsSince[token] = now
         }
     }
 }
