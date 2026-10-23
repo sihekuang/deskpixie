@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -504,10 +505,16 @@ func TestCodexDescriptionFromItsTurn(t *testing.T) {
 
 // #105: prompts a session waits on, answered from Pixie.
 
-// keyHarness runs an agent that prints, in hex, the first byte typed into it.
+// keyHarness runs an agent that prints, in hex, the first byte typed into it on a cleared
+// screen, as an agent taking an answer redraws without its prompt.
 func keyHarness(t *testing.T, tool string) *harness {
 	t.Helper()
-	h := newHarness(t, tool, Launch{Path: "/bin/sh", Args: []string{"-c", "stty raw -echo; head -c 1 | od -An -tx1; sleep 30"}})
+	return agentHarness(t, tool, `stty raw -echo; b=$(head -c 1 | od -An -tx1); printf '\033[2J\033[H%s\r\n' "$b"; sleep 30`)
+}
+
+func agentHarness(t *testing.T, tool, script string) *harness {
+	t.Helper()
+	h := newHarness(t, tool, Launch{Path: "/bin/sh", Args: []string{"-c", script}})
 	waitEvent(t, h.d.events, "connected", func(m wire.Msg) bool { return m.Event == "status" })
 	t.Cleanup(func() { h.s.runner.Hangup(); h.s.finish() })
 	return h
@@ -598,6 +605,80 @@ func TestAClaudeMenuIsAnsweredWithItsDigit(t *testing.T) {
 		t.Fatal(err)
 	}
 	typed(t, h, '2')
+}
+
+// screensHarness runs an agent that draws first a moment after it starts, takes one key, then
+// draws after (if any) once wait passed: it draws everything itself, so nothing writes to the
+// screen beside pix's PTY reader.
+func screensHarness(t *testing.T, first, after string, wait time.Duration) *harness {
+	t.Helper()
+	dir := t.TempDir()
+	write := func(name, text string) string {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	return agentHarness(t, "claude", fmt.Sprintf("stty raw -echo; sleep 0.3; cat %q; head -c 1 >/dev/null; sleep %.2f; cat %q; sleep 30",
+		write("first", first), wait.Seconds(), write("after", after)))
+}
+
+func askBash(t *testing.T, h *harness, command string) wire.Msg {
+	t.Helper()
+	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": command}})
+	return askedQuestion(t, h)
+}
+
+// #268: an answer counts once its prompt left the screen; one the agent didn't take (the
+// prompt stays) is refused, so Pixie says to answer it in the terminal.
+func TestAnAnswerTheAgentDoesntTakeIsRefused(t *testing.T) {
+	defer func(w time.Duration) { answerWait = w }(answerWait)
+	answerWait = 300 * time.Millisecond
+	h := screensHarness(t, bashDialog, "", 0) // takes the key, draws nothing
+	q := askBash(t, h, "npm test")
+	if err := answer(t, h, q.ID, "yes"); err != "The session didn't take the answer." {
+		t.Fatalf("%q", err)
+	}
+	if err := answer(t, h, q.ID, "yes"); !strings.Contains(err, "no longer waiting") {
+		t.Fatalf("typed once: %q", err)
+	}
+}
+
+func TestAnAnswerCountsOnceThePromptLeftTheScreen(t *testing.T) {
+	h := screensHarness(t, bashDialog, "\x1b[2J\x1b[H* Bash(npm test)\r\n", 500*time.Millisecond)
+	q := askBash(t, h, "npm test")
+	start := time.Now()
+	if err := answer(t, h, q.ID, "yes"); err != "" {
+		t.Fatal(err)
+	}
+	if d := time.Since(start); d < 400*time.Millisecond {
+		t.Fatalf("answered after %v, before the prompt left the screen", d)
+	}
+	if err := answer(t, h, q.ID, "yes"); !strings.Contains(err, "no longer waiting") {
+		t.Fatalf("answered once: %q", err)
+	}
+}
+
+// Claude's next dialog with the same question right after it ("Do you want to proceed?" for the
+// next command): the first one's answer still landed (review of #268).
+func TestTheNextDialogWithTheSameMarkerStillCountsAsTaken(t *testing.T) {
+	next := "\x1b[2J\x1b[H" + strings.ReplaceAll(bashDialog, "npm test", "npm run build")
+	h := screensHarness(t, bashDialog, next, 0)
+	q := askBash(t, h, "npm test")
+	if err := answer(t, h, q.ID, "yes"); err != "" {
+		t.Fatal(err)
+	}
+}
+
+// A prompt that showed but is no longer drawn (the screen was cleared or redrawn without it) is
+// not typed into: its leaving couldn't tell whether the answer was taken.
+func TestAPromptNoLongerDrawnIsNotTypedInto(t *testing.T) {
+	h := screensHarness(t, bashDialog+"\x1b[2J\x1b[H", "", 0)
+	q := askBash(t, h, "npm test")
+	if err := answer(t, h, q.ID, "yes"); err != "The question isn't on screen." {
+		t.Fatalf("%q", err)
+	}
 }
 
 func TestAMenuOfSeveralQuestionsIsOnlyAnnounced(t *testing.T) {

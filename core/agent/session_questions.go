@@ -112,19 +112,46 @@ func (c *AgentController) onSessionQuestion(session string, q SessionQuestion, n
 func (c *AgentController) onChoose(token string, option int, now Millis, fx *[]Effect) {
 	p, ok := c.confirms.Choose(token, option)
 	if !ok {
+		c.tapNotWaiting(token, now, fx)
 		return
 	}
+	c.noteTap(token, now)
 	c.answerSession(p, strconv.Itoa(option), now, fx)
 }
 
-// answerSession types answer into p's session and says what was answered.
+// RecentTapMs: a tap this soon after one settled its token is the same click, doubled.
+const RecentTapMs Millis = 5000
+
+func (c *AgentController) noteTap(token string, now Millis) {
+	if c.tapped == nil {
+		c.tapped = map[string]Millis{}
+	}
+	c.tapped[token] = now
+}
+
+// tapNotWaiting: a tap on token settled nothing. One no longer waiting (answered, gone, or from
+// before a restart) is said and logged (#268); a waiting one tapped wrong (Allow on a menu, an
+// option it hasn't) the bubble never offers, and a double click's second tap, stay quiet.
+func (c *AgentController) tapNotWaiting(token string, now Millis, fx *[]Effect) {
+	if c.confirms.IsPendingToken(token) {
+		return
+	}
+	if at, ok := c.tapped[token]; ok && now < at+RecentTapMs {
+		return // the second tap of a double click
+	}
+	*fx = append(*fx, logEffect(fmt.Sprintf("agent: a tap on %q: that question isn't waiting any more", token)))
+	c.deliver(NewLine(LineInfo, "That question isn't waiting any more."), now, fx)
+}
+
+// answerSession types answer into p's session; what was answered is said once the session took
+// it (InSessionAnswered, #268).
 func (c *AgentController) answerSession(p Pending, answer string, now Millis, fx *[]Effect) {
-	*fx = append(*fx, Effect{Kind: EfAnswerSession, Name: p.Session, Text: p.Question, Answer: answer})
 	said := map[string]string{"yes": "allowed", "no": "denied"}[answer]
 	if n, err := strconv.Atoi(answer); err == nil && n >= 1 && n <= len(p.Options) {
 		said = "picked " + p.Options[n-1]
 	}
-	c.deliver(NewLine(LineInfo, fmt.Sprintf("%s: %s", p.Label, said)), now, fx)
+	*fx = append(*fx, Effect{Kind: EfAnswerSession, Name: p.Session, Text: p.Question, Answer: answer,
+		Line: fmt.Sprintf("%s: %s", p.Label, said)})
 }
 
 // orList is "A", "A or B", "A, B or C".

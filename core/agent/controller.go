@@ -154,6 +154,7 @@ const (
 	InDecide                               // Token, Allow: a tap on Allow or Deny in the updates bubble
 	InChoose                               // Token, Option: a tap on a session menu's option in the updates bubble (#105)
 	InSessionAnswerFailed                  // Name, Text: EfAnswerSession could not be typed (#105)
+	InSessionAnswered                      // Name, Text: EfAnswerSession was taken by the session; Text is its Line (#268)
 	InSubmit                               // Agent, Message: a Claude agent took a prompt (its UserPromptSubmit hook); Message is the prompt
 	InLateSessionSent                      // Job, Name, Text, Message, Reason: a session tool done after its call was answered (#246); Job: the request then in flight ("" = none); Reason: its error
 	InSessionSent                          // Name, Text, Message: the coordinator's message_session reached your session Name, described Text (#177); Message: why it waits ("" = typed, #183)
@@ -286,6 +287,11 @@ func ChooseInput(token string, option int) Input {
 	return Input{Kind: InChoose, Token: token, Option: option}
 }
 
+// SessionAnsweredInput: session name took the answer of an EfAnswerSession whose Line was said.
+func SessionAnsweredInput(name, said string) Input {
+	return Input{Kind: InSessionAnswered, Name: name, Text: said}
+}
+
 // SessionAnswerFailedInput: typing an answer into session name failed (why).
 func SessionAnswerFailedInput(name, why string) Input {
 	return Input{Kind: InSessionAnswerFailed, Name: name, Text: why}
@@ -356,7 +362,7 @@ const (
 	EfUpdates          // Value: []UpdateItem: the updates bubble's list (sent when it changes)
 	EfManual           // Agent, Manual: a Claude agent is (or no longer is) in Manual mode
 	EfShowPane         // Job, Name: bring up this agent's pane (Name "": the coordinator) — it waits at a prompt in its terminal (#110)
-	EfAnswerSession    // Name, Text, Answer: type your answer to session Name's prompt Text (#105); a failure comes back as InSessionAnswerFailed
+	EfAnswerSession    // Name, Text, Answer, Line: type your answer to session Name's prompt Text (#105); taken, InSessionAnswered says Line; a failure comes back as InSessionAnswerFailed
 	EfTellSession      // Name, Text: type your answer to the question session Name's turn ended on (#161); a failure comes back as InSessionAnswerFailed
 	EfChat             // Chat: a spoken line for a job typed in the text box (#221)
 )
@@ -493,6 +499,9 @@ type AgentController struct {
 	boxAnswered JobID
 	// sessionSeq numbers session prompts' request ids (#105).
 	sessionSeq uint64
+	// tapped: when a tap on Pixie's bubble settled each token, so a double click's second tap
+	// stays quiet (#268).
+	tapped map[string]Millis
 	// restartAt: when the coordinator is started again after an exit or a failed start (#118);
 	// startFailures: failed starts in a row, for the backoff.
 	restartAt     optMs
@@ -792,10 +801,15 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 	case InDecide:
 		// A token already decided (by voice or an earlier tap) or expired settles nothing.
 		if d, ok := c.confirms.DecideToken(in.Token, in.Allow); ok {
+			c.noteTap(in.Token, now)
 			c.applyDecided(d, now, &fx)
+		} else {
+			c.tapNotWaiting(in.Token, now, &fx)
 		}
 	case InChoose:
 		c.onChoose(in.Token, in.Option, now, &fx)
+	case InSessionAnswered:
+		c.deliver(NewLine(LineInfo, in.Text), now, &fx)
 	case InSessionAnswerFailed:
 		c.deliver(NewLine(LineInfo, fmt.Sprintf("Couldn't answer in %s: %s Answer it in its terminal.", in.Name, in.Text)), now, &fx)
 	case InPresence:

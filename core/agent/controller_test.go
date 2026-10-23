@@ -1183,13 +1183,24 @@ func TestATapOnAllowDecidesLikeASpokenConfirm(t *testing.T) {
 	wantJobStatus(t, c, 1, JobWorking)
 }
 
-func TestATapOnDenyDeniesAndAnotherTapOrAnExpiredTokenDoesNothing(t *testing.T) {
+// Another tap decides nothing: right after the first (a double click) it stays quiet; later, or
+// on an expired token, it says the question isn't waiting (#268).
+func TestATapOnDenyDeniesAndAnotherTapOrAnExpiredTokenDecidesNothing(t *testing.T) {
 	c := workingOnJob1()
 	askPush(c, 7, T0)
 	fx := visible(c.Step(DecideInput("hawk", false), T0))
 	wantEffects(t, fx[:1], eDecide(7, Deny("The user said no.")))
-	wantNone(t, visible(c.Step(DecideInput("hawk", true), T0)))
-	wantNone(t, visible(c.Step(DecideInput("expired-or-unknown", true), T0)))
+	wantNone(t, visible(c.Step(DecideInput("hawk", true), T0+1000)))
+	for _, tap := range []struct {
+		token string
+		at    Millis
+	}{{"hawk", T0 + RecentTapMs}, {"expired-or-unknown", T0}} {
+		fx = c.Step(DecideInput(tap.token, true), tap.at)
+		if d := effectsOfKind(fx, EfDecide); len(d) != 0 {
+			t.Fatalf("%s decided %s", tap.token, fmtEffects(fx))
+		}
+		wantContains(t, fx, eNotify("That question isn't waiting any more."))
+	}
 }
 
 func TestOnlyAPendingQuestionCarriesAToken(t *testing.T) {

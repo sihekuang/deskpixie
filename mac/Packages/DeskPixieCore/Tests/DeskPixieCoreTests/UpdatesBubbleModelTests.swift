@@ -187,16 +187,46 @@ final class UpdatesBubbleModelTests: XCTestCase {
         XCTAssertTrue(m.acceptsDecision(token: "lynx", now: 11.8))
     }
 
-    func testButtonsThatReappearAreGuardedAgain() {
+    /// #268: buttons you open the bubble onto (hovering its badge) take your tap at once once you
+    /// moved to them: a quick move and click was dropped without a sign. A tap where the pointer
+    /// was when it opened (a click meant for the badge, or for what is under it) stays guarded.
+    func testButtonsYouHoverOpenAndMoveToTakeATapAtOnce() {
         var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
         m.apply([question(1, "hawk")], now: 10, pop: .allowed)
         m.pointerEntered(now: 12); m.pointerLeft()                 // hovered and left: the badge
         m.tick(now: 17)
         XCTAssertEqual(m.phase, .badge)
         XCTAssertFalse(m.acceptsDecision(token: "hawk", now: 17.5)) // no buttons on a badge
-        m.pointerEntered(now: 20)
-        XCTAssertFalse(m.acceptsDecision(token: "hawk", now: 20.2))
-        XCTAssertTrue(m.acceptsDecision(token: "hawk", now: 20.8))
+        m.pointerEntered(now: 20, at: CGPoint(x: 300, y: 40))     // over the badge
+        XCTAssertTrue(m.acceptsDecision(token: "hawk", now: 20.2, at: CGPoint(x: 120, y: 90)))
+    }
+
+    func testATapWhereTheBubbleOpenedIsStillGuarded() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        m.apply([question(1, "hawk")], now: 10, pop: .allowed)
+        m.pointerEntered(now: 12); m.pointerLeft()
+        m.tick(now: 17)
+        m.pointerEntered(now: 20, at: CGPoint(x: 300, y: 40))
+        XCTAssertFalse(m.acceptsDecision(token: "hawk", now: 20.2, at: CGPoint(x: 301, y: 40)))
+        XCTAssertTrue(m.acceptsDecision(token: "hawk", now: 20.8, at: CGPoint(x: 301, y: 40)))
+    }
+
+    /// The pop's guard holds over a hover right after it (a pop under a resting pointer, #97).
+    func testAPopsGuardSurvivesAHover() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        m.apply([question(1, "hawk")], now: 10, pop: .allowed)
+        m.pointerEntered(now: 10.1, at: CGPoint(x: 300, y: 40))
+        XCTAssertFalse(m.acceptsDecision(token: "hawk", now: 10.3, at: CGPoint(x: 120, y: 90)))
+        XCTAssertTrue(m.acceptsDecision(token: "hawk", now: 10.8, at: CGPoint(x: 120, y: 90)))
+    }
+
+    func testAQuestionArrivingWhileOpenIsStillGuarded() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        m.apply([line(1)], now: 10, pop: .allowed)
+        m.pointerEntered(now: 11, at: CGPoint(x: 300, y: 40))
+        m.apply([line(1), question(2, "hawk")], now: 12, pop: .allowed) // appears under the pointer
+        XCTAssertFalse(m.acceptsDecision(token: "hawk", now: 12.2, at: CGPoint(x: 120, y: 90)))
+        XCTAssertTrue(m.acceptsDecision(token: "hawk", now: 12.8))
     }
 
     func testATapOnAQuestionNotShownIsIgnored() {

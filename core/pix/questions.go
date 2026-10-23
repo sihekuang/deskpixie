@@ -192,6 +192,10 @@ func (s *Session) answer(id, choice string) wire.Msg {
 	case !q.seen:
 		s.mu.Unlock()
 		return wire.Msg{Err: "The question isn't on screen yet."}
+	case !shows(s.screen, q.marker, q.detail):
+		// On screen now too, so its leaving the screen tells that the answer was taken (#268).
+		s.mu.Unlock()
+		return wire.Msg{Err: "The question isn't on screen."}
 	}
 	keys, ok := q.keys(s.o.tool, choice)
 	if !ok {
@@ -199,12 +203,64 @@ func (s *Session) answer(id, choice string) wire.Msg {
 		return wire.Msg{Err: "That isn't one of its answers."}
 	}
 	s.q = nil
+	if s.landing != nil {
+		// An answer still checked whose prompt this one followed on screen: it left, so it landed.
+		close(s.landing.done)
+	}
+	l := &landing{marker: q.marker, detail: q.detail, done: make(chan struct{})}
+	s.landing = l
 	s.mu.Unlock()
 	if err := s.runner.WriteToAgent(keys); err != nil {
+		s.dropLanding(l)
 		return wire.Msg{Err: err.Error()}
+	}
+	// It counts once the prompt left the screen: keys the agent didn't take leave it there (#268).
+	t := time.NewTimer(answerWait)
+	defer t.Stop()
+	select {
+	case <-l.done:
+	case <-t.C:
+		s.dropLanding(l)
+		return wire.Msg{Err: "The session didn't take the answer."}
 	}
 	s.client.Send(wire.Msg{Kind: wire.KindEvent, Event: "question-gone", ID: id})
 	return wire.Msg{}
+}
+
+// answerWait: how long an answer typed from Pixie has to take its prompt off the screen.
+var answerWait = 3 * time.Second
+
+// landing is an answer typed from Pixie: done closes when its prompt is off the screen.
+type landing struct {
+	marker, detail string
+	done           chan struct{}
+}
+
+// shows: screen (without spaces) has the prompt with marker and detail on it. The detail tells
+// it from the next prompt with the same marker (another command's dialog right after it).
+func shows(screen, marker, detail string) bool {
+	return strings.Contains(screen, noSpace(marker)) && strings.Contains(screen, noSpace(detail))
+}
+
+// noteScreen keeps what vt shows and closes the typed answer's done once its prompt is no
+// longer on it (PTY reader goroutine only).
+func (s *Session) noteScreen(vt *screen) {
+	text := noSpace(strings.Join(vt.Lines(), ""))
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.screen = text
+	if l := s.landing; l != nil && !shows(text, l.marker, l.detail) {
+		s.landing = nil
+		close(l.done)
+	}
+}
+
+func (s *Session) dropLanding(l *landing) {
+	s.mu.Lock()
+	if s.landing == l {
+		s.landing = nil
+	}
+	s.mu.Unlock()
 }
 
 // keys are what answers q with choice: a permission's Yes is Claude's first option (1) or

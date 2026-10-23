@@ -56,8 +56,13 @@ func TestAConfirmWordAllowsItInTheSession(t *testing.T) {
 		t.Fatalf("%s", fmtEffects(fx))
 	}
 	b := bubbleOf(fx)
+	if len(b) != 0 {
+		t.Fatalf("answered: the question leaves the bubble: %+v", b)
+	}
+	// "allowed" is said once pix says the session took it (#268), not before.
+	b = bubbleOf(c.Step(SessionAnsweredInput(sessionName, a[0].Line), T0+2))
 	if len(b) != 1 || b[0].Token != "" || b[0].Text != "api: allowed" {
-		t.Fatalf("answered: the question leaves the bubble, the answer is said: %+v", b)
+		t.Fatalf("the answer is said: %+v", b)
 	}
 }
 
@@ -151,6 +156,49 @@ func TestAClosedSessionsQuestionLeavesPixie(t *testing.T) {
 	fx := c.Step(PaneInput(PaneEvent{Kind: PaneEventExited, Agent: sessionName}), T0+1)
 	if b := bubbleOf(fx); len(b) != 0 {
 		t.Fatalf("%+v", b)
+	}
+}
+
+// #268: what you picked is only said when the session took it; a failure says so instead.
+func TestAPickIsSaidOnlyOnceTheSessionTookIt(t *testing.T) {
+	c := ctl()
+	token := bubbleOf(askSession(c, pushMenu, T0))[0].Token
+	fx := c.Step(ChooseInput(token, 1), T0+1)
+	a := answers(fx)
+	if len(a) != 1 || a[0].Line != "deskpixie: picked Push" {
+		t.Fatalf("%s", fmtEffects(fx))
+	}
+	if b := bubbleOf(fx); len(b) != 0 {
+		t.Fatalf("not said before the session took it: %+v", b)
+	}
+	if fx := c.Step(ChooseInput(token, 1), T0+2); len(answers(fx)) != 0 || len(effectsOfKind(fx, EfNotify)) != 0 {
+		t.Fatalf("a double click's second tap stays quiet: %s", fmtEffects(fx))
+	}
+	fx = c.Step(SessionAnswerFailedInput(sessionName, "The session didn't take the answer."), T0+2)
+	if b := bubbleOf(fx); len(b) != 1 || strings.Contains(b[0].Text, "picked") ||
+		b[0].Text != "Couldn't answer in api-claude: The session didn't take the answer. Answer it in its terminal." {
+		t.Fatalf("%+v", b)
+	}
+}
+
+// #268: a tap on a question that is no longer waiting says so, and is logged, instead of
+// doing nothing.
+func TestATapOnAQuestionNoLongerWaitingSaysSo(t *testing.T) {
+	for name, tap := range map[string]Input{
+		"choose": ChooseInput("hawk", 1),
+		"allow":  DecideInput("hawk", true),
+	} {
+		c := ctl()
+		askSession(c, bashAsk, T0)
+		sessionGone(c, "q1", T0+1)
+		fx := c.Step(tap, T0+2)
+		if len(answers(fx)) != 0 {
+			t.Fatalf("%s: typed %s", name, fmtEffects(fx))
+		}
+		wantContains(t, fx, eNotify("That question isn't waiting any more."))
+		if logs := effectsOfKind(fx, EfLog); len(logs) != 1 || !strings.Contains(logs[0].Text, "hawk") {
+			t.Fatalf("%s: logged %s", name, fmtEffects(fx))
+		}
 	}
 }
 
