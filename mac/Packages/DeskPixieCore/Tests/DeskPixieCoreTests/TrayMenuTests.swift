@@ -80,7 +80,10 @@ final class TrayMenuTests: XCTestCase {
         XCTAssertTrue(items.contains(.action(.init(id: "settings", title: "Settings…", shortcut: ","))))
         let pixie = try XCTUnwrap(submenu(items, "Pixie"))
         XCTAssertEqual(pixie.items, [.action(.init(id: "pack:bit", title: "Bit", checked: true)),
-                                      .action(.init(id: "pack:zed", title: "Zed", checked: false))])
+                                      .action(.init(id: "pack:zed", title: "Zed", checked: false)),
+                                      .separator,
+                                      .action(.init(id: "pixies:folder", title: "Open Pixies Folder")),
+                                      .action(.init(id: "reload", title: "Reload Pixies"))])
         let size = try XCTUnwrap(submenu(items, "Size"))
         XCTAssertTrue(size.items.contains(.action(.init(id: "size:6", title: "Medium (×6)", checked: true))))
         let canvas = try XCTUnwrap(submenu(items, "Canvas"))
@@ -94,6 +97,19 @@ final class TrayMenuTests: XCTestCase {
         let cancel = try XCTUnwrap(submenu(agent.items, "Cancel job"))
         XCTAssertTrue(cancel.enabled)
         XCTAssertEqual(titles(cancel.items), ["agent:cancel:job_1"])
+    }
+
+    func testPixiesThatDidNotLoadSayWhy() throws {
+        // #266: under the pixies, before the folder rows; a line can't be clicked.
+        let s = try state(#"""
+        {"state":"idle","packs":[{"id":"bit","name":"Bit"},{"id":"mycat","name":"My Cat"}],"pack":"mycat",
+         "packProblems":["myowl didn't load: mouth.row: row 9 exceeds sheet rows (7)"],"statusLines":[]}
+        """#)
+        let pixie = try XCTUnwrap(submenu(TrayMenu.build(s, localStatusLines: [], micModeAvailable: false), "Pixie"))
+        XCTAssertEqual(titles(pixie.items), ["pack:bit", "pack:mycat", "--",
+                                             "label:myowl didn't load: mouth.row: row 9 exceeds sheet rows (7)",
+                                             "--", "pixies:folder", "reload"])
+        XCTAssertTrue(pixie.items.contains(.action(.init(id: "pack:mycat", title: "My Cat", checked: true))))
     }
 
     func testMissingDataHidesRows() throws {

@@ -16,6 +16,7 @@ const (
 	NotOnPlatform = "Not available on this platform"
 	NotAChoice    = "Not one of the choices"
 	NoFile        = "No file at that path"
+	NoFolder      = "No folder at that path"
 	// BadProjectsRoot is shown for any bad projects folder: never the OS error or a path.
 	BadProjectsRoot = "Choose a folder inside your home folder"
 	BadHotkey       = "Not a key combination (e.g. ctrl+alt+Space)"
@@ -90,6 +91,11 @@ func Validate(c Config, env Env) []FieldError {
 	if CheckSession(c.Agent.Session) != nil {
 		add("agent.session", BadSession)
 	}
+	if c.PixiesFolder != nil {
+		if _, ok := PixiesFolder(*c.PixiesFolder, env.Home); !ok {
+			add("pixiesFolder", NoFolder)
+		}
+	}
 	if c.Voice.PersonaPath != nil && !isFile(*c.Voice.PersonaPath) {
 		add("voice.personaPath", NoFile)
 	}
@@ -130,6 +136,17 @@ func choiceProblem(c Choices, value string, env Env) string {
 func isFile(p string) bool {
 	st, err := os.Stat(p)
 	return err == nil && st.Mode().IsRegular()
+}
+
+// PixiesFolder is the pixies folder setting as a full path (~ and relative paths as in
+// ExpandProjectsRoot); ok is false when it isn't an existing folder (#266).
+func PixiesFolder(raw, home string) (string, bool) {
+	p, err := ExpandProjectsRoot(raw, home)
+	if err != nil {
+		return "", false
+	}
+	st, err := os.Stat(p)
+	return p, err == nil && st.IsDir()
 }
 
 // ParseAgentKind is "claude" or "codex" for those names (any case, trimmed), else "".

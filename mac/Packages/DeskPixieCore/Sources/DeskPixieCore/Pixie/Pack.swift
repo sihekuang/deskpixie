@@ -99,15 +99,18 @@ public struct PackPayload: Decodable, Sendable, Equatable {
     public let sheetPath: String
     public let scale: Int?
     public let hitMask: Data?
+    /// The sheet file's modification time, as in `PackEvent` (#266).
+    public let sheetVersion: Int64?
 
-    public init(pack: Pack, sheetPath: String, scale: Int? = nil, hitMask: Data? = nil) {
+    public init(pack: Pack, sheetPath: String, scale: Int? = nil, hitMask: Data? = nil, sheetVersion: Int64? = nil) {
         self.pack = pack
         self.sheetPath = sheetPath
         self.scale = scale
         self.hitMask = hitMask
+        self.sheetVersion = sheetVersion
     }
 
-    private enum CodingKeys: String, CodingKey { case pack, sheetPath, scale, hitMask }
+    private enum CodingKeys: String, CodingKey { case pack, sheetPath, scale, hitMask, sheetVersion }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -115,6 +118,7 @@ public struct PackPayload: Decodable, Sendable, Equatable {
         sheetPath = try c.decode(String.self, forKey: .sheetPath)
         scale = try? c.decodeIfPresent(Int.self, forKey: .scale)
         hitMask = try? c.decodeIfPresent(Data.self, forKey: .hitMask)
+        sheetVersion = try? c.decodeIfPresent(Int64.self, forKey: .sheetVersion)
     }
 
     /// nil for malformed JSON or a missing field.

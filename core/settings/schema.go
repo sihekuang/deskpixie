@@ -364,6 +364,7 @@ var (
 var Fields = []FieldSpec{
 	spec("hotkey", SectionPixie, "Voice hotkey", "Starts or ends a conversation with Pixie from any app.", hotkeyKind, ApplyLive),
 	spec("pack", SectionPixie, "Pixie", "Which pixie pack is shown.", choiceKind(SourcePacks), ApplyLive),
+	spec("pixiesFolder", SectionPixie, "Your pixies folder", "Pixies you made, one folder each. Empty uses the app's own pixies folder. New or changed pixies show up when you pick the folder or open Settings.", pathKind(true, true), ApplyLive),
 	spec("scale", SectionPixie, "Size", "Whole-number sizes keep the pixel art crisp.", intKind(1, MaxScale, true), ApplyLive),
 	spec("replyMode", SectionPixie, "Talk to Pixie by", "Voice: talk and Pixie answers aloud. Text: type a quick message under Pixie and read the coordinator's answer.", staticChoice(ReplyModes), ApplyLive),
 	spec("alwaysShowCaption", SectionPixie, "Always show what Pixie said", "Keeps Pixie's last words under it, with how long ago. Off, they show while Pixie talks and when you hover near Pixie.", boolKind, ApplyLive),

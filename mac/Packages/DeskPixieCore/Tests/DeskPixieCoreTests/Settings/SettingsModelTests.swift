@@ -71,6 +71,10 @@ final class FakeSettingsClient: SettingsClient {
         if let exportThrows { throw exportThrows }
     }
 
+    func reloadPixies() throws {
+        calls.append("reload")
+    }
+
     var restartCoordinatorThrows: Error?
     func restartCoordinator() throws {
         calls.append("agent:restart")
@@ -163,7 +167,17 @@ final class SettingsModelTests: XCTestCase {
         model.openFile()
         model.restart()
         XCTAssertEqual(Set(client.calls), ["settings.snapshot", "settings.reload", "settings.secrets", "settings.set",
-                                           "settings.openFile", "settings.restart"])
+                                           "settings.openFile", "settings.restart", "reload"])
+    }
+
+    func test_opening_or_focusing_the_window_reads_the_pixies_first() {
+        // #266: a pixie just added to your folder is in the Pixie list the window shows.
+        client.calls = []
+        model.load()
+        XCTAssertEqual(Array(client.calls.prefix(2)), ["reload", "settings.snapshot"])
+        client.calls = []
+        model.focusGained()
+        XCTAssertEqual(Array(client.calls.prefix(2)), ["reload", "settings.reload"])
     }
 
     func test_a_stale_snapshot_is_ignored() {
@@ -323,6 +337,7 @@ final class SettingsModelTests: XCTestCase {
             func openFile() throws {}
             func restart() throws {}
             func restartCoordinator() throws {}
+            func reloadPixies() throws { throw DeskPixieEngineError.notInitialized }
             func exportLogs(to path: String, app: String, os: String) throws {}
             func setKeychain(_ values: [String: String]) throws {}
             func projectsFolder() throws -> ProjectsFolderStatus { throw DeskPixieEngineError.notInitialized }

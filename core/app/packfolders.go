@@ -2,10 +2,14 @@ package app
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
+
+	"github.com/sihekuang/deskpixie/core/packs"
+	"github.com/sihekuang/deskpixie/core/settings"
 )
 
 // UserPacksDir is the user's pack folder under AppSupport; LegacyUserPacksDir is its name before
@@ -39,4 +43,26 @@ func UserPackRoots(appSupport string) []string {
 		roots = append(roots, old)
 	}
 	return append(roots, cur)
+}
+
+// PackRoots are the pack roots to read, in order, and the user's pixies folder (#266): the
+// bundled pixies, then the pixiesFolder setting when it is a folder, else UserPackRoots. A
+// chosen folder that has gone falls back to <AppSupport>/pixies.
+func PackRoots(bundled, appSupport string, folder *string, home string) (roots []string, user string) {
+	if bundled != "" {
+		roots = append(roots, bundled)
+	}
+	if folder != nil {
+		if dir, ok := settings.PixiesFolder(*folder, home); ok {
+			return append(roots, dir), dir
+		}
+		log.Printf("app: the pixies folder %q is not a folder; reading %s", *folder, UserPacksDir)
+	}
+	users := UserPackRoots(appSupport)
+	return append(roots, users...), users[len(users)-1]
+}
+
+// PackProblem is the tray's line for a pixie that didn't load.
+func PackProblem(r *packs.Rejected) string {
+	return fmt.Sprintf("%s didn't load: %v", r.ID, r.Err)
 }

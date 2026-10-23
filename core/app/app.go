@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -113,6 +114,13 @@ type App struct {
 	deps  Deps
 	paths Paths
 	roots []string
+	// userPixies is the folder Tray ▸ Pixie ▸ Open Pixies Folder opens: the pixiesFolder
+	// setting, else <AppSupport>/pixies (#266).
+	userPixies string
+	// packProblems are the pixies that didn't load, as the tray shows them.
+	packProblems []string
+	// shown is what the last pack payload (the `pack` event, dp_pack_json) was drawn from.
+	shown *packStamp
 	store *settings.FileStore
 	api   *settings.API
 
@@ -179,7 +187,6 @@ func New(d Deps) (*App, error) {
 	if d.CanvasTick <= 0 {
 		d.CanvasTick = CanvasTick
 	}
-	userRoots := UserPackRoots(p.AppSupport)
 	a := &App{
 		deps:       d,
 		paths:      p,
@@ -189,16 +196,13 @@ func New(d Deps) (*App, error) {
 		pixie:      NewPixieState(),
 		hitMasks:   map[string]string{},
 	}
-	if p.BundledPixies != "" {
-		a.roots = append(a.roots, p.BundledPixies)
-	}
-	a.roots = append(a.roots, userRoots...)
-	a.packs, _ = packs.Load(a.roots...) // rejected packs are logged by Load
+	cfg := a.store.Current()
+	a.loadPacks(cfg)
 	if len(a.packs) == 0 {
 		return nil, fmt.Errorf("%w in %q", ErrNoPack, a.roots)
 	}
-	cfg := a.store.Current()
 	a.wanted = cfg.Pack
+	a.shown = a.shownStamp() // what Swift draws first (dp_pack_json)
 	a.hotkey.bound = cfg.Hotkey
 
 	platform := settings.Platform(p.Platform)
@@ -624,7 +628,9 @@ func (m appMouth) Mouth(level uint32) { m.a.emit("mouth", map[string]any{"level"
 
 // packPayload is the `pack` event's fields for the pack shown at scale (nil without a pack).
 func (a *App) packPayload(scale uint32) map[string]any {
+	stamp := a.shownStamp()
 	a.mu.Lock()
+	a.shown = stamp
 	p, ok := a.currentPackLocked()
 	var mask string
 	var cached bool
@@ -646,6 +652,10 @@ func (a *App) packPayload(scale uint32) map[string]any {
 		a.mu.Unlock()
 	}
 	f := map[string]any{"pack": p, "sheetPath": p.SheetPath, "scale": scale}
+	if stamp != nil && !stamp.mtime.IsZero() {
+		// A sheet redrawn in place has the same path: this tells the shell to read it again.
+		f["sheetVersion"] = stamp.mtime.UnixNano()
+	}
 	if mask != "" {
 		f["hitMask"] = mask
 	}
@@ -704,14 +714,54 @@ func (a *App) selectPack(id string) error {
 	return nil
 }
 
-// reloadPacks: Tray ▸ Reload packs. Never saves: a missing chosen pack only falls back for now.
-func (a *App) reloadPacks() {
-	found, _ := packs.Load(a.roots...)
+// loadPacks reads the bundled pixies and the user's folder for cfg (rejected packs are logged
+// by Load and kept for the tray).
+func (a *App) loadPacks(cfg settings.Config) {
+	home, _ := os.UserHomeDir()
+	roots, user := PackRoots(a.paths.BundledPixies, a.paths.AppSupport, cfg.PixiesFolder, home)
+	found, err := packs.Load(roots...)
+	var problems []string
+	for _, r := range packs.Rejections(err) {
+		problems = append(problems, PackProblem(r))
+	}
 	a.mu.Lock()
-	a.packs = found
+	a.roots, a.userPixies, a.packs, a.packProblems = roots, user, found, problems
 	a.hitMasks = map[string]string{}
 	a.mu.Unlock()
-	a.showPack()
+}
+
+// reloadPacks: Tray ▸ Pixie ▸ Reload Pixies, opening Settings, and a new pixies folder. Never
+// saves: a missing chosen pack only falls back for now. Pixie is drawn again only when the
+// pack shown changed (its manifest or its sheet), so opening Settings doesn't restart it.
+func (a *App) reloadPacks(cfg settings.Config) {
+	a.mu.Lock()
+	before := a.shown
+	a.mu.Unlock()
+	a.loadPacks(cfg)
+	if after := a.shownStamp(); after == nil || before == nil || !reflect.DeepEqual(*before, *after) {
+		a.showPack()
+	}
+}
+
+// packStamp is what the pack shown is drawn from.
+type packStamp struct {
+	pack  packs.Pack
+	size  int64
+	mtime time.Time
+}
+
+func (a *App) shownStamp() *packStamp {
+	a.mu.Lock()
+	p, ok := a.currentPackLocked()
+	a.mu.Unlock()
+	if !ok {
+		return nil
+	}
+	st := packStamp{pack: *p}
+	if fi, err := os.Stat(p.SheetPath); err == nil {
+		st.size, st.mtime = fi.Size(), fi.ModTime()
+	}
+	return &st
 }
 
 // setScale: Tray ▸ Size.
@@ -759,6 +809,7 @@ func (a *App) State() AppState {
 		CanvasRecent: append([]CanvasPage{}, a.canvasRecent...),
 		Agent:        AgentState{Enabled: agent.Enabled, Jobs: JobItems(agent.Jobs)},
 		StatusLines:  []string{},
+		PackProblems: append([]string{}, a.packProblems...),
 		Hotkey:       cfg.Hotkey,
 	}
 	if agent.Enabled {
@@ -805,7 +856,18 @@ func (a *App) action(id string) error {
 		a.save(func(c *settings.Config) { c.ProximityFade.Enabled = !c.ProximityFade.Enabled })
 		return nil
 	case "reload":
-		a.reloadPacks()
+		a.reloadPacks(a.store.Current())
+		return nil
+	case "pixies:folder":
+		a.mu.Lock()
+		dir := a.userPixies
+		a.mu.Unlock()
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("pixies: cannot make %s: %w", dir, err)
+		}
+		if err := a.deps.Run("open", dir); err != nil {
+			return fmt.Errorf("pixies: cannot open %s: %w", dir, err)
+		}
 		return nil
 	case "reset-position":
 		a.resetPosition()
@@ -940,6 +1002,8 @@ func (ap applier) Apply(field string, cfg settings.Config) error {
 		} else {
 			a.showPack()
 		}
+	case settings.RoutePixiesFolder:
+		a.reloadPacks(cfg)
 	case settings.RouteScale:
 		if f := a.packPayload(cfg.Scale); f != nil {
 			a.emit("pack", f)

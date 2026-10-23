@@ -9,9 +9,11 @@ import (
 // AppState is the tray model returned by `app.state` (plan "Shared contract"). Lists always
 // encode as [] (never null).
 type AppState struct {
-	State        string       `json:"state"`
-	Packs        []PackRef    `json:"packs"`
-	Pack         string       `json:"pack"`
+	State string    `json:"state"`
+	Packs []PackRef `json:"packs"`
+	Pack  string    `json:"pack"`
+	// PackProblems are the pixies that didn't load and why, one line each (#266).
+	PackProblems []string     `json:"packProblems"`
 	Scale        int          `json:"scale"`
 	Fade         bool         `json:"fade"`
 	Talking      bool         `json:"talking"`
