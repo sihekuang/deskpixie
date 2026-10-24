@@ -639,6 +639,48 @@ final class QuickChatModelTests: XCTestCase {
         m.apply(line("done", "Old news.", job: "job_0"))
         XCTAssertEqual(m.phase, .ready)
     }
+
+    // MARK: Update cards (#286)
+
+    private func card(_ id: UInt64, _ text: String, count: Int = 1) -> ReplyCard {
+        ReplyCard(id: id, text: text, count: count, lines: [id], sessions: [])
+    }
+
+    func testAnUpdateShowsOnItsOwnAndGoesIntoHistory() {
+        var m = QuickChatModel()
+        XCTAssertTrue(m.update(card(1, "**live-like:** done")))
+        XCTAssertTrue(m.showsCard(hovering: false, always: false))
+        XCTAssertEqual(m.shownFull, "**live-like:** done")
+        _ = m.update(card(2, "**api:** done"))
+        XCTAssertEqual(m.position, QuickChatModel.Position(index: 2, count: 2))
+        XCTAssertEqual(m.history.map(\.id), [1])
+    }
+
+    func testARowJoiningTheShownCardReplacesItInPlace() {
+        var m = QuickChatModel()
+        _ = m.update(card(1, "**a:** one"))
+        _ = m.update(card(1, "**a:** one\n**b:** two", count: 2))
+        XCTAssertEqual(m.count, 2)
+        XCTAssertEqual(m.cardID, 1)
+        XCTAssertEqual(m.shownFull, "**a:** one\n**b:** two")
+        XCTAssertNil(m.position) // still one card, nothing to step back to
+    }
+
+    func testAnUpdateNeverCoversATypedMessageAtWork() {
+        var m = QuickChatModel()
+        m.mode = "text"; m.open = true
+        m.sending(); _ = m.sent(job: "job_1")
+        XCTAssertFalse(m.update(card(1, "**a:** done")))
+        XCTAssertEqual(m.phase, .thinking)
+        XCTAssertEqual(m.history.last?.text, "**a:** done")
+    }
+
+    func testAnUpdateCardIsPutAwayAfterTheDismissTime() {
+        var m = QuickChatModel()
+        let t0 = Date()
+        _ = m.update(card(1, "**a:** done"), now: t0)
+        XCTAssertTrue(m.dismissIfOlder(than: 120, now: t0.addingTimeInterval(121)))
+    }
 }
 
 /// #240: attachments alone can be sent.
@@ -698,4 +740,5 @@ final class QuickChatAttachmentTests: XCTestCase {
         m.saying("Hi again.")
         XCTAssertEqual(m.sessions, [])
     }
+
 }

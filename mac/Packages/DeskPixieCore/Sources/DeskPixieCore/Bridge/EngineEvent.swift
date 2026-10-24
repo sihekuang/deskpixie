@@ -106,6 +106,8 @@ public enum EngineEvent: Sendable, Equatable {
     case focusPlan(FocusPlan)
     /// A spoken line for a message typed in the text box (#221).
     case chatLine(ChatLine)
+    /// An update card: sessions' finished work, one card for rows that came together (#286).
+    case replyCard(ReplyCard)
     /// The hotkey in text mode: open the text box and focus it.
     case chatFocus
     /// replyMode changed: "voice" or "text".
@@ -177,6 +179,7 @@ public enum EngineEvent: Sendable, Equatable {
         case "showPane": return get(PaneRequest.self).map { .showPane($0) }
         case "focusPlan": return get(FocusPlanEvent.self).map { .focusPlan($0.plan) }
         case "chat.line": return get(ChatLine.self).map { .chatLine($0) }
+        case "reply.card": return get(ReplyCard.self).map { .replyCard($0) }
         case "chat.focus": return .chatFocus
         case "replyMode": return get(ReplyModeEvent.self).map { .replyMode($0.mode) }
         case "captions": return get(CaptionsEvent.self).map { .captions(always: $0.always, dismissSecs: $0.dismissSecs, fadeSecs: $0.fadeSecs ?? 4, historyMins: $0.historyMins ?? 5) }

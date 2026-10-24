@@ -26,6 +26,35 @@ public struct ChatLine: Decodable, Sendable, Equatable {
     private enum CodingKeys: String, CodingKey { case job, status, text, sessions }
 }
 
+/// An update card (#286): the finished work of one or more sessions, one markdown row each, as
+/// the core's `reply.card` event sends it. A card that gains a row comes again whole, with the
+/// same `id`.
+public struct ReplyCard: Decodable, Sendable, Equatable {
+    public let id: UInt64
+    public let text: String
+    public let count: Int
+    public let lines: [UInt64]
+    /// The sessions the rows are about: the card's buttons that go to them.
+    public let sessions: [String]
+
+    public init(id: UInt64, text: String, count: Int, lines: [UInt64], sessions: [String] = []) {
+        self.id = id
+        self.text = text
+        self.count = count
+        self.lines = lines
+        self.sessions = sessions
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(id: try c.decode(UInt64.self, forKey: .id), text: try c.decode(String.self, forKey: .text),
+                  count: try c.decode(Int.self, forKey: .count), lines: try c.decode([UInt64].self, forKey: .lines),
+                  sessions: try c.decodeIfPresent([String].self, forKey: .sessions) ?? [])
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, text, count, lines, sessions }
+}
+
 /// The text box under Pixie (#221, spec docs/superpowers/specs/2026-10-21-text-mode-design.md
 /// §4.3): one message at a time, and only the coordinator's spoken answer to it, typed out word
 /// by word. The controller feeds it events and a timer (`tick`); the view draws it. It also
@@ -53,6 +82,9 @@ public struct QuickChatModel: Equatable, Sendable {
     private var lastJob: String?
     /// The sessions what is shown is about (#261): the card's buttons that go to them.
     public private(set) var sessions: [String] = []
+    /// The update card shown (#286), nil for anything else, and how many rows it holds.
+    public private(set) var cardID: UInt64?
+    public private(set) var count = 1
     /// The sessions Pixie was just told of: its next reply is about them (#261).
     private var aboutNext: [String] = []
 
@@ -120,10 +152,15 @@ public struct QuickChatModel: Equatable, Sendable {
         public let text: String
         public let sessions: [String]
         public let at: Date
-        public init(text: String, sessions: [String], at: Date) {
+        /// The update card it was (#286), and how many rows it holds.
+        public let id: UInt64?
+        public let count: Int
+        public init(text: String, sessions: [String], at: Date, id: UInt64? = nil, count: Int = 1) {
             self.text = text
             self.sessions = sessions
             self.at = at
+            self.id = id
+            self.count = count
         }
     }
 
@@ -203,12 +240,17 @@ public struct QuickChatModel: Equatable, Sendable {
         return true
     }
 
+    private mutating func clearCard() {
+        cardID = nil
+        count = 1
+    }
+
     /// A new reply replaces what is shown: Pixie's words go into the history (not yours, nor a
     /// line about work still running). Looking back, you stay there and » offers the new one.
     private mutating func keep(now: Date) {
         // A typed message's answer or a caption: not why a message couldn't go (no job).
         if !isYou, !full.isEmpty, let saidAt, phase == .done || phase == .answering, isCaption || job != nil {
-            history.append(Reply(text: full, sessions: sessions, at: saidAt))
+            history.append(Reply(text: full, sessions: sessions, at: saidAt, id: cardID, count: count))
         }
         if viewing != nil { newerWaiting = true }
         prune(now: now)
@@ -226,7 +268,7 @@ public struct QuickChatModel: Equatable, Sendable {
 
     /// The card without the input line: a live caption, or the last words on hover or always.
     public func showsCard(hovering: Bool, always: Bool) -> Bool {
-        (hovering && !history.isEmpty) || showsCaption || (lateShown && !isCaption && !full.isEmpty && (phase == .answering || phase == .done)) || ((hovering || always) && hasLast)
+        (hovering && !history.isEmpty) || showsCaption || (lateShown && !isCaption && !full.isEmpty && (phase == .answering || phase == .done)) || (lateShown && cardID != nil && phase == .done) || ((hovering || always) && hasLast)
     }
 
     /// How long ago it was said ("just now", "2m ago"), once it is all shown.
@@ -264,6 +306,7 @@ public struct QuickChatModel: Equatable, Sendable {
     /// meanwhile are kept until the job is known.
     public mutating func sending(now: Date = Date()) {
         keep(now: now)
+        clearCard()
         toNewest()
         isCaption = false
         isYou = false
@@ -287,6 +330,7 @@ public struct QuickChatModel: Equatable, Sendable {
     /// True when Stop came first, so the core must cancel this job now.
     @discardableResult
     public mutating func sent(job: String) -> Bool {
+        clearCard()
         self.job = job
         lastJob = job
         lateShown = false
@@ -314,6 +358,7 @@ public struct QuickChatModel: Equatable, Sendable {
 
     /// The message couldn't go: the reason is the answer.
     public mutating func failedToSend(_ reason: String) {
+        clearCard()
         lateShown = false
         sessions = []
         isCaption = false
@@ -341,6 +386,7 @@ public struct QuickChatModel: Equatable, Sendable {
             // #241: a late answer to the last message brings the card back with it (not after
             // Stop: the cancel's own line doesn't replace "Stopped.").
             keep(now: now)
+            clearCard()
             job = line.job
             isCaption = false
             isYou = false
@@ -365,6 +411,7 @@ public struct QuickChatModel: Equatable, Sendable {
             saidAt = now // the same words while they type out: the same reply
         } else {
             keep(now: now)
+            clearCard()
             full = line.text
             shown = ""
             phase = .answering
@@ -385,6 +432,7 @@ public struct QuickChatModel: Equatable, Sendable {
     public mutating func dismiss(now: Date = Date()) {
         guard canDismiss else { return }
         keep(now: now)
+        clearCard()
         toNewest()
         lateShown = false
         sessions = []
@@ -427,6 +475,7 @@ public struct QuickChatModel: Equatable, Sendable {
         }
         guard takeCaption() else { return false }
         keep(now: now)
+        clearCard()
         newReply()
         moveUp(beforeYou: false, now: now)
         isCaption = true
@@ -447,6 +496,7 @@ public struct QuickChatModel: Equatable, Sendable {
         let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !words.isEmpty, takeCaption() else { return false }
         keep(now: now)
+        clearCard()
         toNewest()
         moveUp(beforeYou: true, now: now)
         sessions = []
@@ -469,6 +519,7 @@ public struct QuickChatModel: Equatable, Sendable {
         guard !words.isEmpty, takeCaption() else { return false }
         if !awaitsFinal || isYou || !isCaption {
             keep(now: now)
+            clearCard()
             newReply()
         }
         moveUp(beforeYou: false, now: now)
@@ -480,6 +531,42 @@ public struct QuickChatModel: Equatable, Sendable {
         job = nil
         full = words
         shown = words
+        phase = .done
+        return true
+    }
+
+    /// An update card (#286): the finished work of sessions, shown on its own like a caption but
+    /// never over a typed message at work (it goes into the history, » offers it). The card
+    /// already up comes again with more rows: it is replaced in place. True when it shows.
+    @discardableResult
+    public mutating func update(_ card: ReplyCard, now: Date = Date()) -> Bool {
+        if cardID == card.id, hasCurrent {
+            full = card.text
+            shown = card.text
+            count = card.count
+            sessions = card.sessions
+            return true
+        }
+        guard takeCaption() else {
+            history.append(Reply(text: card.text, sessions: card.sessions, at: now, id: card.id, count: card.count))
+            newerWaiting = true
+            prune(now: now)
+            return false
+        }
+        keep(now: now)
+        isCaption = true
+        isYou = false
+        captionLive = false
+        awaitsFinal = false
+        earlier = nil
+        lateShown = true
+        cardID = card.id
+        count = card.count
+        sessions = card.sessions
+        saidAt = now
+        job = nil
+        full = card.text
+        shown = card.text
         phase = .done
         return true
     }
