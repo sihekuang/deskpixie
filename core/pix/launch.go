@@ -75,6 +75,9 @@ func PlanLaunch(tool string, userArgs []string, self, sock, dir string) (Launch,
 		args := []string{
 			"-c", "mcp_servers.pixie.command=" + strconv.Quote(self),
 			"-c", `mcp_servers.pixie.args=["mcp"]`,
+			// Codex starts MCP servers with a short environment of its own: pass on what pix's
+			// tool finds pix by (#272).
+			"-c", `mcp_servers.pixie.env_vars=["PIX_SOCK","PIX_SESSION"]`,
 			// Its own tool never asks for approval (Claude's settings allow it the same way).
 			"-c", `mcp_servers.pixie.tools.set_description.approval_mode="approve"`,
 			"-c", "developer_instructions=" + strconv.Quote(Instruction),
