@@ -390,3 +390,32 @@ func TestAlertingLanes(t *testing.T) {
 		}
 	}
 }
+
+// restoredCtl: a controller restored from these outbox lines (all undelivered).
+func restoredCtl(lines ...OutboxLine) *AgentController {
+	var recs []string
+	for i := range lines {
+		lines[i].ID, lines[i].At = uint64(i+1), T0
+		recs = append(recs, lines[i].record())
+	}
+	c := ctl()
+	c.Step(RestoredInput(nil, recs, true), T0)
+	return c
+}
+
+// #286: a restart keeps a session's open question on the badge, until that session says
+// something else; an info line that only carries the session (an "allowed" line) doesn't clear it.
+func TestARestartKeepsASessionsOpenQuestionOnTheBadge(t *testing.T) {
+	ask := OutboxLine{Kind: LineSession, Session: "api-claude", Asking: true, Text: "api: asks"}
+	if got := restoredCtl(ask).Updates(); len(got) != 1 || !got[0].Asking {
+		t.Fatalf("%+v", got)
+	}
+	next := OutboxLine{Kind: LineSession, Session: "api-claude", Text: "api is done"}
+	if got := restoredCtl(ask, next).Updates(); len(got) != 0 {
+		t.Fatalf("a later turn left it open: %+v", got)
+	}
+	info := OutboxLine{Kind: LineInfo, Session: "api-claude", Text: "api: allowed"}
+	if got := restoredCtl(ask, info).Updates(); len(got) != 1 {
+		t.Fatalf("an info line dropped the question: %+v", got)
+	}
+}
