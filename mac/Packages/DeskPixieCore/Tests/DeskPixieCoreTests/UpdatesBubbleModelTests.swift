@@ -43,6 +43,27 @@ final class UpdatesBubbleModelTests: XCTestCase {
         XCTAssertEqual(m.lines.map(\.id), [2], "2 was forgotten once dropped; 1 and 3 are still acted on")
     }
 
+    /// #286: « closes the deck to the badge; it stays closed until the pointer has left the
+    /// region, nothing is dismissed, and a new item may pop it.
+    func testCollapsingKeepsTheDeckClosedUntilThePointerHasLeft() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        m.apply([line(1), line(2)], now: 1, pop: .allowed)
+        m.pointerEntered(now: 2)
+        m.collapse()
+        XCTAssertEqual(m.phase, .badge)
+        XCTAssertEqual(m.count, 2, "nothing dismissed")
+        m.pointerEntered(now: 3)
+        XCTAssertEqual(m.phase, .badge, "still around: stays closed")
+        m.regionLeft()
+        m.pointerEntered(now: 4)
+        XCTAssertEqual(m.phase, .expanded(since: 4))
+        m.collapse()
+        m.apply([line(1), line(2), line(3)], now: 5, pop: .allowed)
+        XCTAssertEqual(m.phase, .popped(until: 5 + m.popSecs), "a new item pops it")
+        m.pointerEntered(now: 6)
+        XCTAssertEqual(m.phase, .expanded(since: 6))
+    }
+
     /// #286: a scroll to a card moves the deck there; an id no longer listed changes nothing.
     func testAScrollToACardMovesTheDeck() {
         var m = UpdatesBubbleModel()

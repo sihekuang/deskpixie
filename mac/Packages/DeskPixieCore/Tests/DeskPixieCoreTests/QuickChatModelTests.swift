@@ -706,8 +706,8 @@ final class QuickChatModelTests: XCTestCase {
 
     func testTheHeaderCountsACombinedCard() {
         XCTAssertEqual(QuickChatModel.header(who: "Pixie", count: 1, ago: "2m ago"), "Pixie · 2m ago")
-        XCTAssertEqual(QuickChatModel.header(who: "Pixie", count: 3, ago: "just now"), "Pixie · 3 updates · just now")
-        XCTAssertEqual(QuickChatModel.header(who: "Pixie", count: 2, ago: nil), "Pixie · 2 updates")
+        XCTAssertEqual(QuickChatModel.header(who: "Pixie", count: 3, ago: "just now"), "3 updates · just now")
+        XCTAssertEqual(QuickChatModel.header(who: "Pixie", count: 2, ago: nil), "2 updates")
         XCTAssertEqual(QuickChatModel.header(who: "You", count: 1, ago: nil), "You")
     }
 
@@ -779,7 +779,7 @@ final class QuickChatModelTests: XCTestCase {
         let t0 = Date()
         _ = m.update(ReplyCard(id: 1, text: "a", count: 1, lines: [1], at: t0 - 240), now: t0)
         _ = m.update(ReplyCard(id: 2, text: "b\nc", count: 2, lines: [2, 3], at: t0 - 60), now: t0)
-        XCTAssertEqual(m.pages.map { $0.header(now: t0) }, ["Pixie · 4m ago", "Pixie · 2 updates · 1m ago"])
+        XCTAssertEqual(m.pages.map { $0.header(now: t0) }, ["Pixie · 4m ago", "2 updates · 1m ago"])
         XCTAssertTrue(m.caption(role: "assistant", text: "Hello there", now: t0))
         XCTAssertEqual(m.pages.last?.header(now: t0), "Pixie", "no time while it is being said")
     }

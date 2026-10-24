@@ -213,7 +213,7 @@ public struct QuickChatModel: Equatable, Sendable {
         public let count: Int
         public let at: Date?
 
-        /// "Pixie · 3 updates · 2m ago".
+        /// "Pixie · 2m ago", or "3 updates · 2m ago" when combined.
         public func header(now: Date) -> String {
             QuickChatModel.header(who: who, count: count, ago: at.map { QuickChatModel.ago($0, now: now) })
         }
@@ -252,9 +252,10 @@ public struct QuickChatModel: Equatable, Sendable {
     }
     /// How many updates the card shown holds (#286).
     public var shownCount: Int { viewed?.count ?? (cardID != nil ? count : 1) }
-    /// The card's header (#286): "Pixie · 3 updates · 2m ago"; the count only when combined.
+    /// The card's header (#286): "Pixie · 2m ago", or "3 updates · 2m ago" when combined (who
+    /// says it gives way to the count, so the time fits whole on the card).
     public static func header(who: String, count: Int, ago: String?) -> String {
-        ([who] + (count > 1 ? ["\(count) updates"] : []) + (ago.map { [$0] } ?? [])).joined(separator: " · ")
+        ([count > 1 ? "\(count) updates" : who] + (ago.map { [$0] } ?? [])).joined(separator: " · ")
     }
     public var canBack: Bool { !history.isEmpty && viewing != 0 }
     public var canForward: Bool { viewing != nil }

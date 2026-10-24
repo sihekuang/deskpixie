@@ -267,7 +267,10 @@ public struct UpdatesBubbleModel: Sendable {
         if !added.isEmpty {
             switch pop {
             case .allowed:
-                if !isExpanded { phase = .popped(until: now + popSecs) }
+                if !isExpanded {
+                    phase = .popped(until: now + popSecs)
+                    collapsed = false
+                }
             case .hold:
                 heldPop = true
                 if !isExpanded { phase = .badge }
@@ -281,7 +284,7 @@ public struct UpdatesBubbleModel: Sendable {
 
     /// The pointer entered the bubble or badge at `at` (a click also lands here): open it.
     public mutating func pointerEntered(now: TimeInterval, at: CGPoint? = nil) {
-        guard !lines.isEmpty || isPopped else { return }
+        guard !collapsed, !lines.isEmpty || isPopped else { return }
         leftWhileTyping = false
         phase = .expanded(since: now)
         frozen = lines.reversed()
@@ -306,6 +309,26 @@ public struct UpdatesBubbleModel: Sendable {
         guard typing != nil else { return }
         typing = nil
         if !pointerInside || leftWhileTyping { pointerLeft() }
+    }
+
+    /// The deck was closed to the badge with its « (#286): everything stays waiting, and the
+    /// pointer, still around, doesn't open it again until it has left (`regionLeft`). A new item
+    /// may still pop it.
+    public private(set) var collapsed = false
+
+    public mutating func collapse() {
+        typing = nil
+        leftWhileTyping = false
+        collapsed = true
+        frozen = nil
+        phase = lines.isEmpty ? .hidden : .badge
+        decisionsSince = [:]
+        hoverOpened = []
+    }
+
+    /// The pointer left the region around Pixie: hovering the badge opens the deck again.
+    public mutating func regionLeft() {
+        collapsed = false
     }
 
     /// The pointer left: back to the badge, or hidden when nothing unheard is left. Not while you

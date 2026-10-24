@@ -40,6 +40,8 @@ struct UpdatesBubbleView: View {
     /// "Open its terminal" on a line that asks without buttons: its pane comes up and the card
     /// leaves (#286).
     var onTerminal: (UpdateLine) -> Void = { _ in }
+    /// « on a card: the deck closes to the badge, everything still waiting (#286).
+    var onCollapse: () -> Void = {}
 
     /// The bubble sizes to its lines (UpdatesBubbleLayout, #105, #278).
     static func width(for lines: [UpdateLine]) -> CGFloat { UpdatesBubbleLayout.width(for: lines) }
@@ -86,6 +88,16 @@ struct UpdatesBubbleView: View {
     private func header(_ i: Int) -> some View {
         let line = lines[i]
         return HStack(spacing: 4) {
+            Button(action: onCollapse) {
+                Image(systemName: "chevron.left.2")
+                    .font(.caption2.weight(.bold))
+                    .frame(width: 16, height: 16)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("Collapse")
+            .accessibilityLabel("Collapse")
             Group {
                 if line.offersDecision {
                     Image(systemName: "lock.fill")
