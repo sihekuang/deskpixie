@@ -20,6 +20,7 @@ import (
 // Screen markers of the prompts, as each agent shows them.
 const (
 	claudeMenu       = "Enter to select"
+	codexMenu        = "enter to submit answer"
 	claudePermission = "Do you want to" // "… proceed?", "… make this edit to x?", "… create x?"
 )
 
@@ -126,6 +127,30 @@ type question struct {
 	labels      []string
 	input       map[string]any
 	suggestions any
+	// replyMenu: a held menu's hook reply for an answer, as its agent takes it.
+	replyMenu func(input map[string]any, a menuAnswer) (string, bool)
+}
+
+// menuAnswer is Pixie's answer to a held menu: an option's label, your own words (own), or
+// that you want to talk it over first (chat).
+type menuAnswer struct {
+	label     string
+	own, chat bool
+}
+
+// menuTool is an agent's question tool, as pix holds it (#268): its name in the hook's payload,
+// the marker its menu shows on screen, whether pix can answer that menu by keys when it isn't
+// held, and the hook reply that answers it. Another agent's is another entry.
+type menuTool struct {
+	name   string
+	marker string
+	keys   bool
+	reply  func(input map[string]any, a menuAnswer) (string, bool)
+}
+
+var menuTools = map[string]menuTool{
+	"claude": {name: "AskUserQuestion", marker: claudeMenu, keys: true, reply: claudeMenuReply},
+	"codex":  {name: "request_user_input", marker: codexMenu, reply: codexMenuReply},
 }
 
 // hold is a question held in its hook (#268): the hook returns its reply, "" to let it go.
@@ -349,15 +374,15 @@ func (q *question) hookAnswer(choice string) (string, bool) {
 	}
 	if q.kind == "menu" {
 		if typed, ok := strings.CutPrefix(choice, "text:"); ok && strings.TrimSpace(typed) != "" {
-			return menuReply(q.input, strings.TrimSpace(typed), "")
+			return q.replyMenu(q.input, menuAnswer{label: strings.TrimSpace(typed), own: true})
 		}
-		if choice == "chat" { // as its terminal's "Chat about this": an answer, not a refusal
-			return menuReply(q.input, "Chat about this", "The user wants to talk this over before answering. Ask them what to clarify.")
+		if choice == "chat" {
+			return q.replyMenu(q.input, menuAnswer{chat: true})
 		}
 		if _, err := strconv.Atoi(choice); err != nil {
 			return "", false
 		}
-		return menuReply(q.input, label, "")
+		return q.replyMenu(q.input, menuAnswer{label: label})
 	}
 	switch {
 	case label == "yes" || label == "Yes":
@@ -368,6 +393,31 @@ func (q *question) hookAnswer(choice string) (string, bool) {
 		return permissionReply(map[string]any{"behavior": "allow", "updatedPermissions": q.suggestions})
 	}
 	return "", false
+}
+
+// claudeMenuReply answers AskUserQuestion in its input's answers; "Chat about this" as its
+// terminal's: an answer with a note, not a refusal (a deny reads as a hook error).
+func claudeMenuReply(input map[string]any, a menuAnswer) (string, bool) {
+	if a.chat {
+		return menuReply(input, "Chat about this", "The user wants to talk this over before answering. Ask them what to clarify.")
+	}
+	return menuReply(input, a.label, "")
+}
+
+// codexMenuReply answers request_user_input: Codex's hook can't change the tool's input, so the
+// answer is its refusal's reason, which Codex reads as the tool's result.
+func codexMenuReply(input map[string]any, a menuAnswer) (string, bool) {
+	text, _, _ := menuOf(input)
+	var reason string
+	switch {
+	case a.chat:
+		reason = fmt.Sprintf("The user wants to talk this over before answering %q. Ask them what to clarify; don't ask the question again until they have.", text)
+	case a.own:
+		reason = fmt.Sprintf("The user answered in Pixie: %q -> %q (their own answer, not one of the options). Continue with that answer; don't ask it again.", text, a.label)
+	default:
+		reason = fmt.Sprintf("The user answered in Pixie: %q -> %q. Continue with that answer; don't ask it again.", text, a.label)
+	}
+	return hookOutput(map[string]any{"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason})
 }
 
 // menuReply answers AskUserQuestion's one question with label (and notes, if any): its input as
@@ -512,7 +562,9 @@ func menuOf(input any) (string, []string, []string) {
 	if len(qs) > 1 {
 		return fmt.Sprintf("%s (and %d more)", text, len(qs)-1), nil, nil
 	}
-	if multi, _ := first["multiSelect"].(bool); multi {
+	multi, _ := first["multiSelect"].(bool)
+	secret, _ := first["isSecret"].(bool) // Codex: typed in its terminal only
+	if multi || secret {
 		return text, nil, nil
 	}
 	opts, _ := first["options"].([]any)

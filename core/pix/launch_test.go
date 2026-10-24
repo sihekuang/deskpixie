@@ -120,6 +120,8 @@ func TestPlanLaunchCodex(t *testing.T) {
 	// set_description never asks for approval (as for Claude): a session can't stop on it.
 	for _, want := range []string{`tui.notification_method="osc9"`, `tui.notification_condition="always"`,
 		`mcp_servers.pixie.tools.set_description.approval_mode="approve"`,
+		// #268: Codex's questions wait in this hook for Pixie's answer.
+		`hooks.PreToolUse=[{matcher="^request_user_input$",hooks=[{type="command",command="\"/app/pix\" hook PreToolUse",timeout=330}]}]`,
 		// #272: Codex starts MCP servers with a short environment; pix's tool finds pix by these.
 		`mcp_servers.pixie.env_vars=["PIX_SOCK","PIX_SESSION"]`} {
 		if !strings.Contains(joined, want) {
