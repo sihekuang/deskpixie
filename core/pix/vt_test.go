@@ -149,6 +149,12 @@ func TestAWrappedCodexOptionIsRead(t *testing.T) {
 	if !ok || !reflect.DeepEqual(d, want) {
 		t.Fatalf("%v %+v", ok, d)
 	}
+	// The selection arrow on the wrapped option (you moved to it): read the same.
+	arrowed := append([]string{}, lines...)
+	arrowed[4], arrowed[5] = "  1. Yes, proceed (y)", "› 2. Yes, and don't ask again for commands that start with `touch zz-codex-"
+	if d, ok := readCodexDialog(arrowed); !ok || !reflect.DeepEqual(d, want) {
+		t.Fatalf("arrowed: %v %+v", ok, d)
+	}
 	// Wrapped at a space, its words keep their space.
 	lines[5], lines[6] = "  2. Yes, and don't ask again for commands that start with", "     `touch zz-codex-1.txt` (p)"
 	if d, ok := readCodexDialog(lines); !ok || d.Options[1] != want.Options[1] {

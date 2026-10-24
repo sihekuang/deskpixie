@@ -274,7 +274,7 @@ func runeWidth(r rune) int {
 	return 1
 }
 
-var optionLine = regexp.MustCompile(`^\s*(?:❯\s*)?(\d)\.\s+(.*\S)\s*$`)
+var optionLine = regexp.MustCompile(`^\s*(?:[❯›]\s*)?(\d)\.\s+(.*\S)\s*$`)
 
 // dialog is a Claude Code permission dialog as shown (#105): its title ("Bash command"),
 // Claude's summary under it (or the file's name), what the dashed box holds (the command, the
