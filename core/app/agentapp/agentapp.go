@@ -97,6 +97,8 @@ func TerminalFailureStatus(err string) string {
 type Config struct {
 	Settings      settings.AgentSettings
 	Notifications settings.NotificationSettings
+	// ReplyHistoryMins is how long the reply deck keeps Pixie's earlier replies (replyHistoryMins).
+	ReplyHistoryMins uint32
 	// AppSupport is the app-data folder; Home the user's home folder.
 	AppSupport, Home string
 	Hooks            app.AgentHooks
@@ -169,7 +171,7 @@ func Factory(cfg settings.Config, appSupport string, hooks app.AgentHooks) app.A
 		log.Print("agent: no home dir; delegation unavailable")
 		return nil
 	}
-	a := Build(Config{Settings: cfg.Agent, Notifications: cfg.Notifications, AppSupport: appSupport, Home: home, Hooks: hooks})
+	a := Build(Config{Settings: cfg.Agent, Notifications: cfg.Notifications, ReplyHistoryMins: cfg.ReplyHistoryMins, AppSupport: appSupport, Home: home, Hooks: hooks})
 	if a == nil {
 		return nil
 	}
@@ -364,6 +366,7 @@ func Build(c Config) *Agent {
 		IDs:         c.IDs,
 		Kept:        KeptFile(paths.Kept()),
 		Updates:     updatesSink{c.Hooks},
+		Replies:     replySink{c.Hooks},
 		Panes:       paneSink{c.Hooks},
 		Roster:      rosterSink{c.Hooks},
 		Modes:       a,
@@ -395,6 +398,7 @@ func Build(c Config) *Agent {
 			KeepPanesOnQuit:     s.KeepPanesOnQuit,
 			Workers:             ws.Policy,
 			SpeakWorkerReports:  s.Workers.SpeakResults,
+			ReplyHistoryMs:      agent.Millis(c.ReplyHistoryMins) * 60_000,
 			SessionTurns:        c.Notifications.SessionTurns,
 			SessionTurnsMinMs:   agent.Millis(c.Notifications.SessionTurnsMinSeconds) * 1000,
 			OpenConversation:    s.OpenConversationForUpdates,
@@ -643,6 +647,12 @@ func (a *Agent) ChatAbout(token string)          { a.handle.ChatAbout(token) }
 
 // UpdatesSeen: the updates bubble showed these lines long enough to count as heard.
 func (a *Agent) UpdatesSeen(ids []uint64) { a.handle.UpdatesSeen(ids) }
+
+// RepliesShown: the reply deck showed these cards, so they count as delivered.
+func (a *Agent) RepliesShown(ids []uint64) { a.handle.RepliesShown(ids) }
+
+// PendingReplies is the deck's cards not yet shown ([]agent.ReplyCard, never nil).
+func (a *Agent) PendingReplies() any { return a.handle.PendingReplies() }
 
 // UpdatesDismissed: the user clicked these lines away (#199).
 func (a *Agent) UpdatesDismissed(ids []uint64) { a.handle.UpdatesDismissed(ids) }

@@ -113,6 +113,15 @@ type chatSink struct{ hooks app.AgentHooks }
 
 func (c chatSink) Chat(l agent.ChatLine) { c.hooks.Chat(l) }
 
+// replySink: a reply card → the app's `reply.card` event.
+type replySink struct{ hooks app.AgentHooks }
+
+func (r replySink) Reply(c agent.ReplyCard) {
+	if r.hooks.Reply != nil {
+		r.hooks.Reply(c)
+	}
+}
+
 type rosterSink struct{ hooks app.AgentHooks }
 
 func (r rosterSink) Roster(v agent.RosterView) {

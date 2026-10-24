@@ -35,6 +35,9 @@ type AgentHooks struct {
 	NotifyUpdate func(title, body string, update any)
 	// Updates is the updates bubble's list (the `updates` event's lines; never nil).
 	Updates func(items any)
+	// Reply is a reply card for the reply deck (the `reply.card` event's ReplyCard); a card that
+	// gains a row comes again whole with the same id.
+	Reply func(card any)
 	// Roster is the roster beside Pixie (the `agents` event's roster), on every change (#91).
 	Roster func(view any)
 	// ShowPane asks the shell to bring up an agent's pane (the `showPane` event, #110).
@@ -74,6 +77,11 @@ type Agent interface {
 	ChatAbout(token string)
 	// UpdatesSeen: the updates bubble showed these lines long enough to count as heard.
 	UpdatesSeen(ids []uint64)
+	// RepliesShown: the deck showed these cards (their ids): a card counts as delivered once shown.
+	RepliesShown(ids []uint64)
+	// PendingReplies is the deck's cards not yet shown ([]agent.ReplyCard, never nil), for the
+	// shell's first read: the event may go out before the deck exists.
+	PendingReplies() any
 	// UpdatesDismissed: the user clicked these lines away (#199): a job's question goes too.
 	UpdatesDismissed(ids []uint64)
 	// Updates is the bubble's current list (the `updates` event's lines), for the shell's first

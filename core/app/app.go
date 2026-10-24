@@ -242,6 +242,7 @@ func New(d Deps) (*App, error) {
 				a.emit("notify", map[string]any{"title": title, "body": body, "update": update})
 			},
 			Updates:  func(items any) { a.emit("updates", map[string]any{"lines": items}) },
+			Reply:    func(c any) { a.emit("reply.card", fieldsOf(c)) },
 			Roster:   func(view any) { a.emit("agents", map[string]any{"roster": view}) },
 			ShowPane: func(job, worker string) { a.emit("showPane", map[string]any{"job": job, "worker": worker}) },
 			Focus:    func(plan any) { a.emit("focusPlan", map[string]any{"plan": plan}) },
@@ -1273,6 +1274,25 @@ func (a *App) Register(r Registrar) {
 			a.agent.UpdatesSeen(in.IDs)
 		}
 		return struct{}{}, nil
+	})
+	r.Register("agent.repliesShown", func(args json.RawMessage) (any, error) {
+		var in struct {
+			IDs []uint64 `json:"ids"`
+		}
+		if err := decodeArgs("agent.repliesShown", args, &in); err != nil {
+			return nil, err
+		}
+		if a.agent != nil {
+			a.agent.RepliesShown(in.IDs)
+		}
+		return struct{}{}, nil
+	})
+	r.Register("agent.replies", func(json.RawMessage) (any, error) {
+		var cards any = []any{}
+		if a.agent != nil {
+			cards = a.agent.PendingReplies()
+		}
+		return map[string]any{"cards": cards}, nil
 	})
 	r.Register("agent.decide", func(args json.RawMessage) (any, error) {
 		var in struct {
