@@ -46,7 +46,7 @@ func TestOpenSettingsShowsTheSettingInTheWindow(t *testing.T) {
 		t.Fatal(out)
 	}
 	ev := h.waitFor("settings.open", nil, time.Second)
-	if ev["path"] != "voice.noiseFilter" || ev["section"] != "Voice" || ev["label"] != "Noise filter" || ev["help"] == "" {
+	if ev["path"] != "voice.noiseFilter" || ev["section"] != "Voice" || ev["label"] != "Noise filter" || ev["group"] != "Microphone and speaker" || ev["help"] == "" {
 		t.Fatal(ev)
 	}
 

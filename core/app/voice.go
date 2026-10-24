@@ -45,7 +45,7 @@ func ProviderNames() []string {
 	return out
 }
 
-// AudioBackends are the audio backend names Swift implements (Settings ▸ Voice ▸ Audio).
+// AudioBackends are the audio backend names Swift implements (Settings ▸ Advanced ▸ Audio engine).
 func AudioBackends() []string { return []string{"macos-vpio"} }
 
 // PickModel builds the model named by s.Provider; an unknown name is a setup failure.

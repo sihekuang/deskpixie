@@ -60,6 +60,13 @@ final class SettingsGroupsTests: XCTestCase {
         XCTAssertFalse(model.canChange(workers))
     }
 
+    func test_a_field_round_trips_with_its_unit() throws {
+        let f = SettingsFixture.view("voice.idleTimeoutSecs")
+        XCTAssertEqual(f.unit, "seconds")
+        let back = try JSONDecoder().decode(SettingsField.self, from: JSONEncoder().encode(f))
+        XCTAssertEqual(back, f)
+    }
+
     func test_a_search_result_says_its_page_and_group() {
         XCTAssertEqual(L.place(SettingsHit(path: "voice.inputDevice", section: .voice, group: "Microphone and speaker", label: "Microphone")),
                        "Voice › Microphone and speaker")

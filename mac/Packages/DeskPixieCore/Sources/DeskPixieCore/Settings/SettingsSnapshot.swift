@@ -233,6 +233,26 @@ public struct SettingsField: Codable, Equatable, Sendable {
         unit = try c.nestedContainer(keyedBy: UnitKey.self, forKey: .kind).decodeIfPresent(String.self, forKey: .unit)
     }
 
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(path, forKey: .path)
+        try c.encode(section, forKey: .section)
+        try c.encode(group, forKey: .group)
+        try c.encode(label, forKey: .label)
+        try c.encode(help, forKey: .help)
+        // The core sends the unit inside the kind; write it back there.
+        let kindEncoder = c.superEncoder(forKey: .kind)
+        try kind.encode(to: kindEncoder)
+        if let unit {
+            var k = kindEncoder.container(keyedBy: UnitKey.self)
+            try k.encode(unit, forKey: .unit)
+        }
+        try c.encode(apply, forKey: .apply)
+        try c.encodeIfPresent(platforms, forKey: .platforms)
+        try c.encodeIfPresent(visibleWhen, forKey: .visibleWhen)
+        try c.encodeIfPresent(enabledWhen, forKey: .enabledWhen)
+    }
+
     /// Whether the field can be changed for `values`: every `enabledWhen` condition holds.
     public func isEnabled(_ values: JSONValue) -> Bool {
         (enabledWhen ?? []).allSatisfy { $0.holds(values) }
