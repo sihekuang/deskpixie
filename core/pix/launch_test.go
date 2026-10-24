@@ -119,7 +119,9 @@ func TestPlanLaunchCodex(t *testing.T) {
 	// #105: Codex tells pix of an approval prompt with its own OSC 9 notification.
 	// set_description never asks for approval (as for Claude): a session can't stop on it.
 	for _, want := range []string{`tui.notification_method="osc9"`, `tui.notification_condition="always"`,
-		`mcp_servers.pixie.tools.set_description.approval_mode="approve"`} {
+		`mcp_servers.pixie.tools.set_description.approval_mode="approve"`,
+		// #272: Codex starts MCP servers with a short environment; pix's tool finds pix by these.
+		`mcp_servers.pixie.env_vars=["PIX_SOCK","PIX_SESSION"]`} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("no %s: %q", want, joined)
 		}
