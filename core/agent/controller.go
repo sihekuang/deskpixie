@@ -503,6 +503,8 @@ type AgentController struct {
 	typedTo map[string]JobID
 	// jobSessions: the sessions each job was passed to, in order (#261).
 	jobSessions map[JobID][]string
+	// asking: each session's open question, the outbox line id; its next turn clears it (#286).
+	asking map[string]uint64
 	// boxAsker: the session whose question the box shows, answered from the box (#241).
 	boxAsker string
 	// boxAnswered: the typed job a session already answered in the box; the coordinator's
@@ -550,6 +552,7 @@ func NewAgentController(settings Settings) *AgentController {
 		handedOff:   map[JobID]bool{},
 		typedTo:     map[string]JobID{},
 		jobSessions: map[JobID][]string{},
+		asking:      map[string]uint64{},
 		typed:       map[JobID]bool{},
 		opener:      newOpener(settings.NotifyPerMinute),
 		modes:       map[string]bool{},
@@ -905,6 +908,17 @@ func (c *AgentController) restore(jobs, outbox []string, keep bool, now Millis, 
 	table, restarted := RestoreJobTable(jobs, now, keep)
 	c.jobs = table
 	c.outbox = RestoreOutbox(outbox, now)
+	c.asking = map[string]uint64{}
+	for _, l := range c.outbox.lines {
+		if l.Session == "" {
+			continue
+		}
+		if l.Asking {
+			c.asking[l.Session] = l.ID
+		} else {
+			delete(c.asking, l.Session)
+		}
+	}
 	// Queued only: the runtime ensures the coordinator once setup problems are known.
 	for _, j := range c.jobs.Open() {
 		c.inbox.Push(MessageForJob(j.ID, CoordinatorRestartNote))
@@ -1805,6 +1819,7 @@ const MaxSessionDetailBytes = 2 << 10
 // (never held by the cap). Pending confirm words are masked in all of it: the label is
 // agent-settable too.
 func (c *AgentController) onSessionTurn(name string, t SessionTurn, now Millis, fx *[]Effect) {
+	delete(c.asking, name)
 	if c.shutDown {
 		return
 	}
@@ -2099,6 +2114,9 @@ func (c *AgentController) applyDelivery(d RouteDelivery, now Millis, fx *[]Effec
 		record := c.outbox.Push(d.Line, now)
 		*fx = append(*fx, Effect{Kind: EfAppend, File: OutboxFile, Line: record})
 		c.attachNotification(*fx, d.Line)
+		if d.Line.Asking && d.Line.Session != "" {
+			c.asking[d.Line.Session] = c.outbox.lines[len(c.outbox.lines)-1].ID
+		}
 	}
 }
 

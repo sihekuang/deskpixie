@@ -6,14 +6,13 @@ import "testing"
 // below. What is said doesn't change.
 
 func TestASessionTurnIsBriefInTheBubble(t *testing.T) {
-	items, _ := lastUpdates(t, sessionTurn(turnCtl(nil), longTurn, T0))
-	if len(items) != 1 || items[0].Title != "deskpixie: fix login redirect" ||
-		items[0].Brief != "The redirect loop is fixed and all 412 tests pass." || items[0].Text != longTurnLine || items[0].Asking {
+	// #286: a done line is a reply, not a bubble line.
+	if items, _ := lastUpdates(t, sessionTurn(turnCtl(nil), longTurn, T0)); len(items) != 0 {
 		t.Fatalf("%+v", items)
 	}
 	asks := longTurn
 	asks.Reply = "Fixed the loop.\n\nShould I also update the docs?"
-	items, _ = lastUpdates(t, sessionTurn(turnCtl(nil), asks, T0))
+	items, _ := lastUpdates(t, sessionTurn(turnCtl(nil), asks, T0))
 	if len(items) != 1 || items[0].Brief != "Should I also update the docs?" || !items[0].Asking {
 		t.Fatalf("%+v", items)
 	}
@@ -21,21 +20,20 @@ func TestASessionTurnIsBriefInTheBubble(t *testing.T) {
 
 func TestAnOlderPixIsBriefInTheBubble(t *testing.T) {
 	ev := PaneEvent{Kind: PaneEventOutdated, Agent: "api-claude", Outdated: &SessionOutdated{Label: "landing", Tool: "codex"}}
-	items, _ := lastUpdates(t, ctl().Step(PaneInput(ev), T0))
-	if len(items) != 1 || items[0].Title != "landing" || items[0].Brief != "Older pix: restart with pix codex resume." {
+	// #286: an info line is not in the bubble.
+	if items, _ := lastUpdates(t, ctl().Step(PaneInput(ev), T0)); len(items) != 0 {
 		t.Fatalf("%+v", items)
 	}
 }
 
 func TestAHandOffIsBriefInTheBubble(t *testing.T) {
 	c := workingOnJob1()
-	items, _ := lastUpdates(t, c.Step(SessionSentInput("repo-claude", landing), T0))
-	if len(items) != 1 || items[0].Title != landing || items[0].Brief != "Message passed on." {
+	// #286: hand-off lines are not in the bubble.
+	if items, _ := lastUpdates(t, c.Step(SessionSentInput("repo-claude", landing), T0)); len(items) != 0 {
 		t.Fatalf("%+v", items)
 	}
 	c = workingOnJob1()
-	items, _ = lastUpdates(t, c.Step(SessionWaitingInput("repo-claude", landing, "typing"), T0))
-	if len(items) != 1 || items[0].Brief != "Message held: you're typing there." {
+	if items, _ := lastUpdates(t, c.Step(SessionWaitingInput("repo-claude", landing, "typing"), T0)); len(items) != 0 {
 		t.Fatalf("%+v", items)
 	}
 }

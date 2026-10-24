@@ -21,12 +21,13 @@ func lastUpdates(t *testing.T, fx []Effect) ([]UpdateItem, bool) {
 
 func TestAnOutboxedLineIsSentToTheBubbleWithItsJob(t *testing.T) {
 	c := workingOnJob1()
-	items, ok := lastUpdates(t, stop(c, doneStop, T0))
-	if !ok || len(items) != 1 || items[0].Text != "There are 12 open issues." || items[0].Job != job(1) {
+	// #286: a reply is not a bubble line; a job's question is, with its job.
+	if items, _ := lastUpdates(t, stop(c, doneStop, T0)); len(items) != 0 {
 		t.Fatalf("%+v", items)
 	}
-	if items[0].Kind != LineReply || items[0].At != T0 {
-		t.Fatalf("%+v", items[0])
+	items, ok := lastUpdates(t, stop(workingOnJob1(), questionStop, T0+10))
+	if !ok || len(items) != 1 || items[0].Text != "Which branch?" || items[0].Job != job(1) || items[0].Kind != LineQuestion || items[0].At != T0+10 {
+		t.Fatalf("%+v", items)
 	}
 }
 
@@ -64,19 +65,25 @@ func TestAnUnchangedListIsNotSentAgain(t *testing.T) {
 func TestOpeningAConversationEmptiesTheBubble(t *testing.T) {
 	c := workingOnJob1()
 	stop(c, doneStop, T0)
-	items, ok := lastUpdates(t, c.Step(voiceOpened(), T0+1000))
-	if !ok || len(items) != 0 {
-		t.Fatalf("%v %+v", ok, items)
+	// #286: the done line was never in the bubble, and opening a conversation leaves it empty.
+	if got := c.Updates(); len(got) != 0 {
+		t.Fatalf("%+v", got)
+	}
+	c.Step(voiceOpened(), T0+1000)
+	if got := c.Updates(); len(got) != 0 {
+		t.Fatalf("%+v", got)
 	}
 }
 
 func TestSeenLinesLeaveTheBubbleAndAreNotReplayed(t *testing.T) {
 	c := workingOnJob1()
-	items, _ := lastUpdates(t, stop(c, doneStop, T0))
-	fx := c.Step(UpdatesSeenInput([]uint64{items[0].ID}), T0+1000)
-	if got, ok := lastUpdates(t, fx); !ok || len(got) != 0 {
+	// #286: a reply is never in the bubble; seeing a line that was (a handed-off question) marks
+	// it heard.
+	if got, _ := lastUpdates(t, stop(c, doneStop, T0)); len(got) != 0 {
 		t.Fatalf("%+v", got)
 	}
+	id := c.outbox.lines[len(c.outbox.lines)-1].ID
+	fx := c.Step(UpdatesSeenInput([]uint64{id}), T0+1000)
 	if !anyKind(fx, EfAppend) {
 		t.Fatal("the delivered mark is not saved")
 	}
@@ -106,8 +113,8 @@ func TestAPendingPermissionQuestionStaysAfterBeingSeenAndLeavesOnceExpired(t *te
 		t.Fatal("a pending permission question was cleared by viewing")
 	}
 	got, ok := lastUpdates(t, c.Step(TickInput(), T0+DefaultSettings().PermissionTimeoutMs+1000))
-	// The question leaves; the expiry's own line ("denied after two minutes") takes its place.
-	if !ok || len(got) != 1 || got[0].ID == items[0].ID || got[0].Kind != LineInfo {
+	// The question leaves; the expiry's own line ("denied after two minutes") is info, not a bubble line (#286).
+	if !ok || len(got) != 0 {
 		t.Fatalf("an expired permission question is still listed: %v %+v", ok, got)
 	}
 }
@@ -124,8 +131,13 @@ func TestUpdatesIsTheCurrentListForAShellThatMissedTheEvent(t *testing.T) {
 	if got := c.Updates(); got == nil || len(got) != 0 {
 		t.Fatalf("nothing yet is an empty list: %#v", got)
 	}
-	stop(c, doneStop, T0)
-	if got := c.Updates(); len(got) != 1 || got[0].Text != "There are 12 open issues." || got[0].Job != job(1) {
+	stop(c, doneStop, T0) // #286: a reply is not in the list
+	if got := c.Updates(); len(got) != 0 {
+		t.Fatalf("%+v", got)
+	}
+	c = workingOnJob1()
+	stop(c, questionStop, T0)
+	if got := c.Updates(); len(got) != 1 || got[0].Text != "Which branch?" || got[0].Job != job(1) {
 		t.Fatalf("%+v", got)
 	}
 }
@@ -204,7 +216,7 @@ func TestAQuestionAnsweredInThePaneLeavesTheBubbleAndIsSavedAsDelivered(t *testi
 	// The user answered in the herdr pane; the job moved on.
 	fx := stop(c, `<spoken ref="job_000000000001" status="working">Using main.</spoken>`, T0+1000)
 	got, ok := lastUpdates(t, fx)
-	if !ok || len(got) != 1 || got[0].ID == items[0].ID || got[0].Text != "Using main." {
+	if !ok || len(got) != 0 { // #286: "Using main." is a reply, not a bubble line
 		t.Fatalf("the answered question is still listed: %v %+v", ok, got)
 	}
 	if !anyKind(fx, EfAppend) {
@@ -286,9 +298,9 @@ func TestAPermissionQuestionAskedDuringAConversationIsListed(t *testing.T) {
 	}
 }
 
-// #199: a job's question, clicked away, leaves the bubble while its job still waits; only seen,
-// it stays.
-func TestAJobsQuestionClickedAwayLeavesTheBubble(t *testing.T) {
+// #199, #286: a job's question stays in the bubble while its job still waits, seen or clicked
+// away; it leaves when the job moves on.
+func TestAJobsQuestionClickedAwayStaysWhileItsJobWaits(t *testing.T) {
 	c := workingOnJob1()
 	items, _ := lastUpdates(t, stop(c, questionStop, T0))
 	c.Step(UpdatesSeenInput([]uint64{items[0].ID}), T0+1000)
@@ -296,7 +308,7 @@ func TestAJobsQuestionClickedAwayLeavesTheBubble(t *testing.T) {
 		t.Fatal("seen only: it stays")
 	}
 	c.Step(UpdatesDismissedInput([]uint64{items[0].ID}), T0+2000)
-	if got := c.Updates(); len(got) != 0 {
+	if got := c.Updates(); len(got) != 1 {
 		t.Fatalf("%+v", got)
 	}
 }
@@ -305,7 +317,7 @@ func TestAJobsQuestionClickedAwayLeavesTheBubble(t *testing.T) {
 // on the line does.
 func TestANotificationCarriesItsBubbleLine(t *testing.T) {
 	c := workingOnJob1()
-	fx := stop(c, doneStop, T0)
+	fx := stop(c, questionStop, T0) // #286: a done line has no bubble line
 	items, _ := lastUpdates(t, fx)
 	var notes []Effect
 	for _, e := range fx {
@@ -315,5 +327,66 @@ func TestANotificationCarriesItsBubbleLine(t *testing.T) {
 	}
 	if len(notes) != 1 || notes[0].Update == nil || notes[0].Update.ID != items[0].ID || notes[0].Update.Job != job(1) {
 		t.Fatalf("%+v", notes)
+	}
+}
+
+// #283/#286: with openConversationForUpdates on and text mode, an update reaches no bubble
+// (it's a reply card) and a question does.
+func TestTheBubbleHoldsOnlyWhatNeedsYou(t *testing.T) {
+	c := ctlWith(func(s *Settings) { s.OpenConversation = true })
+	c.Step(TextModeInput(true), T0)
+	fx := sessionTurn(c, longTurn, T0+10) // "…is done": a reply
+	if items, _ := lastUpdates(t, fx); len(items) != 0 {
+		t.Fatalf("a done line in the bubble: %+v", items)
+	}
+	asking := longTurn
+	asking.Reply = "Shall I go ahead and push?"
+	items, _ := lastUpdates(t, sessionTurn(c, asking, T0+20))
+	if len(items) != 1 || !items[0].Asking {
+		t.Fatalf("%+v", items)
+	}
+}
+
+func TestSeeingAQuestionDoesntTakeItOffTheBadge(t *testing.T) {
+	c := turnCtl(nil)
+	asking := longTurn
+	asking.Reply = "Shall I go ahead and push?"
+	items, _ := lastUpdates(t, sessionTurn(c, asking, T0))
+	c.Step(UpdatesSeenInput([]uint64{items[0].ID}), T0+10)
+	if got := c.Updates(); len(got) != 1 {
+		t.Fatalf("seen cleared it: %+v", got)
+	}
+}
+
+func TestASessionsNextTurnTakesItsQuestionOffTheBadge(t *testing.T) {
+	c := ctlWith(func(s *Settings) { s.SessionTurns = true })
+	asking := longTurn
+	asking.Reply = "Shall I go ahead and push?"
+	sessionTurn(c, asking, T0)
+	short := longTurn
+	short.Duration = 1_000 // not told, but it moved on
+	sessionTurn(c, short, T0+10)
+	if got := c.Updates(); len(got) != 0 {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestAlertingLanes(t *testing.T) {
+	tok := "hawk"
+	for _, tc := range []struct {
+		l    OutboxLine
+		want bool
+	}{
+		{OutboxLine{Kind: LineQuestion, Token: &tok}, true},
+		{OutboxLine{Kind: LineQuestion, Job: job(1)}, true},
+		{OutboxLine{Kind: LineSession, Asking: true}, true},
+		{OutboxLine{Kind: LineSession}, false},
+		{OutboxLine{Kind: LineReply}, false},
+		{OutboxLine{Kind: LineInfo}, false},
+		{OutboxLine{Kind: LineUnsolicited}, false},
+	} {
+		if alerting(tc.l) != tc.want {
+			t.Fatalf("%+v", tc.l)
+		}
 	}
 }
