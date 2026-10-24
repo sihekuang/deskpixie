@@ -25,6 +25,11 @@ final class EngineEventTests: XCTestCase {
     func testDecodeParityKinds() {
         XCTAssertEqual(d(#"{"kind":"tray"}"#), .tray)
         XCTAssertEqual(d(#"{"kind":"settings.changed"}"#), .settingsChanged)
+        // #288: open_settings, at a setting or not; a hit missing its section just opens.
+        XCTAssertEqual(d(#"{"kind":"settings.open","path":"voice.noiseFilter","section":"Voice","label":"Noise filter","help":"h"}"#),
+                       .settingsOpen(SettingsHit(path: "voice.noiseFilter", section: .voice, label: "Noise filter", help: "h")))
+        XCTAssertEqual(d(#"{"kind":"settings.open"}"#), .settingsOpen(nil))
+        XCTAssertEqual(d(#"{"kind":"settings.open","path":"x"}"#), .settingsOpen(nil))
         XCTAssertEqual(d(#"{"kind":"restart"}"#), .restart)
         XCTAssertEqual(d(#"{"kind":"hotkey","combo":"Ctrl+Alt+Space"}"#), .hotkey(combo: "Ctrl+Alt+Space"))
         XCTAssertEqual(d(#"{"kind":"position","x":10.5,"y":-20}"#), .position(x: 10.5, y: -20))

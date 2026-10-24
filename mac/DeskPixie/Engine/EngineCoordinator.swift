@@ -512,6 +512,10 @@ final class EngineCoordinator {
             SettingsHub.shared?.refresh()
             bubble?.settingsChanged()
             roster?.settingsChanged()
+        case .settingsOpen(let hit):
+            // Reveal first, so the window opens on the setting's page.
+            if let hit { settingsModel?().reveal(hit) }
+            SettingsOpener.open?()
         case .hotkey(let combo):
             hotkeyChanged(combo)
         case .devices(let input, let output):
