@@ -1,10 +1,13 @@
 import DeskPixieCore
 import SwiftUI
 
-/// A deck's cards side by side, one page at a time (#286): SwiftUI's own horizontal paging, so a
-/// two-finger swipe moves one card and the neighbours peek in at the edges. The model stays the
-/// source of truth: `selected` comes from it, a scroll by you goes back through `onSelect`, and
-/// a change in the model (a new card, an answered one, the arrows) scrolls the pager to it.
+/// A deck's cards side by side, one page at a time (#286): SwiftUI's own horizontal paging, the
+/// neighbours peeking in at the edges, and one card per swipe however hard the flick
+/// (`DeckSnap.step`). The model stays the source of truth: `selected` comes from it, a swipe by
+/// you goes back through `onSelect` once it rests, and a change in the model (a new card, an
+/// answered one, the arrows) scrolls the pager to it. The deck is as tall as its tallest card,
+/// so nothing is clipped and the panel doesn't resize while you swipe; each card keeps its own
+/// height, against the edge nearest Pixie.
 struct DeckPager<ID: Hashable, Page: View>: View {
     let ids: [ID]
     let selected: ID?
@@ -15,6 +18,8 @@ struct DeckPager<ID: Hashable, Page: View>: View {
     var onResize: () -> Void = {}
     /// A swipe on the deck started (true) or came to rest (false): nothing hides meanwhile.
     var onScroll: (Bool) -> Void = { _ in }
+    /// The deck shows above Pixie: shorter cards sit at the bottom, next to it.
+    var bottomAligned = false
     let page: (ID) -> Page
 
     /// How far the neighbours peek in, and the gap between pages.
@@ -28,7 +33,8 @@ struct DeckPager<ID: Hashable, Page: View>: View {
 
     init(ids: [ID], selected: ID?, width: CGFloat, onSelect: @escaping (ID) -> Void,
          onResize: @escaping () -> Void = {}, onScroll: @escaping (Bool) -> Void = { _ in },
-         @ViewBuilder page: @escaping (ID) -> Page) {
+         bottomAligned: Bool = false, @ViewBuilder page: @escaping (ID) -> Page) {
+        self.bottomAligned = bottomAligned
         self.ids = ids
         self.selected = selected
         self.width = width
@@ -41,11 +47,12 @@ struct DeckPager<ID: Hashable, Page: View>: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var pageWidth: CGFloat { max(40, width - 2 * Self.peek) }
+    private var tallest: CGFloat? { heights.values.max() }
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal) {
-                HStack(alignment: .top, spacing: Self.gap) {
+                HStack(alignment: bottomAligned ? .bottom : .top, spacing: Self.gap) {
                     ForEach(ids, id: \.self) { id in
                         page(id)
                             .frame(width: pageWidth, alignment: .topLeading)
@@ -71,15 +78,22 @@ struct DeckPager<ID: Hashable, Page: View>: View {
             .contentMargins(.horizontal, Self.peek, for: .scrollContent)
             .deckPaging()
             .scrollPosition(id: $scrolled, anchor: .center)
-            .modifier(SwipeWatch(stride: pageWidth + Self.gap, onChange: onScroll, onRest: { nearest in
-                // Comes to rest on one card, centred: the nearest, whatever the scroll view did.
+            .modifier(SwipeWatch(onChange: onScroll, onLift: { offset in
+                // One swipe, one card: the neighbour of the card it started on (the model's,
+                // which a swipe doesn't change until it rests), centred, however far the fingers
+                // or the momentum would take it. Card k rests at offset k × stride.
                 guard !ids.isEmpty else { return }
-                let id = ids[min(nearest, ids.count - 1)]
-                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { proxy.scrollTo(id, anchor: .center) }
-                scrolled = id
+                let stride = pageWidth + Self.gap
+                let start = selected.flatMap { ids.firstIndex(of: $0) } ?? DeckSnap.nearest(offset: offset, stride: stride)
+                let moved = offset - CGFloat(start) * stride
+                let id = ids[DeckSnap.step(from: start, moved: moved, count: ids.count)]
+                settle(on: id, proxy)
                 forward(id)
+            }, onDrift: {
+                // Momentum after the swipe was settled: back onto the card it settled on.
+                if let id = selected { settle(on: id, proxy) }
             }))
-            .frame(width: width, height: selected.flatMap { heights[$0] }, alignment: .topLeading)
+            .frame(width: width, height: tallest, alignment: bottomAligned ? .bottomLeading : .topLeading)
         }
         .onPreferenceChange(PageHeights.self) { new in
             MainActor.assumeIsolated {
@@ -109,18 +123,23 @@ struct DeckPager<ID: Hashable, Page: View>: View {
     private func forward(_ id: ID?) {
         if let id, id != selected { onSelect(id) }
     }
+
+    private func settle(on id: ID, _ proxy: ScrollViewProxy) {
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { proxy.scrollTo(id, anchor: .center) }
+        scrolled = id
+    }
 }
 
-/// Tells when a swipe is yours and where it came to rest (macOS 15's scroll phases and
-/// geometry): the card nearest the middle, by `DeckSnap`.
+/// Watches a swipe (macOS 15's scroll phases): where the deck was when the fingers lifted
+/// (`onLift`, the scroll offset), and momentum that moves it after that (`onDrift`).
 private struct SwipeWatch: ViewModifier {
-    /// A card's width plus the gap.
-    let stride: CGFloat
     let onChange: (Bool) -> Void
-    let onRest: (Int) -> Void
+    let onLift: (CGFloat) -> Void
+    let onDrift: () -> Void
 
-    @State private var yours = false
-    @State private var offset: CGFloat = 0
+    @State private var fingers = false
+    /// The deck moved on its own after the lift (momentum, or scrolling that came late).
+    @State private var drifting = false
 
     static var knowsPhases: Bool {
         if #available(macOS 15, *) { return true }
@@ -129,24 +148,32 @@ private struct SwipeWatch: ViewModifier {
 
     func body(content: Content) -> some View {
         if #available(macOS 15, *) {
-            content
-                .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.x + $0.contentInsets.leading } action: { _, new in
-                    offset = new
+            content.onScrollPhaseChange { _, phase, context in
+                let offset = context.geometry.contentOffset.x + context.geometry.contentInsets.leading
+                let down = phase == .tracking || phase == .interacting
+                if down && !fingers {
+                    fingers = true
+                    onChange(true)
+                } else if !down && fingers {
+                    fingers = false
+                    onLift(offset)
+                    onChange(false)
+                } else if phase == .decelerating && !fingers {
+                    drifting = true
+                    onDrift()
+                } else if phase == .idle && drifting {
+                    // It came to rest wherever the drift left it: back onto the settled card.
+                    drifting = false
+                    onDrift()
                 }
-                .onScrollPhaseChange { _, phase in
-                    let now = phase == .tracking || phase == .interacting || phase == .decelerating
-                    guard now != yours else { return }
-                    yours = now
-                    onChange(now)
-                    if !now { onRest(DeckSnap.nearest(offset: offset, stride: stride)) }
-                }
+            }
         } else {
             content
         }
     }
 }
 
-/// Each page's height, so the pager is as tall as the page shown.
+/// Each card's own height: the deck is as tall as the tallest.
 private struct PageHeights: PreferenceKey {
     static var defaultValue: [AnyHashable: CGFloat] { [:] }
     static func reduce(value: inout [AnyHashable: CGFloat], nextValue: () -> [AnyHashable: CGFloat]) {
@@ -155,7 +182,8 @@ private struct PageHeights: PreferenceKey {
 }
 
 private extension View {
-    /// One card per swipe: always by one on macOS 15; on 14 a hard flick may go further.
+    /// Rests on a card. One card per swipe is held by `SwipeWatch` and `DeckSnap.step`, since
+    /// `.alwaysByOne` doesn't hold against a real trackpad's flick.
     @ViewBuilder func deckPaging() -> some View {
         if #available(macOS 15, *) {
             scrollTargetBehavior(.viewAligned(limitBehavior: .alwaysByOne))

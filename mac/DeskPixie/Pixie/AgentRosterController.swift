@@ -594,7 +594,10 @@ final class AgentRosterController {
             return
         }
         zeroSizeRetries = 0
-        if !model.open && !cardUp && offer.kind == nil { chipHeight = size.height }
+        if !model.open && !cardUp && offer.kind == nil {
+            chipHeight = size.height
+            pixie.chipHeight = size.height
+        }
         let top = ScreenDisplays.primaryMaxY
         let bit = pixie.panel.frame
         let screen = NSScreen.screens.first { $0.frame.contains(NSPoint(x: bit.midX, y: bit.midY)) }
@@ -672,7 +675,7 @@ extension PixieController {
         let area = DesktopSpace.desktopRect(screen?.visibleFrame ?? bit, primaryMaxY: top)
         let shown = (panel.childWindows ?? []).filter(\.isVisible).map { DesktopSpace.desktopRect($0.frame, primaryMaxY: top) }
         return HoverKeeper.reach(pixie: DesktopSpace.desktopRect(bit, primaryMaxY: top), screen: area,
-                                 cardWidth: QuickChatCard.width) + shown
+                                 chipHeight: chipHeight, cardWidth: QuickChatCard.width) + shown
     }
 
     /// The pointer, in the same space.

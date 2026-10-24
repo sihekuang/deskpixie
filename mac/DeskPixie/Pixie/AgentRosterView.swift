@@ -68,7 +68,7 @@ struct AgentRosterView: View {
     private var card: some View {
         QuickChatCard(model: chat, state: chatState, showsInput: chatOpen,
                       onSend: onSend, onStop: onStop, onClose: onCloseChat, onResize: onResize, onDismiss: onDismiss,
-                      onStep: onStep, onPage: onPage, onScroll: onScroll, attachments: attachments,
+                      onStep: onStep, above: !below, onPage: onPage, onScroll: onScroll, attachments: attachments,
                       rows: { [view = model.view] in AgentRosterModel.buttons(for: $0, in: view) }, onSession: onSession)
     }
 

@@ -293,6 +293,34 @@ final class UpdatesBubbleModelTests: XCTestCase {
         XCTAssertFalse(m.acceptsDecision(token: "hawk", now: 12.8), "stepped away from")
     }
 
+    /// #286 re-review: a card brought up by a step, a scroll or acting on the one before is
+    /// stamped then, so a tap after the guard counts with no tick in between.
+    func testACardBroughtUpIsStampedWhenItComesUp() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        m.apply([question(1, "hawk"), question(2, "lynx"), question(3, "owl")], now: 10, pop: .allowed)
+        m.pointerEntered(now: 11)
+        m.step(1, now: 20)
+        XCTAssertFalse(m.acceptsDecision(token: "lynx", now: 20.1))
+        XCTAssertTrue(m.acceptsDecision(token: "lynx", now: 20 + UpdatesBubbleModel.decisionGuard))
+        m.act(on: 2, now: 30)
+        XCTAssertEqual(m.current?.id, 3)
+        XCTAssertFalse(m.acceptsDecision(token: "owl", now: 30.1))
+        XCTAssertTrue(m.acceptsDecision(token: "owl", now: 30 + UpdatesBubbleModel.decisionGuard))
+        m.show(id: 1, now: 40)
+        XCTAssertFalse(m.acceptsDecision(token: "hawk", now: 40.1))
+        XCTAssertTrue(m.acceptsDecision(token: "hawk", now: 40 + UpdatesBubbleModel.decisionGuard))
+    }
+
+    /// #286: while you're around a pop holds, but its buttons are still stamped.
+    func testAHeldPopStaysAndStillStamps() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        m.apply([line(1)], now: 1, pop: .allowed)
+        m.tick(now: 100, holding: true)
+        XCTAssertEqual(m.phase, .popped(until: 1 + m.popSecs))
+        m.tick(now: 101)
+        XCTAssertEqual(m.phase, .badge)
+    }
+
     /// #286 review: once a card is answered the next slides up under the pointer; a second tap
     /// meant for the first never answers it.
     func testTheCardThatSlidesUpIsGuardedAgain() {

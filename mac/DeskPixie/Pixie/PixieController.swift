@@ -40,6 +40,9 @@ final class PixieController {
     private let gestures: PixieGestureRouter
     /// The opacity last applied to the view (actions.rs `last_opacity`).
     private var lastOpacity: CGFloat = 1.0
+    /// The row of buttons under Pixie as last measured (the roster sets it), for the hover
+    /// region (#286).
+    var chipHeight: CGFloat = 40
     private var moves = MoveDebounce()
     /// Set while the controller places the panel itself, so the move is not reported as the user's.
     private var placing = false

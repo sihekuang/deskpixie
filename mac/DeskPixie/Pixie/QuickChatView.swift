@@ -55,6 +55,8 @@ struct QuickChatCard: View {
     let onResize: () -> Void
     let onDismiss: () -> Void
     var onStep: (ReplyStep) -> Void = { _ in }
+    /// The card shows above Pixie (#286): the deck's shorter cards sit at its bottom, next to it.
+    var above = false
     /// A scroll to another page of the deck (#286), by its id, and a swipe starting or ending.
     var onPage: (Int) -> Void = { _ in }
     var onScroll: (Bool) -> Void = { _ in }
@@ -73,7 +75,7 @@ struct QuickChatCard: View {
                 // The replies side by side (#286), each its own card: a two-finger swipe or a
                 // card's arrows page them.
                 DeckPager(ids: model.pages.map(\.id), selected: model.pageID, width: Self.width,
-                          onSelect: onPage, onResize: onResize, onScroll: onScroll) { id in
+                          onSelect: onPage, onResize: onResize, onScroll: onScroll, bottomAligned: above) { id in
                     if let i = model.pages.firstIndex(where: { $0.id == id }) { replyCard(i) }
                 }
             } else if model.showsEarlierOnly {
@@ -112,65 +114,65 @@ struct QuickChatCard: View {
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 8)
                     }
-                if attachments.model.chipsVisible {
-                    AttachmentChips(items: attachments.model.items, onRemove: attachments.onRemove)
-                        .padding(.horizontal, 8)
-                        .padding(.top, 2)
-                }
-                if let notice = attachments.model.notice {
-                    Text(notice)
+                    if attachments.model.chipsVisible {
+                        AttachmentChips(items: attachments.model.items, onRemove: attachments.onRemove)
+                            .padding(.horizontal, 8)
+                            .padding(.top, 2)
+                    }
+                    if let notice = attachments.model.notice {
+                        Text(notice)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 8)
+                    } else if showsInput, let hint = attachments.hint {
+                        HStack(spacing: 4) {
+                            Image(systemName: "doc.on.clipboard")
+                            Text(hint)
+                            Text("·")
+                            Button("Attach", action: attachments.onAttachHint)
+                                .buttonStyle(.link)
+                        }
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 8)
-                } else if showsInput, let hint = attachments.hint {
-                    HStack(spacing: 4) {
-                        Image(systemName: "doc.on.clipboard")
-                        Text(hint)
-                        Text("·")
-                        Button("Attach", action: attachments.onAttachHint)
-                            .buttonStyle(.link)
                     }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 8)
-                }
-                if showsInput {
-                    HStack(alignment: .bottom, spacing: 6) {
-                        Button(action: attachments.onPick) {
-                            Image(systemName: "paperclip")
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                        .help("Attach files")
-                        .accessibilityLabel("Attach files")
-                        // Grows with what is typed, up to a few lines, then scrolls; Return sends.
-                        TextField("Message Pixie", text: $state.draft, axis: .vertical)
-                            .textFieldStyle(.plain)
-                            .font(.callout)
-                            .lineLimit(1...5)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .focused($focused)
-                            .onSubmit(onSend)
-                            .onExitCommand(perform: onClose)
-                            // With text in the field, Esc is the field editor's "complete" and never
-                            // reaches onExitCommand: take it first.
-                            .onKeyPress(.escape) {
-                                onClose()
-                                return .handled
+                    if showsInput {
+                        HStack(alignment: .bottom, spacing: 6) {
+                            Button(action: attachments.onPick) {
+                                Image(systemName: "paperclip")
+                                    .font(.callout)
+                                    .foregroundStyle(.secondary)
                             }
-                        Button(action: onSend) {
-                            Image(systemName: "arrow.up.circle.fill")
-                                .font(.title3)
-                                .foregroundStyle(canSend ? .primary : .tertiary)
+                            .buttonStyle(.plain)
+                            .help("Attach files")
+                            .accessibilityLabel("Attach files")
+                            // Grows with what is typed, up to a few lines, then scrolls; Return sends.
+                            TextField("Message Pixie", text: $state.draft, axis: .vertical)
+                                .textFieldStyle(.plain)
+                                .font(.callout)
+                                .lineLimit(1...5)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .focused($focused)
+                                .onSubmit(onSend)
+                                .onExitCommand(perform: onClose)
+                                // With text in the field, Esc is the field editor's "complete" and never
+                                // reaches onExitCommand: take it first.
+                                .onKeyPress(.escape) {
+                                    onClose()
+                                    return .handled
+                                }
+                            Button(action: onSend) {
+                                Image(systemName: "arrow.up.circle.fill")
+                                    .font(.title3)
+                                    .foregroundStyle(canSend ? .primary : .tertiary)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(!canSend)
+                            .help("Send")
                         }
-                        .buttonStyle(.plain)
-                        .disabled(!canSend)
-                        .help("Send")
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
-                }
                 }
                 .padding(6)
                 .deckCard()

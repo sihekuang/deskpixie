@@ -115,7 +115,7 @@ final class UpdatesBubbleController {
     }
 
     private func acted(_ line: UpdateLine) {
-        model.act(on: line.id)
+        model.act(on: line.id, now: Self.now)
         SystemNotificationSink.removeNotifications(updates: [line.id])
         render()
     }
@@ -243,7 +243,7 @@ final class UpdatesBubbleController {
         }
         let before = model.phase
         // A pop doesn't shrink to the badge while you're around (#286).
-        if !keeper.keepsShowing(now: Self.now) { model.tick(now: Self.now) }
+        model.tick(now: Self.now, holding: keeper.keepsShowing(now: Self.now))
         if changed || model.phase != before { render() } else { updateAlpha() }
     }
 
@@ -286,7 +286,7 @@ final class UpdatesBubbleController {
             onLine: { [weak self] in self?.clicked($0) },
             onSelect: { [weak self] in
                 guard let self else { return }
-                self.model.show(id: $0)
+                self.model.show(id: $0, now: Self.now)
                 self.render()
             },
             onResize: { [weak self] in DispatchQueue.main.async { self?.layout() } },

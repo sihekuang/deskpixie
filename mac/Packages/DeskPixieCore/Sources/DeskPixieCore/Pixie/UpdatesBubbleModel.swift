@@ -195,13 +195,16 @@ public struct UpdatesBubbleModel: Sendable {
     }
 
     /// Moves the deck by `delta` cards (+1 newer, −1 older), stopping at either end.
-    public mutating func step(_ delta: Int) {
+    /// With `now`, the card that comes up has its buttons stamped then (the stray-click guard).
+    public mutating func step(_ delta: Int, now: TimeInterval? = nil) {
         deckIndex = min(max(0, deckIndex + delta), max(0, lines.count - 1))
+        if let now { noteDecisions(now) }
     }
 
     /// Scrolled to `id`'s card (#286); nothing when it isn't listed.
-    public mutating func show(id: UInt64) {
+    public mutating func show(id: UInt64, now: TimeInterval? = nil) {
         if let i = lines.firstIndex(where: { $0.id == id }) { deckIndex = i }
+        if let now { noteDecisions(now) }
     }
 
     /// Keeps the deck on `id`'s card if it is still listed, else on the nearest one.
@@ -320,9 +323,10 @@ public struct UpdatesBubbleModel: Sendable {
     }
 
     /// Advances timers: a pop runs out to the badge (unless a question waits on you).
-    public mutating func tick(now: TimeInterval) {
+    /// `holding`: you're around (#286), so a pop doesn't run out yet.
+    public mutating func tick(now: TimeInterval, holding: Bool = false) {
         defer { noteDecisions(now) }
-        if case .popped(let until) = phase, now >= until, !waitsOnYou {
+        if case .popped(let until) = phase, now >= until, !waitsOnYou, !holding {
             phase = .badge
         }
     }
@@ -350,8 +354,9 @@ public struct UpdatesBubbleModel: Sendable {
     /// "Open its terminal". It leaves the deck at once and the next slides into its place,
     /// without waiting for the core; a list from the core that still has it doesn't bring it
     /// back, until the core drops it too.
-    public mutating func act(on id: UInt64) {
+    public mutating func act(on id: UInt64, now: TimeInterval? = nil) {
         guard lines.contains(where: { $0.id == id }) else { return }
+        defer { if let now { noteDecisions(now) } }
         dismissed.insert(id)
         let onCard = current?.id
         lines.removeAll { $0.id == id }
