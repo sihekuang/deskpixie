@@ -36,23 +36,27 @@ public struct ReplyCard: Decodable, Sendable, Equatable {
     public let lines: [UInt64]
     /// The sessions the rows are about: the card's buttons that go to them.
     public let sessions: [String]
+    /// When its newest row came (the core sends milliseconds since the epoch): the card's "ago".
+    public let at: Date?
 
-    public init(id: UInt64, text: String, count: Int, lines: [UInt64], sessions: [String] = []) {
+    public init(id: UInt64, text: String, count: Int, lines: [UInt64], sessions: [String] = [], at: Date? = nil) {
         self.id = id
         self.text = text
         self.count = count
         self.lines = lines
         self.sessions = sessions
+        self.at = at
     }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.init(id: try c.decode(UInt64.self, forKey: .id), text: try c.decode(String.self, forKey: .text),
                   count: try c.decode(Int.self, forKey: .count), lines: try c.decode([UInt64].self, forKey: .lines),
-                  sessions: try c.decodeIfPresent([String].self, forKey: .sessions) ?? [])
+                  sessions: try c.decodeIfPresent([String].self, forKey: .sessions) ?? [],
+                  at: try c.decodeIfPresent(Int64.self, forKey: .at).map { Date(timeIntervalSince1970: Double($0) / 1000) })
     }
 
-    private enum CodingKeys: String, CodingKey { case id, text, count, lines, sessions }
+    private enum CodingKeys: String, CodingKey { case id, text, count, lines, sessions, at }
 }
 
 /// The text box under Pixie (#221, spec docs/superpowers/specs/2026-10-21-text-mode-design.md
@@ -251,14 +255,19 @@ public struct QuickChatModel: Equatable, Sendable {
     private mutating func clearCard() {
         cardID = nil
         count = 1
+        cardAt = nil
     }
+
+    /// When the card shown got its newest row (#286): its "ago", while `saidAt` (when it popped
+    /// up) runs the dismiss time.
+    private var cardAt: Date?
 
     /// A new reply replaces what is shown: Pixie's words go into the history (not yours, nor a
     /// line about work still running). Looking back, you stay there and » offers the new one.
     private mutating func keep(now: Date) {
         // A typed message's answer or a caption: not why a message couldn't go (no job).
         if !isYou, !full.isEmpty, let saidAt, phase == .done || phase == .answering, isCaption || job != nil {
-            history.append(Reply(text: full, sessions: sessions, at: saidAt, id: cardID, count: count))
+            history.append(Reply(text: full, sessions: sessions, at: cardAt ?? saidAt, id: cardID, count: count))
         }
         if viewing != nil { newerWaiting = true }
         prune(now: now)
@@ -283,7 +292,7 @@ public struct QuickChatModel: Equatable, Sendable {
     public func ago(now: Date) -> String? {
         if let viewed { return Self.ago(viewed.at, now: now) }
         guard let saidAt, phase == .done else { return nil }
-        return Self.ago(saidAt, now: now)
+        return Self.ago(cardAt ?? saidAt, now: now)
     }
 
     private static func ago(_ at: Date, now: Date) -> String {
@@ -555,7 +564,7 @@ public struct QuickChatModel: Equatable, Sendable {
         if let i = history.firstIndex(where: { $0.id == card.id }) {
             if hasCurrent || i != history.count - 1 || !takeCaption() {
                 // The card was pushed back by a newer one: its entry gains the row, no second card.
-                history[i] = Reply(text: card.text, sessions: card.sessions, at: history[i].at, id: card.id, count: card.count)
+                history[i] = Reply(text: card.text, sessions: card.sessions, at: card.at ?? history[i].at, id: card.id, count: card.count)
                 return false
             }
             // Put away and gaining a row: it comes back as the shown card.
@@ -566,7 +575,7 @@ public struct QuickChatModel: Equatable, Sendable {
             return true
         }
         guard takeCaption() else {
-            history.append(Reply(text: card.text, sessions: card.sessions, at: now, id: card.id, count: card.count))
+            history.append(Reply(text: card.text, sessions: card.sessions, at: card.at ?? now, id: card.id, count: card.count))
             newerWaiting = true
             prune(now: now)
             return false
@@ -583,6 +592,7 @@ public struct QuickChatModel: Equatable, Sendable {
         count = card.count
         sessions = card.sessions
         saidAt = now
+        cardAt = card.at.map { min($0, now) }
         lateShown = true
     }
 

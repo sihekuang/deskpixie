@@ -738,6 +738,40 @@ final class QuickChatModelTests: XCTestCase {
         XCTAssertEqual(m.peeks, 0)
     }
 
+    /// #286 tryout: cards restored at launch, fed oldest first, leave the newest on top.
+    func testCardsFedInOrderLeaveTheNewestOnTop() {
+        var m = QuickChatModel()
+        for i in UInt64(1)...3 { _ = m.update(card(i, "card \(i)")) }
+        XCTAssertEqual(m.cardID, 3)
+        XCTAssertEqual(m.shownFull, "card 3")
+        XCTAssertEqual(m.position, QuickChatModel.Position(index: 3, count: 3))
+    }
+
+    /// #286 tryout: a card restored at launch says how long ago its row came, not "just now".
+    func testACardsAgoIsWhenItsNewestRowCame() {
+        var m = QuickChatModel()
+        let t0 = Date()
+        _ = m.update(ReplyCard(id: 1, text: "a", count: 1, lines: [1], at: t0.addingTimeInterval(-240)), now: t0)
+        XCTAssertEqual(m.ago(now: t0), "4m ago")
+        _ = m.update(ReplyCard(id: 2, text: "b", count: 1, lines: [2], at: t0.addingTimeInterval(-60)), now: t0)
+        XCTAssertEqual(m.ago(now: t0), "1m ago")
+        m.back(now: t0)
+        XCTAssertEqual(m.ago(now: t0), "4m ago", "the kept card keeps its own time")
+    }
+
+    /// A gained row: the ago follows the newest row, while the dismiss time runs from the pop.
+    func testAGainedRowMovesTheAgoButThePopRunsFromNow() {
+        var m = QuickChatModel()
+        let t0 = Date()
+        _ = m.update(ReplyCard(id: 1, text: "a", count: 1, lines: [1], at: t0.addingTimeInterval(-300)), now: t0)
+        XCTAssertEqual(m.ago(now: t0), "5m ago")
+        _ = m.update(ReplyCard(id: 1, text: "a\nb", count: 2, lines: [1, 2], at: t0.addingTimeInterval(8)),
+                     now: t0.addingTimeInterval(10))
+        XCTAssertEqual(m.ago(now: t0.addingTimeInterval(10)), "just now")
+        XCTAssertFalse(m.dismissIfOlder(than: 120, now: t0.addingTimeInterval(125)))
+        XCTAssertTrue(m.dismissIfOlder(than: 120, now: t0.addingTimeInterval(131)))
+    }
+
     func testAnUpdateCardIsPutAwayAfterTheDismissTime() {
         var m = QuickChatModel()
         let t0 = Date()

@@ -20,7 +20,7 @@ final class UpdatesBubbleModelTests: XCTestCase {
         XCTAssertEqual(m.deckPosition?.index, 2)
     }
 
-    func testTheDeckKeepsItsCardWhenOthersArriveAndHasNoPositionAlone() {
+    func testTheDeckKeepsItsCardWhenOthersArriveAndSaysOneOfOneAlone() {
         var m = UpdatesBubbleModel()
         m.apply([line(1), line(2)], now: 0, pop: .allowed)
         m.step(1)
@@ -30,8 +30,10 @@ final class UpdatesBubbleModelTests: XCTestCase {
         m.step(-1); m.step(-1)
         XCTAssertEqual(m.current?.id, 1, "stops at the oldest")
         m.apply([line(1)], now: 2, pop: .allowed)
-        XCTAssertNil(m.deckPosition)
+        XCTAssertEqual(m.deckPosition?.index, 1)
+        XCTAssertEqual(m.deckPosition?.count, 1)
         m.apply([], now: 3, pop: .allowed)
+        XCTAssertNil(m.deckPosition)
         XCTAssertNil(m.current)
     }
 
@@ -249,8 +251,25 @@ final class UpdatesBubbleModelTests: XCTestCase {
         m.apply([question(1, "hawk")], now: 10, pop: .allowed)
         m.apply([question(1, "hawk"), question(2, "lynx")], now: 11, pop: .allowed)
         XCTAssertTrue(m.acceptsDecision(token: "hawk", now: 11.2))
+        XCTAssertFalse(m.acceptsDecision(token: "lynx", now: 11.2), "not on screen: the deck shows hawk")
+        m.step(1)                                                    // lynx's buttons appear at 12
+        XCTAssertFalse(m.acceptsDecision(token: "lynx", now: 12))
+        XCTAssertFalse(m.acceptsDecision(token: "lynx", now: 12.5))
+        XCTAssertTrue(m.acceptsDecision(token: "lynx", now: 12.8))
+        XCTAssertFalse(m.acceptsDecision(token: "hawk", now: 12.8), "stepped away from")
+    }
+
+    /// #286 review: once a card is answered the next slides up under the pointer; a second tap
+    /// meant for the first never answers it.
+    func testTheCardThatSlidesUpIsGuardedAgain() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        m.apply([question(1, "hawk"), question(2, "lynx")], now: 10, pop: .allowed)
+        XCTAssertTrue(m.acceptsDecision(token: "hawk", now: 11))
+        m.apply([question(2, "lynx")], now: 11.1, pop: .allowed)     // hawk answered
+        XCTAssertEqual(m.current?.id, 2)
         XCTAssertFalse(m.acceptsDecision(token: "lynx", now: 11.2))
-        XCTAssertTrue(m.acceptsDecision(token: "lynx", now: 11.8))
+        XCTAssertFalse(m.acceptsDecision(token: "lynx", now: 11.8))
+        XCTAssertTrue(m.acceptsDecision(token: "lynx", now: 11.1 + UpdatesBubbleModel.decisionGuard))
     }
 
     /// #268: buttons you open the bubble onto (hovering its badge) take your tap at once once you
@@ -290,7 +309,8 @@ final class UpdatesBubbleModelTests: XCTestCase {
         var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
         m.apply([line(1)], now: 10, pop: .allowed)
         m.pointerEntered(now: 11, at: CGPoint(x: 300, y: 40))
-        m.apply([line(1), question(2, "hawk")], now: 12, pop: .allowed) // appears under the pointer
+        m.apply([line(1), question(2, "hawk")], now: 12, pop: .allowed)
+        m.step(1); m.tick(now: 12)                                       // its card comes up
         XCTAssertFalse(m.acceptsDecision(token: "hawk", now: 12.2, at: CGPoint(x: 120, y: 90)))
         XCTAssertTrue(m.acceptsDecision(token: "hawk", now: 12.8))
     }

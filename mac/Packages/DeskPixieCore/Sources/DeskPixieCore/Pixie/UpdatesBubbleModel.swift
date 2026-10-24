@@ -189,9 +189,9 @@ public struct UpdatesBubbleModel: Sendable {
     /// The badge deck's card, nil when nothing is unheard.
     public var current: UpdateLine? { lines.indices.contains(deckIndex) ? lines[deckIndex] : nil }
 
-    /// Where the deck is, counting from 1; nil with fewer than two cards.
+    /// Where the deck is, counting from 1 ("1 of 1" alone); nil with nothing in it.
     public var deckPosition: (index: Int, count: Int)? {
-        lines.count > 1 ? (deckIndex + 1, lines.count) : nil
+        lines.isEmpty ? nil : (deckIndex + 1, lines.count)
     }
 
     /// Moves the deck by `delta` cards (+1 newer, −1 older), stopping at either end.
@@ -371,16 +371,16 @@ public struct UpdatesBubbleModel: Sendable {
     /// How far the pointer moves after opening the bubble for a tap to count as aimed (points).
     public static let movedDistance: CGFloat = 4
 
-    /// Stamps the questions whose Allow and Deny show now (the bubble is open and the row is
-    /// listed) and forgets the rest, so buttons that reappear are guarded again.
+    /// Stamps the question whose buttons show now: the deck's card while the bubble is open
+    /// (#286), the only one on screen. The rest are forgotten, so buttons that come back (a step,
+    /// or the next card sliding up once one is answered) are guarded again.
     private mutating func noteDecisions(_ now: TimeInterval) {
         guard isExpanded || isPopped else {
             decisionsSince = [:]
             hoverOpened = []
             return
         }
-        // The deck's card is on screen whatever its place in the list (#286).
-        let showing = Set((shown + [current].compactMap { $0 })
+        let showing = Set([current].compactMap { $0 }
             .filter { $0.offersDecision || $0.offersOptions }.compactMap(\.token))
         decisionsSince = decisionsSince.filter { showing.contains($0.key) }
         hoverOpened.formIntersection(showing)

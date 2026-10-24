@@ -22,7 +22,17 @@ struct DeckSwipeCatcher: NSViewRepresentable {
         private var swipe = DeckSwipe()
         /// The gesture began over this view: its later events count wherever the pointer is.
         private var tracking = false
-        private var monitor: Any?
+        // Read in deinit too (nonisolated); only ever touched on the main thread.
+        nonisolated(unsafe) private var monitor: Any?
+        /// When this gesture began (its `.began` event's timestamp).
+        private var gesture: TimeInterval = 0
+        /// The gesture that last stepped a deck, app-wide: one physical swipe never steps twice,
+        /// even if a redraw leaves a second catcher listening for a moment.
+        private static var stepped: TimeInterval = -1
+
+        deinit {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+        }
 
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
@@ -44,6 +54,7 @@ struct DeckSwipeCatcher: NSViewRepresentable {
                 phase = .momentum
             } else if event.phase.contains(.began) {
                 tracking = bounds.contains(convert(event.locationInWindow, from: nil))
+                gesture = event.timestamp
                 phase = .began
             } else if event.phase.contains(.changed) {
                 phase = .changed
@@ -55,7 +66,9 @@ struct DeckSwipeCatcher: NSViewRepresentable {
             guard tracking else { return }
             if phase == .ended { tracking = false }
             let step = swipe.feed(deltaX: event.scrollingDeltaX, deltaY: event.scrollingDeltaY, phase: phase)
-            if step != 0 { onStep(step) }
+            guard step != 0, Self.stepped != gesture else { return }
+            Self.stepped = gesture
+            onStep(step)
         }
     }
 }

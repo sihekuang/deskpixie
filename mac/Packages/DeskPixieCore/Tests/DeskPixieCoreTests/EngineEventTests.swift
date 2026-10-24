@@ -14,8 +14,9 @@ final class EngineEventTests: XCTestCase {
         XCTAssertEqual(d(#"{"kind":"about","sessions":["fruit-claude","web-claude"]}"#), .about(["fruit-claude", "web-claude"]))
         XCTAssertEqual(try? JSONDecoder().decode(ChatLine.self, from: Data(#"{"job":"j","status":"done","text":"t","sessions":["a"]}"#.utf8)).sessions, ["a"])
         XCTAssertEqual(try? JSONDecoder().decode(ChatLine.self, from: Data(#"{"job":"j","status":"done","text":"t"}"#.utf8)).sessions, [])
-        XCTAssertEqual(d(#"{"kind":"reply.card","id":3,"text":"x","count":1,"lines":[3],"at":5}"#),
-                       .replyCard(ReplyCard(id: 3, text: "x", count: 1, lines: [3], sessions: [])))
+        XCTAssertEqual(d(#"{"kind":"reply.card","id":3,"text":"x","count":1,"lines":[3],"at":1500}"#),
+                       .replyCard(ReplyCard(id: 3, text: "x", count: 1, lines: [3], sessions: [],
+                                            at: Date(timeIntervalSince1970: 1.5))))
         XCTAssertEqual(d(#"{"kind":"reply.card","id":4,"text":"x","count":2,"lines":[3,4],"sessions":["a"]}"#),
                        .replyCard(ReplyCard(id: 4, text: "x", count: 2, lines: [3, 4], sessions: ["a"])))
         XCTAssertEqual(d(#"{"kind":"captions","always":false,"dismissSecs":60,"fadeSecs":9,"historyMins":2}"#), .captions(always: false, dismissSecs: 60, fadeSecs: 9, historyMins: 2))

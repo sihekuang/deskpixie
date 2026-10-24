@@ -9,7 +9,7 @@ import SwiftUI
 struct UpdatesBubbleView: View {
     let count: Int
     let phase: UpdatesBubbleModel.Phase
-    /// The deck's card, and where it is (nil with fewer than two).
+    /// The deck's card, and where it is ("1 of 1" alone).
     let current: UpdateLine?
     let position: (index: Int, count: Int)?
     /// The deck keeps one width as you step through it.
