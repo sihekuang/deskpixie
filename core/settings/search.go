@@ -104,6 +104,20 @@ func score(qs []string, phrase, label, help string) int {
 	return total
 }
 
+// HitFor is the hit for path (a field path or "extra:" and an extra's ID), whether or not a
+// search would find it now.
+func HitFor(path string) (Hit, bool) {
+	if f := FieldByPath(path); f != nil && f.Kind.Type != KindManaged {
+		return Hit{f.Path, f.Section, f.Label, f.Help}, true
+	}
+	for _, e := range Extras {
+		if ExtraPrefix+e.ID == path {
+			return Hit{path, e.Section, e.Label, e.Help}, true
+		}
+	}
+	return Hit{}, false
+}
+
 // Visible reports whether f shows for the config tree values (tree(c)): every VisibleWhen
 // condition holds, comparing values as the window shows them.
 func Visible(f FieldSpec, values map[string]any) bool {

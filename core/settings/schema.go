@@ -52,6 +52,15 @@ const (
 	SectionAdvanced      Section = "Advanced"
 )
 
+// Title is the page's name in the window's sidebar (mac: SettingsLayout.tabs), which Pixie
+// names too: Agent's page is "Coordinator".
+func (s Section) Title() string {
+	if s == SectionAgent {
+		return "Coordinator"
+	}
+	return string(s)
+}
+
 // Apply says when a change takes effect.
 type Apply string
 

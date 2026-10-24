@@ -421,7 +421,7 @@ func TestTheAgentGetsTheSameLocalToolsAsTheVoiceLoop(t *testing.T) {
 	for _, lt := range f.hooks.LocalTools {
 		got = append(got, lt.Name())
 	}
-	if !slices.Equal(got, []string{"timer", "get_weather", "media", "get_time", "calculate"}) {
+	if !slices.Equal(got, []string{"timer", "get_weather", "media", "get_time", "calculate", "open_settings"}) {
 		t.Fatal(got)
 	}
 	timer := f.hooks.LocalTools[0]
@@ -451,7 +451,7 @@ func TestACoordinatorTimerRingsThroughTheAppEvenWithoutAVoiceLoop(t *testing.T) 
 	if h.app.Runtime() != nil {
 		t.Fatal("expected no voice loop")
 	}
-	if len(f.hooks.LocalTools) != 5 {
+	if len(f.hooks.LocalTools) != 6 {
 		t.Fatal("the agent gets the local tools even without a voice loop:", len(f.hooks.LocalTools))
 	}
 	if _, _, err := f.hooks.LocalTools[0].Invoke(context.Background(), json.RawMessage(`{"action":"start","duration_seconds":120,"label":"pasta"}`)); err != nil {
