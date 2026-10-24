@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -200,6 +201,37 @@ func TestAHeldCardShowsWhenNoOpenIsComing(t *testing.T) {
 	}
 	if fx := c.Step(TextModeInput(true), T0+100); len(replies(fx)) != 1 {
 		t.Fatal(fmtEffects(fx))
+	}
+}
+
+// Opens refused on and on (the mic never starts): the held card shows by OpenWaitMs anyway.
+func TestAHeldCardShowsByTheOpenWaitWhileOpensAreRefused(t *testing.T) {
+	c := ctlWith(func(s *Settings) { s.OpenConversation = true; s.SessionTurns = true })
+	if len(replies(sessionTurn(c, longTurn, T0))) != 0 {
+		t.Fatal("not held while the conversation opens")
+	}
+	shown := 0
+	for at := T0 + 1000; at <= T0+OpenWaitMs; at += 1000 {
+		shown += len(replies(c.Step(OpenRefusedInput(), at)))
+		if at < T0+OpenWaitMs && shown != 0 {
+			t.Fatalf("shown at %d, before the wait was up", at-T0)
+		}
+		shown += len(replies(c.Step(TickInput(), at)))
+	}
+	if shown != 1 {
+		t.Fatalf("shown %d times by OpenWaitMs", shown)
+	}
+	if len(replies(c.Step(TickInput(), T0+OpenWaitMs+1000))) != 0 {
+		t.Fatal("shown again")
+	}
+}
+
+// The deck's startup call decodes a list: nothing pending is [], not null.
+func TestNoPendingRepliesIsAnEmptyList(t *testing.T) {
+	c := ctlWith(func(*Settings) {})
+	b, err := json.Marshal(map[string]any{"cards": c.PendingReplies(T0)})
+	if err != nil || string(b) != `{"cards":[]}` {
+		t.Fatalf("%s %v", b, err)
 	}
 }
 

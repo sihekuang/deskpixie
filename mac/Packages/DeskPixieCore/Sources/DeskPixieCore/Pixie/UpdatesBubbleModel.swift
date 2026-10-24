@@ -311,7 +311,7 @@ public struct UpdatesBubbleModel: Sendable {
         if !pointerInside || leftWhileTyping { pointerLeft() }
     }
 
-    /// The deck was closed to the badge with its « (#286): everything stays waiting, and the
+    /// The deck was closed to the badge with Hide (#286): everything stays waiting, and the
     /// pointer, still around, doesn't open it again until it has left (`regionLeft`). A new item
     /// may still pop it.
     public var collapsed: Bool { latch.collapsed }

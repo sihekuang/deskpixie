@@ -71,6 +71,9 @@ func (c *AgentController) cardFor(l OutboxLine, fx *[]Effect) {
 		if n := len(c.heldCards); n > 0 && c.heldCards[n-1].ID == card.ID {
 			c.heldCards[n-1] = card
 		} else {
+			if len(c.heldCards) == 0 {
+				c.heldSince = l.At
+			}
 			c.heldCards = append(c.heldCards, card)
 		}
 		return
@@ -94,12 +97,14 @@ func (c *AgentController) dropHeldCards() {
 }
 
 // settleHeldCards (every Step ends here): held cards show once no open is on its way (none
-// asked for or to be retried, or it can't be any more: text mode, the setting off), so an
-// update is never left showing nowhere.
+// asked for or to be retried, or it can't be any more: text mode, the setting off), or once
+// they have waited OpenWaitMs whatever the opener still tries (opens refused on and on, away,
+// the cap), so an update is never left showing nowhere. A conversation that opens later still
+// replays the outbox.
 func (c *AgentController) settleHeldCards(now Millis, fx *[]Effect) {
 	o := c.opener
 	coming := o.waiting.set || (o.retry && c.settings.OpenConversation && !c.textMode && !c.shutDown)
-	if len(c.heldCards) > 0 && !coming {
+	if len(c.heldCards) > 0 && (!coming || satSub(now, c.heldSince) >= OpenWaitMs) {
 		c.releaseHeldCards(now, fx)
 	}
 }
@@ -118,7 +123,7 @@ func (c *AgentController) repliesShown(ids []uint64, fx *[]Effect) {
 // PendingReplies: the cards of replies not yet shown and no older than ReplyHistoryMs, oldest
 // first, grouped by the same ReplyJoinMs rule (what the deck holds after a restart).
 func (c *AgentController) PendingReplies(now Millis) []ReplyCard {
-	var out []ReplyCard
+	out := []ReplyCard{} // never nil: the shell decodes a list
 	var last Millis
 	for _, l := range c.outbox.Undelivered() {
 		if alerting(l) || now-l.At > c.settings.ReplyHistoryMs {

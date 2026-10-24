@@ -1,9 +1,9 @@
 import XCTest
 @testable import DeskPixieCore
 
-/// #286: « closes a deck until the pointer has left the region around Pixie.
+/// #286: Hide closes a deck until the pointer has left the region around Pixie.
 final class CollapseLatchTests: XCTestCase {
-    /// The reply deck: « puts the card away, hovering doesn't bring it back until the pointer
+    /// The reply deck: Hide puts the card away, hovering doesn't bring it back until the pointer
     /// has left, and a new card shows as usual.
     func testTheReplyDeckStaysAwayUntilThePointerHasLeft() {
         var latch = CollapseLatch()

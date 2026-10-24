@@ -1,8 +1,9 @@
 import CoreGraphics
 
 /// A two-finger swipe on a deck (#286), as the deck follows it: the cards move with the fingers
-/// up to one card either way, and when the fingers lift the deck goes to the neighbour or back. Momentum is swallowed, so a flick never carries it further. A gesture that
-/// starts vertical is left alone (a long card's text scrolls), and so is a mouse wheel.
+/// up to one card either way, and when the fingers lift the deck goes to the neighbour or back.
+/// Momentum is swallowed, so a flick never carries it further. A gesture that starts vertical
+/// is left alone (a long card's text scrolls), and so is a mouse wheel.
 public struct DeckDrag: Equatable, Sendable {
     /// What the window does with a scroll event.
     public enum Verdict: Equatable, Sendable {
@@ -89,7 +90,8 @@ public struct DeckDrag: Equatable, Sendable {
         return was
     }
 
-    private mutating func move(_ dx: CGFloat, stride: CGFloat, canBack: Bool, canForward: Bool) -> Verdict {
+    private mutating func move(_ dx: CGFloat, stride: CGFloat, canBack: Bool,
+                               canForward: Bool) -> Verdict {
         var d = dx
         // Towards a card that isn't there (+ shows earlier cards): it resists.
         if (offset + d > 0 && !canBack) || (offset + d < 0 && !canForward) { d *= Self.resistance }

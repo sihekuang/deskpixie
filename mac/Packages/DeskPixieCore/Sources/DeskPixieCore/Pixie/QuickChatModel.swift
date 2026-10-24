@@ -286,10 +286,13 @@ public struct QuickChatModel: Equatable, Sendable {
         newerWaiting = false
     }
 
-    /// Drops replies older than `historySecs`, the one you look at too. True when any went.
+    /// Drops replies older than `historySecs`, the one you look at too, but never the newest while
+    /// » offers it: a card that came while a typed message was at work is not yet seen (#286).
+    /// True when any went.
     @discardableResult
     public mutating func prune(now: Date) -> Bool {
-        let keep = history.drop { now.timeIntervalSince($0.at) > TimeInterval(historySecs) || historySecs == 0 }
+        var keep = Array(history.drop { now.timeIntervalSince($0.at) > TimeInterval(historySecs) || historySecs == 0 })
+        if newerWaiting, keep.isEmpty, let last = history.last { keep = [last] }
         let gone = history.count - keep.count
         guard gone > 0 else { return false }
         history = Array(keep)

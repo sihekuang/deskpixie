@@ -77,7 +77,8 @@ type Agent interface {
 	ChatAbout(token string)
 	// UpdatesSeen: the updates bubble showed these lines long enough to count as heard.
 	UpdatesSeen(ids []uint64)
-	// RepliesShown: the deck showed these cards (their ids): a card counts as delivered once shown.
+	// RepliesShown: the deck showed the cards holding these outbox lines (line ids, not card
+	// ids): those lines count as delivered once shown.
 	RepliesShown(ids []uint64)
 	// PendingReplies is the deck's cards not yet shown ([]agent.ReplyCard, never nil), for the
 	// shell's first read: the event may go out before the deck exists.

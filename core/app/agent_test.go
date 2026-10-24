@@ -85,7 +85,14 @@ func (f *fakeAgent) RepliesShown(ids []uint64) {
 	f.shown = append(f.shown, ids)
 	f.mu.Unlock()
 }
-func (f *fakeAgent) PendingReplies() any { f.mu.Lock(); defer f.mu.Unlock(); return f.replies }
+func (f *fakeAgent) PendingReplies() any {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.replies == nil {
+		return []any{} // never nil, as the real one
+	}
+	return f.replies
+}
 func (f *fakeAgent) shownReplies() []uint64 {
 	f.mu.Lock()
 	defer f.mu.Unlock()

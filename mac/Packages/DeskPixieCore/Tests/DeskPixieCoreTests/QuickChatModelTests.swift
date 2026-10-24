@@ -872,6 +872,20 @@ final class QuickChatModelTests: XCTestCase {
         XCTAssertFalse(typing.hide())
     }
 
+    /// #286 review: a card that comes while a typed message is at work isn't lost when the history
+    /// keeps only the latest (0): it waits as the newest, unseen.
+    func testACardDuringATypedMessageSurvivesANoHistorySetting() {
+        var m = QuickChatModel()
+        m.historySecs = 0
+        m.mode = "text"
+        m.sending()
+        XCTAssertFalse(m.update(card(1, "one")), "the typed message stays up")
+        XCTAssertTrue(m.newerWaiting)
+        XCTAssertEqual(m.pages.first?.text, "one")
+        m.prune(now: Date().addingTimeInterval(600))
+        XCTAssertEqual(m.pages.first?.text, "one", "still there, unseen")
+    }
+
     func testAnUpdateCardIsPutAwayAfterTheDismissTime() {
         var m = QuickChatModel()
         let t0 = Date()

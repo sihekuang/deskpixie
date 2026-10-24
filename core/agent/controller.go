@@ -513,9 +513,11 @@ type AgentController struct {
 	// clears it (#286).
 	asking map[string]uint64
 	// lastCard: the reply card the next update may join (#286). heldCards: cards held while
-	// Pixie opens a conversation to say them, shown if it can't.
+	// Pixie opens a conversation to say them, shown if it can't; heldSince: when the first was
+	// held, so none waits longer than OpenWaitMs.
 	lastCard  *ReplyCard
 	heldCards []ReplyCard
+	heldSince Millis
 	// boxAsker: the session whose question the box shows, answered from the box (#241).
 	boxAsker string
 	// boxAnswered: the typed job a session already answered in the box; the coordinator's

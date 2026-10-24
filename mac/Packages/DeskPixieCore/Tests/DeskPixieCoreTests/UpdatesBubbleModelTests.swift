@@ -43,7 +43,7 @@ final class UpdatesBubbleModelTests: XCTestCase {
         XCTAssertEqual(m.lines.map(\.id), [2], "2 was forgotten once dropped; 1 and 3 are still acted on")
     }
 
-    /// #286: « closes the deck to the badge; it stays closed until the pointer has left the
+    /// #286: Hide closes the deck to the badge; it stays closed until the pointer has left the
     /// region, nothing is dismissed, and a new item may pop it.
     func testCollapsingKeepsTheDeckClosedUntilThePointerHasLeft() {
         var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
