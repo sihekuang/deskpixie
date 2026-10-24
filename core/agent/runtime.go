@@ -93,6 +93,8 @@ type Deps struct {
 	Kept KeptStore
 	// Updates gets the updates bubble's list (nil: ignored).
 	Updates UpdatesSink
+	// Replies gets each reply card for the reply deck (nil: ignored).
+	Replies ReplySink
 	// Roster gets the roster beside Pixie on every change (nil: no roster is kept).
 	Roster RosterSink
 	// Panes brings up an agent's pane waiting at a prompt in its terminal (nil: ignored).
@@ -623,6 +625,17 @@ func (h *AgentHandle) OpenTerminal(ctx context.Context) error {
 
 // UpdatesSeen: the bubble showed these lines long enough to count as heard.
 func (h *AgentHandle) UpdatesSeen(ids []uint64) { h.Input(UpdatesSeenInput(ids)) }
+
+// RepliesShown: the reply deck showed the cards holding these lines.
+func (h *AgentHandle) RepliesShown(ids []uint64) { h.Input(RepliesShownInput(ids)) }
+
+// PendingReplies: the cards of replies not yet shown, within the history.
+func (h *AgentHandle) PendingReplies() []ReplyCard {
+	now := h.deps.Clock.NowMs()
+	h.ctlMu.Lock()
+	defer h.ctlMu.Unlock()
+	return h.ctl.PendingReplies(now)
+}
 
 // UpdatesDismissed: the user clicked these lines away, in the bubble or as notifications (#199).
 func (h *AgentHandle) UpdatesDismissed(ids []uint64) { h.Input(UpdatesDismissedInput(ids)) }
@@ -1959,6 +1972,10 @@ func (h *AgentHandle) apply(e Effect) {
 		}
 	case EfHoldOpen:
 		d.Voice.HoldOpen(e.Hold)
+	case EfReply:
+		if d.Replies != nil {
+			d.Replies.Reply(*e.Reply)
+		}
 	case EfUpdates:
 		if d.Updates != nil {
 			d.Updates.Updates(e.Value.([]UpdateItem))

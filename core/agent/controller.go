@@ -82,6 +82,8 @@ type Settings struct {
 	// shorter than this stays quiet. One Pixie started is always announced, setting or not.
 	SessionTurns      bool
 	SessionTurnsMinMs Millis
+	// ReplyHistoryMs: how far back the reply deck brings unseen replies after a restart (#286).
+	ReplyHistoryMs Millis
 	// OpenConversation (`agent.openConversationForUpdates`, a feature flag, off by default): a job's done
 	// or failed line, an agent question or a spoken worker report that comes while no
 	// conversation is open makes Pixie open one and say it (opener.go).
@@ -98,7 +100,7 @@ type Settings struct {
 
 // DefaultSettings: 4 notifications a minute, 2-minute permission timeout, narration on.
 func DefaultSettings() Settings {
-	return Settings{NotifyPerMinute: 4, PermissionTimeoutMs: 120_000, Narration: true, UpdateQuietMs: UpdateQuietMs, Workers: DefaultWorkerPolicy(), SessionTurns: true, SessionTurnsMinMs: 30_000}
+	return Settings{NotifyPerMinute: 4, PermissionTimeoutMs: 120_000, Narration: true, UpdateQuietMs: UpdateQuietMs, Workers: DefaultWorkerPolicy(), SessionTurns: true, SessionTurnsMinMs: 30_000, ReplyHistoryMs: 300_000}
 }
 
 // WorkerPolicy is `agent.workers` (spec §12): whether the coordinator may start workers, how
@@ -161,6 +163,7 @@ const (
 	InLateSessionSent                      // Job, Name, Text, Message, Reason: a session tool done after its call was answered (#246); Job: the request then in flight ("" = none); Reason: its error
 	InSessionSent                          // Name, Text, Message: the coordinator's message_session reached your session Name, described Text (#177); Message: why it waits ("" = typed, #183)
 	InTextMode                             // Away: text mode on (#221): no conversation is opened for updates
+	InRepliesShown                         // IDs: the reply deck showed these lines (#286)
 )
 
 // Input is one stimulus for AgentController.Step. Build it with the *Input constructors.
@@ -375,6 +378,7 @@ const (
 	EfAnswerSession    // Name, Text, Answer, Line: type your answer to session Name's prompt Text (#105); taken, InSessionAnswered says Line; a failure comes back as InSessionAnswerFailed
 	EfTellSession      // Name, Text: type your answer to the question session Name's turn ended on (#161); a failure comes back as InSessionAnswerFailed
 	EfChat             // Chat: a spoken line for a job typed in the text box (#221)
+	EfReply            // Reply: a card for the reply deck (#286)
 )
 
 // Effect is one thing the caller must do, in order. Err set (non-empty) is the Err branch of
@@ -406,6 +410,8 @@ type Effect struct {
 	Update *UpdateItem
 	// Chat (EfChat): the line for the text box.
 	Chat ChatLine
+	// Reply (EfReply): the card for the reply deck.
+	Reply *ReplyCard
 }
 
 type coordinatorState int
@@ -505,6 +511,9 @@ type AgentController struct {
 	jobSessions map[JobID][]string
 	// asking: each session's open question, the outbox line id; its next turn clears it (#286).
 	asking map[string]uint64
+	// lastCard and lastRowAt: the reply card the next update may join, and when its last row came (#286).
+	lastCard  *ReplyCard
+	lastRowAt Millis
 	// boxAsker: the session whose question the box shows, answered from the box (#241).
 	boxAsker string
 	// boxAnswered: the typed job a session already answered in the box; the coordinator's
@@ -808,6 +817,8 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 		c.openRefused(now, &fx)
 	case InUpdatesSeen:
 		c.updatesSeen(in.IDs, in.Clicked, &fx)
+	case InRepliesShown:
+		c.repliesShown(in.IDs, &fx)
 	case InDetachConfirm:
 		if job := c.confirms.Detach(in.RequestID); job != "" {
 			c.resumeJob(job, now, &fx)
@@ -2116,6 +2127,9 @@ func (c *AgentController) applyDelivery(d RouteDelivery, now Millis, fx *[]Effec
 		c.attachNotification(*fx, d.Line)
 		if d.Line.Asking && d.Line.Session != "" {
 			c.asking[d.Line.Session] = c.outbox.lines[len(c.outbox.lines)-1].ID
+		}
+		if pushed := c.outbox.lines[len(c.outbox.lines)-1]; !alerting(pushed) {
+			c.cardFor(pushed, now, fx)
 		}
 	}
 }
