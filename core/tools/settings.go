@@ -52,7 +52,7 @@ func (o OpenSettings) Invoke(_ context.Context, raw json.RawMessage) (json.RawMe
 	if len(found) == 0 {
 		o.Window.Open(nil)
 		return reply(map[string]any{"opened": true, "found": false,
-			"note": "No setting matches; Settings is open on its last page."})
+			"note": "No setting matches; Settings is open."})
 	}
 	best := found[0]
 	o.Window.Open(&best)

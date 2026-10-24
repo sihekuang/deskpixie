@@ -43,7 +43,7 @@ func TestOpenSettingsWithOneMatchNamesNoOthers(t *testing.T) {
 func TestOpenSettingsWithNoMatchStillOpensIt(t *testing.T) {
 	w := &fakeWindow{}
 	got := call(t, OpenSettings{w}, `{"query":"zebra"}`)
-	eq(t, got, `{"opened":true,"found":false,"note":"No setting matches; Settings is open on its last page."}`)
+	eq(t, got, `{"opened":true,"found":false,"note":"No setting matches; Settings is open."}`)
 	if len(w.opened) != 1 || w.opened[0] != nil {
 		t.Fatal(w.opened)
 	}

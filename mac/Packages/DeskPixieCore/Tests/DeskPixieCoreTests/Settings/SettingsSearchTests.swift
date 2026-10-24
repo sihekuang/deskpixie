@@ -59,6 +59,14 @@ final class SettingsSearchTests: XCTestCase {
         XCTAssertEqual(model.takeReveal(for: .voice), mic)
     }
 
+    func test_a_reveal_made_before_the_window_opens_picks_its_page_until_pointed_out() {
+        XCTAssertNil(model.pendingRevealSection)
+        model.reveal(mic)
+        XCTAssertEqual(model.pendingRevealSection, .voice)
+        _ = model.takeReveal(for: .voice)
+        XCTAssertNil(model.pendingRevealSection)
+    }
+
     func test_revealing_a_hit_points_it_out_each_time_and_stops_recording() {
         model.recordingPath = "hotkey"
         model.reveal(mic)

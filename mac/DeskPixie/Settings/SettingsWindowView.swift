@@ -42,6 +42,10 @@ struct SettingsWindowView: View {
             // (menu-bar only) when it closes (Howl's AppDelegate.showSettingsWindow).
             NSApp.setActivationPolicy(.regular)
             NSApp.activate()
+            // A reveal made before the window was built (Pixie's open_settings) picks the page.
+            if let section = model.pendingRevealSection, let index = SettingsLayout.tabIndex(section) {
+                tab = index
+            }
             model.load()
         }
         // A picked search result, or a setting Pixie was asked to show (#288): go to its page;
