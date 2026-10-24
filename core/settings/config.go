@@ -16,6 +16,8 @@ import (
 	"sort"
 	"strings"
 	"sync/atomic"
+
+	"github.com/sihekuang/deskpixie/core/richtext"
 )
 
 // MaxScale is the largest window scale. A hand-edited huge value would give an oversized window.
@@ -176,9 +178,11 @@ type AgentSettings struct {
 	// QuestionWaitSecs (#268): how long a question from a session you started with pix waits
 	// for your answer in Pixie, held in its hook, before the session shows it in its terminal.
 	// 0 doesn't hold it: Pixie's buttons type the answer, as before.
-	QuestionWaitSecs uint64         `json:"questionWaitSecs"`
-	ProjectsRoot     string         `json:"projectsRoot"`
-	Workers          WorkerSettings `json:"workers"`
+	QuestionWaitSecs uint64 `json:"questionWaitSecs"`
+	// Editor (#277): where a file named in Pixie's bubbles opens (richtext.Editors).
+	Editor       string         `json:"editor"`
+	ProjectsRoot string         `json:"projectsRoot"`
+	Workers      WorkerSettings `json:"workers"`
 }
 
 // WorkerSettings is agent.workers.
@@ -214,7 +218,7 @@ func Default() Config {
 		Agent: AgentSettings{
 			Enabled: true, SessionHost: "herdr", Session: "deskpixie", Terminal: "warp",
 			CoordinatorKind: CoordinatorClaude, CoordinatorEffort: "low",
-			Port: 48217, HoldOpenSecs: 180, PermissionTimeoutSecs: 120, NotifyPerMinute: 4, QuestionWaitSecs: 20,
+			Port: 48217, HoldOpenSecs: 180, PermissionTimeoutSecs: 120, NotifyPerMinute: 4, QuestionWaitSecs: 20, Editor: richtext.EditorAuto,
 			Narration: true, ProjectsRoot: "~/Documents/deskpixie",
 			// Handed-off work keeps running when the app quits; the next start adopts it.
 			KeepPanesOnQuit: true,

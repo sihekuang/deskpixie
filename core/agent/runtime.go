@@ -754,20 +754,10 @@ func (h *AgentHandle) ShowSession(ctx context.Context, said string) (string, err
 	if h.deps.Sessions == nil {
 		return "", LaunchError("no way to show your sessions")
 	}
-	// Your sessions are the composite's pix part: listed on its own, so a failing Pixie host
-	// (which the roster shows past) can't hide them.
-	var list []AgentInfo
-	var err error
-	if c, ok := h.deps.Host.Session().(*CompositeHost); ok {
-		parts := c.ListRunningParts(ctx)
-		list, err = parts.Secondary, parts.SecondaryErr
-	} else {
-		list, err = ListRunning(ctx, h.deps.Host.Session())
-	}
+	list, err := h.yourSessions(ctx)
 	if err != nil {
 		return "", err
 	}
-	list = slices.DeleteFunc(list, func(a AgentInfo) bool { return a.Origin != OriginUser || a.User == nil })
 	name, ok := MatchSession(list, said)
 	if !ok {
 		return "", LaunchError("no session of yours named " + said)
@@ -786,6 +776,48 @@ func (h *AgentHandle) ShowSession(ctx context.Context, said string) (string, err
 		h.deps.Focus.Focus(plan)
 	}
 	return name, nil
+}
+
+// yourSessions are the sessions you started with pix. They are the composite's pix part:
+// listed on its own, so a failing Pixie host (which the roster shows past) can't hide them.
+func (h *AgentHandle) yourSessions(ctx context.Context) ([]AgentInfo, error) {
+	var list []AgentInfo
+	var err error
+	if c, ok := h.deps.Host.Session().(*CompositeHost); ok {
+		parts := c.ListRunningParts(ctx)
+		list, err = parts.Secondary, parts.SecondaryErr
+	} else {
+		list, err = ListRunning(ctx, h.deps.Host.Session())
+	}
+	if err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(list, func(a AgentInfo) bool { return a.Origin != OriginUser || a.User == nil }), nil
+}
+
+// SessionPlace is where one of your sessions runs (#277): its folder and its terminal app's
+// bundle id ("" = unknown).
+type SessionPlace struct {
+	Name, Folder, App string
+}
+
+// SessionPlaces are where your sessions named run, in the order named, from one listing; a name
+// that isn't one of yours is left out.
+func (h *AgentHandle) SessionPlaces(ctx context.Context, names []string) []SessionPlace {
+	list, err := h.yourSessions(ctx)
+	if err != nil {
+		return nil
+	}
+	var out []SessionPlace
+	for _, n := range names {
+		for _, a := range list {
+			if a.Name == n {
+				out = append(out, SessionPlace{Name: n, Folder: a.Cwd, App: a.User.App})
+				break
+			}
+		}
+	}
+	return out
 }
 
 // MatchSession picks the one session of yours that said names: its name; else its repo or its

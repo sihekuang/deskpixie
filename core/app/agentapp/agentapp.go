@@ -713,6 +713,20 @@ func (a *Agent) FocusSession(name string) {
 	})
 }
 
+// SessionPlaces: where your sessions named run, for the paths in their replies (#277).
+func (a *Agent) SessionPlaces(names []string) []app.SessionPlace {
+	if len(names) == 0 {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 2*time.Second)
+	defer cancel()
+	var out []app.SessionPlace
+	for _, p := range a.handle.SessionPlaces(ctx, names) {
+		out = append(out, app.SessionPlace{Folder: p.Folder, App: p.App})
+	}
+	return out
+}
+
 // ReportFocusOutcome: the shell finished executing a FocusPlan (#116). A failure becomes the
 // tray status line through the same path as an OpenTerminal failure, so wording never diverges.
 func (a *Agent) ReportFocusOutcome(success bool, detail string) {

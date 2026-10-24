@@ -506,9 +506,12 @@ final class EngineCoordinator {
         case .position(let x, let y):
             pixie?.moveTo(x: x, y: y)
         case .settingsChanged:
-            // The pixie follows proximityFade.{enabled,radius}; the open Settings window re-reads.
+            // The pixie follows proximityFade.{enabled,radius}; the open Settings window re-reads;
+            // the bubbles' links and files are found again (agent.editor, #277).
             applyPixieSettings()
             SettingsHub.shared?.refresh()
+            bubble?.settingsChanged()
+            roster?.settingsChanged()
         case .hotkey(let combo):
             hotkeyChanged(combo)
         case .devices(let input, let output):

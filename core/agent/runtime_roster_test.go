@@ -405,3 +405,23 @@ func TestTheKeptPartStillCountsForBusy(t *testing.T) {
 		}
 	})
 }
+
+// #277: a path in a session's reply resolves against that session's folder, and opens in the
+// app it runs in. Only your own sessions have a place.
+func TestSessionPlaceIsYourSessionsFolderAndApp(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRosterRig(t, false)
+		if _, err := r.user.StartAgent(context.Background(), AgentSpec{Name: "api-claude", Cwd: "/work/api"}); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(time.Second)
+		got := r.h.SessionPlaces(context.Background(), []string{"nobody-claude", "api-claude", Coordinator})
+		if !reflect.DeepEqual(got, []SessionPlace{{Name: "api-claude", Folder: "/work/api", App: "com.googlecode.iterm2"}}) {
+			t.Fatalf("only your sessions have a place: %+v", got)
+		}
+		r.host.FailList(true)
+		if got := r.h.SessionPlaces(context.Background(), []string{"api-claude"}); len(got) != 1 {
+			t.Fatal("Pixie's host failing to list doesn't hide your session")
+		}
+	})
+}

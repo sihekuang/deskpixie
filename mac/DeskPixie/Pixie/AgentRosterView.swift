@@ -78,9 +78,8 @@ struct AgentRosterView: View {
                 Text(earlier.isYou ? "You" : "Pixie")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                Text(earlier.text)
-                    .font(.callout)
-                    .lineLimit(3)
+                // Your words or Pixie's, with their links and files clickable (#277).
+                RichMessage(text: earlier.text, maxLines: 3)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.horizontal, 8)

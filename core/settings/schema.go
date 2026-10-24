@@ -7,6 +7,7 @@ import (
 
 	"github.com/sihekuang/deskpixie/core/herdr/compat"
 	"github.com/sihekuang/deskpixie/core/pix"
+	"github.com/sihekuang/deskpixie/core/richtext"
 	tmuxcompat "github.com/sihekuang/deskpixie/core/tmux/compat"
 )
 
@@ -303,6 +304,16 @@ var CoordinatorKinds = []Opt{
 	{CoordinatorCodex, "Codex", AllPlatforms},
 }
 
+// Editors are agent.editor's choices (#277).
+var Editors = []Opt{
+	{richtext.EditorAuto, "Automatic (the session's editor)", AllPlatforms},
+	{richtext.EditorVSCode, "Visual Studio Code", AllPlatforms},
+	{richtext.EditorCursor, "Cursor", AllPlatforms},
+	{richtext.EditorWindsurf, "Windsurf", AllPlatforms},
+	{richtext.EditorZed, "Zed", AllPlatforms},
+	{richtext.EditorDefault, "The file's default app", AllPlatforms},
+}
+
 // CoordinatorEfforts are the coordinator's reasoning efforts (#177), the levels Claude Code's
 // --effort and Codex's model_reasoning_effort share.
 var CoordinatorEfforts = []Opt{
@@ -409,6 +420,7 @@ var Fields = []FieldSpec{
 	spec("agent.openConversationForUpdates", SectionAgent, "Open a conversation for updates", "When a job finishes or fails, or the coordinator asks you something, while you're not talking to Pixie, Pixie starts a conversation to tell you and then listens for your answer.", boolKind, ApplyRestart),
 	spec("agent.alwaysForceSend", SectionAgent, "Always send messages at once", "Messages Pixie passes to your sessions go in right away, with any still waiting, even while you're typing there. A busy session still gets them with its next step.", boolKind, ApplyRestart),
 	spec("agent.questionWaitSecs", SectionAgent, "Wait for Pixie's answer (seconds)", "How long a question from a session you started with pix waits for your answer in Pixie before the session shows it in its terminal. 0 shows it there at once; Pixie's buttons then type your answer.", intKind(0, int64(pix.MaxHold.Seconds()), false), ApplyRestart),
+	spec("agent.editor", SectionAgent, "Open files in", "Where a file named in Pixie's bubbles opens when you click it. Automatic uses the editor the session runs in (VS Code, Cursor, Zed or a JetBrains IDE), else the file's default app.", staticChoice(Editors), ApplyLive),
 	spec("agent.holdOpenSecs", SectionAgent, "Hold open (seconds)", "How long a conversation stays open while a job runs.", intKind(0, 3600, false), ApplyRestart),
 	spec("agent.projectsRoot", SectionAgent, "Projects folder", "The folder whose repositories workers may use, inside your home folder. DeskPixie creates it when it's missing.", pathKind(true, false), ApplyRestart),
 	spec("agent.workers.enabled", SectionWorkers, "Workers", "Let the coordinator start worker agents in git worktrees.", boolKind, ApplyRestart),

@@ -1163,6 +1163,18 @@ func (a *App) Register(r Registrar) {
 	r.Register("setup.createProjectsFolder", func(json.RawMessage) (any, error) {
 		return a.createProjectsFolder()
 	})
+	// text.spans: a message in Pixie's bubbles split into links, files, code, commits and
+	// emails (#277), its paths resolved against the sessions it is about.
+	r.Register("text.spans", func(args json.RawMessage) (any, error) {
+		var in struct {
+			Text     string   `json:"text"`
+			Sessions []string `json:"sessions"`
+		}
+		if err := decodeArgs("text.spans", args, &in); err != nil {
+			return nil, err
+		}
+		return map[string]any{"spans": a.textSpans(in.Text, in.Sessions)}, nil
+	})
 	r.Register("settings.hotkeyFailed", func(args json.RawMessage) (any, error) {
 		var in struct {
 			Combo string `json:"combo"`
