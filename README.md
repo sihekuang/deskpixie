@@ -1,7 +1,13 @@
-# DeskPixie
+<p align="center">
+  <img src="docs/images/pixie.gif" width="128" height="128" alt="Pixie, a small green pixel-art character, bobbing on the spot">
+</p>
 
-[![License: Apache-2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Latest release](https://img.shields.io/github/v/release/sihekuang/deskpixie?label=release)](https://github.com/sihekuang/deskpixie/releases/latest)
+<h1 align="center">DeskPixie</h1>
+
+<p align="center">
+  <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache%202.0-blue.svg"></a>
+  <a href="https://github.com/sihekuang/deskpixie/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/sihekuang/deskpixie?label=release"></a>
+</p>
 
 **DeskPixie is a voice layer on top of your coding agents**, for macOS. You talk with **Pixie**, a
 small character on your desktop, and Pixie hands real work to **the coordinator**, a Claude Code
