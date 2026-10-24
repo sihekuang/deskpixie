@@ -274,7 +274,7 @@ func runeWidth(r rune) int {
 	return 1
 }
 
-var optionLine = regexp.MustCompile(`^\s*(?:❯\s*)?(\d)\.\s+(.*\S)\s*$`)
+var optionLine = regexp.MustCompile(`^\s*(?:[❯›]\s*)?(\d)\.\s+(.*\S)\s*$`)
 
 // dialog is a Claude Code permission dialog as shown (#105): its title ("Bash command"),
 // Claude's summary under it (or the file's name), what the dashed box holds (the command, the
@@ -380,6 +380,32 @@ var (
 	codexOption   = regexp.MustCompile(`^(?:›\s*)?(\d)\.\s+(.*\S)\s+\((\w+)\)$`)
 )
 
+// codexRows are the dialog's lines trimmed, with an option Codex wrapped joined back into one
+// (#271): its lines go on indented to its label, and one broken after a hyphen is joined
+// without a space (Codex wraps at its own width, not the screen's).
+func codexRows(lines []string) []string {
+	var rows []string
+	labelCol := 0
+	for _, l := range lines {
+		t := strings.TrimSpace(l)
+		if m := optionLine.FindStringSubmatch(l); m != nil {
+			rows, labelCol = append(rows, t), utf8.RuneCountInString(l[:strings.Index(l, m[2])])
+			continue
+		}
+		if t != "" && labelCol > 0 && len(l)-len(strings.TrimLeft(l, " ")) >= labelCol {
+			prev := rows[len(rows)-1]
+			sep := " "
+			if strings.HasSuffix(prev, "-") {
+				sep = ""
+			}
+			rows[len(rows)-1] = prev + sep + t
+			continue
+		}
+		rows, labelCol = append(rows, t), 0
+	}
+	return rows
+}
+
 // readCodexDialog reads Codex's approval prompt, the last one above its footer: its question
 // ("Would you like to run the following command?"), its reason, the command, and its numbered
 // options with the key each shows ("(y)", "(esc)"). false when there is none, or an option has
@@ -405,8 +431,7 @@ func readCodexDialog(lines []string) (dialog, bool) {
 		return dialog{}, false
 	}
 	d.Question = strings.TrimSpace(lines[ask])
-	for _, l := range lines[ask+1 : foot] {
-		t := strings.TrimSpace(l)
+	for _, t := range codexRows(lines[ask+1 : foot]) {
 		if m := codexOption.FindStringSubmatch(t); m != nil {
 			if m[1] != strconv.Itoa(len(d.Options)+1) {
 				return dialog{}, false

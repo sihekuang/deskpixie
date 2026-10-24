@@ -126,11 +126,48 @@ func TestTheCodexApprovalIsReadOffTheScreen(t *testing.T) {
 	}
 }
 
+// #271: an option Codex wraps (it wraps at its own width, here after a hyphen) is read whole,
+// with the key on its last line.
+func TestAWrappedCodexOptionIsRead(t *testing.T) {
+	lines := []string{
+		"  Would you like to run the following command?",
+		"  Environment: local",
+		"  Reason: Allow creating zz-codex-1.txt in the current workspace?",
+		"  $ touch zz-codex-1.txt",
+		"› 1. Yes, proceed (y)",
+		"  2. Yes, and don't ask again for commands that start with `touch zz-codex-",
+		"     1.txt` (p)",
+		"  3. No, and tell Codex what to do differently (esc)",
+		"  Press enter to confirm or esc to cancel",
+	}
+	d, ok := readCodexDialog(lines)
+	want := dialog{Question: "Would you like to run the following command?",
+		Summary: "Allow creating zz-codex-1.txt in the current workspace?",
+		Body:    "touch zz-codex-1.txt",
+		Options: []string{"Yes, proceed", "Yes, and don't ask again for commands that start with `touch zz-codex-1.txt`", "No, and tell Codex what to do differently"},
+		Keys:    []string{"y", "p", "\x1b"}}
+	if !ok || !reflect.DeepEqual(d, want) {
+		t.Fatalf("%v %+v", ok, d)
+	}
+	// The selection arrow on the wrapped option (you moved to it): read the same.
+	arrowed := append([]string{}, lines...)
+	arrowed[4], arrowed[5] = "  1. Yes, proceed (y)", "› 2. Yes, and don't ask again for commands that start with `touch zz-codex-"
+	if d, ok := readCodexDialog(arrowed); !ok || !reflect.DeepEqual(d, want) {
+		t.Fatalf("arrowed: %v %+v", ok, d)
+	}
+	// Wrapped at a space, its words keep their space.
+	lines[5], lines[6] = "  2. Yes, and don't ask again for commands that start with", "     `touch zz-codex-1.txt` (p)"
+	if d, ok := readCodexDialog(lines); !ok || d.Options[1] != want.Options[1] {
+		t.Fatalf("%v %q", ok, d.Options)
+	}
+}
+
 func TestNoCodexApprovalIsRead(t *testing.T) {
 	for _, lines := range [][]string{
-		{"Would you like to run the following command?", "› 1. Yes, proceed (y)"},                                                         // no footer
-		{"› 1. Yes, proceed (y)", "  2. No (esc)", "Press enter to confirm or esc to cancel"},                                             // no question
-		{"Would you like to run the following command?", "› 1. Yes, proceed", "  2. No (esc)", "Press enter to confirm or esc to cancel"}, // a key missing
+		{"Would you like to run the following command?", "› 1. Yes, proceed (y)"},                                                                                     // no footer
+		{"› 1. Yes, proceed (y)", "  2. No (esc)", "Press enter to confirm or esc to cancel"},                                                                         // no question
+		{"Would you like to run the following command?", "› 1. Yes, proceed", "  2. No (esc)", "Press enter to confirm or esc to cancel"},                             // a key missing
+		{"Would you like to run the following command?", "› 1. Yes, proceed (y)", "  2. Yes, and don't ask", "     again", "Press enter to confirm or esc to cancel"}, // wrapped, never a key
 	} {
 		if d, ok := readCodexDialog(lines); ok {
 			t.Errorf("%q: %+v", lines, d)
