@@ -22,6 +22,7 @@ public struct DeckSwipe: Equatable, Sendable {
             sumX = 0
             sumY = 0
             fired = false
+            return 0
         case .changed:
             break
         }
