@@ -511,9 +511,8 @@ type AgentController struct {
 	jobSessions map[JobID][]string
 	// asking: each session's open question, the outbox line id; its next turn clears it (#286).
 	asking map[string]uint64
-	// lastCard and lastRowAt: the reply card the next update may join, and when its last row came (#286).
-	lastCard  *ReplyCard
-	lastRowAt Millis
+	// lastCard: the reply card the next update may join (#286).
+	lastCard *ReplyCard
 	// boxAsker: the session whose question the box shows, answered from the box (#241).
 	boxAsker string
 	// boxAnswered: the typed job a session already answered in the box; the coordinator's
@@ -2125,11 +2124,12 @@ func (c *AgentController) applyDelivery(d RouteDelivery, now Millis, fx *[]Effec
 		record := c.outbox.Push(d.Line, now)
 		*fx = append(*fx, Effect{Kind: EfAppend, File: OutboxFile, Line: record})
 		c.attachNotification(*fx, d.Line)
+		pushed := c.outbox.lines[len(c.outbox.lines)-1]
 		if d.Line.Asking && d.Line.Session != "" {
-			c.asking[d.Line.Session] = c.outbox.lines[len(c.outbox.lines)-1].ID
+			c.asking[d.Line.Session] = pushed.ID
 		}
-		if pushed := c.outbox.lines[len(c.outbox.lines)-1]; !alerting(pushed) {
-			c.cardFor(pushed, now, fx)
+		if !alerting(pushed) {
+			c.cardFor(pushed, fx)
 		}
 	}
 }

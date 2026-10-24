@@ -19,12 +19,16 @@ type ReplyCard struct {
 // ReplySink gets each new or grown reply card (nil in Deps: ignored).
 type ReplySink interface{ Reply(ReplyCard) }
 
-// replyRow is a line as one row of a card: "**who:** the news" when it has the short form.
+// replyRow is a line as one row of a card: "**who:** the news" when it has a title (its brief, else its text).
 func replyRow(l OutboxLine) string {
-	if l.Title != "" && l.Brief != "" {
-		return "**" + l.Title + ":** " + l.Brief
+	body := l.Brief
+	if body == "" {
+		body = l.Text
 	}
-	return l.Text
+	if l.Title != "" {
+		return "**" + l.Title + ":** " + body
+	}
+	return body
 }
 
 // RepliesShownInput: the reply deck showed these outbox lines.
@@ -50,15 +54,14 @@ func newReplyCard(l OutboxLine) *ReplyCard {
 }
 
 // cardFor gives a reply-lane line (one that isn't alerting) its card: it joins the last card
-// when it came within ReplyJoinMs of the last row, else starts one. The card is emitted whole
+// when its time is within ReplyJoinMs of the last row's, else starts one. The card is emitted whole
 // each time, so a sink replaces the one it has by ID.
-func (c *AgentController) cardFor(l OutboxLine, now Millis, fx *[]Effect) {
-	if c.lastCard != nil && now-c.lastRowAt <= ReplyJoinMs {
+func (c *AgentController) cardFor(l OutboxLine, fx *[]Effect) {
+	if c.lastCard != nil && l.At-c.lastCard.At <= ReplyJoinMs {
 		c.lastCard.add(l)
 	} else {
 		c.lastCard = newReplyCard(l)
 	}
-	c.lastRowAt = now
 	card := *c.lastCard
 	card.Lines = append([]uint64(nil), card.Lines...)
 	card.Sessions = append([]string(nil), card.Sessions...)

@@ -89,3 +89,53 @@ func appendedTo(fx []Effect, file string) []string {
 	}
 	return out
 }
+
+func TestATitledLineWithNoBriefKeepsItsTitle(t *testing.T) {
+	row := replyRow(OutboxLine{Title: "deskpixie", Text: "Finished the thing."})
+	if row != "**deskpixie:** Finished the thing." {
+		t.Fatal(row)
+	}
+	if row := replyRow(OutboxLine{Text: "Plain."}); row != "Plain." {
+		t.Fatal(row)
+	}
+}
+
+func TestPendingRepliesGroupsLinesWithinFiveSeconds(t *testing.T) {
+	c := ctlWith(func(s *Settings) { s.ReplyHistoryMs = 300_000 })
+	c.outbox.Push(NewLine(LineSession, "A done."), T0)
+	c.outbox.Push(NewLine(LineSession, "B done."), T0+4_000)
+	c.outbox.Push(NewLine(LineSession, "C done."), T0+4_000+ReplyJoinMs+1)
+	got := c.PendingReplies(T0 + 20_000)
+	if len(got) != 2 || got[0].Count != 2 || got[0].Text != "A done.\nB done." || got[1].Count != 1 {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestPendingRepliesSkipAlertingLines(t *testing.T) {
+	c := ctlWith(func(s *Settings) { s.ReplyHistoryMs = 300_000 })
+	token := "gold"
+	c.outbox.Push(Line{Kind: LineQuestion, Text: "Allow?", Token: &token}, T0)
+	c.outbox.Push(Line{Kind: LineSession, Text: "Shall I?", Asking: true, Session: "s"}, T0+10)
+	c.outbox.Push(NewLine(LineQuestion, "Which repo?"), T0+20)
+	if got := c.PendingReplies(T0 + 100); len(got) != 0 {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestAnUnsolicitedLineGetsACard(t *testing.T) {
+	c := ctl()
+	var out []Effect
+	c.deliverUnsolicited("I tidied the notes.", T0, &out)
+	if cards := replies(out); len(cards) != 1 || cards[0].Text != "I tidied the notes." {
+		t.Fatalf("%+v", out)
+	}
+}
+
+func TestAnAlertingLineGetsNoCard(t *testing.T) {
+	c := ctlWith(func(s *Settings) { s.SessionTurns = true })
+	asking := longTurn
+	asking.Reply = "Shall I go ahead and push?"
+	if n := len(replies(sessionTurn(c, asking, T0))); n != 0 {
+		t.Fatalf("%d cards for a question", n)
+	}
+}

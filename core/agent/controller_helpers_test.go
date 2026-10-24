@@ -13,9 +13,8 @@ import (
 // Shared helpers for controller_test.go and controller_worker_test.go (the Rust test modules'
 // helpers; renamed where a name is taken elsewhere in the package).
 
-// visible drops the persistence and log noise (and tab labels and the updates bubble's list and the reply
-// cards,
-// tested on their own).
+// visible drops the persistence and log noise (and tab labels, the updates bubble's list and the
+// reply cards, tested on their own).
 func visible(fx []Effect) []Effect {
 	var out []Effect
 	for _, e := range fx {
