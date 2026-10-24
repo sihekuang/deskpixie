@@ -453,4 +453,29 @@ final class UpdatesBubbleModelTests: XCTestCase {
         m.apply([], now: 12, pop: .allowed)
         XCTAssertNil(m.typing)
     }
+
+    /// Review of #268: the pointer left while you typed, then the question went (its wait ran
+    /// out, or it was answered in the terminal): the bubble closes, as the pointer leaving would.
+    func testTheBubbleClosesWhenItsQuestionGoesAfterThePointerLeft() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        let other = UpdateLine(id: 5, text: "Done.", kind: "reply", at: 5, job: nil, worker: nil)
+        m.apply([other, typedMenu()], now: 10, pop: .allowed)
+        m.pointerEntered(now: 11)
+        XCTAssertTrue(m.startTyping(token: "hawk"))
+        m.pointerLeft()
+        m.apply([other], now: 12, pop: .allowed)
+        XCTAssertNil(m.typing)
+        XCTAssertEqual(m.phase, .badge)
+    }
+
+    /// The pointer is still over it: the bubble stays open when the question goes.
+    func testTheBubbleStaysOpenWhenItsQuestionGoesUnderThePointer() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        let other = UpdateLine(id: 5, text: "Done.", kind: "reply", at: 5, job: nil, worker: nil)
+        m.apply([other, typedMenu()], now: 10, pop: .allowed)
+        m.pointerEntered(now: 11)
+        XCTAssertTrue(m.startTyping(token: "hawk"))
+        m.apply([other], now: 12, pop: .allowed)
+        XCTAssertEqual(m.phase, .expanded(since: 11))
+    }
 }

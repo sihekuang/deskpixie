@@ -213,6 +213,24 @@ func TestLosingDeskPixieLetsAHeldQuestionGo(t *testing.T) {
 	}
 }
 
+// Review of #268: without DeskPixie nobody sees a question, so none is held until pix registers
+// again (which says how long to hold).
+func TestWithoutDeskPixieNoQuestionIsHeld(t *testing.T) {
+	h := holdHarness(t, 5*time.Second)
+	h.d.down.Store(true)
+	h.conn.Close()
+	deadline := time.Now().Add(3 * time.Second)
+	for h.s.holdFor() != 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("still holding %v", h.s.holdFor())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if out := hookReply(t, hookAsync(h, "PreToolUse", pushMenu), time.Second); out != nil {
+		t.Fatalf("%v", out)
+	}
+}
+
 // DeskPixie says how long to hold when pix registers.
 func TestTheHoldComesFromDeskPixie(t *testing.T) {
 	d, sock := newFakeDaemon(t, "")
@@ -233,6 +251,15 @@ func TestTheHoldComesFromDeskPixie(t *testing.T) {
 			t.Fatalf("hold %v", s.holdFor())
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// Never longer than MaxHold, whatever DeskPixie says: the hook's own deadlines are set from it.
+func TestTheHoldNeverPassesMaxHold(t *testing.T) {
+	h := holdHarness(t, 0)
+	h.s.setHold(2 * MaxHold)
+	if got := h.s.holdFor(); got != MaxHold {
+		t.Fatalf("%v", got)
 	}
 }
 

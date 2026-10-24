@@ -149,9 +149,11 @@ const MaxHold = 5 * time.Minute
 // holds: the hooks whose question may wait for Pixie's answer.
 func holds(event string) bool { return event == "PreToolUse" || event == "PermissionRequest" }
 
+// setHold: how long a question waits in its hook for Pixie's answer, never past MaxHold (the
+// hook's own deadlines are set from it).
 func (s *Session) setHold(d time.Duration) {
 	s.mu.Lock()
-	s.hold = d
+	s.hold = min(max(d, 0), MaxHold)
 	s.mu.Unlock()
 }
 

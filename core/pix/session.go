@@ -677,8 +677,8 @@ func (s *Session) start(ctx context.Context) error {
 			s.mu.Lock()
 			changed := s.outdated != reply.Outdated
 			s.outdated = reply.Outdated
-			s.hold = time.Duration(reply.DurationMs) * time.Millisecond
 			s.mu.Unlock()
+			s.setHold(time.Duration(reply.DurationMs) * time.Millisecond)
 			if changed {
 				s.title()
 			}
@@ -693,6 +693,7 @@ func (s *Session) start(ctx context.Context) error {
 		Resend: s.resend,
 		OnDropped: func() {
 			s.o.log.Printf("lost DeskPixie; reconnecting")
+			s.setHold(0) // nobody would see a question; registering again says how long to hold
 			s.letHeldGo()
 		},
 	}

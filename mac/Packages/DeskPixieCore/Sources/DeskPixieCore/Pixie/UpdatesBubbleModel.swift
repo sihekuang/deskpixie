@@ -156,6 +156,8 @@ public struct UpdatesBubbleModel: Sendable {
     private var dismissed: Set<UInt64> = []
     /// The menu (by token) whose answer you are typing in the bubble (#268): it stays open.
     public private(set) var typing: String?
+    /// The pointer left while you typed: the bubble closes once the typing ends.
+    private var leftWhileTyping = false
 
     public init(popSecs: TimeInterval = 6, maxLines: Int = 5) {
         self.popSecs = popSecs
@@ -192,12 +194,14 @@ public struct UpdatesBubbleModel: Sendable {
         let ids = Set(new.map(\.id))
         dismissed = dismissed.filter { ids.contains($0) }
         let new = new.filter { !dismissed.contains($0.id) }
-        if let t = typing, !new.contains(where: { $0.token == t && $0.offersTyped }) {
-            typing = nil // answered elsewhere, or its wait ran out
-        }
+        let typingEnded = typing.map { t in !new.contains(where: { $0.token == t && $0.offersTyped }) } ?? false
         let old = Set(lines.map(\.id))
         let added = new.filter { !old.contains($0.id) }
         lines = new
+        if typingEnded { // answered elsewhere, or its wait ran out
+            typing = nil
+            if leftWhileTyping { pointerLeft() }
+        }
         if isExpanded, !added.isEmpty {
             frozen = added.reversed() + (frozen ?? [])
         }
@@ -230,6 +234,7 @@ public struct UpdatesBubbleModel: Sendable {
     /// The pointer entered the bubble or badge at `at` (a click also lands here): open it.
     public mutating func pointerEntered(now: TimeInterval, at: CGPoint? = nil) {
         guard !lines.isEmpty || isPopped else { return }
+        leftWhileTyping = false
         phase = .expanded(since: now)
         frozen = lines.reversed()
         let before = Set(decisionsSince.keys)
@@ -252,13 +257,17 @@ public struct UpdatesBubbleModel: Sendable {
     public mutating func stopTyping(pointerInside: Bool = false) {
         guard typing != nil else { return }
         typing = nil
-        if !pointerInside { pointerLeft() }
+        if !pointerInside || leftWhileTyping { pointerLeft() }
     }
 
     /// The pointer left: back to the badge, or hidden when nothing unheard is left. Not while you
     /// type an answer in it.
     public mutating func pointerLeft() {
-        if typing != nil { return }
+        if typing != nil {
+            leftWhileTyping = true
+            return
+        }
+        leftWhileTyping = false
         frozen = nil
         phase = lines.isEmpty ? .hidden : .badge
         decisionsSince = [:]

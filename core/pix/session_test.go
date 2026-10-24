@@ -30,6 +30,8 @@ type fakeDaemon struct {
 	outdated atomic.Bool
 	// holdMs: registered replies say how long a question waits for Pixie (#268).
 	holdMs atomic.Int64
+	// down: DeskPixie is gone; a connection is closed at once.
+	down atomic.Bool
 }
 
 func newFakeDaemon(t *testing.T, refuse string) (*fakeDaemon, string) {
@@ -44,6 +46,10 @@ func newFakeDaemon(t *testing.T, refuse string) (*fakeDaemon, string) {
 			c, err := l.Accept()
 			if err != nil {
 				return
+			}
+			if d.down.Load() {
+				c.Close()
+				continue
 			}
 			go func() {
 				dec := wire.NewDecoder(c)
