@@ -251,13 +251,15 @@ func (s *Session) Hook(event string, p map[string]any) string {
 	}
 	switch event {
 	case "PreToolUse":
-		if name, _ := p["tool_name"].(string); name == "AskUserQuestion" {
+		if tool, ok := menuTools[s.o.tool]; ok && p["tool_name"] == tool.name {
 			text, options, details := menuOf(p["tool_input"])
-			q := &question{kind: "menu", options: len(options), marker: claudeMenu, detail: firstRunes(text, 24)}
+			q := &question{kind: "menu", options: len(options), marker: tool.marker, detail: firstRunes(text, 24)}
 			wait := s.holdFor()
 			if wait > 0 && len(options) > 0 { // held: Pixie answers it through this hook (#268)
-				q.hold, q.labels = newHold(), options
+				q.hold, q.labels, q.replyMenu = newHold(), options, tool.reply
 				q.input, _ = p["tool_input"].(map[string]any)
+			} else if !tool.keys { // not answered by keys either: only announced
+				q.options, options = 0, nil
 			}
 			ev := wire.Msg{Source: "menu", Text: text, Keys: options}
 			if q.hold != nil {

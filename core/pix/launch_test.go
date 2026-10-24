@@ -119,7 +119,9 @@ func TestPlanLaunchCodex(t *testing.T) {
 	// #105: Codex tells pix of an approval prompt with its own OSC 9 notification.
 	// set_description never asks for approval (as for Claude): a session can't stop on it.
 	for _, want := range []string{`tui.notification_method="osc9"`, `tui.notification_condition="always"`,
-		`mcp_servers.pixie.tools.set_description.approval_mode="approve"`} {
+		`mcp_servers.pixie.tools.set_description.approval_mode="approve"`,
+		// #268: Codex's questions wait in this hook for Pixie's answer.
+		`hooks.PreToolUse=[{matcher="^request_user_input$",hooks=[{type="command",command="\"/app/pix\" hook PreToolUse",timeout=330}]}]`} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("no %s: %q", want, joined)
 		}

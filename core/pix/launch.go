@@ -84,6 +84,10 @@ func PlanLaunch(tool string, userArgs []string, self, sock, dir string) (Launch,
 			// text on screen can't fake one. Always: also while you look at the terminal.
 			"-c", `tui.notification_method="osc9"`,
 			"-c", `tui.notification_condition="always"`,
+			// Its questions wait in this hook for Pixie's answer (#268). Codex asks you to trust
+			// it once (its hash is kept in Codex's config); untrusted, it never runs.
+			"-c", fmt.Sprintf(`hooks.PreToolUse=[{matcher="^request_user_input$",hooks=[{type="command",command=%s,timeout=%d}]}]`,
+				strconv.Quote(strconv.Quote(self)+" hook PreToolUse"), int((MaxHold + 30*time.Second).Seconds())),
 		}
 		return Launch{Path: path, Args: append(args, userArgs...), Env: env}, nil
 	}
