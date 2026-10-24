@@ -12,3 +12,6 @@ mac/Configs/DeveloperSettings.xcconfig
 # stray binary from `go build ./cmd/libdeskpixie` run inside core/
 /core/libdeskpixie
 out-local/
+# local tooling: IDE config, Playwright MCP screenshots and logs
+.idea/
+.playwright-mcp/
