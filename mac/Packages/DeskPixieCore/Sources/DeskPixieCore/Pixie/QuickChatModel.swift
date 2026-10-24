@@ -198,8 +198,42 @@ public struct QuickChatModel: Equatable, Sendable {
         guard hasCurrent else { return viewing.map { Position(index: $0 + 1, count: history.count) } }
         return Position(index: (viewing ?? history.count) + 1, count: history.count + 1)
     }
-    /// Older cards peeking behind the one shown (#286): up to two.
-    public var peeks: Int { position.map { min(2, max(0, $0.index - 1)) } ?? 0 }
+    /// One page of the reply deck (#286): a kept reply, or what is up now (typed out so far).
+    /// Its id stays the same while the history grows or drops old replies, so a scroll view can
+    /// follow it.
+    public struct Page: Equatable, Sendable, Identifiable {
+        public let id: Int
+        /// All of it (links and files are found in this), and what is typed out so far.
+        public let text: String
+        public let shown: String
+        public let sessions: [String]
+    }
+
+    /// Replies dropped off the front of the history so far: page ids count on from them.
+    private var dropped = 0
+
+    /// The deck's pages, oldest first: the history, then what is up now.
+    public var pages: [Page] {
+        var out = history.enumerated().map { i, r in Page(id: dropped + i, text: r.text, shown: r.text, sessions: r.sessions) }
+        if hasCurrent { out.append(Page(id: dropped + history.count, text: full, shown: shown, sessions: sessions)) }
+        return out
+    }
+
+    /// The page shown: the one you stepped back to, else what is up now; nil with neither.
+    public var pageID: Int? {
+        if let viewing { return dropped + viewing }
+        return hasCurrent ? dropped + history.count : nil
+    }
+
+    /// Scrolled to a page (#286): look back at a kept reply, or the newest again.
+    public mutating func show(page id: Int) {
+        let i = id - dropped
+        if hasCurrent && i == history.count {
+            toNewest()
+        } else if history.indices.contains(i) {
+            viewing = i
+        }
+    }
     /// How many updates the card shown holds (#286).
     public var shownCount: Int { viewed?.count ?? (cardID != nil ? count : 1) }
     /// The card's header (#286): "Pixie · 3 updates · 2m ago"; the count only when combined.
@@ -242,6 +276,7 @@ public struct QuickChatModel: Equatable, Sendable {
         let gone = history.count - keep.count
         guard gone > 0 else { return false }
         history = Array(keep)
+        dropped += gone
         if let v = viewing {
             if v - gone >= 0 {
                 viewing = v - gone
@@ -554,11 +589,13 @@ public struct QuickChatModel: Equatable, Sendable {
 
     /// An update card (#286): the finished work of sessions, shown on its own like a caption but
     /// never over a typed message at work (it goes into the history, » offers it). The card
-    /// already up comes again with more rows: it is replaced in place. True when it shows.
+    /// already up comes again with more rows: it is replaced in place. A card that shows brings
+    /// the deck to it, the newest, even while you look back. True when it shows.
     @discardableResult
     public mutating func update(_ card: ReplyCard, now: Date = Date()) -> Bool {
         if cardID == card.id, hasCurrent {
             popUp(card, now: now)
+            toNewest()
             return true
         }
         if let i = history.firstIndex(where: { $0.id == card.id }) {
@@ -582,6 +619,7 @@ public struct QuickChatModel: Equatable, Sendable {
         }
         keep(now: now)
         showCard(card, now: now)
+        toNewest()
         return true
     }
 

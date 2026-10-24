@@ -260,14 +260,20 @@ final class UpdatesBubbleController {
 
     private func render() {
         hosting.rootView = AnyView(UpdatesBubbleView(
-            count: model.count, phase: model.phase, current: model.current, position: model.deckPosition,
-            width: UpdatesBubbleView.width(for: model.lines),
+            count: model.count, phase: model.phase, lines: model.lines, current: model.current,
+            position: model.deckPosition, width: UpdatesBubbleView.width(for: model.lines),
             onLine: { [weak self] in self?.clicked($0) },
             onStep: { [weak self] in
                 guard let self else { return }
                 self.model.step($0)
                 self.render()
             },
+            onSelect: { [weak self] in
+                guard let self else { return }
+                self.model.show(id: $0)
+                self.render()
+            },
+            onResize: { [weak self] in DispatchQueue.main.async { self?.layout() } },
             onDecide: { [weak self] token, allow in
                 // A tap within decisionGuard of the buttons appearing is a stray click: ignored.
                 guard let self, self.model.acceptsDecision(token: token, now: Self.now, at: NSEvent.mouseLocation) else { return }

@@ -30,7 +30,8 @@ struct AgentRosterView: View {
     var onStep: (ReplyStep) -> Void = { _ in }
     let attachments: AttachmentUI
     /// The caption's buttons to sessions (#261), and what a click does.
-    var sessionButtons: [RosterRow] = []
+    /// A scroll to another page of the reply deck (#286).
+    var onPage: (Int) -> Void = { _ in }
     var onSession: (String) -> Void = { _ in }
     /// Pixie's "Want me to take this?" for a new copy (#240), nil when not up.
     let offer: ClipboardKind?
@@ -68,7 +69,8 @@ struct AgentRosterView: View {
     private var card: some View {
         QuickChatCard(model: chat, state: chatState, showsInput: chatOpen, ago: ago,
                       onSend: onSend, onStop: onStop, onClose: onCloseChat, onResize: onResize, onDismiss: onDismiss,
-                      onStep: onStep, attachments: attachments, sessions: sessionButtons, onSession: onSession)
+                      onStep: onStep, onPage: onPage, attachments: attachments,
+                      rows: { [view = model.view] in AgentRosterModel.buttons(for: $0, in: view) }, onSession: onSession)
     }
 
     /// The other side's last words, above the caption until they fade (#254).

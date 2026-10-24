@@ -199,6 +199,11 @@ public struct UpdatesBubbleModel: Sendable {
         deckIndex = min(max(0, deckIndex + delta), max(0, lines.count - 1))
     }
 
+    /// Scrolled to `id`'s card (#286); nothing when it isn't listed.
+    public mutating func show(id: UInt64) {
+        if let i = lines.firstIndex(where: { $0.id == id }) { deckIndex = i }
+    }
+
     /// Keeps the deck on `id`'s card if it is still listed, else on the nearest one.
     private mutating func settleDeck(on id: UInt64?) {
         if let id, let i = lines.firstIndex(where: { $0.id == id }) {

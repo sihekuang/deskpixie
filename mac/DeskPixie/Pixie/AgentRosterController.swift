@@ -557,7 +557,11 @@ final class AgentRosterController {
             onDismiss: { [weak self] in self?.dismissWords() },
             onStep: { [weak self] in self?.step($0) },
             attachments: attach == nil ? .none : attachmentUI,
-            sessionButtons: AgentRosterModel.buttons(for: chat.shownSessions, in: model.view),
+            onPage: { [weak self] in
+                guard let self else { return }
+                self.chat.show(page: $0)
+                self.render()
+            },
             onSession: { [weak self] in self?.focusSession($0) },
             offer: offer.kind, onOffer: { [weak self] in self?.takeOffer() })
             .onPreferenceChange(ChipFrameKey.self) { [weak self] frame in

@@ -722,22 +722,6 @@ final class QuickChatModelTests: XCTestCase {
         XCTAssertEqual(m.shownCount, 2)
     }
 
-    func testUpToTwoOlderCardsPeekBehind() {
-        var m = QuickChatModel()
-        _ = m.update(card(1, "one"))
-        XCTAssertEqual(m.peeks, 0)
-        _ = m.update(card(2, "two"))
-        XCTAssertEqual(m.peeks, 1)
-        _ = m.update(card(3, "three"))
-        _ = m.update(card(4, "four"))
-        XCTAssertEqual(m.peeks, 2)
-        m.back(now: Date()); m.back(now: Date())
-        XCTAssertEqual(m.position?.index, 2)
-        XCTAssertEqual(m.peeks, 1)
-        m.back(now: Date())
-        XCTAssertEqual(m.peeks, 0)
-    }
-
     /// #286 tryout: cards restored at launch, fed oldest first, leave the newest on top.
     func testCardsFedInOrderLeaveTheNewestOnTop() {
         var m = QuickChatModel()
@@ -770,6 +754,74 @@ final class QuickChatModelTests: XCTestCase {
         XCTAssertEqual(m.ago(now: t0.addingTimeInterval(10)), "just now")
         XCTAssertFalse(m.dismissIfOlder(than: 120, now: t0.addingTimeInterval(125)))
         XCTAssertTrue(m.dismissIfOlder(than: 120, now: t0.addingTimeInterval(131)))
+    }
+
+    /// #286: the deck's pages keep their ids while the history grows and drops old replies.
+    func testPagesKeepTheirIdsAsTheHistoryMoves() {
+        var m = QuickChatModel()
+        m.historySecs = 100
+        let t0 = Date()
+        _ = m.update(card(1, "one"), now: t0)
+        let first = m.pageID
+        _ = m.update(card(2, "two"), now: t0 + 10)
+        XCTAssertEqual(m.pages.map(\.text), ["one", "two"])
+        XCTAssertEqual(m.pages.first?.id, first, "the shown card keeps its id once it is kept")
+        let second = m.pageID
+        XCTAssertEqual(m.pages.last?.id, second)
+        _ = m.update(card(3, "three"), now: t0 + 105) // "one" drops off
+        XCTAssertEqual(m.pages.map(\.text), ["two", "three"])
+        XCTAssertEqual(m.pages.first?.id, second)
+    }
+
+    func testScrollingToAPageLooksBackOrComesToTheNewest() {
+        var m = QuickChatModel()
+        for i in UInt64(1)...3 { _ = m.update(card(i, "card \(i)")) }
+        let ids = m.pages.map(\.id)
+        m.show(page: ids[0])
+        XCTAssertEqual(m.shownFull, "card 1")
+        XCTAssertEqual(m.position, QuickChatModel.Position(index: 1, count: 3))
+        XCTAssertEqual(m.pageID, ids[0])
+        m.show(page: ids[2])
+        XCTAssertNil(m.viewed)
+        XCTAssertEqual(m.pageID, ids[2])
+        m.show(page: 999)
+        XCTAssertEqual(m.pageID, ids[2], "a page that isn't there changes nothing")
+    }
+
+    /// #286: a new card brings the deck to it, even while you look back.
+    func testANewCardBringsTheDeckToTheNewest() {
+        var m = QuickChatModel()
+        _ = m.update(card(1, "one")); _ = m.update(card(2, "two"))
+        m.back(now: Date())
+        XCTAssertEqual(m.shownFull, "one")
+        _ = m.update(card(3, "three"))
+        XCTAssertEqual(m.shownFull, "three")
+        XCTAssertEqual(m.position, QuickChatModel.Position(index: 3, count: 3))
+        XCTAssertFalse(m.newerWaiting)
+        XCTAssertEqual(m.pageID, m.pages.last?.id)
+    }
+
+    /// #286 tryout: launch as the app runs it. The startup fetch (`agent.replies`, oldest first)
+    /// and live `reply.card` events for the same cards arrive in either order, with the settings
+    /// read (`captions`, mode) in between: the newest card is on top and is the deck's page.
+    func testTheStartupFeedLeavesTheNewestOnTop() {
+        let t0 = Date()
+        let restored = [
+            ReplyCard(id: 1, text: "issues", count: 1, lines: [1], at: t0 - 240),
+            ReplyCard(id: 2, text: "bench", count: 1, lines: [2], at: t0 - 180),
+            ReplyCard(id: 3, text: "three rows", count: 3, lines: [3, 4, 5], at: t0 - 60),
+        ]
+        for liveFirst in [false, true] {
+            var m = QuickChatModel()
+            if liveFirst { for c in restored { _ = m.update(c, now: t0) } }
+            m.mode = "text"; m.historySecs = 300; m.prune(now: t0)
+            for c in restored { _ = m.update(c, now: t0) }
+            if !liveFirst { _ = m.update(restored[2], now: t0) } // a late live copy of the newest
+            XCTAssertEqual(m.cardID, 3, "liveFirst \(liveFirst)")
+            XCTAssertEqual(m.position, QuickChatModel.Position(index: 3, count: 3))
+            XCTAssertEqual(m.pageID, m.pages.last?.id)
+            XCTAssertEqual(m.ago(now: t0), "1m ago")
+        }
     }
 
     func testAnUpdateCardIsPutAwayAfterTheDismissTime() {

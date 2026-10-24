@@ -9,14 +9,19 @@ import SwiftUI
 struct UpdatesBubbleView: View {
     let count: Int
     let phase: UpdatesBubbleModel.Phase
-    /// The deck's card, and where it is ("1 of 1" alone).
+    /// The deck's cards (oldest first), the one shown, and where it is ("1 of 1" alone).
+    let lines: [UpdateLine]
     let current: UpdateLine?
     let position: (index: Int, count: Int)?
     /// The deck keeps one width as you step through it.
     let width: CGFloat
     let onLine: (UpdateLine) -> Void
-    /// The arrows or a swipe: +1 newer, −1 older.
+    /// The arrows: +1 newer, −1 older.
     let onStep: (Int) -> Void
+    /// A scroll to another card, by its id.
+    var onSelect: (UInt64) -> Void = { _ in }
+    /// The deck changed height: the panel is sized from the view.
+    var onResize: () -> Void = {}
     /// Allow or Deny on a permission question (token, allow). The controller ignores a tap that
     /// comes too soon after the buttons appear (`UpdatesBubbleModel.acceptsDecision`).
     let onDecide: (String, Bool) -> Void
@@ -65,15 +70,19 @@ struct UpdatesBubbleView: View {
 
     @ViewBuilder private var bubble: some View {
         if let line = current {
-            card(line)
-                .padding(6)
-                .frame(width: width, alignment: .leading)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.separator))
-                .background(DeckSwipeCatcher(onStep: onStep))
-                .background(alignment: .top) { DeckPeeks(count: count > 1 ? 1 : 0) }
-                .padding(.top, count > 1 ? DeckPeeks.raise : 0)
-                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 2) {
+                header(line)
+                // The cards side by side (#286): a two-finger swipe or the arrows page them.
+                DeckPager(ids: lines.map(\.id), selected: line.id, width: width - 12, anchor: .leading,
+                          onSelect: onSelect, onResize: onResize) { id in
+                    if let l = lines.first(where: { $0.id == id }) { card(l) }
+                }
+            }
+            .padding(6)
+            .frame(width: width, alignment: .leading)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.separator))
+            .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -120,7 +129,6 @@ struct UpdatesBubbleView: View {
 
     private func card(_ line: UpdateLine) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            header(line)
             Button { if !RichTextClicks.takeSpanPress() { onLine(line) } } label: { row(line) }
                 .buttonStyle(.plain)
             if line.offersDecision, let token = line.token {
@@ -186,6 +194,8 @@ struct UpdatesBubbleView: View {
                 .padding(.bottom, 4)
             }
         }
+        .padding(.vertical, 2)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05)))
     }
 
     /// The typed answer's field (#268): Return sends, Esc goes back to the options.

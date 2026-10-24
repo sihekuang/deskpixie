@@ -20,6 +20,17 @@ final class UpdatesBubbleModelTests: XCTestCase {
         XCTAssertEqual(m.deckPosition?.index, 2)
     }
 
+    /// #286: a scroll to a card moves the deck there; an id no longer listed changes nothing.
+    func testAScrollToACardMovesTheDeck() {
+        var m = UpdatesBubbleModel()
+        m.apply([line(1), line(2), line(3)], now: 0, pop: .allowed)
+        m.show(id: 3)
+        XCTAssertEqual(m.current?.id, 3)
+        XCTAssertEqual(m.deckPosition?.index, 3)
+        m.show(id: 9)
+        XCTAssertEqual(m.current?.id, 3)
+    }
+
     func testTheDeckKeepsItsCardWhenOthersArriveAndSaysOneOfOneAlone() {
         var m = UpdatesBubbleModel()
         m.apply([line(1), line(2)], now: 0, pop: .allowed)

@@ -56,10 +56,12 @@ struct QuickChatCard: View {
     let onResize: () -> Void
     let onDismiss: () -> Void
     var onStep: (ReplyStep) -> Void = { _ in }
+    /// A scroll to another page of the deck (#286), by its id.
+    var onPage: (Int) -> Void = { _ in }
     /// The chips, the hint row, 📎 and drops (#240).
     let attachments: AttachmentUI
-    /// Buttons to the sessions the words are about (#261), and what a click does.
-    var sessions: [RosterRow] = []
+    /// Buttons to the sessions a page's words are about (#261), and what a click does.
+    var rows: ([String]) -> [RosterRow] = { _ in [] }
     var onSession: (String) -> Void = { _ in }
 
     static let width: CGFloat = 260
@@ -92,21 +94,12 @@ struct QuickChatCard: View {
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 8)
                 .padding(.top, 4)
-                if !model.shownText.isEmpty {
-                    ScrollView {
-                        // Typed out word by word; its links and files are found in all of it (#277).
-                        RichMessage(text: model.shownFull, shown: model.shownText, sessions: model.shownSessions,
-                                    selectable: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                if model.pageID != nil, !(model.shownText.isEmpty && model.pages.count < 2) {
+                    // The replies side by side (#286): a two-finger swipe or the arrows page them.
+                    DeckPager(ids: model.pages.map(\.id), selected: model.pageID, width: Self.width - 12,
+                              onSelect: onPage, onResize: onResize) { id in
+                        if let p = model.pages.first(where: { $0.id == id }) { page(p) }
                     }
-                    .frame(maxHeight: 180)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 8)
-                }
-                if !sessions.isEmpty {
-                    SessionButtons(sessions: sessions, onSession: onSession)
-                        .padding(.horizontal, 8)
-                        .padding(.top, 2)
                 }
                 if model.phase == .stopped && model.viewed == nil {
                     Text("Stopped.")
@@ -198,10 +191,6 @@ struct QuickChatCard: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.separator))
         .onDrop(of: [.fileURL, .image], isTargeted: nil, perform: attachments.onDrop)
-        // A two-finger swipe steps like the arrows (#286); older cards peek out above.
-        .background(DeckSwipeCatcher { onStep($0 < 0 ? .back : .forward) })
-        .background(alignment: .top) { DeckPeeks(count: model.peeks) }
-        .padding(.top, CGFloat(model.peeks) * DeckPeeks.raise)
         .onAppear { if showsInput { focused = true } }
         .onChange(of: state.focusRequests) { focused = true }
         // The panel is sized from the view: a taller field needs a new frame.
@@ -209,35 +198,28 @@ struct QuickChatCard: View {
         .onChange(of: attachments.model) { onResize() }
     }
 
-    private var canSend: Bool { model.canSend(state.draft, attachments: attachments.model.items.count) }
-}
-
-/// The edges of older cards behind a deck's top card (#286): each inset 8 pt per side and raised
-/// 7 pt, fainter the further back. Drawn as a background aligned to the card's top; the card
-/// leaves `raise` per peek of room above itself.
-struct DeckPeeks: View {
-    let count: Int
-
-    static let inset: CGFloat = 8
-    static let raise: CGFloat = 7
-    private static let opacities: [Double] = [0.75, 0.55]
-
-    var body: some View {
-        ZStack(alignment: .top) {
-            ForEach((0..<min(count, Self.opacities.count)).reversed(), id: \.self) { i in
-                let k = CGFloat(i + 1)
-                // Only the edge shows: it reaches just under the card's rounded top.
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(.regularMaterial)
-                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.separator))
-                    .frame(height: k * Self.raise + 14)
-                    .padding(.horizontal, k * Self.inset)
-                    .offset(y: -k * Self.raise)
-                    .opacity(Self.opacities[i])
+    /// One reply: its words (typed out word by word; links and files are found in all of it,
+    /// #277), scrolling when long, and buttons to the sessions it is about.
+    private func page(_ p: QuickChatModel.Page) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if !p.shown.isEmpty {
+                ScrollView {
+                    RichMessage(text: p.text, shown: p.shown, sessions: p.sessions, selectable: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 180)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            let buttons = rows(p.sessions)
+            if !buttons.isEmpty {
+                SessionButtons(sessions: buttons, onSession: onSession, maxWidth: Self.width - 12 - 2 * DeckPager<Int, EmptyView>.peek - 12)
             }
         }
-        .allowsHitTesting(false)
+        .padding(6)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05)))
     }
+
+    private var canSend: Bool { model.canSend(state.draft, attachments: attachments.model.items.count) }
 }
 
 /// What the card's arrows ask for (#263).
@@ -298,6 +280,7 @@ struct ReplyArrows: View {
 struct SessionButtons: View {
     let sessions: [RosterRow]
     let onSession: (String) -> Void
+    var maxWidth: CGFloat = QuickChatCard.width - 16
 
     var body: some View {
         FlowLayout(spacing: 6) {
@@ -314,7 +297,7 @@ struct SessionButtons: View {
                     .font(.caption.weight(.semibold))
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
-                    .frame(maxWidth: QuickChatCard.width - 16, alignment: .leading)
+                    .frame(maxWidth: maxWidth, alignment: .leading)
                     .background(Capsule().fill(.regularMaterial))
                     .overlay(Capsule().strokeBorder(.separator))
                     .contentShape(Capsule())
