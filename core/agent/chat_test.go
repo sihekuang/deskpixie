@@ -40,6 +40,14 @@ func wantChat(t *testing.T, fx []Effect, want ...ChatLine) {
 	}
 }
 
+// notSaid: nothing of the line was spoken, notified or chimed, and no conversation opened for it.
+func notSaid(t *testing.T, fx []Effect) {
+	t.Helper()
+	if anyKind(fx, EfInject, EfNotify, EfChime, EfOpenConversation) {
+		t.Fatalf("said: %s", fmtEffects(fx))
+	}
+}
+
 // noUsualRoute: nothing of the line was spoken, notified, chimed or put in the outbox.
 func noUsualRoute(t *testing.T, fx []Effect) {
 	t.Helper()
@@ -75,7 +83,7 @@ func TestATypedJobsProgressAndQuestionGoToTheCard(t *testing.T) {
 	noUsualRoute(t, fx)
 	fx = stop(c, `<spoken ref="job_000000000001" status="question">Which repo?</spoken>`, T0+30)
 	wantChat(t, fx, ChatLine{Job: job(1), Status: "question", Text: "Which repo?"})
-	noUsualRoute(t, fx)
+	notSaid(t, fx) // kept as heard, so it waits on the badge too (#286 call 7)
 }
 
 func TestATypedJobThatFailsOrStopsSaysSoInTheCard(t *testing.T) {
@@ -235,7 +243,7 @@ func TestASessionsQuestionAboutATypedMessageAsksInTheBox(t *testing.T) {
 	c := handedOffTyped(t)
 	fx := sessionTurn(c, pixieTurn("Should I also fix the logout page?"), T0+20)
 	wantChat(t, fx, ChatLine{Job: job(1), Status: "question", Text: "Should I also fix the logout page?"})
-	noUsualRoute(t, fx)
+	notSaid(t, fx) // kept as heard, so it waits on the badge too (#286 call 7)
 }
 
 // When the box no longer shows that message (voice mode, or a newer typed one), the reply

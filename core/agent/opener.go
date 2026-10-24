@@ -68,6 +68,7 @@ func (c *AgentController) tryOpen(now Millis, fx *[]Effect) {
 	if o.waiting.set && satSub(now, o.waiting.v) >= OpenWaitMs {
 		o.waiting = optMs{}
 		o.retry = true
+		c.releaseHeldCards(now, fx)
 	}
 	if c.away {
 		return
@@ -115,13 +116,19 @@ func (c *AgentController) openRefused(now Millis, fx *[]Effect) {
 }
 
 // openerSaw is told of the voice loop's Opened and Closed: whichever comes ends the wait.
-// Opened replays the outbox; a Closed while waiting is a failed connect, not retried until the
-// next update. A Closed with no open asked for (the conversation that made Pixie busy ended)
-// leaves a refused open to the next tick.
-func (c *AgentController) openerSaw(kind voice.SignalKind) {
+// Opened replays the outbox (the conversation says the held cards); a Closed while waiting is a
+// failed connect, not retried until the next update, so the held cards show. A Closed with no
+// open asked for (the conversation that made Pixie busy ended) leaves a refused open to the
+// next tick.
+func (c *AgentController) openerSaw(kind voice.SignalKind, now Millis, fx *[]Effect) {
 	o := c.opener
-	if kind == voice.SigOpened || o.waiting.set {
+	switch {
+	case kind == voice.SigOpened:
 		o.retry = false
+		c.dropHeldCards()
+	case o.waiting.set:
+		o.retry = false
+		c.releaseHeldCards(now, fx)
 	}
 	o.waiting = optMs{}
 }

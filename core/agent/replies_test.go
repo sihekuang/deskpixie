@@ -139,3 +139,175 @@ func TestAnAlertingLineGetsNoCard(t *testing.T) {
 		t.Fatalf("%d cards for a question", n)
 	}
 }
+
+// #286 table: open-for-updates holds the card while Pixie opens a conversation to say it.
+func TestOpenForUpdatesHoldsTheCardWhileItOpens(t *testing.T) {
+	c := ctlWith(func(s *Settings) { s.OpenConversation = true; s.SessionTurns = true })
+	fx := sessionTurn(c, longTurn, T0)
+	if len(replies(fx)) != 0 {
+		t.Fatal("a card while Pixie opens a conversation to say it")
+	}
+	wantContains(t, fx, Effect{Kind: EfOpenConversation}, "opens")
+}
+
+func TestAFailedOpenStillShowsTheCard(t *testing.T) {
+	c := ctlWith(func(s *Settings) { s.OpenConversation = true; s.SessionTurns = true })
+	sessionTurn(c, longTurn, T0)
+	fx := c.Step(VoiceInput(VoiceSignal{Kind: voice.SigClosed}), T0+1_000) // failed connect
+	if len(replies(fx)) != 1 {
+		t.Fatal(fmtEffects(fx))
+	}
+}
+
+func TestAnOpenThatNeverReportsShowsTheCard(t *testing.T) {
+	c := ctlWith(func(s *Settings) { s.OpenConversation = true; s.SessionTurns = true })
+	sessionTurn(c, longTurn, T0)
+	if fx := c.Step(TickInput(), T0+OpenWaitMs-1); len(replies(fx)) != 0 {
+		t.Fatalf("shown before the wait ran out: %s", fmtEffects(fx))
+	}
+	if fx := c.Step(TickInput(), T0+OpenWaitMs); len(replies(fx)) != 1 {
+		t.Fatal(fmtEffects(fx))
+	}
+}
+
+// An opened conversation says the update, and its caption is the card: the held one is dropped,
+// and the next update doesn't join it.
+func TestAnOpenedConversationDropsTheHeldCard(t *testing.T) {
+	c := ctlWith(func(s *Settings) { s.OpenConversation = true; s.SessionTurns = true })
+	sessionTurn(c, longTurn, T0)
+	if fx := c.Step(voiceOpened(), T0+500); len(replies(fx)) != 0 {
+		t.Fatal(fmtEffects(fx))
+	}
+	if fx := c.Step(voiceClosed(), T0+1_000); len(replies(fx)) != 0 {
+		t.Fatalf("released after it was said: %s", fmtEffects(fx))
+	}
+	c.Step(TextModeInput(true), T0+1_500)
+	other := longTurn
+	other.Label = "live-like: benchmark"
+	cards := replies(sessionTurn(c, other, T0+2_000))
+	if len(cards) != 1 || cards[0].Count != 1 {
+		t.Fatalf("joined a card that was said: %+v", cards)
+	}
+}
+
+// Once no open is coming (here: refused, to be retried, then text mode turned on), the card
+// shows at once.
+func TestAHeldCardShowsWhenNoOpenIsComing(t *testing.T) {
+	c := ctlWith(func(s *Settings) { s.OpenConversation = true; s.SessionTurns = true })
+	sessionTurn(c, longTurn, T0)
+	if fx := c.Step(OpenRefusedInput(), T0+50); len(replies(fx)) != 0 {
+		t.Fatalf("a refused open is retried: %s", fmtEffects(fx))
+	}
+	if fx := c.Step(TextModeInput(true), T0+100); len(replies(fx)) != 1 {
+		t.Fatal(fmtEffects(fx))
+	}
+}
+
+func TestTextModeShowsTheCardWithOpenForUpdatesOn(t *testing.T) {
+	c := ctlWith(func(s *Settings) { s.OpenConversation = true; s.SessionTurns = true })
+	c.Step(TextModeInput(true), T0)
+	if len(replies(sessionTurn(c, longTurn, T0+10))) != 1 {
+		t.Fatal("no card in text mode")
+	}
+}
+
+func TestASpokenQuestionWaitsOnTheBadge(t *testing.T) {
+	c := workingOnJob1()
+	c.Step(VoiceInput(VoiceSignal{Kind: voice.SigOpened}), T0)
+	stop(c, `<spoken ref="job_000000000001" status="question">Which branch?</spoken>`, T0+10)
+	if got := c.Updates(); len(got) != 1 || got[0].Kind != LineQuestion {
+		t.Fatalf("%+v", got)
+	}
+}
+
+// A session asking in a conversation is said, and waits on the badge until its next turn.
+func TestASpokenSessionQuestionWaitsOnTheBadge(t *testing.T) {
+	c := ctlWith(func(s *Settings) { s.SessionTurns = true })
+	openVoice(c)
+	asking := longTurn
+	asking.Reply = "Shall I go ahead and push?"
+	fx := sessionTurn(c, asking, T0+10)
+	if !anyKind(fx, EfInject) {
+		t.Fatalf("not said: %s", fmtEffects(fx))
+	}
+	if got := c.Updates(); len(got) != 1 || !got[0].Asking {
+		t.Fatalf("%+v", got)
+	}
+	sessionTurn(c, longTurn, T0+20)
+	if got := c.Updates(); len(got) != 0 {
+		t.Fatalf("still asking after its next turn: %+v", got)
+	}
+}
+
+func TestATypedJobsQuestionIsInTheCardAndOnTheBadge(t *testing.T) {
+	c := typedOnJob1()
+	fx := stop(c, `<spoken ref="job_000000000001" status="question">Which branch?</spoken>`, T0+10)
+	wantChat(t, fx, ChatLine{Job: job(1), Status: "question", Text: "Which branch?"})
+	if got := c.Updates(); len(got) != 1 {
+		t.Fatalf("%+v", got)
+	}
+}
+
+// Call 7: a session's question about a message typed in the box is in the box and on the badge.
+func TestASessionsQuestionInTheBoxIsOnTheBadge(t *testing.T) {
+	c := handedOffTyped(t)
+	sessionTurn(c, pixieTurn("Should I also fix the logout page?"), T0+20)
+	if got := c.Updates(); len(got) != 1 || !got[0].Asking || got[0].Session != "api-claude" {
+		t.Fatalf("%+v", got)
+	}
+	sessionTurn(c, pixieTurn("The logout page is fixed too."), T0+40)
+	if got := c.Updates(); len(got) != 0 {
+		t.Fatalf("%+v", got)
+	}
+}
+
+// askedLine: the outbox line of the session's question.
+func askedLine(t *testing.T, c *AgentController) OutboxLine {
+	t.Helper()
+	for _, l := range c.outbox.lines {
+		if l.Asking {
+			return l
+		}
+	}
+	t.Fatal("no question in the outbox")
+	return OutboxLine{}
+}
+
+// A session that moved on (a turn of its own that isn't told) or ended has answered its
+// question: it is marked delivered, so a later conversation doesn't say it.
+func TestASessionsAnsweredQuestionIsNotReplayed(t *testing.T) {
+	asking := longTurn
+	asking.Reply = "Shall I go ahead and push?"
+	for name, after := range map[string]func(c *AgentController) []Effect{
+		"an untold turn": func(c *AgentController) []Effect {
+			short := longTurn
+			short.Duration = 1_000
+			return sessionTurn(c, short, T0+10)
+		},
+		"session end": func(c *AgentController) []Effect {
+			return c.Step(PaneInput(PaneEvent{Kind: PaneEventExited, Agent: "api-claude"}), T0+10)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := ctlWith(func(s *Settings) { s.SessionTurns = true })
+			sessionTurn(c, asking, T0)
+			fx := after(c)
+			l := askedLine(t, c)
+			if !l.Delivered {
+				t.Fatalf("still undelivered: %+v", l)
+			}
+			wantContains(t, fx, Effect{Kind: EfAppend, File: OutboxFile, Line: l.record()}, "saved")
+			if got := c.Updates(); len(got) != 0 {
+				t.Fatalf("%+v", got)
+			}
+		})
+	}
+}
+
+// A restart rebuilds a session's open question only from one still undelivered.
+func TestARestartDropsADeliveredSessionQuestion(t *testing.T) {
+	ask := OutboxLine{Kind: LineSession, Session: "api-claude", Asking: true, Text: "api: asks", Delivered: true}
+	if got := restoredCtl(ask).Updates(); len(got) != 0 {
+		t.Fatalf("%+v", got)
+	}
+}

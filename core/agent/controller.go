@@ -509,10 +509,13 @@ type AgentController struct {
 	typedTo map[string]JobID
 	// jobSessions: the sessions each job was passed to, in order (#261).
 	jobSessions map[JobID][]string
-	// asking: each session's open question, the outbox line id; its next turn clears it (#286).
+	// asking: each session's open question, the outbox line id; its next turn or its end
+	// clears it (#286).
 	asking map[string]uint64
-	// lastCard: the reply card the next update may join (#286).
-	lastCard *ReplyCard
+	// lastCard: the reply card the next update may join (#286). heldCards: cards held while
+	// Pixie opens a conversation to say them, shown if it can't.
+	lastCard  *ReplyCard
+	heldCards []ReplyCard
 	// boxAsker: the session whose question the box shows, answered from the box (#241).
 	boxAsker string
 	// boxAnswered: the typed job a session already answered in the box; the coordinator's
@@ -709,6 +712,7 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 			c.onWorkerStatus(ev.Agent, ev.Status, now, &fx)
 		default:
 			c.confirms.TakeSession(ev.Agent, "") // a session that closed asks nothing any more
+			c.dropAsking(ev.Agent, &fx)
 			c.workerGone(ev.Agent, now, &fx)
 		}
 	case InMode:
@@ -736,12 +740,12 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 	case InVoice:
 		switch in.Voice.Kind {
 		case voice.SigOpened:
-			c.openerSaw(voice.SigOpened)
+			c.openerSaw(voice.SigOpened, now, &fx)
 			c.voiceOpened(&fx)
 			// #118: a request made in this conversation never waits on a cold start.
 			c.ensureCoordinator(&fx)
 		case voice.SigClosed:
-			c.openerSaw(voice.SigClosed)
+			c.openerSaw(voice.SigClosed, now, &fx)
 			c.conversationClosed(now, &fx)
 			for _, n := range in.Voice.Undelivered {
 				c.reroute(n, now, &fx)
@@ -847,6 +851,7 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 	// A question answered or decided puts its job back to work: the hold follows (#119).
 	c.syncHold(&fx)
 	c.syncCoordTab(&fx)
+	c.settleHeldCards(now, &fx)
 	c.syncUpdates(&fx)
 	return fx
 }
@@ -923,7 +928,7 @@ func (c *AgentController) restore(jobs, outbox []string, keep bool, now Millis, 
 		if l.Session == "" || l.Kind != LineSession {
 			continue // live, only a session's turn opens or clears its question
 		}
-		if l.Asking {
+		if l.Asking && !l.Delivered { // delivered: answered (dropAsking) or said before the restart
 			c.asking[l.Session] = l.ID
 		} else {
 			delete(c.asking, l.Session)
@@ -1829,7 +1834,7 @@ const MaxSessionDetailBytes = 2 << 10
 // (never held by the cap). Pending confirm words are masked in all of it: the label is
 // agent-settable too.
 func (c *AgentController) onSessionTurn(name string, t SessionTurn, now Millis, fx *[]Effect) {
-	delete(c.asking, name)
+	c.dropAsking(name, fx)
 	if c.shutDown {
 		return
 	}
@@ -1846,21 +1851,8 @@ func (c *AgentController) onSessionTurn(name string, t SessionTurn, now Millis, 
 	if !told {
 		return
 	}
-	if job, ok := c.typedTo[name]; ok {
-		if c.boxShows(job) {
-			// #241: the answer to a message typed in the box, so it goes there.
-			status := "done"
-			c.boxAsker = ""
-			if asking {
-				status, c.boxAsker = "question", name
-			}
-			c.boxAnswered = job
-			*fx = append(*fx, Effect{Kind: EfChat, Chat: ChatLine{Job: job, Status: status, Text: SessionTurnBrief(gist), Sessions: []string{name}}})
-			return
-		}
-	}
 	label := maskPendingTokens(t.Label, tokens)
-	c.deliverUpdate(Line{
+	line := Line{
 		Kind:    LineSession,
 		Text:    SessionTurnLine(label, gist, asking),
 		Title:   label,
@@ -1869,13 +1861,29 @@ func (c *AgentController) onSessionTurn(name string, t SessionTurn, now Millis, 
 		App:     t.App,
 		Session: name,
 		Detail:  truncateBytes(strings.Join(strings.Fields(reply), " "), MaxSessionDetailBytes),
-	}, now, fx)
+	}
+	if job, ok := c.typedTo[name]; ok {
+		if c.boxShows(job) {
+			// #241: the answer to a message typed in the box, so it goes there.
+			status := "done"
+			c.boxAsker = ""
+			if asking {
+				status, c.boxAsker = "question", name
+				c.keepHeardAlert(line, now, fx) // on the badge too, until answered (#286 call 7)
+			}
+			c.boxAnswered = job
+			*fx = append(*fx, Effect{Kind: EfChat, Chat: ChatLine{Job: job, Status: status, Text: SessionTurnBrief(gist), Sessions: []string{name}}})
+			return
+		}
+	}
+	c.deliverUpdate(line, now, fx)
 }
 
 func (c *AgentController) deliverUpdate(line Line, now Millis, fx *[]Effect) {
 	for _, d := range c.router.RouteUpdate(c.voiceOpen, line, now) {
 		if d.Kind == DeliverInject {
 			d.Notice = c.remember(d.Notice, []Line{line})
+			c.keepHeardAlert(line, now, fx)
 		}
 		c.applyDelivery(d, now, fx)
 	}
@@ -1973,6 +1981,7 @@ func (c *AgentController) deliver(line Line, now Millis, fx *[]Effect) bool {
 	if c.typed[line.Job] {
 		*fx = append(*fx, Effect{Kind: EfChat, Chat: c.chatLine(line)})
 		if line.Token == nil {
+			c.keepHeardAlert(line, now, fx) // a question is on the badge too, until answered (#286 call 7)
 			return true
 		}
 		// A permission request also goes where it can be allowed: the bubble or a notification.
@@ -1981,6 +1990,7 @@ func (c *AgentController) deliver(line Line, now Millis, fx *[]Effect) bool {
 	for _, d := range c.router.Route(c.voiceOpen, line, now) {
 		if d.Kind == DeliverInject {
 			d.Notice = c.remember(d.Notice, []Line{line})
+			c.keepHeardAlert(line, now, fx)
 		}
 		reached = reached || d.Kind == DeliverInject || d.Kind == DeliverNotify
 		c.applyDelivery(d, now, fx)
@@ -2125,9 +2135,7 @@ func (c *AgentController) applyDelivery(d RouteDelivery, now Millis, fx *[]Effec
 		*fx = append(*fx, Effect{Kind: EfAppend, File: OutboxFile, Line: record})
 		c.attachNotification(*fx, d.Line)
 		pushed := c.outbox.lines[len(c.outbox.lines)-1]
-		if d.Line.Asking && d.Line.Session != "" {
-			c.asking[d.Line.Session] = pushed.ID
-		}
+		c.noteAsking(pushed)
 		if !alerting(pushed) {
 			c.cardFor(pushed, fx)
 		}

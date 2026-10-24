@@ -65,7 +65,43 @@ func (c *AgentController) cardFor(l OutboxLine, fx *[]Effect) {
 	card := *c.lastCard
 	card.Lines = append([]uint64(nil), card.Lines...)
 	card.Sessions = append([]string(nil), card.Sessions...)
+	if c.settings.OpenConversation && !c.textMode && !c.voiceOpen && !c.away {
+		// Pixie opens a conversation to say it, and its caption is the card: held until then,
+		// shown if it can't open (releaseHeldCards).
+		if n := len(c.heldCards); n > 0 && c.heldCards[n-1].ID == card.ID {
+			c.heldCards[n-1] = card
+		} else {
+			c.heldCards = append(c.heldCards, card)
+		}
+		return
+	}
 	*fx = append(*fx, Effect{Kind: EfReply, Reply: &card})
+}
+
+// releaseHeldCards: the conversation that was to say the held cards can't open: they show.
+func (c *AgentController) releaseHeldCards(now Millis, fx *[]Effect) {
+	for i := range c.heldCards {
+		*fx = append(*fx, Effect{Kind: EfReply, Reply: &c.heldCards[i]})
+	}
+	c.heldCards = nil
+}
+
+// dropHeldCards: a conversation opened and says them; the next update starts a card of its own.
+func (c *AgentController) dropHeldCards() {
+	if len(c.heldCards) > 0 {
+		c.heldCards, c.lastCard = nil, nil
+	}
+}
+
+// settleHeldCards (every Step ends here): held cards show once no open is on its way (none
+// asked for or to be retried, or it can't be any more: text mode, the setting off), so an
+// update is never left showing nowhere.
+func (c *AgentController) settleHeldCards(now Millis, fx *[]Effect) {
+	o := c.opener
+	coming := o.waiting.set || (o.retry && c.settings.OpenConversation && !c.textMode && !c.shutDown)
+	if len(c.heldCards) > 0 && !coming {
+		c.releaseHeldCards(now, fx)
+	}
 }
 
 // repliesShown marks the lines of a card the deck showed delivered, so they aren't replayed.

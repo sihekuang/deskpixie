@@ -62,6 +62,37 @@ func (c *AgentController) unresolved(l OutboxLine) bool {
 	return !l.Delivered
 }
 
+// keepHeardAlert: an alerting line said in a conversation or shown in the text box never
+// reaches the outbox; it is kept there as heard, so it waits on the badge until answered and a
+// later conversation doesn't say it again (#286).
+func (c *AgentController) keepHeardAlert(line Line, now Millis, fx *[]Effect) {
+	if !alerting(OutboxLine{Kind: line.Kind, Asking: line.Asking}) {
+		return
+	}
+	*fx = append(*fx, Effect{Kind: EfAppend, File: OutboxFile, Line: c.outbox.PushHeard(line, now)})
+	c.noteAsking(c.outbox.lines[len(c.outbox.lines)-1])
+}
+
+// noteAsking: l, just added to the outbox, is its session's open question if it asks.
+func (c *AgentController) noteAsking(l OutboxLine) {
+	if l.Asking && l.Session != "" {
+		c.asking[l.Session] = l.ID
+	}
+}
+
+// dropAsking: session took its next turn or ended, so its open question is answered: it leaves
+// the badge and is marked delivered, so a later conversation doesn't replay it.
+func (c *AgentController) dropAsking(session string, fx *[]Effect) {
+	id, ok := c.asking[session]
+	if !ok {
+		return
+	}
+	delete(c.asking, session)
+	for _, r := range c.outbox.MarkDeliveredWhere(func(l OutboxLine) bool { return l.ID == id }) {
+		*fx = append(*fx, Effect{Kind: EfAppend, File: OutboxFile, Line: r})
+	}
+}
+
 // bubbleItems: the alerting lines still unresolved: permission questions pending (heard or
 // not, so Allow and Deny stay reachable, #97), job questions, sessions asking. Never nil.
 func (c *AgentController) bubbleItems() []UpdateItem {
