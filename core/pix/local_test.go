@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 type fakeLocal struct {
@@ -15,9 +16,11 @@ type fakeLocal struct {
 	payloads []map[string]any
 	desc     string
 	reply    string
+	delay    time.Duration // before each reply
 }
 
 func (f *fakeLocal) Hook(ev string, p map[string]any) string {
+	time.Sleep(f.delay)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.events = append(f.events, ev)
@@ -61,6 +64,30 @@ func TestHookPayloadFromArgument(t *testing.T) {
 	RunHook("Stop", sock, `{"type":"agent-turn-complete"}`, strings.NewReader("must not be read"), &out)
 	if len(f.payloads) != 1 || f.payloads[0]["type"] != "agent-turn-complete" {
 		t.Fatalf("%v", f.payloads)
+	}
+}
+
+// #268: a question's hook waits for Pixie's answer, past the usual deadlines; other hooks don't.
+func TestAHeldHookOutlastsTheUsualDeadlines(t *testing.T) {
+	defer func(a, b time.Duration) { hookWait, localDeadline = a, b }(hookWait, localDeadline)
+	hookWait, localDeadline = 100*time.Millisecond, 100*time.Millisecond
+	f := &fakeLocal{reply: `{"hookSpecificOutput":{}}`, delay: 300 * time.Millisecond}
+	sock := serveFake(t, f)
+	for ev, want := range map[string]bool{"PermissionRequest": true, "PreToolUse": true, "Stop": false} {
+		var out bytes.Buffer
+		RunHook(ev, sock, "", strings.NewReader("{}"), &out)
+		if got := out.Len() > 0; got != want {
+			t.Errorf("%s: replied %v, want %v", ev, got, want)
+		}
+	}
+	// Every request reached Hook, so no connection still reads the deadlines put back above.
+	for deadline := time.Now().Add(2 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		f.mu.Lock()
+		n := len(f.events)
+		f.mu.Unlock()
+		if n == 3 || time.Now().After(deadline) {
+			break
+		}
 	}
 }
 

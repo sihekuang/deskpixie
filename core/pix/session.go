@@ -91,6 +91,7 @@ type Session struct {
 	landing   *landing   // an answer typed from Pixie, until its prompt leaves the screen (#268)
 	screen    string     // what the agent's screen shows now, without spaces (#268)
 	qseq      int
+	hold      time.Duration // how long a question waits in its hook for Pixie (0: not held, #268)
 
 	turnStart     time.Time        // when this turn went working (zero: none seen)
 	turnFromPixie bool             // a prompt of this turn was Pixie's
@@ -251,9 +252,20 @@ func (s *Session) Hook(event string, p map[string]any) string {
 	switch event {
 	case "PreToolUse":
 		if name, _ := p["tool_name"].(string); name == "AskUserQuestion" {
-			text, options := menuOf(p["tool_input"])
-			s.ask(&question{kind: "menu", options: len(options), marker: claudeMenu, detail: firstRunes(text, 24)},
-				wire.Msg{Source: "menu", Text: text, Keys: options})
+			text, options, details := menuOf(p["tool_input"])
+			q := &question{kind: "menu", options: len(options), marker: claudeMenu, detail: firstRunes(text, 24)}
+			wait := s.holdFor()
+			if wait > 0 && len(options) > 0 { // held: Pixie answers it through this hook (#268)
+				q.hold, q.labels = newHold(), options
+				q.input, _ = p["tool_input"].(map[string]any)
+			}
+			ev := wire.Msg{Source: "menu", Text: text, Keys: options}
+			if q.hold != nil {
+				ev.Details, ev.Typed = details, true
+			}
+			if s.ask(q, ev) && q.hold != nil {
+				return s.await(q, wait)
+			}
 		}
 		return ""
 	case "PermissionRequest":
@@ -263,10 +275,15 @@ func (s *Session) Hook(event string, p map[string]any) string {
 			ev := wire.Msg{Source: "permission", ToolName: name, Input: string(input)}
 			q := &question{kind: "permission", marker: claudePermission, detail: claudeDetail(name, p["tool_input"]),
 				read: func(lines []string) (dialog, bool) { return readDialog(lines, claudePermission) }}
+			wait := s.holdFor()
 			if !claudeAnswerable(name) || q.detail == "" {
 				q, ev.Source = &question{kind: "notice"}, "notice" // answered in its terminal only
+			} else if wait > 0 { // held: its dialog shows meanwhile, so you can answer it there too
+				q.hold, q.suggestions = newHold(), p["permission_suggestions"]
 			}
-			s.ask(q, ev)
+			if s.ask(q, ev) && q.hold != nil {
+				return s.await(q, wait)
+			}
 		}
 		return ""
 	case "UserPromptSubmit":
@@ -661,6 +678,7 @@ func (s *Session) start(ctx context.Context) error {
 			changed := s.outdated != reply.Outdated
 			s.outdated = reply.Outdated
 			s.mu.Unlock()
+			s.setHold(time.Duration(reply.DurationMs) * time.Millisecond)
 			if changed {
 				s.title()
 			}
@@ -672,8 +690,12 @@ func (s *Session) start(ctx context.Context) error {
 			s.mu.Unlock()
 			s.title()
 		},
-		Resend:    s.resend,
-		OnDropped: func() { s.o.log.Printf("lost DeskPixie; reconnecting") },
+		Resend: s.resend,
+		OnDropped: func() {
+			s.o.log.Printf("lost DeskPixie; reconnecting")
+			s.setHold(0) // nobody would see a question; registering again says how long to hold
+			s.letHeldGo()
+		},
 	}
 	s.o.log.Printf("start in %s (%s)", cwd, strings.TrimSpace(s.o.where+" "+s.o.app))
 	if err := s.runner.Start(); err != nil {

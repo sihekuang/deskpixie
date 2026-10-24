@@ -30,6 +30,11 @@ public struct UpdateLine: Codable, Sendable, Equatable, Identifiable {
     public let options: [String]?
     /// Shown small under the line, never said: a session dialog's command (#105).
     public let note: String?
+    /// A session menu's option descriptions, "" for none (#268).
+    public let details: [String]?
+    /// The menu also takes a typed answer (`agent.typedAnswer`) and "Chat about this"
+    /// (`agent.chatAbout`), as its terminal does (#268).
+    public let typed: Bool?
 
     /// What the row says: the brief when there is one, else the full text.
     public var shownText: String {
@@ -43,10 +48,19 @@ public struct UpdateLine: Codable, Sendable, Equatable, Identifiable {
     /// Whether the row shows one button per option (a session's menu, #105).
     public var offersOptions: Bool { kind == "question" && token != nil && !(options ?? []).isEmpty }
 
+    /// Whether the menu also shows "Type something…" and "Chat about this" (#268).
+    public var offersTyped: Bool { offersOptions && typed == true }
+
+    /// Option i's description, or nil when it has none.
+    public func detail(of i: Int) -> String? {
+        guard let details, details.indices.contains(i), !details[i].isEmpty else { return nil }
+        return details[i]
+    }
+
     public init(id: UInt64, text: String, kind: String, at: Int64, job: String?, worker: String?,
                 token: String? = nil, app: String? = nil, session: String? = nil,
                 title: String? = nil, brief: String? = nil, asking: Bool? = nil,
-                options: [String]? = nil, note: String? = nil) {
+                options: [String]? = nil, note: String? = nil, details: [String]? = nil, typed: Bool? = nil) {
         self.id = id
         self.text = text
         self.kind = kind
@@ -61,6 +75,8 @@ public struct UpdateLine: Codable, Sendable, Equatable, Identifiable {
         self.asking = asking
         self.options = options
         self.note = note
+        self.details = details
+        self.typed = typed
     }
 }
 
@@ -138,6 +154,10 @@ public struct UpdatesBubbleModel: Sendable {
     private var hoverOpened: Set<String> = []
     /// Lines clicked away (#194): left out of the core's lists until it drops them too.
     private var dismissed: Set<UInt64> = []
+    /// The menu (by token) whose answer you are typing in the bubble (#268): it stays open.
+    public private(set) var typing: String?
+    /// The pointer left while you typed: the bubble closes once the typing ends.
+    private var leftWhileTyping = false
 
     public init(popSecs: TimeInterval = 6, maxLines: Int = 5) {
         self.popSecs = popSecs
@@ -174,9 +194,14 @@ public struct UpdatesBubbleModel: Sendable {
         let ids = Set(new.map(\.id))
         dismissed = dismissed.filter { ids.contains($0) }
         let new = new.filter { !dismissed.contains($0.id) }
+        let typingEnded = typing.map { t in !new.contains(where: { $0.token == t && $0.offersTyped }) } ?? false
         let old = Set(lines.map(\.id))
         let added = new.filter { !old.contains($0.id) }
         lines = new
+        if typingEnded { // answered elsewhere, or its wait ran out
+            typing = nil
+            if leftWhileTyping { pointerLeft() }
+        }
         if isExpanded, !added.isEmpty {
             frozen = added.reversed() + (frozen ?? [])
         }
@@ -209,6 +234,7 @@ public struct UpdatesBubbleModel: Sendable {
     /// The pointer entered the bubble or badge at `at` (a click also lands here): open it.
     public mutating func pointerEntered(now: TimeInterval, at: CGPoint? = nil) {
         guard !lines.isEmpty || isPopped else { return }
+        leftWhileTyping = false
         phase = .expanded(since: now)
         frozen = lines.reversed()
         let before = Set(decisionsSince.keys)
@@ -219,8 +245,29 @@ public struct UpdatesBubbleModel: Sendable {
         hoverOpened = Set(decisionsSince.keys).subtracting(before)
     }
 
-    /// The pointer left: back to the badge, or hidden when nothing unheard is left.
+    /// "Type something…" on the menu with token: the bubble holds a field for its answer and
+    /// stays open until it is sent or put away. False when that menu takes no typed answer.
+    public mutating func startTyping(token: String) -> Bool {
+        guard display.contains(where: { $0.token == token && $0.offersTyped }) else { return false }
+        typing = token
+        return true
+    }
+
+    /// The typed answer was sent or put away (Esc, a click elsewhere).
+    public mutating func stopTyping(pointerInside: Bool = false) {
+        guard typing != nil else { return }
+        typing = nil
+        if !pointerInside || leftWhileTyping { pointerLeft() }
+    }
+
+    /// The pointer left: back to the badge, or hidden when nothing unheard is left. Not while you
+    /// type an answer in it.
     public mutating func pointerLeft() {
+        if typing != nil {
+            leftWhileTyping = true
+            return
+        }
+        leftWhileTyping = false
         frozen = nil
         phase = lines.isEmpty ? .hidden : .badge
         decisionsSince = [:]

@@ -75,6 +75,20 @@ func TestPlanLaunchClaude(t *testing.T) {
 	if hooks["PermissionRequest"] == nil {
 		t.Error("no PermissionRequest hook")
 	}
+	// #268: these two wait for Pixie's answer, so Claude must give them longer than the hold.
+	timeout := func(ev string) float64 {
+		e, _ := hooks[ev].([]any)
+		hs, _ := e[0].(map[string]any)["hooks"].([]any)
+		return hs[0].(map[string]any)["timeout"].(float64)
+	}
+	for _, ev := range []string{"PreToolUse", "PermissionRequest"} {
+		if got := timeout(ev); got <= MaxHold.Seconds() {
+			t.Errorf("%s timeout %v, want more than the longest hold %v", ev, got, MaxHold)
+		}
+	}
+	if got := timeout("Stop"); got != 5 {
+		t.Errorf("Stop timeout %v", got)
+	}
 	// #144: a session idle for a minute gets an idle_prompt Notification; that isn't waiting
 	// on you, so it must not reach pix (it would mark the session blocked and hold messages).
 	note, _ := hooks["Notification"].([]any)

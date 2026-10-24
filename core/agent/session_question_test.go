@@ -293,3 +293,47 @@ func TestASessionPromptDoesNotHoldPixie(t *testing.T) {
 	wantNotContains(t, askSession(c, bashAsk, T0), eHold(true))
 	wantNotContains(t, askSession(c, pushMenu, T0), eHold(true))
 }
+
+// #268: a menu pix holds in its hook also takes a typed answer and "Chat about this", as its
+// terminal does; the bubble gets each option's description and both extra choices.
+var typedMenu = SessionQuestion{ID: "q3", Label: "proj", App: "dev.warp.Warp-Stable", Kind: "menu",
+	Text: "Which database?", Options: []string{"Postgres", "SQLite"}, Details: []string{"Relational", ""}, Typed: true}
+
+func TestATypedAnswerIsSentAndSaid(t *testing.T) {
+	c := ctl()
+	b := bubbleOf(askSession(c, typedMenu, T0))
+	if len(b) != 1 || !b[0].Typed || strings.Join(b[0].Details, "|") != "Relational|" {
+		t.Fatalf("%+v", b)
+	}
+	fx := c.Step(TypedAnswerInput(b[0].Token, "  MariaDB, we run it  "), T0+1)
+	if a := answers(fx); len(a) != 1 || a[0].Answer != "text:MariaDB, we run it" || a[0].Line != `proj: answered "MariaDB, we run it"` {
+		t.Fatalf("%s", fmtEffects(fx))
+	}
+}
+
+func TestChatAboutThisIsSentAndSaid(t *testing.T) {
+	c := ctl()
+	token := bubbleOf(askSession(c, typedMenu, T0))[0].Token
+	fx := c.Step(ChatAboutInput(token), T0+1)
+	if a := answers(fx); len(a) != 1 || a[0].Answer != "chat" || a[0].Line != "proj: you'll talk it over first" {
+		t.Fatalf("%s", fmtEffects(fx))
+	}
+}
+
+// A menu answered by keys (not held) has no typed answer; nor has an empty one.
+func TestATypedAnswerOnlyGoesToAMenuThatTakesOne(t *testing.T) {
+	c := ctl()
+	token := bubbleOf(askSession(c, pushMenu, T0))[0].Token
+	fx := c.Step(TypedAnswerInput(token, "maybe"), T0+1)
+	if len(answers(fx)) != 0 {
+		t.Fatalf("%s", fmtEffects(fx))
+	}
+	c = ctl()
+	token = bubbleOf(askSession(c, typedMenu, T0))[0].Token
+	if fx := c.Step(TypedAnswerInput(token, "   "), T0+1); len(answers(fx)) != 0 {
+		t.Fatalf("%s", fmtEffects(fx))
+	}
+	if fx := c.Step(ChooseInput(token, 2), T0+2); len(answers(fx)) != 1 {
+		t.Fatalf("still waiting after an empty answer: %s", fmtEffects(fx))
+	}
+}

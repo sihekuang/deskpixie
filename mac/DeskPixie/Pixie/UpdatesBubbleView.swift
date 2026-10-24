@@ -23,6 +23,15 @@ struct UpdatesBubbleView: View {
     let onChoose: (String, Int) -> Void
     /// A click on the badge (opens the bubble, like hovering).
     let onBadge: () -> Void
+    /// The menu whose answer is being typed (#268), and its draft.
+    var typing: String? = nil
+    @ObservedObject var typed: BubbleTyping
+    /// "Type something…" (token), sending the typed answer (token), putting the field away, and
+    /// "Chat about this" (token) on a menu held in its session's hook (#268).
+    var onStartTyping: (String) -> Void = { _ in }
+    var onSendTyped: (String) -> Void = { _ in }
+    var onStopTyping: () -> Void = {}
+    var onChat: (String) -> Void = { _ in }
 
     /// The bubble sizes to its lines: this narrow for short updates, as wide as a long question
     /// or option needs up to maxWidth, wrapping beyond it (#105). Nothing a question shows is cut.
@@ -43,6 +52,7 @@ struct UpdatesBubbleView: View {
             need = max(need, one(l.shownText, callout) + 48)                       // icon, row and bubble padding
             if let t = l.title { need = max(need, one(t, title) + 48) }
             for o in l.options ?? [] { need = max(need, one(o, small) + 52) } // button and bubble padding
+            for d in l.details ?? [] { need = max(need, one(d, small) + 52) }
             for n in (l.note ?? "").split(separator: "\n") { need = max(need, one(String(n), mono) + 48) }
         }
         return min(max(ceil(need), width), maxWidth)
@@ -95,12 +105,37 @@ struct UpdatesBubbleView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             ForEach(Array(options.enumerated()), id: \.offset) { i, option in
                                 Button { onChoose(token, i + 1) } label: {
-                                    Text(option)
-                                        .multilineTextAlignment(.leading)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(option)
+                                        if let detail = line.detail(of: i) {
+                                            Text(detail)
+                                                .font(.caption)
+                                                .opacity(0.75)
+                                        }
+                                    }
+                                    .multilineTextAlignment(.leading)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                                 }
-                                .buttonStyle(OptionButtonStyle(prominent: i == 0))
+                                .buttonStyle(OptionButtonStyle(prominent: i == 0 && typing != token))
+                                .disabled(typing == token)
+                            }
+                            if line.offersTyped {
+                                Divider().padding(.vertical, 2)
+                                if typing == token {
+                                    typedField(token)
+                                } else {
+                                    Button { onStartTyping(token) } label: {
+                                        Label("Type something…", systemImage: "pencil")
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                    }
+                                    .buttonStyle(OutlineButtonStyle())
+                                    Button { onChat(token) } label: {
+                                        Label("Chat about this", systemImage: "bubble.left")
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                    }
+                                    .buttonStyle(OutlineButtonStyle())
+                                }
                             }
                         }
                         .controlSize(.small)
@@ -142,6 +177,47 @@ struct UpdatesBubbleView: View {
         .fixedSize(horizontal: false, vertical: true)
     }
 
+    /// The typed answer's field (#268): Return sends, Esc goes back to the options.
+    private func typedField(_ token: String) -> some View {
+        let canSend = !typed.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                TextField("Your answer", text: $typed.draft, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: NSFont.smallSystemFontSize))
+                    .lineLimit(1...4)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .focused($fieldFocused)
+                    .onSubmit { onSendTyped(token) }
+                    .onExitCommand(perform: onStopTyping)
+                    // With text in the field, Esc is the field editor's "complete": take it first.
+                    .onKeyPress(.escape) {
+                        onStopTyping()
+                        return .handled
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 4)
+                    .background(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.accentColor, lineWidth: 1.5))
+                Button { onSendTyped(token) } label: {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(canSend ? Color.accentColor : Color.secondary)
+                }
+                .buttonStyle(.plain)
+                .disabled(!canSend)
+                .help("Send")
+                .accessibilityLabel("Send")
+            }
+            Text("Return sends · Esc goes back")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .onAppear { fieldFocused = true }
+        .onChange(of: typed.focusRequests) { fieldFocused = true }
+    }
+
+    @FocusState private var fieldFocused: Bool
+
     private func row(_ line: UpdateLine) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             if line.kind == "question" || line.asking == true {
@@ -181,6 +257,29 @@ struct UpdatesBubbleView: View {
         .padding(.vertical, 4)
         .contentShape(Rectangle())
     }
+}
+
+/// "Type something…" and "Chat about this" (#268): outlined, so they don't read as one of the
+/// session's own options.
+private struct OutlineButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: NSFont.smallSystemFontSize))
+            .foregroundStyle(Color.primary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.primary.opacity(0.25)))
+            .opacity(configuration.isPressed ? 0.7 : 1)
+            .contentShape(Rectangle())
+    }
+}
+
+/// The typed answer's draft (#268), kept outside the view so redraws don't lose it.
+@MainActor
+final class BubbleTyping: ObservableObject {
+    @Published var draft = ""
+    /// Bumped to put the cursor in the field again.
+    @Published var focusRequests = 0
 }
 
 /// A session option's button: full width, its label wrapping (AppKit's bordered buttons keep to

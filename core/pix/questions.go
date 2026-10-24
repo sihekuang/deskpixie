@@ -1,11 +1,13 @@
 package pix
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sihekuang/deskpixie/core/pix/wire"
@@ -118,6 +120,47 @@ type question struct {
 	read    func([]string) (dialog, bool)
 	held    *wire.Msg
 	optKeys []string
+	// hold: its hook waits for Pixie's answer, sent as the hook's reply (#268). labels: the
+	// options Pixie shows; input: the menu's tool input; suggestions: a permission's rules.
+	hold        *hold
+	labels      []string
+	input       map[string]any
+	suggestions any
+}
+
+// hold is a question held in its hook (#268): the hook returns its reply, "" to let it go.
+type hold struct {
+	once  sync.Once
+	reply chan string
+}
+
+func newHold() *hold { return &hold{reply: make(chan string, 1)} }
+
+// give hands the hook its reply; false when it already had one.
+func (h *hold) give(r string) (given bool) {
+	h.once.Do(func() { h.reply <- r; given = true })
+	return given
+}
+
+// MaxHold is the longest a question waits in its hook for Pixie (#268); DeskPixie's setting
+// stays within it, and the hooks that hold are given longer.
+const MaxHold = 5 * time.Minute
+
+// holds: the hooks whose question may wait for Pixie's answer.
+func holds(event string) bool { return event == "PreToolUse" || event == "PermissionRequest" }
+
+// setHold: how long a question waits in its hook for Pixie's answer, never past MaxHold (the
+// hook's own deadlines are set from it).
+func (s *Session) setHold(d time.Duration) {
+	s.mu.Lock()
+	s.hold = min(max(d, 0), MaxHold)
+	s.mu.Unlock()
+}
+
+func (s *Session) holdFor() time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.hold
 }
 
 // dialogWait: how long a Claude permission waits for its dialog before it is asked without it.
@@ -125,11 +168,11 @@ const dialogWait = 1500 * time.Millisecond
 
 // ask makes q the prompt waiting on you and tells DeskPixie about it with ev. A prompt still
 // waiting is never replaced (its dialog could be the one on screen): the new one is not asked.
-func (s *Session) ask(q *question, ev wire.Msg) {
+func (s *Session) ask(q *question, ev wire.Msg) bool {
 	s.mu.Lock()
 	if s.q != nil {
 		s.mu.Unlock()
-		return
+		return false
 	}
 	s.qseq++
 	q.id = "q" + strconv.Itoa(s.qseq)
@@ -139,10 +182,53 @@ func (s *Session) ask(q *question, ev wire.Msg) {
 		q.held = &ev
 		s.mu.Unlock()
 		time.AfterFunc(dialogWait, func() { s.sendHeld(q, nil) })
-		return
+		return true
 	}
 	s.mu.Unlock()
 	s.client.Send(ev)
+	return true
+}
+
+// await is the reply of held question q's hook: Pixie's answer, or "" once wait passed (its
+// bubble goes and the terminal shows it) or it was answered or withdrawn elsewhere.
+func (s *Session) await(q *question, wait time.Duration) string {
+	t := time.NewTimer(wait)
+	defer t.Stop()
+	select {
+	case r := <-q.hold.reply:
+		return r
+	case <-t.C:
+		s.withdraw(q)
+		return <-q.hold.reply // "", or an answer given just before
+	}
+}
+
+// withdraw takes q back if it still waits, lets its hook go, and tells DeskPixie it's gone.
+func (s *Session) withdraw(q *question) {
+	s.mu.Lock()
+	mine := s.q == q
+	if mine {
+		s.q = nil
+	}
+	told := mine && q.held == nil
+	s.mu.Unlock()
+	q.hold.give("")
+	if told {
+		s.client.Send(wire.Msg{Kind: wire.KindEvent, Event: "question-gone", ID: q.id})
+	}
+}
+
+// letHeldGo lets a held question's hook go at once: DeskPixie is gone, so nobody answers it there.
+func (s *Session) letHeldGo() {
+	s.mu.Lock()
+	q := s.q
+	if q == nil || q.hold == nil {
+		s.mu.Unlock()
+		return
+	}
+	s.q = nil
+	s.mu.Unlock()
+	q.hold.give("")
 }
 
 // sendHeld asks q's held event, with its dialog d as shown when it was read (nil: not read):
@@ -157,7 +243,7 @@ func (s *Session) sendHeld(q *question, d *dialog) {
 	q.held = nil
 	if d != nil {
 		ev.Text, ev.Body, ev.Prompt, ev.Keys = d.Summary, d.Body, d.Question, d.Options
-		q.options, q.optKeys = len(d.Options), d.Keys
+		q.options, q.optKeys, q.labels = len(d.Options), d.Keys, d.Options
 	}
 	s.mu.Unlock()
 	s.client.Send(ev)
@@ -176,6 +262,9 @@ func (s *Session) clearQuestion() {
 	s.q = nil
 	told := q != nil && q.held == nil // a held one was never told
 	s.mu.Unlock()
+	if q != nil && q.hold != nil {
+		q.hold.give("") // answered in the terminal, or the session moved on: its hook lets go
+	}
 	if told {
 		s.client.Send(wire.Msg{Kind: wire.KindEvent, Event: "question-gone", ID: q.id})
 	}
@@ -185,6 +274,22 @@ func (s *Session) clearQuestion() {
 func (s *Session) answer(id, choice string) wire.Msg {
 	s.mu.Lock()
 	q := s.q
+	if q != nil && q.id == id && q.hold != nil {
+		if r, ok := q.hookAnswer(choice); ok {
+			s.q = nil
+			s.mu.Unlock()
+			if !q.hold.give(r) {
+				return wire.Msg{Err: "The question is no longer waiting."}
+			}
+			s.client.Send(wire.Msg{Kind: wire.KindEvent, Event: "question-gone", ID: id})
+			return wire.Msg{}
+		}
+		if q.kind == "menu" {
+			s.mu.Unlock()
+			return wire.Msg{Err: "That isn't one of its answers."}
+		}
+		// A permission option its hook can't say: typed into its dialog, which shows meanwhile.
+	}
 	switch {
 	case q == nil || q.id != id:
 		s.mu.Unlock()
@@ -203,6 +308,9 @@ func (s *Session) answer(id, choice string) wire.Msg {
 		return wire.Msg{Err: "That isn't one of its answers."}
 	}
 	s.q = nil
+	if q.hold != nil {
+		q.hold.give("") // the keys answer it
+	}
 	if s.landing != nil {
 		// An answer still checked whose prompt this one followed on screen: it left, so it landed.
 		close(s.landing.done)
@@ -225,6 +333,70 @@ func (s *Session) answer(id, choice string) wire.Msg {
 	}
 	s.client.Send(wire.Msg{Kind: wire.KindEvent, Event: "question-gone", ID: id})
 	return wire.Msg{}
+}
+
+// hookAnswer is the reply of held question q's hook that answers it with choice: a menu's
+// option, a typed answer ("text:…") or "chat" goes back in its tool input's answers; a
+// permission's Yes, No, and "don't ask again" (with the rules Claude suggested) are its
+// decision. False for anything else.
+func (q *question) hookAnswer(choice string) (string, bool) {
+	label := choice
+	if n, err := strconv.Atoi(choice); err == nil {
+		if n < 1 || n > len(q.labels) {
+			return "", false
+		}
+		label = q.labels[n-1]
+	}
+	if q.kind == "menu" {
+		if typed, ok := strings.CutPrefix(choice, "text:"); ok && strings.TrimSpace(typed) != "" {
+			return menuReply(q.input, strings.TrimSpace(typed), "")
+		}
+		if choice == "chat" { // as its terminal's "Chat about this": an answer, not a refusal
+			return menuReply(q.input, "Chat about this", "The user wants to talk this over before answering. Ask them what to clarify.")
+		}
+		if _, err := strconv.Atoi(choice); err != nil {
+			return "", false
+		}
+		return menuReply(q.input, label, "")
+	}
+	switch {
+	case label == "yes" || label == "Yes":
+		return permissionReply(map[string]any{"behavior": "allow"})
+	case label == "no" || strings.HasPrefix(label, "No"):
+		return permissionReply(map[string]any{"behavior": "deny", "message": "The user said no in Pixie."})
+	case strings.Contains(label, "don't ask again") && q.suggestions != nil:
+		return permissionReply(map[string]any{"behavior": "allow", "updatedPermissions": q.suggestions})
+	}
+	return "", false
+}
+
+// menuReply answers AskUserQuestion's one question with label (and notes, if any): its input as
+// it came, plus answers.
+func menuReply(input map[string]any, label, notes string) (string, bool) {
+	qs, _ := input["questions"].([]any)
+	if len(qs) == 0 {
+		return "", false
+	}
+	first, _ := qs[0].(map[string]any)
+	text, _ := first["question"].(string)
+	in := map[string]any{}
+	for k, v := range input {
+		in[k] = v
+	}
+	in["answers"] = map[string]any{text: label}
+	if notes != "" {
+		in["annotations"] = map[string]any{text: map[string]any{"notes": notes}}
+	}
+	return hookOutput(map[string]any{"hookEventName": "PreToolUse", "permissionDecision": "allow", "updatedInput": in})
+}
+
+func permissionReply(decision map[string]any) (string, bool) {
+	return hookOutput(map[string]any{"hookEventName": "PermissionRequest", "decision": decision})
+}
+
+func hookOutput(specific map[string]any) (string, bool) {
+	b, err := json.Marshal(map[string]any{"hookSpecificOutput": specific})
+	return string(b), err == nil
 }
 
 // answerWait: how long an answer typed from Pixie has to take its prompt off the screen.
@@ -329,34 +501,35 @@ func (w *questionWatch) watch(s *Session, out string, vt *screen) {
 // menuOf is the question of an AskUserQuestion input and its options when a digit answers it:
 // one question, one pick, at most 8 options (Claude adds "Type something" after them). Else
 // no options: you answer it in the terminal.
-func menuOf(input any) (string, []string) {
+func menuOf(input any) (string, []string, []string) {
 	m, _ := input.(map[string]any)
 	qs, _ := m["questions"].([]any)
 	if len(qs) == 0 {
-		return "", nil
+		return "", nil, nil
 	}
 	first, _ := qs[0].(map[string]any)
 	text, _ := first["question"].(string)
 	if len(qs) > 1 {
-		return fmt.Sprintf("%s (and %d more)", text, len(qs)-1), nil
+		return fmt.Sprintf("%s (and %d more)", text, len(qs)-1), nil, nil
 	}
 	if multi, _ := first["multiSelect"].(bool); multi {
-		return text, nil
+		return text, nil, nil
 	}
 	opts, _ := first["options"].([]any)
-	var labels []string
+	var labels, details []string
 	for _, o := range opts {
 		om, _ := o.(map[string]any)
 		label, _ := om["label"].(string)
 		if label == "" {
-			return text, nil
+			return text, nil, nil
 		}
-		labels = append(labels, label)
+		detail, _ := om["description"].(string)
+		labels, details = append(labels, label), append(details, detail)
 	}
 	if len(labels) > 8 {
-		return text, nil
+		return text, nil, nil
 	}
-	return text, labels
+	return text, labels, details
 }
 
 // onlyReports: b is the terminal reporting focus or the mouse, not a key of yours.

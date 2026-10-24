@@ -17,6 +17,9 @@ type LocalHandler interface {
 	SetDescription(text string) error
 }
 
+// localDeadline: how long one request to the parent pix may take.
+var localDeadline = 10 * time.Second
+
 // ServeLocal listens on path (0600), one request per connection, until the returned stop.
 func ServeLocal(path string, h LocalHandler) (func(), error) {
 	os.Remove(path)
@@ -42,10 +45,13 @@ func ServeLocal(path string, h LocalHandler) (func(), error) {
 
 func serveLocalConn(c net.Conn, h LocalHandler) {
 	defer c.Close()
-	c.SetDeadline(time.Now().Add(10 * time.Second))
+	c.SetDeadline(time.Now().Add(localDeadline))
 	m, err := wire.NewDecoder(c).Next()
 	if err != nil {
 		return
+	}
+	if m.Event == "hook" && holds(m.Status) {
+		c.SetDeadline(time.Now().Add(MaxHold + localDeadline)) // its question may wait for Pixie (#268)
 	}
 	reply := wire.Msg{Kind: wire.KindResult}
 	switch m.Event {

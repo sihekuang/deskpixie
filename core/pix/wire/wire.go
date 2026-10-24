@@ -56,13 +56,19 @@ type Msg struct {
 	ExitCode    int    `json:"exitCode,omitempty"`
 	ToolName    string `json:"toolName,omitempty"`
 	Input       string `json:"input,omitempty"`
-	DurationMs  int64  `json:"durationMs,omitempty"`
+	// DurationMs: a turn's length (turn), or how long a question waits in its hook for Pixie's
+	// answer (registered, #268; 0 holds none).
+	DurationMs int64 `json:"durationMs,omitempty"`
 	// Prompt and Body (question, #105): a dialog's own question and what its box shows.
 	Prompt  string   `json:"prompt,omitempty"`
 	Body    string   `json:"body,omitempty"`
 	Command string   `json:"command,omitempty"`
 	Text    string   `json:"text,omitempty"`
 	Keys    []string `json:"keys,omitempty"`
+	// Details and Typed (a menu's question, #268): each option's description ("" none), and
+	// that it also takes a typed answer and "Chat about this" (held in its hook).
+	Details []string `json:"details,omitempty"`
+	Typed   bool     `json:"typed,omitempty"`
 	Err     string   `json:"err,omitempty"`
 	// Build (register) is pix's build, BuildOf its binary (#189); Outdated (registered): it is
 	// not the build of the pix this app ships.

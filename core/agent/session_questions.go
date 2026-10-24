@@ -84,6 +84,10 @@ func (c *AgentController) onSessionQuestion(session string, q SessionQuestion, n
 	pending.Options = q.Options
 	if q.Kind == "menu" {
 		pending.Menu = true
+		pending.Typed = q.Typed
+		for _, d := range q.Details {
+			pending.Details = append(pending.Details, mask(d))
+		}
 	} else {
 		pending.NoVoice = q.Tool == "" || !VoiceConfirmableWith(q.Tool, input, c.settings.SpokenPaths)
 	}
@@ -119,6 +123,32 @@ func (c *AgentController) onChoose(token string, option int, now Millis, fx *[]E
 	c.answerSession(p, strconv.Itoa(option), now, fx)
 }
 
+// onTypedAnswer: an answer typed in the bubble for a session menu that takes one (#268).
+func (c *AgentController) onTypedAnswer(token, text string, now Millis, fx *[]Effect) {
+	text = strings.TrimSpace(text)
+	if text == "" || !c.confirms.TakesTyped(token) {
+		return
+	}
+	p, ok := c.confirms.take(token)
+	if !ok {
+		c.tapNotWaiting(token, now, fx)
+		return
+	}
+	c.noteTap(token, now)
+	c.answerSession(p, "text:"+text, now, fx)
+}
+
+// onChatAbout: "Chat about this" on a session menu that takes one (#268).
+func (c *AgentController) onChatAbout(token string, now Millis, fx *[]Effect) {
+	if !c.confirms.TakesTyped(token) {
+		c.tapNotWaiting(token, now, fx)
+		return
+	}
+	p, _ := c.confirms.take(token)
+	c.noteTap(token, now)
+	c.answerSession(p, "chat", now, fx)
+}
+
 // RecentTapMs: a tap this soon after one settled its token is the same click, doubled.
 const RecentTapMs Millis = 5000
 
@@ -149,6 +179,11 @@ func (c *AgentController) answerSession(p Pending, answer string, now Millis, fx
 	said := map[string]string{"yes": "allowed", "no": "denied"}[answer]
 	if n, err := strconv.Atoi(answer); err == nil && n >= 1 && n <= len(p.Options) {
 		said = "picked " + p.Options[n-1]
+	}
+	if typed, ok := strings.CutPrefix(answer, "text:"); ok {
+		said = fmt.Sprintf("answered %q", typed)
+	} else if answer == "chat" {
+		said = "you'll talk it over first"
 	}
 	*fx = append(*fx, Effect{Kind: EfAnswerSession, Name: p.Session, Text: p.Question, Answer: answer,
 		Line: fmt.Sprintf("%s: %s", p.Label, said)})

@@ -288,6 +288,7 @@ func Build(c Config) *Agent {
 		return names
 	})
 	ph.SetBuild(wire.BuildOf(c.Pix))
+	ph.SetQuestionWait(time.Duration(s.QuestionWaitSecs) * time.Second)
 	if err := ph.Listen(); err != nil {
 		log.Printf("agent: pix: %v", err) // delegation still works without it
 	} else {
@@ -637,6 +638,8 @@ func (a *Agent) Decide(token string, allow bool) { a.handle.Decide(token, allow)
 
 // Choose: a tap on option (from 1) of a session menu in the bubble (#105).
 func (a *Agent) Choose(token string, option int) { a.handle.Choose(token, option) }
+func (a *Agent) TypedAnswer(token, text string)  { a.handle.TypedAnswer(token, text) }
+func (a *Agent) ChatAbout(token string)          { a.handle.ChatAbout(token) }
 
 // UpdatesSeen: the updates bubble showed these lines long enough to count as heard.
 func (a *Agent) UpdatesSeen(ids []uint64) { a.handle.UpdatesSeen(ids) }

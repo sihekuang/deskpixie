@@ -48,6 +48,9 @@ type Pending struct {
 	Options  []string
 	Menu     bool
 	NoVoice  bool
+	// Details and Typed: a menu's option descriptions, and that it takes a typed answer (#268).
+	Details []string
+	Typed   bool
 }
 
 // Decided is one request settled by a transcript.
@@ -250,6 +253,21 @@ func (c *Confirmations) voiceToken(token string) bool {
 }
 
 // OptionsOf is the menu choices of the prompt with this token (nil: not a menu).
+// TakesTyped: the request with token is a session menu that takes a typed answer (#268).
+func (c *Confirmations) TakesTyped(token string) bool {
+	at := slices.IndexFunc(c.pending, func(p Pending) bool { return p.Token == token })
+	return at >= 0 && c.pending[at].Typed
+}
+
+// PendingOf is the request still waiting with token.
+func (c *Confirmations) PendingOf(token string) (Pending, bool) {
+	at := slices.IndexFunc(c.pending, func(p Pending) bool { return p.Token == token })
+	if at < 0 {
+		return Pending{}, false
+	}
+	return c.pending[at], true
+}
+
 func (c *Confirmations) OptionsOf(token string) []string {
 	if at := slices.IndexFunc(c.pending, func(p Pending) bool { return p.Token == token }); at >= 0 {
 		return c.pending[at].Options

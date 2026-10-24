@@ -172,9 +172,13 @@ type AgentSettings struct {
 	OpenConversationForUpdates bool `json:"openConversationForUpdates"`
 	// AlwaysForceSend (#205): every message Pixie passes to a session you started with pix
 	// goes in at once, as message_session's force would send it (off by default).
-	AlwaysForceSend bool           `json:"alwaysForceSend"`
-	ProjectsRoot    string         `json:"projectsRoot"`
-	Workers         WorkerSettings `json:"workers"`
+	AlwaysForceSend bool `json:"alwaysForceSend"`
+	// QuestionWaitSecs (#268): how long a question from a session you started with pix waits
+	// for your answer in Pixie, held in its hook, before the session shows it in its terminal.
+	// 0 doesn't hold it: Pixie's buttons type the answer, as before.
+	QuestionWaitSecs uint64         `json:"questionWaitSecs"`
+	ProjectsRoot     string         `json:"projectsRoot"`
+	Workers          WorkerSettings `json:"workers"`
 }
 
 // WorkerSettings is agent.workers.
@@ -210,7 +214,7 @@ func Default() Config {
 		Agent: AgentSettings{
 			Enabled: true, SessionHost: "herdr", Session: "deskpixie", Terminal: "warp",
 			CoordinatorKind: CoordinatorClaude, CoordinatorEffort: "low",
-			Port: 48217, HoldOpenSecs: 180, PermissionTimeoutSecs: 120, NotifyPerMinute: 4,
+			Port: 48217, HoldOpenSecs: 180, PermissionTimeoutSecs: 120, NotifyPerMinute: 4, QuestionWaitSecs: 20,
 			Narration: true, ProjectsRoot: "~/Documents/deskpixie",
 			// Handed-off work keeps running when the app quits; the next start adopts it.
 			KeepPanesOnQuit: true,
