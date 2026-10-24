@@ -196,7 +196,7 @@ func TestRegisteredMethodsSpeakTheContract(t *testing.T) {
 	f := newAPIFixture(t)
 	r := fakeRegistrar{}
 	f.api.Register(r)
-	want := []string{"settings.choices", "settings.openFile", "settings.reload", "settings.restart", "settings.secrets", "settings.set", "settings.snapshot"}
+	want := []string{"settings.choices", "settings.openFile", "settings.reload", "settings.restart", "settings.search", "settings.secrets", "settings.set", "settings.snapshot"}
 	var got []string
 	for m := range r {
 		got = append(got, m)

@@ -192,6 +192,14 @@ func (a *API) SetChoices(field string, choices []Pair) error {
 // Secrets is which API keys exist.
 func (a *API) Secrets() Secrets { return SecretStatus(a.deps.Secrets) }
 
+// Search is the settings and extra rows matching query, for this platform and the current
+// values (Search).
+func (a *API) Search(query string) []Hit {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return Search(query, a.deps.Platform, a.deps.Store.Current())
+}
+
 // OpenFile shows settings.json in the file manager.
 func (a *API) OpenFile() error {
 	program, args := RevealCommand(a.deps.Platform, a.deps.SettingsPath)
@@ -210,7 +218,7 @@ func (a *API) Restart() {
 }
 
 // Register adds the settings.* methods: snapshot, set, reload, secrets, choices (the shared
-// contract) and openFile, restart (the window's Open Settings File and Restart buttons).
+// contract), search (the window's search field) and openFile, restart (the window's Open Settings File and Restart buttons).
 func (a *API) Register(r Registrar) {
 	r.Register("settings.snapshot", func(json.RawMessage) (any, error) { return a.Snapshot(), nil })
 	r.Register("settings.reload", func(json.RawMessage) (any, error) {
@@ -246,6 +254,15 @@ func (a *API) Register(r Registrar) {
 			return nil, err
 		}
 		return struct{}{}, nil
+	})
+	r.Register("settings.search", func(args json.RawMessage) (any, error) {
+		var in struct {
+			Query string `json:"query"`
+		}
+		if err := json.Unmarshal(args, &in); err != nil {
+			return nil, fmt.Errorf("settings.search: %w", err)
+		}
+		return a.Search(in.Query), nil
 	})
 	r.Register("settings.openFile", func(json.RawMessage) (any, error) {
 		if err := a.OpenFile(); err != nil {
