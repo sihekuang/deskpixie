@@ -625,8 +625,9 @@ final class AgentRosterController {
             if !(s.width > 0 && s.height > 0) { hide(); return }
         }
         panel.setFrame(ScreenDisplays.appKitFrame(topLeft: rect.origin, size: rect.size), display: true)
-        if (model.open || cardUp) && panel.parent != nil {
-            // Above the updates bubble (a sibling child panel): re-adding puts it last.
+        if (model.open || cardUp) && panel.parent != nil && pixie.panel.childWindows?.last !== panel {
+            // Above the updates bubble (a sibling child panel): re-adding puts it last. Only
+            // when it isn't already: re-ordering on every layout made the windows flicker (#286).
             pixie.panel.removeChildWindow(panel)
         }
         if panel.parent == nil { pixie.panel.addChildWindow(panel, ordered: .above) }
