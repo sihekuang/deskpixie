@@ -13,6 +13,8 @@ public protocol SettingsClient {
     /// `secrets.keychain {values}`: the keys stored in the Keychain (variable → key), replacing
     /// the set the core holds. Never logged.
     func setKeychain(_ values: [String: String]) throws
+    /// `settings.search {query}`: the matching settings and rows, best first (#287).
+    func search(_ query: String) throws -> [SettingsHit]
     /// `settings.openFile`: shows settings.json in Finder.
     func openFile() throws
     /// `settings.restart`: quits and relaunches.
@@ -63,6 +65,14 @@ public struct EngineSettingsClient: SettingsClient, Sendable {
 
     public func setKeychain(_ values: [String: String]) throws {
         _ = try engine.call("secrets.keychain", KeychainArgs(values: values))
+    }
+
+    private struct SearchArgs: Encodable {
+        let query: String
+    }
+
+    public func search(_ query: String) throws -> [SettingsHit] {
+        try engine.call("settings.search", SearchArgs(query: query), as: [SettingsHit].self)
     }
 
     public func openFile() throws {
