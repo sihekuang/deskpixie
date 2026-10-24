@@ -41,7 +41,7 @@ final class AgentRosterController {
     private var hovering = false
     /// Keeps the card up while the pointer is around Pixie and its cards, or a swipe runs (#286).
     private var keeper = HoverKeeper()
-    /// The « put the deck away: hovering doesn't bring it back until the pointer has left.
+    /// Hide put the deck away: hovering doesn't bring it back until the pointer has left.
     private var latch = CollapseLatch()
     private var agoShown: String?
     private var typeTimer: Timer?
@@ -178,11 +178,11 @@ final class AgentRosterController {
         render()
     }
 
-    /// The « on the card: the words go at once, and the deck stays away until the pointer has
+    /// Hide on the card: the words go at once, and the deck stays away until the pointer has
     /// left the region around Pixie (#286).
     private func dismissWords() {
-        chat.dismiss()
-        latch.collapse()
+        // Latched only when something went away (#286).
+        if chat.dismiss() { latch.collapse() }
         typeTimer?.invalidate()
         typeTimer = nil
         render()

@@ -835,6 +835,18 @@ final class QuickChatModelTests: XCTestCase {
         }
     }
 
+    /// #286 re-review: Hide says whether anything was put away, so the deck isn't latched for
+    /// nothing.
+    func testHideSaysWhetherAnythingWentAway() {
+        var m = QuickChatModel()
+        XCTAssertFalse(m.canDismiss)
+        XCTAssertFalse(m.dismiss())
+        _ = m.update(card(1, "one"))
+        XCTAssertTrue(m.canDismiss)
+        XCTAssertTrue(m.dismiss())
+        XCTAssertFalse(m.dismiss(), "already away")
+    }
+
     func testAnUpdateCardIsPutAwayAfterTheDismissTime() {
         var m = QuickChatModel()
         let t0 = Date()

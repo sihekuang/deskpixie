@@ -93,16 +93,21 @@ struct DeckPager<ID: Hashable, Page: View>: View {
             guard new != shown else { return }
             withAnimation(reduceMotion ? nil : Self.slide) { shown = new }
         }
+        .onDisappear {
+            // Gone mid-swipe: its end is still owed, or nothing would ever hide again.
+            drag = 0
+            if swipe.cancel() { onScroll(false) }
+        }
     }
 
     @State private var swipe = DeckDrag()
 
     /// A trackpad event over the deck: true when the deck takes it (it goes no further).
     private func feed(_ phase: DeckDrag.Phase, dx: CGFloat, dy: CGFloat) -> Bool {
-        let wasActive = swipe.active
+        let wasSwiping = swipe.swiping
         let verdict = swipe.feed(phase, dx: dx, dy: dy, stride: stride,
                                  canBack: index > 0, canForward: index < ids.count - 1)
-        if swipe.active && !wasActive { onScroll(true) }
+        if swipe.swiping && !wasSwiping { onScroll(true) }
         switch verdict {
         case .pass:
             return false
@@ -230,5 +235,21 @@ extension View {
     func deckCard() -> some View {
         background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.separator))
+    }
+}
+
+/// Hide on a deck's card (#286), where Notification Center puts "Show less": plain text in the
+/// header's colour, highlighted under the pointer.
+struct DeckHideButton: View {
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button("Hide", action: action)
+            .buttonStyle(.plain)
+            .foregroundStyle(hovering ? .primary : .secondary)
+            .onHover { hovering = $0 }
+            .help("Hide")
+            .accessibilityLabel("Hide")
     }
 }

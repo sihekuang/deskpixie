@@ -196,7 +196,7 @@ struct QuickChatCard: View {
             || attachments.model.chipsVisible || attachments.model.notice != nil
     }
 
-    /// One reply as its own card (#286): its header with «, the time and ‹ n/m ›, its words (typed out
+    /// One reply as its own card (#286): its header with the time, ‹ n/m › and Hide, its words (typed out
     /// word by word; links and files are found in all of it, #277), scrolling when long, and
     /// buttons to the sessions it is about. Its arrows page the deck from this card.
     private func replyCard(_ i: Int) -> some View {
@@ -204,17 +204,6 @@ struct QuickChatCard: View {
         let p = pages[i]
         return VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 4) {
-                // Puts the deck away (#224, #286), as « does on the badge deck; the setting puts
-                // it away on its own after a while.
-                Button(action: onDismiss) {
-                    Image(systemName: "chevron.left.2")
-                        .font(.caption2.weight(.bold))
-                        .frame(width: 16, height: 16)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("Collapse")
-                .accessibilityLabel("Collapse")
                 TimelineView(.periodic(from: .now, by: 30)) { context in
                     Text(p.header(now: context.date))
                         .lineLimit(1)
@@ -237,6 +226,11 @@ struct QuickChatCard: View {
                     .buttonStyle(.plain)
                     .help("Newest reply")
                     .accessibilityLabel("Newest reply")
+                }
+                if model.canDismiss {
+                    // Puts the deck away (#224, #286), as on the badge deck; the setting puts it
+                    // away on its own after a while.
+                    DeckHideButton(action: onDismiss)
                 }
             }
             .font(.caption.weight(.semibold))

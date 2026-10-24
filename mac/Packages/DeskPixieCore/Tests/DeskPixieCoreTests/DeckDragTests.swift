@@ -54,6 +54,22 @@ final class DeckDragTests: XCTestCase {
         XCTAssertFalse(d.active)
     }
 
+    /// #286 re-review: a deck torn down mid-swipe owes the end of the swipe; at rest it doesn't.
+    func testCancellingMidSwipeOwesTheEnd() {
+        var d = DeckDrag()
+        _ = d.feed(.began, dx: 0, dy: 0, stride: 236, canBack: true, canForward: true)
+        _ = d.feed(.changed, dx: 30, dy: 0, stride: 236, canBack: true, canForward: true)
+        XCTAssertTrue(d.swiping)
+        XCTAssertTrue(d.cancel())
+        XCTAssertFalse(d.swiping)
+        XCTAssertEqual(d.offset, 0)
+        XCTAssertFalse(d.cancel(), "nothing under way now")
+        _ = d.feed(.began, dx: 0, dy: 0, stride: 236, canBack: true, canForward: true)
+        _ = d.feed(.changed, dx: 30, dy: 0, stride: 236, canBack: true, canForward: true)
+        _ = d.feed(.ended, dx: 0, dy: 0, stride: 236, canBack: true, canForward: true)
+        XCTAssertFalse(d.cancel(), "settled: its end was already told")
+    }
+
     func testEventsWithoutABeganAreLeftAlone() {
         var d = DeckDrag()
         XCTAssertEqual(d.feed(.changed, dx: 50, dy: 0, stride: 236, canBack: true, canForward: true), .pass)

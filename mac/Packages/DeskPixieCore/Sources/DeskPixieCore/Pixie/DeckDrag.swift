@@ -27,6 +27,9 @@ public struct DeckDrag: Equatable, Sendable {
     public private(set) var offset: CGFloat = 0
     /// A sideways gesture is under way, or its momentum may still come (until the next gesture).
     public private(set) var active = false
+    /// The deck follows the fingers: from the moment the gesture counts as sideways until it
+    /// settles. Nothing hides meanwhile.
+    public private(set) var swiping = false
 
     private var tracking = false
     private var horizontal: Bool?
@@ -54,6 +57,7 @@ public struct DeckDrag: Equatable, Sendable {
         case .ended:
             let was = tracking && horizontal == true
             tracking = false
+            swiping = false
             guard was else { return .pass }
             let moved = -offset
             let step = abs(moved) < Self.threshold ? 0 : (moved > 0 ? 1 : -1)
@@ -68,12 +72,21 @@ public struct DeckDrag: Equatable, Sendable {
                 guard max(abs(sumX), abs(sumY)) >= Self.decideAfter else { return .pass }
                 horizontal = abs(sumX) > abs(sumY)
                 active = horizontal == true
+                swiping = active
                 guard active else { return .pass }
                 return move(sumX, stride: stride, canBack: canBack, canForward: canForward)
             }
             guard horizontal == true else { return .pass }
             return move(dx, stride: stride, canBack: canBack, canForward: canForward)
         }
+    }
+
+    /// The deck went away mid-swipe: forget the gesture. True when a swipe was under way, so its
+    /// end is still owed to whoever was told it started.
+    public mutating func cancel() -> Bool {
+        let was = swiping
+        self = DeckDrag()
+        return was
     }
 
     private mutating func move(_ dx: CGFloat, stride: CGFloat, canBack: Bool, canForward: Bool) -> Verdict {

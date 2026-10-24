@@ -228,7 +228,7 @@ final class UpdatesBubbleController {
         let mouse = NSEvent.mouseLocation
         keeper.pointer(at: pixie.hoverPointer, frames: pixie.hoverFrames, now: Self.now)
         let onPanel = panel.isVisible && panel.frame.contains(mouse)
-        // Closed with « : it opens again on hover once the pointer has been away.
+        // Closed with Hide: it opens again on hover once the pointer has been away.
         if !keeper.inside { model.regionLeft() }
         // Opened only on the badge or bubble itself; once open, the whole region keeps it.
         let inside = model.collapsed ? false : pointerInside
@@ -306,7 +306,7 @@ final class UpdatesBubbleController {
             },
             onBadge: { [weak self] in
                 guard let self, self.panel.alphaValue >= UpdatesBubbleModel.hoverMinAlpha else { return }
-                self.model.regionLeft() // a click on the badge opens it, closed with « or not
+                self.model.regionLeft() // a click on the badge opens it, closed with Hide or not
                 self.model.pointerEntered(now: Self.now, at: NSEvent.mouseLocation)
                 self.render()
             },

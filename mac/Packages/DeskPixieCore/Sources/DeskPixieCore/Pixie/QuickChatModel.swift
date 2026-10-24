@@ -497,9 +497,11 @@ public struct QuickChatModel: Equatable, Sendable {
         isCaption ? phase != .ready : (phase == .done || phase == .stopped)
     }
 
-    /// The ✕ (#224): the words go; hover and always show nothing until something new is said.
-    public mutating func dismiss(now: Date = Date()) {
-        guard canDismiss else { return }
+    /// Hide (#224, #286): the words go; hover and always show nothing until something new is
+    /// said. False when there was nothing to put away.
+    @discardableResult
+    public mutating func dismiss(now: Date = Date()) -> Bool {
+        guard canDismiss else { return false }
         keep(now: now)
         clearCard()
         toNewest()
@@ -514,6 +516,7 @@ public struct QuickChatModel: Equatable, Sendable {
         full = ""
         shown = ""
         phase = .ready
+        return true
     }
 
     /// Puts the words away `secs` after they were said (0 keeps them), never while the
