@@ -207,6 +207,16 @@ public struct QuickChatModel: Equatable, Sendable {
         public let text: String
         public let shown: String
         public let sessions: [String]
+        /// Its header (#286): who said it, how many updates it holds, and when (nil while it is
+        /// still being said).
+        public let who: String
+        public let count: Int
+        public let at: Date?
+
+        /// "Pixie · 3 updates · 2m ago".
+        public func header(now: Date) -> String {
+            QuickChatModel.header(who: who, count: count, ago: at.map { QuickChatModel.ago($0, now: now) })
+        }
     }
 
     /// Replies dropped off the front of the history so far: page ids count on from them.
@@ -214,8 +224,14 @@ public struct QuickChatModel: Equatable, Sendable {
 
     /// The deck's pages, oldest first: the history, then what is up now.
     public var pages: [Page] {
-        var out = history.enumerated().map { i, r in Page(id: dropped + i, text: r.text, shown: r.text, sessions: r.sessions) }
-        if hasCurrent { out.append(Page(id: dropped + history.count, text: full, shown: shown, sessions: sessions)) }
+        var out = history.enumerated().map { i, r in
+            Page(id: dropped + i, text: r.text, shown: r.text, sessions: r.sessions, who: "Pixie", count: r.count, at: r.at)
+        }
+        if hasCurrent {
+            out.append(Page(id: dropped + history.count, text: full, shown: shown, sessions: sessions,
+                            who: isYou ? "You" : "Pixie", count: cardID != nil ? count : 1,
+                            at: phase == .done ? (cardAt ?? saidAt) : nil))
+        }
         return out
     }
 
@@ -330,7 +346,7 @@ public struct QuickChatModel: Equatable, Sendable {
         return Self.ago(cardAt ?? saidAt, now: now)
     }
 
-    private static func ago(_ at: Date, now: Date) -> String {
+    public static func ago(_ at: Date, now: Date) -> String {
         let s = max(0, Int(now.timeIntervalSince(at)))
         switch s {
         case ..<60: return "just now"

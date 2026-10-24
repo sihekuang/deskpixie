@@ -15,8 +15,6 @@ struct AgentRosterView: View {
     let chatState: QuickChatState
     /// The card on its own, without the input line (#224): the controller decides.
     let captionCard: Bool
-    /// "2m ago" for the card's header.
-    let ago: String?
     /// The other side's last words above the caption, and how far they've faded (#254).
     let earlier: QuickChatModel.Earlier?
     let earlierPhase: QuickChatModel.EarlierPhase
@@ -32,6 +30,7 @@ struct AgentRosterView: View {
     /// The caption's buttons to sessions (#261), and what a click does.
     /// A scroll to another page of the reply deck (#286).
     var onPage: (Int) -> Void = { _ in }
+    var onScroll: (Bool) -> Void = { _ in }
     var onSession: (String) -> Void = { _ in }
     /// Pixie's "Want me to take this?" for a new copy (#240), nil when not up.
     let offer: ClipboardKind?
@@ -67,9 +66,9 @@ struct AgentRosterView: View {
     private var showsCard: Bool { chatOpen || captionCard }
 
     private var card: some View {
-        QuickChatCard(model: chat, state: chatState, showsInput: chatOpen, ago: ago,
+        QuickChatCard(model: chat, state: chatState, showsInput: chatOpen,
                       onSend: onSend, onStop: onStop, onClose: onCloseChat, onResize: onResize, onDismiss: onDismiss,
-                      onStep: onStep, onPage: onPage, attachments: attachments,
+                      onStep: onStep, onPage: onPage, onScroll: onScroll, attachments: attachments,
                       rows: { [view = model.view] in AgentRosterModel.buttons(for: $0, in: view) }, onSession: onSession)
     }
 

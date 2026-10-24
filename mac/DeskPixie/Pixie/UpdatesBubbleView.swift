@@ -9,19 +9,18 @@ import SwiftUI
 struct UpdatesBubbleView: View {
     let count: Int
     let phase: UpdatesBubbleModel.Phase
-    /// The deck's cards (oldest first), the one shown, and where it is ("1 of 1" alone).
+    /// The deck's cards (oldest first) and the one shown.
     let lines: [UpdateLine]
     let current: UpdateLine?
-    let position: (index: Int, count: Int)?
     /// The deck keeps one width as you step through it.
     let width: CGFloat
     let onLine: (UpdateLine) -> Void
-    /// The arrows: +1 newer, −1 older.
-    let onStep: (Int) -> Void
-    /// A scroll to another card, by its id.
+    /// A scroll or a card's arrows to another card, by its id.
     var onSelect: (UInt64) -> Void = { _ in }
     /// The deck changed height: the panel is sized from the view.
     var onResize: () -> Void = {}
+    /// A swipe on the deck started or came to rest.
+    var onScroll: (Bool) -> Void = { _ in }
     /// Allow or Deny on a permission question (token, allow). The controller ignores a tap that
     /// comes too soon after the buttons appear (`UpdatesBubbleModel.acceptsDecision`).
     let onDecide: (String, Bool) -> Void
@@ -70,65 +69,45 @@ struct UpdatesBubbleView: View {
 
     @ViewBuilder private var bubble: some View {
         if let line = current {
-            VStack(alignment: .leading, spacing: 2) {
-                header(line)
-                // The cards side by side (#286): a two-finger swipe or the arrows page them.
-                DeckPager(ids: lines.map(\.id), selected: line.id, width: width - 12, anchor: .leading,
-                          onSelect: onSelect, onResize: onResize) { id in
-                    if let l = lines.first(where: { $0.id == id }) { card(l) }
-                }
+            // The cards side by side (#286), each on its own: a two-finger swipe or a card's
+            // arrows page them.
+            DeckPager(ids: lines.map(\.id), selected: line.id, width: width,
+                      onSelect: onSelect, onResize: onResize, onScroll: onScroll) { id in
+                if let i = lines.firstIndex(where: { $0.id == id }) { card(i) }
             }
-            .padding(6)
-            .frame(width: width, alignment: .leading)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.separator))
             .fixedSize(horizontal: false, vertical: true)
         }
     }
 
     /// "Permission · coordinator" in amber with a lock, or "<session> is asking"; then ‹ i of n ›.
-    private func header(_ line: UpdateLine) -> some View {
-        HStack(spacing: 4) {
-            if line.offersDecision {
-                Image(systemName: "lock.fill")
-            } else if line.kind == "question" || line.asking == true {
-                Image(systemName: "questionmark.circle")
+    private func header(_ i: Int) -> some View {
+        let line = lines[i]
+        return HStack(spacing: 4) {
+            Group {
+                if line.offersDecision {
+                    Image(systemName: "lock.fill")
+                } else if line.kind == "question" || line.asking == true {
+                    Image(systemName: "questionmark.circle")
+                }
+                Text(line.deckHeader)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
-            Text(line.deckHeader)
-                .lineLimit(1)
-                .truncationMode(.tail)
+            .foregroundStyle(line.offersDecision ? Color.orange : Color.secondary)
             Spacer(minLength: 4)
-            if let position {
-                deckArrow("chevron.left", "Previous", enabled: position.index > 1) { onStep(-1) }
-                Text("\(position.index) of \(position.count)")
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .accessibilityLabel("\(position.index) of \(position.count)")
-                deckArrow("chevron.right", "Next", enabled: position.index < position.count) { onStep(1) }
-            }
+            DeckArrows(index: i, count: lines.count, label: " of ",
+                       onBack: { onSelect(lines[i - 1].id) }, onForward: { onSelect(lines[i + 1].id) })
+                .foregroundStyle(.secondary)
         }
         .font(.caption.weight(.semibold))
-        .foregroundStyle(line.offersDecision ? Color.orange : Color.secondary)
         .padding(.horizontal, 8)
         .padding(.top, 4)
     }
 
-    private func deckArrow(_ symbol: String, _ label: String, enabled: Bool, _ action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.caption2.weight(.bold))
-                .frame(width: 16, height: 16)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(enabled ? .primary : .tertiary)
-        .disabled(!enabled)
-        .help(label)
-        .accessibilityLabel(label)
-    }
-
-    private func card(_ line: UpdateLine) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
+    private func card(_ i: Int) -> some View {
+        let line = lines[i]
+        return VStack(alignment: .leading, spacing: 0) {
+            header(i)
             Button { if !RichTextClicks.takeSpanPress() { onLine(line) } } label: { row(line) }
                 .buttonStyle(.plain)
             if line.offersDecision, let token = line.token {
@@ -194,8 +173,8 @@ struct UpdatesBubbleView: View {
                 .padding(.bottom, 4)
             }
         }
-        .padding(.vertical, 2)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05)))
+        .padding(4)
+        .deckCard()
     }
 
     /// The typed answer's field (#268): Return sends, Esc goes back to the options.

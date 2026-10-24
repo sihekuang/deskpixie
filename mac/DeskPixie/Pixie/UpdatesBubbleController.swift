@@ -38,6 +38,9 @@ final class UpdatesBubbleController {
 
     private var timer: Timer?
     private var pointerInside = false
+    /// Once open, the bubble stays open while the pointer is around Pixie and its cards, or a
+    /// swipe runs (#286).
+    private var keeper = HoverKeeper()
     /// The typed answer's draft (#268), and the monitor that puts the field away on a click in
     /// another app.
     private let typed = BubbleTyping()
@@ -209,9 +212,13 @@ final class UpdatesBubbleController {
 
     private func poll() {
         // A badge faded with Pixie is not looked at: a passing pointer doesn't open it.
-        let inside = UpdatesBubbleModel.hoverCounts(
-            pointerOnPanel: panel.isVisible && panel.frame.contains(NSEvent.mouseLocation),
-            alpha: panel.alphaValue, alreadyInside: pointerInside)
+        let mouse = NSEvent.mouseLocation
+        keeper.pointer(at: pixie.hoverPointer, frames: pixie.hoverFrames, now: Self.now)
+        let onPanel = panel.isVisible && panel.frame.contains(mouse)
+        // Opened only on the badge or bubble itself; once open, the whole region keeps it.
+        let inside = pointerInside
+            ? onPanel || keeper.keepsShowing(now: Self.now)
+            : UpdatesBubbleModel.hoverCounts(pointerOnPanel: onPanel, alpha: panel.alphaValue, alreadyInside: false)
         var changed = false
         if inside != pointerInside {
             pointerInside = inside
@@ -222,7 +229,8 @@ final class UpdatesBubbleController {
             call("agent.focusJob", FocusJobArgs(job: r.job, worker: r.worker))
         }
         let before = model.phase
-        model.tick(now: Self.now)
+        // A pop doesn't shrink to the badge while you're around (#286).
+        if !keeper.keepsShowing(now: Self.now) { model.tick(now: Self.now) }
         if changed || model.phase != before { render() } else { updateAlpha() }
     }
 
@@ -261,19 +269,15 @@ final class UpdatesBubbleController {
     private func render() {
         hosting.rootView = AnyView(UpdatesBubbleView(
             count: model.count, phase: model.phase, lines: model.lines, current: model.current,
-            position: model.deckPosition, width: UpdatesBubbleView.width(for: model.lines),
+            width: UpdatesBubbleView.width(for: model.lines),
             onLine: { [weak self] in self?.clicked($0) },
-            onStep: { [weak self] in
-                guard let self else { return }
-                self.model.step($0)
-                self.render()
-            },
             onSelect: { [weak self] in
                 guard let self else { return }
                 self.model.show(id: $0)
                 self.render()
             },
             onResize: { [weak self] in DispatchQueue.main.async { self?.layout() } },
+            onScroll: { [weak self] in self?.keeper.scroll(active: $0, now: Self.now) },
             onDecide: { [weak self] token, allow in
                 // A tap within decisionGuard of the buttons appearing is a stray click: ignored.
                 guard let self, self.model.acceptsDecision(token: token, now: Self.now, at: NSEvent.mouseLocation) else { return }

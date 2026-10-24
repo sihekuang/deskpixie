@@ -39,9 +39,9 @@ final class AgentRosterController {
     /// captionDismissSecs: the words are put away this long after they were said (0 keeps them).
     private var dismissSecs = 120
     private var hovering = false
+    /// Keeps the card up while the pointer is around Pixie and its cards, or a swipe runs (#286).
+    private var keeper = HoverKeeper()
     private var agoShown: String?
-    /// How near Pixie, in points, the pointer brings the last words back.
-    static let hoverMargin: CGFloat = 24
     private var typeTimer: Timer?
     private var clickAway: Any?
     static let typeInterval: TimeInterval = 0.12
@@ -484,12 +484,13 @@ final class AgentRosterController {
             let flipped = CGPoint(x: p.x, y: hosting.bounds.height - p.y)
             inside = model.open || chipFrame.insetBy(dx: -3, dy: -3).contains(flipped)
         }
-        // Near Pixie, or on the card it brought back: the last words show (#224).
-        let near = pixie.isShown
-            && (pixie.panel.frame.insetBy(dx: -Self.hoverMargin, dy: -Self.hoverMargin).contains(mouse)
-                || (overPanel && captionCard))
-        // Put away once old enough (captionDismissSecs).
-        let expired = chat.dismissIfOlder(than: dismissSecs, now: Date())
+        // Around Pixie, its buttons and cards (or just left, or mid-swipe): the last words show
+        // (#224, #286).
+        keeper.pointer(at: pixie.hoverPointer, frames: pixie.hoverFrames, now: Self.uptime)
+        let keep = keeper.keepsShowing(now: Self.uptime)
+        let near = pixie.isShown && keep
+        // Put away once old enough (captionDismissSecs), but not while you're there.
+        let expired = !keep && chat.dismissIfOlder(than: dismissSecs, now: Date())
         let pruned = chat.prune(now: Date())
         let ago = cardUp ? chat.ago(now: Date()) : nil
         if offerChanged || expired || pruned || inside != model.open || near != hovering || ago != agoShown {
@@ -544,7 +545,7 @@ final class AgentRosterController {
                 self.render()
             },
             onRow: { [weak self] in self?.clicked($0) },
-            chat: chat, chatState: chatState, captionCard: captionCard, ago: agoShown,
+            chat: chat, chatState: chatState, captionCard: captionCard,
             earlier: chat.earlier, earlierPhase: chat.earlierPhase(now: Date()),
             onMode: { [weak self] in self?.pick($0) },
             onSend: { [weak self] in self?.send() },
@@ -562,6 +563,7 @@ final class AgentRosterController {
                 self.chat.show(page: $0)
                 self.render()
             },
+            onScroll: { [weak self] in self?.keeper.scroll(active: $0, now: Self.uptime) },
             onSession: { [weak self] in self?.focusSession($0) },
             offer: offer.kind, onOffer: { [weak self] in self?.takeOffer() })
             .onPreferenceChange(ChipFrameKey.self) { [weak self] frame in
@@ -631,6 +633,8 @@ final class AgentRosterController {
         setRoot()
     }
 
+    private static var uptime: TimeInterval { ProcessInfo.processInfo.systemUptime }
+
     private struct RosterReply: Decodable { var roster: RosterView }
     private struct ModeReply: Decodable {
         var mode: String
@@ -644,6 +648,24 @@ final class AgentRosterController {
     private struct FocusAgentArgs: Encodable, Sendable { let name: String }
     private struct ShownArgs: Encodable, Sendable { let ids: [UInt64] }
     private struct RepliesReply: Decodable { var cards: [ReplyCard] }
+}
+
+extension PixieController {
+    /// The hover region's frames (#286), in desktop space: everywhere the cards and the badge can
+    /// show around Pixie at this spot, plus whatever shows now (a long list, say).
+    var hoverFrames: [CGRect] {
+        let top = ScreenDisplays.primaryMaxY
+        let bit = panel.frame
+        let screen = NSScreen.screens.first { $0.frame.contains(NSPoint(x: bit.midX, y: bit.midY)) }
+            ?? panel.screen ?? NSScreen.main
+        let area = DesktopSpace.desktopRect(screen?.visibleFrame ?? bit, primaryMaxY: top)
+        let shown = (panel.childWindows ?? []).filter(\.isVisible).map { DesktopSpace.desktopRect($0.frame, primaryMaxY: top) }
+        return HoverKeeper.reach(pixie: DesktopSpace.desktopRect(bit, primaryMaxY: top), screen: area,
+                                 cardWidth: QuickChatCard.width) + shown
+    }
+
+    /// The pointer, in the same space.
+    var hoverPointer: CGPoint { DesktopSpace.desktopPoint(NSEvent.mouseLocation, primaryMaxY: ScreenDisplays.primaryMaxY) }
 }
 
 /// Takes the first click even though the panel never becomes key (non-activating).

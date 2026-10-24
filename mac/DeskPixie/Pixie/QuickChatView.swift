@@ -49,15 +49,15 @@ struct QuickChatCard: View {
     let model: QuickChatModel
     @Bindable var state: QuickChatState
     let showsInput: Bool
-    let ago: String?
     let onSend: () -> Void
     let onStop: () -> Void
     let onClose: () -> Void
     let onResize: () -> Void
     let onDismiss: () -> Void
     var onStep: (ReplyStep) -> Void = { _ in }
-    /// A scroll to another page of the deck (#286), by its id.
+    /// A scroll to another page of the deck (#286), by its id, and a swipe starting or ending.
     var onPage: (Int) -> Void = { _ in }
+    var onScroll: (Bool) -> Void = { _ in }
     /// The chips, the hint row, 📎 and drops (#240).
     let attachments: AttachmentUI
     /// Buttons to the sessions a page's words are about (#261), and what a click does.
@@ -68,128 +68,115 @@ struct QuickChatCard: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if !model.shownText.isEmpty || model.phase != .ready || model.showsEarlierOnly {
+        VStack(alignment: .leading, spacing: 6) {
+            if showsDeck {
+                // The replies side by side (#286), each its own card: a two-finger swipe or a
+                // card's arrows page them.
+                DeckPager(ids: model.pages.map(\.id), selected: model.pageID, width: Self.width,
+                          onSelect: onPage, onResize: onResize, onScroll: onScroll) { id in
+                    if let i = model.pages.firstIndex(where: { $0.id == id }) { replyCard(i) }
+                }
+            } else if model.showsEarlierOnly {
                 HStack(spacing: 4) {
-                    let who = model.showsEarlierOnly ? "Earlier replies" : model.isYou && model.viewed == nil ? "You" : "Pixie"
-                    Text(QuickChatModel.header(who: who, count: model.shownCount, ago: ago))
+                    Text("Earlier replies")
                     Spacer(minLength: 4)
-                    if model.position != nil || model.showsEarlierOnly {
-                        ReplyArrows(model: model, position: model.position, onStep: onStep)
-                    }
-                    if model.canDismiss {
-                        // Puts the words away (#224); the setting does it on its own after a while.
-                        Button(action: onDismiss) {
-                            Image(systemName: "xmark")
-                                .font(.caption2.weight(.bold))
-                                .frame(width: 16, height: 16)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .help("Dismiss")
-                        .accessibilityLabel("Dismiss")
-                    }
+                    ReplyArrows(model: model, position: nil, onStep: onStep)
                 }
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
-                .padding(.horizontal, 8)
-                .padding(.top, 4)
-                if model.pageID != nil, !(model.shownText.isEmpty && model.pages.count < 2) {
-                    // The replies side by side (#286): a two-finger swipe or the arrows page them.
-                    DeckPager(ids: model.pages.map(\.id), selected: model.pageID, width: Self.width - 12,
-                              onSelect: onPage, onResize: onResize) { id in
-                        if let p = model.pages.first(where: { $0.id == id }) { page(p) }
+                .padding(8)
+                .deckCard()
+            }
+            if showsBox {
+                VStack(alignment: .leading, spacing: 4) {
+                    if model.phase == .stopped && model.viewed == nil {
+                        Text("Stopped.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 8)
                     }
+                    if let status = model.statusText {
+                        HStack {
+                            Text(status)
+                            Spacer(minLength: 4)
+                            if model.showsStop {
+                                Button(action: onStop) {
+                                    Label("Stop", systemImage: "stop.fill")
+                                        .labelStyle(.titleAndIcon)
+                                }
+                                .buttonStyle(.plain)
+                                .help("Stop the coordinator")
+                            }
+                        }
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                    }
+                if attachments.model.chipsVisible {
+                    AttachmentChips(items: attachments.model.items, onRemove: attachments.onRemove)
+                        .padding(.horizontal, 8)
+                        .padding(.top, 2)
                 }
-                if model.phase == .stopped && model.viewed == nil {
-                    Text("Stopped.")
+                if let notice = attachments.model.notice {
+                    Text(notice)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 8)
-                }
-                if let status = model.statusText {
-                    HStack {
-                        Text(status)
-                        Spacer(minLength: 4)
-                        if model.showsStop {
-                            Button(action: onStop) {
-                                Label("Stop", systemImage: "stop.fill")
-                                    .labelStyle(.titleAndIcon)
-                            }
-                            .buttonStyle(.plain)
-                            .help("Stop the coordinator")
-                        }
+                } else if showsInput, let hint = attachments.hint {
+                    HStack(spacing: 4) {
+                        Image(systemName: "doc.on.clipboard")
+                        Text(hint)
+                        Text("·")
+                        Button("Attach", action: attachments.onAttachHint)
+                            .buttonStyle(.link)
                     }
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 8)
-                }
-                if showsInput || attachments.model.chipsVisible { Divider().padding(.top, 2) }
-            }
-            if attachments.model.chipsVisible {
-                AttachmentChips(items: attachments.model.items, onRemove: attachments.onRemove)
-                    .padding(.horizontal, 8)
-                    .padding(.top, 2)
-            }
-            if let notice = attachments.model.notice {
-                Text(notice)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 8)
-            } else if showsInput, let hint = attachments.hint {
-                HStack(spacing: 4) {
-                    Image(systemName: "doc.on.clipboard")
-                    Text(hint)
-                    Text("·")
-                    Button("Attach", action: attachments.onAttachHint)
-                        .buttonStyle(.link)
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 8)
-            }
-            if showsInput {
-                HStack(alignment: .bottom, spacing: 6) {
-                    Button(action: attachments.onPick) {
-                        Image(systemName: "paperclip")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Attach files")
-                    .accessibilityLabel("Attach files")
-                    // Grows with what is typed, up to a few lines, then scrolls; Return sends.
-                    TextField("Message Pixie", text: $state.draft, axis: .vertical)
-                        .textFieldStyle(.plain)
-                        .font(.callout)
-                        .lineLimit(1...5)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .focused($focused)
-                        .onSubmit(onSend)
-                        .onExitCommand(perform: onClose)
-                        // With text in the field, Esc is the field editor's "complete" and never
-                        // reaches onExitCommand: take it first.
-                        .onKeyPress(.escape) {
-                            onClose()
-                            return .handled
+                if showsInput {
+                    HStack(alignment: .bottom, spacing: 6) {
+                        Button(action: attachments.onPick) {
+                            Image(systemName: "paperclip")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
                         }
-                    Button(action: onSend) {
-                        Image(systemName: "arrow.up.circle.fill")
-                            .font(.title3)
-                            .foregroundStyle(canSend ? .primary : .tertiary)
+                        .buttonStyle(.plain)
+                        .help("Attach files")
+                        .accessibilityLabel("Attach files")
+                        // Grows with what is typed, up to a few lines, then scrolls; Return sends.
+                        TextField("Message Pixie", text: $state.draft, axis: .vertical)
+                            .textFieldStyle(.plain)
+                            .font(.callout)
+                            .lineLimit(1...5)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .focused($focused)
+                            .onSubmit(onSend)
+                            .onExitCommand(perform: onClose)
+                            // With text in the field, Esc is the field editor's "complete" and never
+                            // reaches onExitCommand: take it first.
+                            .onKeyPress(.escape) {
+                                onClose()
+                                return .handled
+                            }
+                        Button(action: onSend) {
+                            Image(systemName: "arrow.up.circle.fill")
+                                .font(.title3)
+                                .foregroundStyle(canSend ? .primary : .tertiary)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!canSend)
+                        .help("Send")
                     }
-                    .buttonStyle(.plain)
-                    .disabled(!canSend)
-                    .help("Send")
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
+                }
+                .padding(6)
+                .deckCard()
             }
         }
-        .padding(6)
         .frame(width: Self.width, alignment: .leading)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.separator))
         .onDrop(of: [.fileURL, .image], isTargeted: nil, perform: attachments.onDrop)
         .onAppear { if showsInput { focused = true } }
         .onChange(of: state.focusRequests) { focused = true }
@@ -198,10 +185,61 @@ struct QuickChatCard: View {
         .onChange(of: attachments.model) { onResize() }
     }
 
-    /// One reply: its words (typed out word by word; links and files are found in all of it,
-    /// #277), scrolling when long, and buttons to the sessions it is about.
-    private func page(_ p: QuickChatModel.Page) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+    /// Words to page through: what is up now, or a kept reply you went back to.
+    private var showsDeck: Bool { model.pageID != nil && !(model.shownText.isEmpty && model.pages.count < 2) }
+
+    /// The box under the cards: work in progress, the attachments and the line to type in.
+    private var showsBox: Bool {
+        (model.phase == .stopped && model.viewed == nil) || model.statusText != nil || showsInput
+            || attachments.model.chipsVisible || attachments.model.notice != nil
+    }
+
+    /// One reply as its own card (#286): its header with ‹ n/m › and ✕, its words (typed out
+    /// word by word; links and files are found in all of it, #277), scrolling when long, and
+    /// buttons to the sessions it is about. Its arrows page the deck from this card.
+    private func replyCard(_ i: Int) -> some View {
+        let pages = model.pages
+        let p = pages[i]
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
+                TimelineView(.periodic(from: .now, by: 30)) { context in
+                    Text(p.header(now: context.date))
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 4)
+                if pages.count > 1 {
+                    DeckArrows(index: i, count: pages.count, label: "/",
+                               onBack: { onPage(pages[i - 1].id) }, onForward: { onPage(pages[i + 1].id) })
+                }
+                if model.newerWaiting && i < pages.count - 1 {
+                    Button { onStep(.newest) } label: {
+                        Image(systemName: "chevron.right.2")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 4)
+                            .frame(height: 16)
+                            .background(Capsule().fill(Color.accentColor))
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Newest reply")
+                    .accessibilityLabel("Newest reply")
+                }
+                if model.canDismiss {
+                    // Puts the words away (#224); the setting does it on its own after a while.
+                    Button(action: onDismiss) {
+                        Image(systemName: "xmark")
+                            .font(.caption2.weight(.bold))
+                            .frame(width: 16, height: 16)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Dismiss")
+                    .accessibilityLabel("Dismiss")
+                }
+            }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
             if !p.shown.isEmpty {
                 ScrollView {
                     RichMessage(text: p.text, shown: p.shown, sessions: p.sessions, selectable: true)
@@ -212,11 +250,12 @@ struct QuickChatCard: View {
             }
             let buttons = rows(p.sessions)
             if !buttons.isEmpty {
-                SessionButtons(sessions: buttons, onSession: onSession, maxWidth: Self.width - 12 - 2 * DeckPager<Int, EmptyView>.peek - 12)
+                SessionButtons(sessions: buttons, onSession: onSession,
+                               maxWidth: Self.width - 2 * DeckPager<Int, EmptyView>.peek - 16)
             }
         }
-        .padding(6)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05)))
+        .padding(8)
+        .deckCard()
     }
 
     private var canSend: Bool { model.canSend(state.draft, attachments: attachments.model.items.count) }

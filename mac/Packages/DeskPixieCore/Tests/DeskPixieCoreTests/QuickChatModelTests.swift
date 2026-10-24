@@ -773,6 +773,17 @@ final class QuickChatModelTests: XCTestCase {
         XCTAssertEqual(m.pages.first?.id, second)
     }
 
+    /// #286: every card carries its own header.
+    func testEachPageHasItsOwnHeader() {
+        var m = QuickChatModel()
+        let t0 = Date()
+        _ = m.update(ReplyCard(id: 1, text: "a", count: 1, lines: [1], at: t0 - 240), now: t0)
+        _ = m.update(ReplyCard(id: 2, text: "b\nc", count: 2, lines: [2, 3], at: t0 - 60), now: t0)
+        XCTAssertEqual(m.pages.map { $0.header(now: t0) }, ["Pixie · 4m ago", "Pixie · 2 updates · 1m ago"])
+        XCTAssertTrue(m.caption(role: "assistant", text: "Hello there", now: t0))
+        XCTAssertEqual(m.pages.last?.header(now: t0), "Pixie", "no time while it is being said")
+    }
+
     func testScrollingToAPageLooksBackOrComesToTheNewest() {
         var m = QuickChatModel()
         for i in UInt64(1)...3 { _ = m.update(card(i, "card \(i)")) }
