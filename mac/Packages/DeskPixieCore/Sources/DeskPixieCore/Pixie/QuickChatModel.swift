@@ -541,10 +541,20 @@ public struct QuickChatModel: Equatable, Sendable {
     @discardableResult
     public mutating func update(_ card: ReplyCard, now: Date = Date()) -> Bool {
         if cardID == card.id, hasCurrent {
-            full = card.text
-            shown = card.text
-            count = card.count
-            sessions = card.sessions
+            popUp(card, now: now)
+            return true
+        }
+        if let i = history.firstIndex(where: { $0.id == card.id }) {
+            if hasCurrent || i != history.count - 1 || !takeCaption() {
+                // The card was pushed back by a newer one: its entry gains the row, no second card.
+                history[i] = Reply(text: card.text, sessions: card.sessions, at: history[i].at, id: card.id, count: card.count)
+                return false
+            }
+            // Put away and gaining a row: it comes back as the shown card.
+            history.remove(at: i)
+            if viewing != nil { toNewest() }
+            keep(now: now)
+            showCard(card, now: now)
             return true
         }
         guard takeCaption() else {
@@ -554,21 +564,30 @@ public struct QuickChatModel: Equatable, Sendable {
             return false
         }
         keep(now: now)
+        showCard(card, now: now)
+        return true
+    }
+
+    /// The shown card gained a row: replaced in place, and up again for the dismiss time.
+    private mutating func popUp(_ card: ReplyCard, now: Date) {
+        full = card.text
+        shown = card.text
+        count = card.count
+        sessions = card.sessions
+        saidAt = now
+        lateShown = true
+    }
+
+    private mutating func showCard(_ card: ReplyCard, now: Date) {
         isCaption = true
         isYou = false
         captionLive = false
         awaitsFinal = false
         earlier = nil
-        lateShown = true
         cardID = card.id
-        count = card.count
-        sessions = card.sessions
-        saidAt = now
         job = nil
-        full = card.text
-        shown = card.text
         phase = .done
-        return true
+        popUp(card, now: now)
     }
 
     /// Pixie was told of these sessions (#261): its next reply, when it starts, is about them.

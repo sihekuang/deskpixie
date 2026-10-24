@@ -673,6 +673,35 @@ final class QuickChatModelTests: XCTestCase {
         XCTAssertFalse(m.update(card(1, "**a:** done")))
         XCTAssertEqual(m.phase, .thinking)
         XCTAssertEqual(m.history.last?.text, "**a:** done")
+        XCTAssertTrue(m.newerWaiting)
+        XCTAssertNil(m.cardID)
+    }
+
+    func testAReEmittedCardPushedToHistoryUpdatesThatEntry() {
+        var m = QuickChatModel()
+        _ = m.update(card(1, "**a:** one"))
+        _ = m.update(card(2, "**b:** two"))
+        XCTAssertFalse(m.update(card(1, "**a:** one\n**c:** three", count: 2)))
+        XCTAssertEqual(m.history.map(\.id), [1])
+        XCTAssertEqual(m.history.first?.text, "**a:** one\n**c:** three")
+        XCTAssertEqual(m.history.first?.count, 2)
+        XCTAssertEqual(m.cardID, 2)
+        XCTAssertEqual(m.shownFull, "**b:** two")
+    }
+
+    func testAPutAwayCardGainingARowShowsAgain() {
+        var m = QuickChatModel()
+        let t0 = Date()
+        _ = m.update(card(1, "**a:** one"), now: t0)
+        m.dismiss(now: t0)
+        XCTAssertFalse(m.showsCard(hovering: false, always: false))
+        XCTAssertTrue(m.update(card(1, "**a:** one\n**b:** two", count: 2), now: t0 + 100))
+        XCTAssertTrue(m.showsCard(hovering: false, always: false))
+        XCTAssertEqual(m.cardID, 1)
+        XCTAssertEqual(m.count, 2)
+        XCTAssertEqual(m.history, [])
+        XCTAssertFalse(m.dismissIfOlder(than: 120, now: t0 + 130))
+        XCTAssertTrue(m.dismissIfOlder(than: 120, now: t0 + 221))
     }
 
     func testAnUpdateCardIsPutAwayAfterTheDismissTime() {
@@ -740,5 +769,4 @@ final class QuickChatAttachmentTests: XCTestCase {
         m.saying("Hi again.")
         XCTAssertEqual(m.sessions, [])
     }
-
 }
