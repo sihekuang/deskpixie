@@ -197,8 +197,6 @@ private struct SettingsDetailView: View {
 
     /// The row being pointed out, for a moment after it was revealed.
     @State private var highlighted: String?
-    /// The last reveal pointed out, so coming back to the page doesn't point it out again.
-    @State private var shownReveal = 0
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -219,11 +217,13 @@ private struct SettingsDetailView: View {
             }
             // Runs again when the page changes, since a reveal can switch to another page first.
             .task(id: "\(model.revealCount)|\(tab.section.rawValue)") {
-                guard let hit = model.revealed, hit.section == tab.section,
-                      model.revealCount != shownReveal else { return }
-                shownReveal = model.revealCount
+                guard let hit = model.takeReveal(for: tab.section) else { return }
                 // The page may have only just been switched to: let its rows lay out first.
-                try? await Task.sleep(for: .milliseconds(50))
+                do {
+                    try await Task.sleep(for: .milliseconds(50))
+                } catch {
+                    return
+                }
                 withAnimation { proxy.scrollTo(hit.path, anchor: .center) }
                 highlighted = hit.path
                 do {
@@ -402,7 +402,7 @@ struct SettingsTabView: View {
                 NoteText(text: help, isError: false)
             }
         case .pix(let help):
-            row(label: "pix command", id: extra.path) {
+            row(label: extra.label, id: extra.path) {
                 HStack(spacing: 6) {
                     switch pix.state {
                     case .installed:

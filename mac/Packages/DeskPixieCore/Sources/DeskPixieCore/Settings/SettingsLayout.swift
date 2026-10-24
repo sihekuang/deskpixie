@@ -485,6 +485,21 @@ public enum SettingsLayout {
 
         /// The row's search path (`SettingsHit.path`).
         public var path: String { "extra:\(id)" }
+
+        /// The row's name, as the core's search has it.
+        public var label: String {
+            switch self {
+            case .button(let label, _, _, _), .secret(_, let label, _): return label
+            case .pix: return "pix command"
+            }
+        }
+
+        /// The row's help, as the core's search has it.
+        public var help: String {
+            switch self {
+            case .button(_, let help, _, _), .secret(_, _, let help), .pix(let help): return help
+            }
+        }
     }
 
     /// Export Logs…'s suggested file name (#225), e.g. "DeskPixie logs 2026-10-21 1402.zip".

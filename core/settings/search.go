@@ -9,24 +9,26 @@ import (
 
 // Extra is a row of the Settings window that isn't a setting: a button, an API key, the pix
 // command. The window draws it (mac: SettingsLayout.extras) and finds it by ID; it is here so
-// the search finds it like a field.
+// the search finds it like a field. Label and Help are the window's, word for word.
 type Extra struct {
-	ID        string
-	Section   Section
-	Label     string
-	Help      string
+	ID      string
+	Section Section
+	Label   string
+	Help    string
+	// Title is the row's button title ("Export Logs…"); search matches it like the help.
+	Title     string
 	Platforms []Platform
 }
 
 // Extras are the window's extra rows, in page order within each section.
 var Extras = []Extra{
-	{"resetPosition", SectionPixie, "Reset position", "Move Pixie back to the bottom-right corner of the main screen.", AllPlatforms},
-	{"key.openai", SectionVoice, "OpenAI key", "The OpenAI API key, kept in the Keychain or set as OPENAI_API_KEY.", AllPlatforms},
-	{"key.gemini", SectionVoice, "Gemini key", "The Gemini API key, kept in the Keychain or set as GEMINI_API_KEY.", AllPlatforms},
-	{"pix", SectionAgent, "pix command", "Install pix to start Claude Code or Codex in any terminal so Pixie can see, message and interrupt that session.", AllPlatforms},
-	{"restartCoordinator", SectionAgent, "Restart coordinator", "Stops the coordinator and starts it again on your next request.", AllPlatforms},
-	{"openFile", SectionAdvanced, "Settings file", "Shows settings.json, which holds every setting.", AllPlatforms},
-	{"exportLogs", SectionAdvanced, "Logs", "Export the app's logs in one zip to share.", AllPlatforms},
+	{"resetPosition", SectionPixie, "Reset position", "Move Pixie back to the bottom-right corner of the main screen.", "Reset Position", AllPlatforms},
+	{"key.openai", SectionVoice, "OpenAI key", "Type the key here to keep it in the Keychain (used first), or set OPENAI_API_KEY in your environment or a .env file. Keys are never shown here.", "", AllPlatforms},
+	{"key.gemini", SectionVoice, "Gemini key", "Type the key here to keep it in the Keychain (used first), or set GEMINI_API_KEY in your environment or a .env file. Keys are never shown here.", "", AllPlatforms},
+	{"pix", SectionAgent, "pix command", "Start Claude Code or Codex with `pix claude` or `pix codex` in any terminal (WebStorm, iTerm, …) and Pixie can see, message and interrupt that session. Quitting DeskPixie never ends it.", "", AllPlatforms},
+	{"restartCoordinator", SectionAgent, "Restart coordinator", "Stops the coordinator and starts it again on your next request, with its conversation. Asks first.", "Restart Coordinator…", AllPlatforms},
+	{"openFile", SectionAdvanced, "Settings file", "settings.json holds every setting on this page.", "Open Settings File", AllPlatforms},
+	{"exportLogs", SectionAdvanced, "Logs", "Saves the app's log, pix's log, the voice log and metrics in one zip to share. It can include what you said to Pixie.", "Export Logs…", AllPlatforms},
 }
 
 // Hit is one search result: a setting (Path is its dotted path) or an extra row (Path is
@@ -96,7 +98,7 @@ func score(qs []string, phrase, label, help string) int {
 			return 0
 		}
 	}
-	if phrase != "" && strings.Contains(strings.ToLower(label), phrase) {
+	if phrase != "" && strings.Contains(strings.Join(lw, " "), phrase) {
 		total += 5
 	}
 	return total
@@ -162,7 +164,7 @@ func Search(query string, p Platform, c Config) []Hit {
 		if !onPlatform(e.Platforms, p) {
 			continue
 		}
-		if s := score(qs, phrase, e.Label, e.Help); s > 0 {
+		if s := score(qs, phrase, e.Label, e.Help+" "+e.Title); s > 0 {
 			found = append(found, scored{Hit{ExtraPrefix + e.ID, e.Section, e.Label, e.Help}, s})
 		}
 	}

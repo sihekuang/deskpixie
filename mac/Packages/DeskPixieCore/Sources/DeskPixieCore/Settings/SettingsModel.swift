@@ -39,6 +39,9 @@ public final class SettingsModel {
     public private(set) var revealed: SettingsHit?
     /// Counts reveals, so revealing the same row again points it out again.
     public private(set) var revealCount = 0
+    /// The last reveal a page pointed out. Kept here, not in the view, so reopening the window
+    /// doesn't point out an old one again.
+    @ObservationIgnored private var shownReveal = 0
 
     /// Where typed API keys are stored (the app sets the Keychain); nil = keys can't be typed.
     @ObservationIgnored public var keyStore: APIKeyStore?
@@ -264,6 +267,13 @@ public final class SettingsModel {
         recordingPath = nil
         revealed = hit
         revealCount += 1
+    }
+
+    /// The reveal `section`'s page has yet to point out, if any; taking it marks it pointed out.
+    public func takeReveal(for section: SettingsSection) -> SettingsHit? {
+        guard let hit = revealed, hit.section == section, revealCount != shownReveal else { return nil }
+        shownReveal = revealCount
+        return hit
     }
 
     // MARK: Committing

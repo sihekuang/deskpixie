@@ -48,6 +48,18 @@ func TestSearchNeedsEveryWordAndRanksTheNameAboveTheHelp(t *testing.T) {
 	}
 }
 
+func TestAHyphenatedNameStillCountsAsTheWholeQuery(t *testing.T) {
+	// "gpt-live delegation" is split into words like the label is, so the label's bonus holds.
+	c := Default()
+	c.Voice.Provider = ProviderOpenAILive
+	if score([]string{"gpt", "live", "delegation"}, "gpt live delegation", "GPT-Live delegation", "") != 3*3+5 {
+		t.Fatal("no whole-query bonus")
+	}
+	if hits := Search("gpt-live delegation", Macos, c); len(hits) == 0 || hits[0].Path != "voice.liveDelegation" {
+		t.Fatal(paths(hits))
+	}
+}
+
 func TestSearchFindsTheWindowsOtherRows(t *testing.T) {
 	for q, want := range map[string]string{
 		"gemini key":          "extra:key.gemini",

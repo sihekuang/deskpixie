@@ -48,6 +48,17 @@ final class SettingsSearchTests: XCTestCase {
         XCTAssertEqual(client.queries, ["mic", "mic"])
     }
 
+    func test_a_page_points_out_a_reveal_once_even_when_the_window_is_reopened() {
+        XCTAssertNil(model.takeReveal(for: .voice))
+        model.reveal(mic)
+        XCTAssertNil(model.takeReveal(for: .pixie))
+        XCTAssertEqual(model.takeReveal(for: .voice), mic)
+        // A new page view (the window reopened) asks again: already pointed out.
+        XCTAssertNil(model.takeReveal(for: .voice))
+        model.reveal(mic)
+        XCTAssertEqual(model.takeReveal(for: .voice), mic)
+    }
+
     func test_revealing_a_hit_points_it_out_each_time_and_stops_recording() {
         model.recordingPath = "hotkey"
         model.reveal(mic)
@@ -71,6 +82,28 @@ final class SettingsSearchTests: XCTestCase {
                                   "openFile", "exportLogs"])
         XCTAssertEqual(ids.count, Set(ids).count)
         XCTAssertEqual(SettingsLayout.extras(.voice).first?.path, "extra:key.openai")
+    }
+
+    func test_the_extra_rows_read_as_the_core_searches_them() {
+        // Word for word Go's settings.Extras: the search matches on and shows these.
+        let all = SettingsLayout.tabs.flatMap { SettingsLayout.extras($0.section) }
+        let rows = Dictionary(uniqueKeysWithValues: all.map { ($0.id, [$0.label, $0.help]) })
+        XCTAssertEqual(rows, [
+            "resetPosition": ["Reset position", "Move Pixie back to the bottom-right corner of the main screen."],
+            "key.openai": ["OpenAI key", "Type the key here to keep it in the Keychain (used first), or set OPENAI_API_KEY in your environment or a .env file. Keys are never shown here."],
+            "key.gemini": ["Gemini key", "Type the key here to keep it in the Keychain (used first), or set GEMINI_API_KEY in your environment or a .env file. Keys are never shown here."],
+            "pix": ["pix command", "Start Claude Code or Codex with `pix claude` or `pix codex` in any terminal (WebStorm, iTerm, …) and Pixie can see, message and interrupt that session. Quitting DeskPixie never ends it."],
+            "restartCoordinator": ["Restart coordinator", "Stops the coordinator and starts it again on your next request, with its conversation. Asks first."],
+            "openFile": ["Settings file", "settings.json holds every setting on this page."],
+            "exportLogs": ["Logs", "Saves the app's log, pix's log, the voice log and metrics in one zip to share. It can include what you said to Pixie."],
+        ])
+        // Go's Extra.Title: the buttons' titles.
+        let titles = all.compactMap { e -> String? in
+            if case .button(_, _, let title, _) = e { return "\(e.id)=\(title)" }
+            return nil
+        }
+        XCTAssertEqual(Set(titles), ["resetPosition=Reset Position", "openFile=Open Settings File",
+                                     "exportLogs=Export Logs…", "restartCoordinator=Restart Coordinator…"])
     }
 
     func test_a_hit_names_its_page_as_the_sidebar_does() {
