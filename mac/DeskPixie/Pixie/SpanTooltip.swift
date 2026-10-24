@@ -58,6 +58,12 @@ final class SpanTooltip {
     }
 
     private func place(_ text: String) {
+        // The text can move under a resting pointer (a card growing as a reply types out): show
+        // only while the pointer is on the span.
+        guard anchor.insetBy(dx: -2, dy: -2).contains(NSEvent.mouseLocation) else {
+            hide()
+            return
+        }
         label.attributedStringValue = Self.styled(text)
         let maxWidth: CGFloat = 360
         var size = label.sizeThatFits(NSSize(width: maxWidth, height: CGFloat.greatestFiniteMagnitude))

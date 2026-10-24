@@ -154,9 +154,21 @@ final class SpanTextView: NSTextView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {
-        if newWindow == nil { clearHover() }
+        clearHover()
+        NotificationCenter.default.removeObserver(self)
         super.viewWillMove(toWindow: newWindow)
     }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        // The panel moving or resizing moves the text under a resting pointer: its highlight no
+        // longer marks what the pointer is on.
+        for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification] {
+            NotificationCenter.default.addObserver(self, selector: #selector(windowChanged), name: name, object: window)
+        }
+    }
+
+    @objc private func windowChanged(_ note: Notification) { clearHover() }
 
     // MARK: Hover
 
