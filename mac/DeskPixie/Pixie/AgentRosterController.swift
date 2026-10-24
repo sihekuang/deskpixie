@@ -14,6 +14,8 @@ final class AgentRosterController {
     nonisolated private static let log = Logger(subsystem: "com.sihekuang.deskpixie", category: "roster")
 
     private let engine: CoreEngine
+    /// The links and files in the reply card's text (#277).
+    private let richText: RichTextStore
     private let worker: CoreWorker
     private let pixie: PixieController
     private let panel: PixiePanel
@@ -61,10 +63,12 @@ final class AgentRosterController {
         self.engine = engine
         self.worker = worker
         self.pixie = pixie
+        richText = RichTextStore(engine: engine)
         panel = PixiePanel(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
         hosting = RosterHostingView(rootView: AnyView(EmptyView()))
         panel.contentView = hosting
         pixie.observeFrame { [weak self] _ in self?.layout() }
+        richText.onChange = { [weak self] in DispatchQueue.main.async { self?.layout() } }
         timer = Timer.scheduledTimer(withTimeInterval: Self.pollInterval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.poll() }
         }
@@ -521,7 +525,8 @@ final class AgentRosterController {
             offer: offer.kind, onOffer: { [weak self] in self?.takeOffer() })
             .onPreferenceChange(ChipFrameKey.self) { [weak self] frame in
                 MainActor.assumeIsolated { self?.chipFrame = frame }
-            })
+            }
+            .environmentObject(richText))
     }
 
     private func layout() {

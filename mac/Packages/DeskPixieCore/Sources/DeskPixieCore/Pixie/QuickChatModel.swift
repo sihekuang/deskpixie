@@ -161,6 +161,8 @@ public struct QuickChatModel: Equatable, Sendable {
     public var canForward: Bool { viewing != nil }
     /// What the card shows: the reply you stepped back to, else the newest.
     public var shownText: String { viewed?.text ?? shown }
+    /// All of what is shown, typed out or not: its links and files are found in this (#277).
+    public var shownFull: String { viewed?.text ?? full }
     public var shownSessions: [String] { viewed?.sessions ?? sessions }
 
     public mutating func back(now: Date) {

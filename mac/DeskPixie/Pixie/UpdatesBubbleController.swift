@@ -23,6 +23,8 @@ final class UpdatesBubbleController {
     nonisolated private static let log = Logger(subsystem: "com.sihekuang.deskpixie", category: "bubble")
 
     private let engine: CoreEngine
+    /// The links and files in the lines' text (#277).
+    private let richText: RichTextStore
     private let worker: CoreWorker
     private let pixie: PixieController
     private let panel: PixiePanel
@@ -50,10 +52,12 @@ final class UpdatesBubbleController {
         self.engine = engine
         self.worker = worker
         self.pixie = pixie
+        richText = RichTextStore(engine: engine)
         panel = PixiePanel(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
         hosting = BubbleHostingView(rootView: AnyView(EmptyView()))
         panel.contentView = hosting
         pixie.observeFrame { [weak self] _ in self?.layout() }
+        richText.onChange = { [weak self] in DispatchQueue.main.async { self?.layout() } }
         timer = Timer.scheduledTimer(withTimeInterval: Self.pollInterval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.poll() }
         }
@@ -296,7 +300,7 @@ final class UpdatesBubbleController {
             onChat: { [weak self] token in
                 guard let self, self.model.acceptsDecision(token: token, now: Self.now, at: NSEvent.mouseLocation) else { return }
                 self.call("agent.chatAbout", ChatArgs(token: token))
-            }))
+            }).environmentObject(richText))
         layout()
     }
 
@@ -321,7 +325,7 @@ final class UpdatesBubbleController {
         // that opens from it stay on the same side, next to Pixie (no flip under the pointer).
         let (rect, _) = BubblePlacement.frame(pixie: DesktopSpace.desktopRect(bit, primaryMaxY: top),
                                               bubble: size, screen: area,
-                                              sideWidth: UpdatesBubbleView.maxWidth)
+                                              sideWidth: UpdatesBubbleLayout.maxWidth)
         panel.setFrame(ScreenDisplays.appKitFrame(topLeft: rect.origin, size: rect.size), display: true)
         if panel.parent == nil {
             pixie.panel.addChildWindow(panel, ordered: .above)

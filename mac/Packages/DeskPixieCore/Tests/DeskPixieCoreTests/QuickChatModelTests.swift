@@ -74,6 +74,7 @@ final class QuickChatModelTests: XCTestCase {
         XCTAssertTrue(m.showsStop)
         XCTAssertTrue(m.tick())
         XCTAssertEqual(m.shown, "Two")
+        XCTAssertEqual(m.shownFull, "Two are running now.", "its links are found in all of it (#277)")
         XCTAssertTrue(m.tick())
         XCTAssertEqual(m.shown, "Two are")
         while m.tick() {}

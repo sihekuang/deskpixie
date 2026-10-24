@@ -94,9 +94,9 @@ struct QuickChatCard: View {
                 .padding(.top, 4)
                 if !model.shownText.isEmpty {
                     ScrollView {
-                        Text(model.shownText)
-                            .font(.callout)
-                            .textSelection(.enabled)
+                        // Typed out word by word; its links and files are found in all of it (#277).
+                        RichMessage(text: model.shownFull, shown: model.shownText, sessions: model.shownSessions,
+                                    selectable: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .frame(maxHeight: 180)

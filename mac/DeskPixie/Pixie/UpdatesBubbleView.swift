@@ -33,30 +33,8 @@ struct UpdatesBubbleView: View {
     var onStopTyping: () -> Void = {}
     var onChat: (String) -> Void = { _ in }
 
-    /// The bubble sizes to its lines: this narrow for short updates, as wide as a long question
-    /// or option needs up to maxWidth, wrapping beyond it (#105). Nothing a question shows is cut.
-    static let width: CGFloat = 240
-    static let maxWidth: CGFloat = 440
-
-    /// The width the shown lines need: their longest text on one line (a question's text, its
-    /// options and note), plus the row's padding, between width and maxWidth.
-    static func width(for lines: [UpdateLine]) -> CGFloat {
-        let callout = NSFont.preferredFont(forTextStyle: .callout)
-        let small = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
-        let caption = NSFont.preferredFont(forTextStyle: .caption1).pointSize
-        let title = NSFont.systemFont(ofSize: caption, weight: .semibold)
-        let mono = NSFont.monospacedSystemFont(ofSize: caption, weight: .regular)
-        func one(_ s: String, _ f: NSFont) -> CGFloat { (s as NSString).size(withAttributes: [.font: f]).width }
-        var need: CGFloat = 0
-        for l in lines where l.kind == "question" {
-            need = max(need, one(l.shownText, callout) + 48)                       // icon, row and bubble padding
-            if let t = l.title { need = max(need, one(t, title) + 48) }
-            for o in l.options ?? [] { need = max(need, one(o, small) + 52) } // button and bubble padding
-            for d in l.details ?? [] { need = max(need, one(d, small) + 52) }
-            for n in (l.note ?? "").split(separator: "\n") { need = max(need, one(String(n), mono) + 48) }
-        }
-        return min(max(ceil(need), width), maxWidth)
-    }
+    /// The bubble sizes to its lines (UpdatesBubbleLayout, #105, #278).
+    static func width(for lines: [UpdateLine]) -> CGFloat { UpdatesBubbleLayout.width(for: lines) }
 
     var body: some View {
         switch phase {
@@ -88,7 +66,7 @@ struct UpdatesBubbleView: View {
         VStack(alignment: .leading, spacing: 2) {
             ForEach(shown) { line in
                 VStack(alignment: .leading, spacing: 0) {
-                    Button { onLine(line) } label: { row(line) }
+                    Button { if !RichTextClicks.takeSpanPress() { onLine(line) } } label: { row(line) }
                         .buttonStyle(.plain)
                     if line.offersDecision, let token = line.token {
                         HStack(spacing: 6) {
@@ -232,11 +210,10 @@ struct UpdatesBubbleView: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
-                Text(line.shownText)
-                    .font(.callout)
-                    .lineLimit(line.kind == "question" ? nil : 2) // a question is read in full
-                    .truncationMode(.tail)
-                    .fixedSize(horizontal: false, vertical: line.kind == "question")
+                // Links, files and code can be clicked (#277); a question is read in full.
+                RichMessage(text: line.shownText, sessions: line.session.map { [$0] } ?? [],
+                            maxLines: line.kind == "question" ? 0 : UpdatesBubbleLayout.maxLines)
+                    .fixedSize(horizontal: false, vertical: true)
                 if let note = line.note, !note.isEmpty {
                     Text(note)
                         .font(.caption.monospaced())
