@@ -150,15 +150,13 @@ final class UpdatesBubbleModelTests: XCTestCase {
         XCTAssertEqual(m.count, 1)
     }
 
-    /// #199: a job's question (no buttons) is clicked away like any line; Clear all leaves it.
-    func testAJobsQuestionIsDismissedByAClickButNotByClearAll() {
+    /// #199: a job's question (no buttons) is clicked away like any line.
+    func testAJobsQuestionIsDismissedByAClick() {
         var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
         let ask = UpdateLine(id: 1, text: "Which branch?", kind: "question", at: 1, job: "job_1", worker: nil)
-        m.apply([ask, line(2), line(3)], now: 1, pop: .allowed)
-        XCTAssertEqual(Set(m.dismissAll()), [2, 3])
-        XCTAssertEqual(m.count, 1)
+        m.apply([ask, line(2)], now: 1, pop: .allowed)
         XCTAssertTrue(m.dismiss(1))
-        XCTAssertEqual(m.count, 0)
+        XCTAssertEqual(m.count, 1)
     }
 
     /// #199 review: an old notification whose id now names another line is stale.
@@ -212,6 +210,38 @@ final class UpdatesBubbleModelTests: XCTestCase {
         m.apply([menu], now: 10, pop: .allowed)
         XCTAssertFalse(m.acceptsDecision(token: "hawk", now: 10.2))
         XCTAssertTrue(m.acceptsDecision(token: "hawk", now: 10.8))
+    }
+
+    /// #286: the deck's card can be older than the newest maxLines; its buttons still count.
+    func testTheDecksCardIsGuardedThenAcceptedWhateverItsPlace() {
+        var m = UpdatesBubbleModel(maxLines: 2); m.apply([], now: 0, pop: .allowed)
+        m.apply([question(1, "hawk"), line(2), line(3)], now: 10, pop: .allowed)
+        XCTAssertEqual(m.current?.id, 1)
+        XCTAssertFalse(m.acceptsDecision(token: "hawk", now: 10.2))
+        XCTAssertTrue(m.acceptsDecision(token: "hawk", now: 10.8))
+    }
+
+    /// #286: the badge card's header names the kind and who it is about.
+    func testTheDeckHeaderNamesTheKindAndSource() {
+        var perm = question(1, "hawk")
+        XCTAssertEqual(perm.deckHeader, "Permission")
+        perm = UpdateLine(id: 1, text: "Run it?", kind: "question", at: 1, job: nil, worker: nil,
+                          token: "hawk", title: "coordinator")
+        XCTAssertEqual(perm.deckHeader, "Permission · coordinator")
+        XCTAssertFalse(perm.offersTerminal)
+        let asks = UpdateLine(id: 2, text: "Resize the VM?", kind: "session", at: 2, job: nil, worker: nil,
+                              session: "trader", title: "trader", asking: true)
+        XCTAssertEqual(asks.deckHeader, "trader is asking")
+        XCTAssertTrue(asks.offersTerminal)
+        let menu = UpdateLine(id: 3, text: "Push?", kind: "question", at: 3, job: nil, worker: nil,
+                              token: "owl", title: "deskpixie", options: ["Push", "Don't"])
+        XCTAssertEqual(menu.deckHeader, "deskpixie is asking")
+        XCTAssertFalse(menu.offersTerminal)
+        let jobQuestion = UpdateLine(id: 4, text: "Which branch?", kind: "question", at: 4, job: "job_1", worker: nil)
+        XCTAssertEqual(jobQuestion.deckHeader, "Question")
+        XCTAssertTrue(jobQuestion.offersTerminal)
+        XCTAssertEqual(line(5).deckHeader, "Update")
+        XCTAssertFalse(line(5).offersTerminal)
     }
 
     func testTheGuardIsPerQuestion() {
@@ -329,16 +359,6 @@ final class UpdatesBubbleModelTests: XCTestCase {
         XCTAssertEqual(m.count, 2)
         m.pointerEntered(now: 6)
         XCTAssertEqual(m.shown.map(\.id), [3, 1])
-    }
-
-    func testClearAllLeavesQuestionsWaitingOnYou() {
-        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
-        m.apply([line(1), question(2, "hawk"), line(3)], now: 1, pop: .allowed)
-        m.pointerEntered(now: 2)
-        XCTAssertTrue(m.offersClearAll)
-        XCTAssertEqual(Set(m.dismissAll()), [1, 3])
-        XCTAssertEqual(m.shown.map(\.id), [2])
-        XCTAssertFalse(m.offersClearAll)
     }
 
     func testPointerOverAnEmptyHiddenBubbleDoesNothing() {

@@ -79,6 +79,7 @@ final class AgentRosterController {
         pixie.view.onDrop = { [weak self] board in self?.attach.drop(board: board) ?? false }
         fetchCurrent()
         fetchMode()
+        fetchReplies()
     }
 
     // MARK: - attachments (#240)
@@ -188,6 +189,42 @@ final class AgentRosterController {
         chat.apply(chatLine)
         if chat.phase == .answering { startTyping() }
         render()
+    }
+
+    /// An update card (#286): it shows on its own or goes into the history, and either way it is
+    /// in the deck, so its lines count as shown.
+    func replyCard(_ card: ReplyCard) {
+        chat.update(card)
+        call("agent.repliesShown", ShownArgs(ids: card.lines))
+        render()
+    }
+
+    /// Cards still undelivered from before launch (#286), oldest first: fed like new ones.
+    private func fetchReplies() {
+        let engine = engine, worker = worker
+        Task { @MainActor [weak self] in
+            let cards: [ReplyCard]?? = await worker.run {
+                do {
+                    return try engine.call("agent.replies", as: RepliesReply.self).cards
+                } catch {
+                    Self.log.error("agent.replies: \(String(describing: error), privacy: .public)")
+                    return nil
+                }
+            }
+            guard let self, let cards = cards ?? nil else { return }
+            for card in cards { self.replyCard(card) }
+        }
+    }
+
+    private func call(_ method: String, _ args: some Encodable & Sendable) {
+        let engine = engine
+        worker.async {
+            do {
+                _ = try engine.call(method, args)
+            } catch {
+                Self.log.error("\(method, privacy: .public): \(String(describing: error), privacy: .public)")
+            }
+        }
     }
 
     /// Your words so far while you talk (#251): shown at once, over Pixie's last reply. Not once
@@ -601,6 +638,8 @@ final class AgentRosterController {
     private struct SendArgs: Encodable, Sendable { let text: String }
     private struct SendReply: Decodable { var job: String }
     private struct FocusAgentArgs: Encodable, Sendable { let name: String }
+    private struct ShownArgs: Encodable, Sendable { let ids: [UInt64] }
+    private struct RepliesReply: Decodable { var cards: [ReplyCard] }
 }
 
 /// Takes the first click even though the panel never becomes key (non-activating).

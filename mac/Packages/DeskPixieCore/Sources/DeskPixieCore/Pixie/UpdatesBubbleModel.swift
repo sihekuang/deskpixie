@@ -51,6 +51,20 @@ public struct UpdateLine: Codable, Sendable, Equatable, Identifiable {
     /// Whether the menu also shows "Type something…" and "Chat about this" (#268).
     public var offersTyped: Bool { offersOptions && typed == true }
 
+    /// The line asks you something but offers no buttons (#286): its card offers its terminal.
+    public var offersTerminal: Bool {
+        !offersDecision && !offersOptions && (kind == "question" || asking == true)
+    }
+
+    /// The badge card's header (#286): "Permission · <who>", "<who> is asking", else who it is
+    /// about.
+    public var deckHeader: String {
+        let who = title.flatMap { $0.isEmpty ? nil : $0 }
+        if offersDecision { return who.map { "Permission · \($0)" } ?? "Permission" }
+        if kind == "question" || asking == true { return who.map { "\($0) is asking" } ?? "Question" }
+        return who ?? "Update"
+    }
+
     /// Option i's description, or nil when it has none.
     public func detail(of i: Int) -> String? {
         guard let details, details.indices.contains(i), !details[i].isEmpty else { return nil }
@@ -334,19 +348,6 @@ public struct UpdatesBubbleModel: Sendable {
         return listed.at != line.at || listed.text != line.text
     }
 
-    /// "Clear all" (#198): every line but the questions leaves at once (a question waiting on
-    /// you is clicked away on its own). Returns their ids for `agent.updatesSeen`.
-    public mutating func dismissAll() -> [UInt64] {
-        let ids = display.filter(Self.clearable).map(\.id)
-        for id in ids { _ = dismiss(id) }
-        return ids
-    }
-
-    private static func clearable(_ line: UpdateLine) -> Bool { line.kind != "question" }
-
-    /// The "Clear all" row shows: more than one line could be cleared.
-    public var offersClearAll: Bool { display.filter(Self.clearable).count > 1 }
-
     /// Presence came back: one pop if anything arrived while away.
     public mutating func back(now: TimeInterval, pop: PopPermission) {
         if heldPop, !lines.isEmpty, pop == .allowed, !isExpanded {
@@ -378,7 +379,9 @@ public struct UpdatesBubbleModel: Sendable {
             hoverOpened = []
             return
         }
-        let showing = Set(shown.filter { $0.offersDecision || $0.offersOptions }.compactMap(\.token))
+        // The deck's card is on screen whatever its place in the list (#286).
+        let showing = Set((shown + [current].compactMap { $0 })
+            .filter { $0.offersDecision || $0.offersOptions }.compactMap(\.token))
         decisionsSince = decisionsSince.filter { showing.contains($0.key) }
         hoverOpened.formIntersection(showing)
         for token in showing where decisionsSince[token] == nil {

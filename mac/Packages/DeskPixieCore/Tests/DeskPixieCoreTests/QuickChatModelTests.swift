@@ -704,6 +704,40 @@ final class QuickChatModelTests: XCTestCase {
         XCTAssertTrue(m.dismissIfOlder(than: 120, now: t0 + 221))
     }
 
+    func testTheHeaderCountsACombinedCard() {
+        XCTAssertEqual(QuickChatModel.header(who: "Pixie", count: 1, ago: "2m ago"), "Pixie · 2m ago")
+        XCTAssertEqual(QuickChatModel.header(who: "Pixie", count: 3, ago: "just now"), "Pixie · 3 updates · just now")
+        XCTAssertEqual(QuickChatModel.header(who: "Pixie", count: 2, ago: nil), "Pixie · 2 updates")
+        XCTAssertEqual(QuickChatModel.header(who: "You", count: 1, ago: nil), "You")
+    }
+
+    func testTheShownCountFollowsTheCardLookedAt() {
+        var m = QuickChatModel()
+        XCTAssertEqual(m.shownCount, 1)
+        _ = m.update(card(1, "**a:** one\n**b:** two", count: 2))
+        XCTAssertEqual(m.shownCount, 2)
+        _ = m.update(card(2, "**c:** three"))
+        XCTAssertEqual(m.shownCount, 1)
+        m.back(now: Date())
+        XCTAssertEqual(m.shownCount, 2)
+    }
+
+    func testUpToTwoOlderCardsPeekBehind() {
+        var m = QuickChatModel()
+        _ = m.update(card(1, "one"))
+        XCTAssertEqual(m.peeks, 0)
+        _ = m.update(card(2, "two"))
+        XCTAssertEqual(m.peeks, 1)
+        _ = m.update(card(3, "three"))
+        _ = m.update(card(4, "four"))
+        XCTAssertEqual(m.peeks, 2)
+        m.back(now: Date()); m.back(now: Date())
+        XCTAssertEqual(m.position?.index, 2)
+        XCTAssertEqual(m.peeks, 1)
+        m.back(now: Date())
+        XCTAssertEqual(m.peeks, 0)
+    }
+
     func testAnUpdateCardIsPutAwayAfterTheDismissTime() {
         var m = QuickChatModel()
         let t0 = Date()

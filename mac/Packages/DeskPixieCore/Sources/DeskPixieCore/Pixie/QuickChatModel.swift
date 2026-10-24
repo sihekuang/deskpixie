@@ -194,6 +194,14 @@ public struct QuickChatModel: Equatable, Sendable {
         guard hasCurrent else { return viewing.map { Position(index: $0 + 1, count: history.count) } }
         return Position(index: (viewing ?? history.count) + 1, count: history.count + 1)
     }
+    /// Older cards peeking behind the one shown (#286): up to two.
+    public var peeks: Int { position.map { min(2, max(0, $0.index - 1)) } ?? 0 }
+    /// How many updates the card shown holds (#286).
+    public var shownCount: Int { viewed?.count ?? (cardID != nil ? count : 1) }
+    /// The card's header (#286): "Pixie · 3 updates · 2m ago"; the count only when combined.
+    public static func header(who: String, count: Int, ago: String?) -> String {
+        ([who] + (count > 1 ? ["\(count) updates"] : []) + (ago.map { [$0] } ?? [])).joined(separator: " · ")
+    }
     public var canBack: Bool { !history.isEmpty && viewing != 0 }
     public var canForward: Bool { viewing != nil }
     /// What the card shows: the reply you stepped back to, else the newest.

@@ -526,6 +526,8 @@ final class EngineCoordinator {
             roster?.apply(view: view)
         case .chatLine(let line):
             roster?.apply(chatLine: line)
+        case .replyCard(let card):
+            roster?.replyCard(card)
         case .attachments(let items):
             roster?.apply(attachments: items)
         case .clipboardRead(let request):
@@ -578,7 +580,6 @@ final class EngineCoordinator {
     /// bubble (held pops) and to the core (`presence.set`: no chime, no conversation by Pixie).
     private func startBubble(pixie m: PixieController, settings: BubbleSettingsValues) {
         let b = UpdatesBubbleController(engine: engine, worker: worker, pixie: m)
-        b.onTalk = { [weak self] in self?.talk() }
         bubble = b
         // A click on an update's Mac notification does what a click on its bubble line does (#199).
         ForegroundPresenter.onOpenUpdate = { [weak self] line in self?.bubble?.openFromNotification(line) }

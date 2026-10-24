@@ -70,7 +70,7 @@ struct QuickChatCard: View {
             if !model.shownText.isEmpty || model.phase != .ready || model.showsEarlierOnly {
                 HStack(spacing: 4) {
                     let who = model.showsEarlierOnly ? "Earlier replies" : model.isYou && model.viewed == nil ? "You" : "Pixie"
-                    Text(ago.map { "\(who) · \($0)" } ?? who)
+                    Text(QuickChatModel.header(who: who, count: model.shownCount, ago: ago))
                     Spacer(minLength: 4)
                     if model.position != nil || model.showsEarlierOnly {
                         ReplyArrows(model: model, position: model.position, onStep: onStep)
@@ -198,6 +198,10 @@ struct QuickChatCard: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.separator))
         .onDrop(of: [.fileURL, .image], isTargeted: nil, perform: attachments.onDrop)
+        // A two-finger swipe steps like the arrows (#286); older cards peek out above.
+        .background(DeckSwipeCatcher { onStep($0 < 0 ? .back : .forward) })
+        .background(alignment: .top) { DeckPeeks(count: model.peeks) }
+        .padding(.top, CGFloat(model.peeks) * DeckPeeks.raise)
         .onAppear { if showsInput { focused = true } }
         .onChange(of: state.focusRequests) { focused = true }
         // The panel is sized from the view: a taller field needs a new frame.
@@ -206,6 +210,34 @@ struct QuickChatCard: View {
     }
 
     private var canSend: Bool { model.canSend(state.draft, attachments: attachments.model.items.count) }
+}
+
+/// The edges of older cards behind a deck's top card (#286): each inset 8 pt per side and raised
+/// 7 pt, fainter the further back. Drawn as a background aligned to the card's top; the card
+/// leaves `raise` per peek of room above itself.
+struct DeckPeeks: View {
+    let count: Int
+
+    static let inset: CGFloat = 8
+    static let raise: CGFloat = 7
+    private static let opacities: [Double] = [0.75, 0.55]
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            ForEach((0..<min(count, Self.opacities.count)).reversed(), id: \.self) { i in
+                let k = CGFloat(i + 1)
+                // Only the edge shows: it reaches just under the card's rounded top.
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(.regularMaterial)
+                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.separator))
+                    .frame(height: k * Self.raise + 14)
+                    .padding(.horizontal, k * Self.inset)
+                    .offset(y: -k * Self.raise)
+                    .opacity(Self.opacities[i])
+            }
+        }
+        .allowsHitTesting(false)
+    }
 }
 
 /// What the card's arrows ask for (#263).

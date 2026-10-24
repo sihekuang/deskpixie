@@ -5,13 +5,12 @@ import SwiftUI
 
 /// The updates bubble beside Pixie (spec docs/specs/2026-10-14-updates-bubble-design.md): a child
 /// panel of the pixie panel showing `UpdatesBubbleModel`'s phase. It pops when an update
-/// arrives, shrinks to a count badge, opens under the pointer, and tells the core what was seen
-/// (`agent.updatesSeen`) and which line was clicked (`agent.focusJob`).
+/// arrives, shrinks to a count badge and opens under the pointer as the badge deck (#286); a
+/// click on a card brings up its pane (`agent.focusSession`, `agent.focusJob`).
 ///
 /// Usage (coordinator, main actor):
 /// ```swift
 /// let bubble = UpdatesBubbleController(engine: engine, worker: worker, pixie: pixie)
-/// bubble.onTalk = { coordinator.talk() }
 /// // .updates → apply(lines:), settings.changed → apply(settings:), presence → presence(present:)
 /// ```
 /// The pointer is polled (like Pixie's cursor poll) rather than tracked: the panel resizes under
@@ -36,8 +35,6 @@ final class UpdatesBubbleController {
     private(set) var settings = BubbleSettingsValues.defaults
     /// False while away (screen locked, displays asleep or idle): pops are held.
     private(set) var present = true
-    /// "+N more": start a conversation (the voice hotkey; Pixie replays everything).
-    var onTalk: (() -> Void)?
 
     private var timer: Timer?
     private var pointerInside = false
@@ -183,14 +180,9 @@ final class UpdatesBubbleController {
         CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown)
     }
 
-    /// A click on a line: it is dismissed (counts as seen, #194), and its pane comes up — your
-    /// session's own tab, else its app, else the job's pane.
+    /// A click on a card (#286): its pane comes up, and it stays in the deck until it is
+    /// answered or no longer pending (the core drops it then).
     private func clicked(_ line: UpdateLine) {
-        // Sent even when the bubble no longer lists it (a notification clicked later, #199).
-        if model.dismiss(line.id) { render() }
-        if !line.offersDecision, !line.offersOptions {
-            call("agent.updatesSeen", SeenArgs(ids: [line.id], clicked: true))
-        }
         SystemNotificationSink.removeNotifications(updates: [line.id])
         focus(line)
     }
@@ -268,15 +260,12 @@ final class UpdatesBubbleController {
 
     private func render() {
         hosting.rootView = AnyView(UpdatesBubbleView(
-            count: model.count, phase: model.phase, shown: model.shown, more: model.more,
-            clearAll: model.offersClearAll,
+            count: model.count, phase: model.phase, current: model.current, position: model.deckPosition,
+            width: UpdatesBubbleView.width(for: model.lines),
             onLine: { [weak self] in self?.clicked($0) },
-            onMore: { [weak self] in self?.onTalk?() },
-            onClearAll: { [weak self] in
+            onStep: { [weak self] in
                 guard let self else { return }
-                let ids = self.model.dismissAll()
-                if !ids.isEmpty { self.call("agent.updatesSeen", SeenArgs(ids: ids, clicked: true)) }
-                SystemNotificationSink.removeNotifications(updates: ids)
+                self.model.step($0)
                 self.render()
             },
             onDecide: { [weak self] token, allow in
@@ -357,7 +346,6 @@ final class UpdatesBubbleController {
     private static var now: TimeInterval { ProcessInfo.processInfo.systemUptime }
 
     private struct UpdatesReply: Decodable { var lines: [UpdateLine] }
-    private struct SeenArgs: Encodable, Sendable { let ids: [UInt64]; var clicked = false }
     private struct DecideArgs: Encodable, Sendable { let token: String; let allow: Bool }
     private struct ChooseArgs: Encodable, Sendable { let token: String; let option: Int }
     private struct TypedArgs: Encodable, Sendable { let token: String; let text: String }
