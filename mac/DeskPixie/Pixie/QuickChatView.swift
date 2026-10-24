@@ -83,6 +83,7 @@ struct QuickChatCard: View {
                     Text("Earlier replies")
                     Spacer(minLength: 4)
                     ReplyArrows(model: model, position: nil, onStep: onStep)
+                    DeckHideButton(action: onDismiss)
                 }
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
@@ -227,7 +228,7 @@ struct QuickChatCard: View {
                     .help("Newest reply")
                     .accessibilityLabel("Newest reply")
                 }
-                if model.canDismiss {
+                if model.canHide {
                     // Puts the deck away (#224, #286), as on the badge deck; the setting puts it
                     // away on its own after a while.
                     DeckHideButton(action: onDismiss)

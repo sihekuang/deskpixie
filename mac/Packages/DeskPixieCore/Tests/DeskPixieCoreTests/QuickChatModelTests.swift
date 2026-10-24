@@ -847,6 +847,31 @@ final class QuickChatModelTests: XCTestCase {
         XCTAssertFalse(m.dismiss(), "already away")
     }
 
+    /// #286: Hide is on the "Earlier replies" bar too, and on a card stepped back to; only words
+    /// still typing out have none.
+    func testHideIsOnWhateverTheDeckShows() {
+        var m = QuickChatModel()
+        _ = m.update(card(1, "one"))
+        XCTAssertTrue(m.canHide)
+        XCTAssertTrue(m.hide())
+        XCTAssertTrue(m.showsEarlierOnly)
+        XCTAssertTrue(m.canHide, "the bar has Hide")
+        XCTAssertTrue(m.hide(), "Hide on the bar latches the deck away")
+        XCTAssertTrue(m.showsEarlierOnly, "nothing else changed")
+        m.back(now: Date())
+        XCTAssertNotNil(m.viewed)
+        XCTAssertTrue(m.canHide)
+        XCTAssertTrue(m.hide())
+        XCTAssertNil(m.viewed, "the look back ends")
+
+        var typing = QuickChatModel()
+        typing.sent(job: "job_1")
+        typing.apply(line("done", "Two are running now."))
+        XCTAssertEqual(typing.phase, .answering)
+        XCTAssertFalse(typing.canHide, "nothing can go while it types out")
+        XCTAssertFalse(typing.hide())
+    }
+
     func testAnUpdateCardIsPutAwayAfterTheDismissTime() {
         var m = QuickChatModel()
         let t0 = Date()

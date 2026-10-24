@@ -181,8 +181,8 @@ final class AgentRosterController {
     /// Hide on the card: the words go at once, and the deck stays away until the pointer has
     /// left the region around Pixie (#286).
     private func dismissWords() {
-        // Latched only when something went away (#286).
-        if chat.dismiss() { latch.collapse() }
+        // Latched whenever Hide was there to press (#286), the "Earlier replies" bar included.
+        if chat.hide() { latch.collapse() }
         typeTimer?.invalidate()
         typeTimer = nil
         render()

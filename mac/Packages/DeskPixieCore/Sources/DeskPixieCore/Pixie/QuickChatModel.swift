@@ -497,7 +497,19 @@ public struct QuickChatModel: Equatable, Sendable {
         isCaption ? phase != .ready : (phase == .done || phase == .stopped)
     }
 
-    /// Hide (#224, #286): the words go; hover and always show nothing until something new is
+    /// Hide is on whatever the reply deck shows (#286): a card, a reply stepped back to, or the
+    /// "Earlier replies" bar. Not while words still type out: nothing can go yet.
+    public var canHide: Bool { canDismiss || !hasCurrent || viewing != nil }
+
+    /// Hide pressed (#286): the words go if they can, a look back ends. True when the deck may be
+    /// latched away.
+    public mutating func hide(now: Date = Date()) -> Bool {
+        guard canHide else { return false }
+        if !dismiss(now: now) { toNewest() }
+        return true
+    }
+
+    /// The ✕ (#224): the words go; hover and always show nothing until something new is
     /// said. False when there was nothing to put away.
     @discardableResult
     public mutating func dismiss(now: Date = Date()) -> Bool {
