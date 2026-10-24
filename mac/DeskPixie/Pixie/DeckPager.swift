@@ -72,7 +72,7 @@ struct DeckPager<ID: Hashable, Page: View>: View {
                     })
                     // Shrunk towards the middle, so the edge that peeks in stays in view.
                     .scaleEffect(1 - 0.05 * off, anchor: CGFloat(i) < at ? .trailing : .leading)
-                    .opacity(1 - 0.4 * off)
+                    .opacity(Double(1 - 0.4 * off))
             }
         }
         .fixedSize()
