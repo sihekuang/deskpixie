@@ -8,6 +8,42 @@ final class UpdatesBubbleModelTests: XCTestCase {
         UpdateLine(id: id, text: "line \(id)", kind: "reply", at: Int64(id), job: nil, worker: nil)
     }
 
+    /// #286: the badge deck shows one card at a time, oldest first; +1 is newer.
+    func testTheBadgeDeckShowsOneAtATimeAndClampsWhenOneIsAnswered() {
+        var m = UpdatesBubbleModel()
+        m.apply([line(1), line(2), line(3)], now: 0, pop: .allowed)
+        XCTAssertEqual(m.current?.id, 1)
+        m.step(1); m.step(1); m.step(1)
+        XCTAssertEqual(m.current?.id, 3)
+        m.apply([line(1), line(2)], now: 1, pop: .allowed) // 3 was answered
+        XCTAssertEqual(m.current?.id, 2)
+        XCTAssertEqual(m.deckPosition?.index, 2)
+    }
+
+    func testTheDeckKeepsItsCardWhenOthersArriveAndHasNoPositionAlone() {
+        var m = UpdatesBubbleModel()
+        m.apply([line(1), line(2)], now: 0, pop: .allowed)
+        m.step(1)
+        XCTAssertEqual(m.current?.id, 2)
+        m.apply([line(1), line(2), line(3)], now: 1, pop: .allowed)
+        XCTAssertEqual(m.current?.id, 2)
+        m.step(-1); m.step(-1)
+        XCTAssertEqual(m.current?.id, 1, "stops at the oldest")
+        m.apply([line(1)], now: 2, pop: .allowed)
+        XCTAssertNil(m.deckPosition)
+        m.apply([], now: 3, pop: .allowed)
+        XCTAssertNil(m.current)
+    }
+
+    func testDismissingTheCurrentCardClampsTheDeck() {
+        var m = UpdatesBubbleModel()
+        m.apply([line(1), line(2)], now: 0, pop: .allowed)
+        m.step(1)
+        XCTAssertTrue(m.dismiss(2))
+        XCTAssertEqual(m.current?.id, 1)
+        XCTAssertEqual(m.deckIndex, 0)
+    }
+
     /// #105: a session's menu offers its options instead of Allow and Deny.
     /// #105: a session's dialog carries its command, shown small under the line.
     /// #105: a question waiting on your answer keeps the bubble open; it collapses once answered.

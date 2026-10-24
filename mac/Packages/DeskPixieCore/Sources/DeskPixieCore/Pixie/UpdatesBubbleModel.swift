@@ -138,6 +138,8 @@ public struct UpdatesBubbleModel: Sendable {
     public private(set) var phase: Phase = .hidden
     /// The core's list, oldest first.
     public private(set) var lines: [UpdateLine] = []
+    /// The badge deck's card (#286): an index into `lines`, oldest first.
+    public private(set) var deckIndex = 0
 
     /// What the expanded bubble shows, newest first: the list as it was on opening plus lines
     /// added since, so rows don't move under the pointer: a line the core drops (answered or
@@ -170,6 +172,28 @@ public struct UpdatesBubbleModel: Sendable {
     /// Newest first, at most `maxLines`.
     public var shown: [UpdateLine] { Array(display.prefix(max(0, maxLines))) }
 
+    /// The badge deck's card, nil when nothing is unheard.
+    public var current: UpdateLine? { lines.indices.contains(deckIndex) ? lines[deckIndex] : nil }
+
+    /// Where the deck is, counting from 1; nil with fewer than two cards.
+    public var deckPosition: (index: Int, count: Int)? {
+        lines.count > 1 ? (deckIndex + 1, lines.count) : nil
+    }
+
+    /// Moves the deck by `delta` cards (+1 newer, −1 older), stopping at either end.
+    public mutating func step(_ delta: Int) {
+        deckIndex = min(max(0, deckIndex + delta), max(0, lines.count - 1))
+    }
+
+    /// Keeps the deck on `id`'s card if it is still listed, else on the nearest one.
+    private mutating func settleDeck(on id: UInt64?) {
+        if let id, let i = lines.firstIndex(where: { $0.id == id }) {
+            deckIndex = i
+        } else {
+            deckIndex = min(max(0, deckIndex), max(0, lines.count - 1))
+        }
+    }
+
     /// The "+N more" row's N.
     public var more: Int { max(0, display.count - max(0, maxLines)) }
 
@@ -197,7 +221,9 @@ public struct UpdatesBubbleModel: Sendable {
         let typingEnded = typing.map { t in !new.contains(where: { $0.token == t && $0.offersTyped }) } ?? false
         let old = Set(lines.map(\.id))
         let added = new.filter { !old.contains($0.id) }
+        let onCard = current?.id
         lines = new
+        settleDeck(on: onCard)
         if typingEnded { // answered elsewhere, or its wait ran out
             typing = nil
             if leftWhileTyping { pointerLeft() }
@@ -290,7 +316,9 @@ public struct UpdatesBubbleModel: Sendable {
         guard let line = display.first(where: { $0.id == id }),
               !line.offersDecision, !line.offersOptions else { return false }
         dismissed.insert(id)
+        let onCard = current?.id
         lines.removeAll { $0.id == id }
+        settleDeck(on: onCard)
         frozen?.removeAll { $0.id == id }
         if display.isEmpty {
             frozen = nil
