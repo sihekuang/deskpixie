@@ -639,6 +639,259 @@ final class QuickChatModelTests: XCTestCase {
         m.apply(line("done", "Old news.", job: "job_0"))
         XCTAssertEqual(m.phase, .ready)
     }
+
+    // MARK: Update cards (#286)
+
+    private func card(_ id: UInt64, _ text: String, count: Int = 1) -> ReplyCard {
+        ReplyCard(id: id, text: text, count: count, lines: [id], sessions: [])
+    }
+
+    func testAnUpdateShowsOnItsOwnAndGoesIntoHistory() {
+        var m = QuickChatModel()
+        XCTAssertTrue(m.update(card(1, "**live-like:** done")))
+        XCTAssertTrue(m.showsCard(hovering: false, always: false))
+        XCTAssertEqual(m.shownFull, "**live-like:** done")
+        _ = m.update(card(2, "**api:** done"))
+        XCTAssertEqual(m.position, QuickChatModel.Position(index: 2, count: 2))
+        XCTAssertEqual(m.history.map(\.id), [1])
+    }
+
+    func testARowJoiningTheShownCardReplacesItInPlace() {
+        var m = QuickChatModel()
+        _ = m.update(card(1, "**a:** one"))
+        _ = m.update(card(1, "**a:** one\n**b:** two", count: 2))
+        XCTAssertEqual(m.count, 2)
+        XCTAssertEqual(m.cardID, 1)
+        XCTAssertEqual(m.shownFull, "**a:** one\n**b:** two")
+        XCTAssertNil(m.position) // still one card, nothing to step back to
+    }
+
+    func testAnUpdateNeverCoversATypedMessageAtWork() {
+        var m = QuickChatModel()
+        m.mode = "text"; m.open = true
+        m.sending(); _ = m.sent(job: "job_1")
+        XCTAssertFalse(m.update(card(1, "**a:** done")))
+        XCTAssertEqual(m.phase, .thinking)
+        XCTAssertEqual(m.history.last?.text, "**a:** done")
+        XCTAssertTrue(m.newerWaiting)
+        XCTAssertNil(m.cardID)
+    }
+
+    func testAReEmittedCardPushedToHistoryUpdatesThatEntry() {
+        var m = QuickChatModel()
+        _ = m.update(card(1, "**a:** one"))
+        _ = m.update(card(2, "**b:** two"))
+        XCTAssertFalse(m.update(card(1, "**a:** one\n**c:** three", count: 2)))
+        XCTAssertEqual(m.history.map(\.id), [1])
+        XCTAssertEqual(m.history.first?.text, "**a:** one\n**c:** three")
+        XCTAssertEqual(m.history.first?.count, 2)
+        XCTAssertEqual(m.cardID, 2)
+        XCTAssertEqual(m.shownFull, "**b:** two")
+    }
+
+    func testAPutAwayCardGainingARowShowsAgain() {
+        var m = QuickChatModel()
+        let t0 = Date()
+        _ = m.update(card(1, "**a:** one"), now: t0)
+        m.dismiss(now: t0)
+        XCTAssertFalse(m.showsCard(hovering: false, always: false))
+        XCTAssertTrue(m.update(card(1, "**a:** one\n**b:** two", count: 2), now: t0 + 100))
+        XCTAssertTrue(m.showsCard(hovering: false, always: false))
+        XCTAssertEqual(m.cardID, 1)
+        XCTAssertEqual(m.count, 2)
+        XCTAssertEqual(m.history, [])
+        XCTAssertFalse(m.dismissIfOlder(than: 120, now: t0 + 130))
+        XCTAssertTrue(m.dismissIfOlder(than: 120, now: t0 + 221))
+    }
+
+    func testTheHeaderCountsACombinedCard() {
+        XCTAssertEqual(QuickChatModel.header(who: "Pixie", count: 1, ago: "2m ago"), "Pixie · 2m ago")
+        XCTAssertEqual(QuickChatModel.header(who: "Pixie", count: 3, ago: "just now"), "3 updates · just now")
+        XCTAssertEqual(QuickChatModel.header(who: "Pixie", count: 2, ago: nil), "2 updates")
+        XCTAssertEqual(QuickChatModel.header(who: "You", count: 1, ago: nil), "You")
+    }
+
+    func testTheShownCountFollowsTheCardLookedAt() {
+        var m = QuickChatModel()
+        XCTAssertEqual(m.shownCount, 1)
+        _ = m.update(card(1, "**a:** one\n**b:** two", count: 2))
+        XCTAssertEqual(m.shownCount, 2)
+        _ = m.update(card(2, "**c:** three"))
+        XCTAssertEqual(m.shownCount, 1)
+        m.back(now: Date())
+        XCTAssertEqual(m.shownCount, 2)
+    }
+
+    /// #286 tryout: cards restored at launch, fed oldest first, leave the newest on top.
+    func testCardsFedInOrderLeaveTheNewestOnTop() {
+        var m = QuickChatModel()
+        for i in UInt64(1)...3 { _ = m.update(card(i, "card \(i)")) }
+        XCTAssertEqual(m.cardID, 3)
+        XCTAssertEqual(m.shownFull, "card 3")
+        XCTAssertEqual(m.position, QuickChatModel.Position(index: 3, count: 3))
+    }
+
+    /// #286 tryout: a card restored at launch says how long ago its row came, not "just now".
+    func testACardsAgoIsWhenItsNewestRowCame() {
+        var m = QuickChatModel()
+        let t0 = Date()
+        _ = m.update(ReplyCard(id: 1, text: "a", count: 1, lines: [1], at: t0.addingTimeInterval(-240)), now: t0)
+        XCTAssertEqual(m.ago(now: t0), "4m ago")
+        _ = m.update(ReplyCard(id: 2, text: "b", count: 1, lines: [2], at: t0.addingTimeInterval(-60)), now: t0)
+        XCTAssertEqual(m.ago(now: t0), "1m ago")
+        m.back(now: t0)
+        XCTAssertEqual(m.ago(now: t0), "4m ago", "the kept card keeps its own time")
+    }
+
+    /// A gained row: the ago follows the newest row, while the dismiss time runs from the pop.
+    func testAGainedRowMovesTheAgoButThePopRunsFromNow() {
+        var m = QuickChatModel()
+        let t0 = Date()
+        _ = m.update(ReplyCard(id: 1, text: "a", count: 1, lines: [1], at: t0.addingTimeInterval(-300)), now: t0)
+        XCTAssertEqual(m.ago(now: t0), "5m ago")
+        _ = m.update(ReplyCard(id: 1, text: "a\nb", count: 2, lines: [1, 2], at: t0.addingTimeInterval(8)),
+                     now: t0.addingTimeInterval(10))
+        XCTAssertEqual(m.ago(now: t0.addingTimeInterval(10)), "just now")
+        XCTAssertFalse(m.dismissIfOlder(than: 120, now: t0.addingTimeInterval(125)))
+        XCTAssertTrue(m.dismissIfOlder(than: 120, now: t0.addingTimeInterval(131)))
+    }
+
+    /// #286: the deck's pages keep their ids while the history grows and drops old replies.
+    func testPagesKeepTheirIdsAsTheHistoryMoves() {
+        var m = QuickChatModel()
+        m.historySecs = 100
+        let t0 = Date()
+        _ = m.update(card(1, "one"), now: t0)
+        let first = m.pageID
+        _ = m.update(card(2, "two"), now: t0 + 10)
+        XCTAssertEqual(m.pages.map(\.text), ["one", "two"])
+        XCTAssertEqual(m.pages.first?.id, first, "the shown card keeps its id once it is kept")
+        let second = m.pageID
+        XCTAssertEqual(m.pages.last?.id, second)
+        _ = m.update(card(3, "three"), now: t0 + 105) // "one" drops off
+        XCTAssertEqual(m.pages.map(\.text), ["two", "three"])
+        XCTAssertEqual(m.pages.first?.id, second)
+    }
+
+    /// #286: every card carries its own header.
+    func testEachPageHasItsOwnHeader() {
+        var m = QuickChatModel()
+        let t0 = Date()
+        _ = m.update(ReplyCard(id: 1, text: "a", count: 1, lines: [1], at: t0 - 240), now: t0)
+        _ = m.update(ReplyCard(id: 2, text: "b\nc", count: 2, lines: [2, 3], at: t0 - 60), now: t0)
+        XCTAssertEqual(m.pages.map { $0.header(now: t0) }, ["Pixie · 4m ago", "2 updates · 1m ago"])
+        XCTAssertTrue(m.caption(role: "assistant", text: "Hello there", now: t0))
+        XCTAssertEqual(m.pages.last?.header(now: t0), "Pixie", "no time while it is being said")
+    }
+
+    func testScrollingToAPageLooksBackOrComesToTheNewest() {
+        var m = QuickChatModel()
+        for i in UInt64(1)...3 { _ = m.update(card(i, "card \(i)")) }
+        let ids = m.pages.map(\.id)
+        m.show(page: ids[0])
+        XCTAssertEqual(m.shownFull, "card 1")
+        XCTAssertEqual(m.position, QuickChatModel.Position(index: 1, count: 3))
+        XCTAssertEqual(m.pageID, ids[0])
+        m.show(page: ids[2])
+        XCTAssertNil(m.viewed)
+        XCTAssertEqual(m.pageID, ids[2])
+        m.show(page: 999)
+        XCTAssertEqual(m.pageID, ids[2], "a page that isn't there changes nothing")
+    }
+
+    /// #286: a new card brings the deck to it, even while you look back.
+    func testANewCardBringsTheDeckToTheNewest() {
+        var m = QuickChatModel()
+        _ = m.update(card(1, "one")); _ = m.update(card(2, "two"))
+        m.back(now: Date())
+        XCTAssertEqual(m.shownFull, "one")
+        _ = m.update(card(3, "three"))
+        XCTAssertEqual(m.shownFull, "three")
+        XCTAssertEqual(m.position, QuickChatModel.Position(index: 3, count: 3))
+        XCTAssertFalse(m.newerWaiting)
+        XCTAssertEqual(m.pageID, m.pages.last?.id)
+    }
+
+    /// #286 tryout: launch as the app runs it. The startup fetch (`agent.replies`, oldest first)
+    /// and live `reply.card` events for the same cards arrive in either order, with the settings
+    /// read (`captions`, mode) in between: the newest card is on top and is the deck's page.
+    func testTheStartupFeedLeavesTheNewestOnTop() {
+        let t0 = Date()
+        let restored = [
+            ReplyCard(id: 1, text: "issues", count: 1, lines: [1], at: t0 - 240),
+            ReplyCard(id: 2, text: "bench", count: 1, lines: [2], at: t0 - 180),
+            ReplyCard(id: 3, text: "three rows", count: 3, lines: [3, 4, 5], at: t0 - 60),
+        ]
+        for liveFirst in [false, true] {
+            var m = QuickChatModel()
+            if liveFirst { for c in restored { _ = m.update(c, now: t0) } }
+            m.mode = "text"; m.historySecs = 300; m.prune(now: t0)
+            for c in restored { _ = m.update(c, now: t0) }
+            if !liveFirst { _ = m.update(restored[2], now: t0) } // a late live copy of the newest
+            XCTAssertEqual(m.cardID, 3, "liveFirst \(liveFirst)")
+            XCTAssertEqual(m.position, QuickChatModel.Position(index: 3, count: 3))
+            XCTAssertEqual(m.pageID, m.pages.last?.id)
+            XCTAssertEqual(m.ago(now: t0), "1m ago")
+        }
+    }
+
+    /// #286 re-review: Hide says whether anything was put away, so the deck isn't latched for
+    /// nothing.
+    func testHideSaysWhetherAnythingWentAway() {
+        var m = QuickChatModel()
+        XCTAssertFalse(m.canDismiss)
+        XCTAssertFalse(m.dismiss())
+        _ = m.update(card(1, "one"))
+        XCTAssertTrue(m.canDismiss)
+        XCTAssertTrue(m.dismiss())
+        XCTAssertFalse(m.dismiss(), "already away")
+    }
+
+    /// #286: Hide is on the "Earlier replies" bar too, and on a card stepped back to; only words
+    /// still typing out have none.
+    func testHideIsOnWhateverTheDeckShows() {
+        var m = QuickChatModel()
+        _ = m.update(card(1, "one"))
+        XCTAssertTrue(m.canHide)
+        XCTAssertTrue(m.hide())
+        XCTAssertTrue(m.showsEarlierOnly)
+        XCTAssertTrue(m.canHide, "the bar has Hide")
+        XCTAssertTrue(m.hide(), "Hide on the bar latches the deck away")
+        XCTAssertTrue(m.showsEarlierOnly, "nothing else changed")
+        m.back(now: Date())
+        XCTAssertNotNil(m.viewed)
+        XCTAssertTrue(m.canHide)
+        XCTAssertTrue(m.hide())
+        XCTAssertNil(m.viewed, "the look back ends")
+
+        var typing = QuickChatModel()
+        typing.sent(job: "job_1")
+        typing.apply(line("done", "Two are running now."))
+        XCTAssertEqual(typing.phase, .answering)
+        XCTAssertFalse(typing.canHide, "nothing can go while it types out")
+        XCTAssertFalse(typing.hide())
+    }
+
+    /// #286 review: a card that comes while a typed message is at work isn't lost when the history
+    /// keeps only the latest (0): it waits as the newest, unseen.
+    func testACardDuringATypedMessageSurvivesANoHistorySetting() {
+        var m = QuickChatModel()
+        m.historySecs = 0
+        m.mode = "text"
+        m.sending()
+        XCTAssertFalse(m.update(card(1, "one")), "the typed message stays up")
+        XCTAssertTrue(m.newerWaiting)
+        XCTAssertEqual(m.pages.first?.text, "one")
+        m.prune(now: Date().addingTimeInterval(600))
+        XCTAssertEqual(m.pages.first?.text, "one", "still there, unseen")
+    }
+
+    func testAnUpdateCardIsPutAwayAfterTheDismissTime() {
+        var m = QuickChatModel()
+        let t0 = Date()
+        _ = m.update(card(1, "**a:** done"), now: t0)
+        XCTAssertTrue(m.dismissIfOlder(than: 120, now: t0.addingTimeInterval(121)))
+    }
 }
 
 /// #240: attachments alone can be sent.

@@ -5,13 +5,12 @@ import SwiftUI
 
 /// The updates bubble beside Pixie (spec docs/specs/2026-10-14-updates-bubble-design.md): a child
 /// panel of the pixie panel showing `UpdatesBubbleModel`'s phase. It pops when an update
-/// arrives, shrinks to a count badge, opens under the pointer, and tells the core what was seen
-/// (`agent.updatesSeen`) and which line was clicked (`agent.focusJob`).
+/// arrives, shrinks to a count badge and opens under the pointer as the badge deck (#286); a
+/// click on a card brings up its pane (`agent.focusSession`, `agent.focusJob`).
 ///
 /// Usage (coordinator, main actor):
 /// ```swift
 /// let bubble = UpdatesBubbleController(engine: engine, worker: worker, pixie: pixie)
-/// bubble.onTalk = { coordinator.talk() }
 /// // .updates → apply(lines:), settings.changed → apply(settings:), presence → presence(present:)
 /// ```
 /// The pointer is polled (like Pixie's cursor poll) rather than tracked: the panel resizes under
@@ -36,11 +35,12 @@ final class UpdatesBubbleController {
     private(set) var settings = BubbleSettingsValues.defaults
     /// False while away (screen locked, displays asleep or idle): pops are held.
     private(set) var present = true
-    /// "+N more": start a conversation (the voice hotkey; Pixie replays everything).
-    var onTalk: (() -> Void)?
 
     private var timer: Timer?
     private var pointerInside = false
+    /// Once open, the bubble stays open while the pointer is around Pixie and its cards, or a
+    /// swipe runs (#286).
+    private var keeper = HoverKeeper()
     /// The typed answer's draft (#268), and the monitor that puts the field away on a click in
     /// another app.
     private let typed = BubbleTyping()
@@ -105,6 +105,19 @@ final class UpdatesBubbleController {
         guard model.typing == token, !text.isEmpty else { return }
         call("agent.typedAnswer", TypedArgs(token: token, text: text))
         stopTyping()
+        acted(token: token)
+    }
+
+    /// You acted on a card (#286): it leaves the deck at once, the next slides in.
+    private func acted(token: String) {
+        guard let line = model.lines.first(where: { $0.token == token }) else { return }
+        acted(line)
+    }
+
+    private func acted(_ line: UpdateLine) {
+        model.act(on: line.id, now: Self.now)
+        SystemNotificationSink.removeNotifications(updates: [line.id])
+        render()
     }
 
     private func stopTyping() {
@@ -183,14 +196,9 @@ final class UpdatesBubbleController {
         CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown)
     }
 
-    /// A click on a line: it is dismissed (counts as seen, #194), and its pane comes up — your
-    /// session's own tab, else its app, else the job's pane.
+    /// A click on a card (#286): its pane comes up, and it stays in the deck until it is
+    /// answered or no longer pending (the core drops it then).
     private func clicked(_ line: UpdateLine) {
-        // Sent even when the bubble no longer lists it (a notification clicked later, #199).
-        if model.dismiss(line.id) { render() }
-        if !line.offersDecision, !line.offersOptions {
-            call("agent.updatesSeen", SeenArgs(ids: [line.id], clicked: true))
-        }
         SystemNotificationSink.removeNotifications(updates: [line.id])
         focus(line)
     }
@@ -217,9 +225,15 @@ final class UpdatesBubbleController {
 
     private func poll() {
         // A badge faded with Pixie is not looked at: a passing pointer doesn't open it.
-        let inside = UpdatesBubbleModel.hoverCounts(
-            pointerOnPanel: panel.isVisible && panel.frame.contains(NSEvent.mouseLocation),
-            alpha: panel.alphaValue, alreadyInside: pointerInside)
+        let mouse = NSEvent.mouseLocation
+        keeper.pointer(at: pixie.hoverPointer, frames: pixie.hoverFrames, now: Self.now)
+        let onPanel = panel.isVisible && panel.frame.contains(mouse)
+        // Closed with Hide: it opens again on hover once the pointer has been away.
+        if !keeper.inside { model.regionLeft() }
+        // Opened only on the badge or bubble itself; once open, the whole region keeps it.
+        let inside = model.collapsed ? false : pointerInside
+            ? onPanel || keeper.keepsShowing(now: Self.now)
+            : UpdatesBubbleModel.hoverCounts(pointerOnPanel: onPanel, alpha: panel.alphaValue, alreadyInside: false)
         var changed = false
         if inside != pointerInside {
             pointerInside = inside
@@ -230,7 +244,8 @@ final class UpdatesBubbleController {
             call("agent.focusJob", FocusJobArgs(job: r.job, worker: r.worker))
         }
         let before = model.phase
-        model.tick(now: Self.now)
+        // A pop doesn't shrink to the badge while you're around (#286).
+        model.tick(now: Self.now, holding: keeper.keepsShowing(now: Self.now))
         if changed || model.phase != before { render() } else { updateAlpha() }
     }
 
@@ -268,28 +283,30 @@ final class UpdatesBubbleController {
 
     private func render() {
         hosting.rootView = AnyView(UpdatesBubbleView(
-            count: model.count, phase: model.phase, shown: model.shown, more: model.more,
-            clearAll: model.offersClearAll,
+            count: model.count, phase: model.phase, lines: model.lines, current: model.current,
+            width: UpdatesBubbleView.width(for: model.lines),
             onLine: { [weak self] in self?.clicked($0) },
-            onMore: { [weak self] in self?.onTalk?() },
-            onClearAll: { [weak self] in
+            onSelect: { [weak self] in
                 guard let self else { return }
-                let ids = self.model.dismissAll()
-                if !ids.isEmpty { self.call("agent.updatesSeen", SeenArgs(ids: ids, clicked: true)) }
-                SystemNotificationSink.removeNotifications(updates: ids)
+                self.model.show(id: $0, now: Self.now)
                 self.render()
             },
+            onResize: { [weak self] in DispatchQueue.main.async { self?.layout() } },
+            onScroll: { [weak self] in self?.keeper.scroll(active: $0, now: Self.now) },
             onDecide: { [weak self] token, allow in
                 // A tap within decisionGuard of the buttons appearing is a stray click: ignored.
                 guard let self, self.model.acceptsDecision(token: token, now: Self.now, at: NSEvent.mouseLocation) else { return }
                 self.call("agent.decide", DecideArgs(token: token, allow: allow))
+                self.acted(token: token)
             },
             onChoose: { [weak self] token, option in
                 guard let self, self.model.acceptsDecision(token: token, now: Self.now, at: NSEvent.mouseLocation) else { return }
                 self.call("agent.choose", ChooseArgs(token: token, option: option))
+                self.acted(token: token)
             },
             onBadge: { [weak self] in
                 guard let self, self.panel.alphaValue >= UpdatesBubbleModel.hoverMinAlpha else { return }
+                self.model.regionLeft() // a click on the badge opens it, closed with Hide or not
                 self.model.pointerEntered(now: Self.now, at: NSEvent.mouseLocation)
                 self.render()
             },
@@ -300,6 +317,19 @@ final class UpdatesBubbleController {
             onChat: { [weak self] token in
                 guard let self, self.model.acceptsDecision(token: token, now: Self.now, at: NSEvent.mouseLocation) else { return }
                 self.call("agent.chatAbout", ChatArgs(token: token))
+                self.acted(token: token)
+            },
+            onTerminal: { [weak self] line in
+                guard let self else { return }
+                self.focus(line)
+                self.acted(line)
+            },
+            onCollapse: { [weak self] in
+                guard let self else { return }
+                self.releaseKey()
+                self.model.collapse()
+                self.pointerInside = false
+                self.render()
             }).environmentObject(richText))
         layout()
     }
@@ -316,9 +346,17 @@ final class UpdatesBubbleController {
         }
         let size = hosting.fittingSize
         guard size.width > 0, size.height > 0 else {
-            hide()
+            // Right after a new root view (a swipe's card, say) SwiftUI may not have measured it
+            // yet: keep the panel where it is and try again, rather than hide it for a moment.
+            if panel.isVisible && zeroSizeRetries < 3 {
+                zeroSizeRetries += 1
+                DispatchQueue.main.async { [weak self] in self?.layout() }
+            } else {
+                hide()
+            }
             return
         }
+        zeroSizeRetries = 0
         let top = ScreenDisplays.primaryMaxY
         let bit = pixie.panel.frame
         let screen = NSScreen.screens.first { $0.frame.contains(NSPoint(x: bit.midX, y: bit.midY)) }
@@ -336,6 +374,9 @@ final class UpdatesBubbleController {
         if !panel.isVisible { panel.orderFrontRegardless() }
         updateAlpha()
     }
+
+    /// Layouts in a row that found the view unmeasured (see `layout`).
+    private var zeroSizeRetries = 0
 
     private func hide() {
         if panel.parent != nil { pixie.panel.removeChildWindow(panel) }
@@ -357,7 +398,6 @@ final class UpdatesBubbleController {
     private static var now: TimeInterval { ProcessInfo.processInfo.systemUptime }
 
     private struct UpdatesReply: Decodable { var lines: [UpdateLine] }
-    private struct SeenArgs: Encodable, Sendable { let ids: [UInt64]; var clicked = false }
     private struct DecideArgs: Encodable, Sendable { let token: String; let allow: Bool }
     private struct ChooseArgs: Encodable, Sendable { let token: String; let option: Int }
     private struct TypedArgs: Encodable, Sendable { let token: String; let text: String }

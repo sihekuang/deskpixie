@@ -46,6 +46,8 @@ type fakeAgent struct {
 	attach          *attach.Store
 	places          map[string][2]string // session → folder, app
 	placeCalls      int
+	shown           [][]uint64
+	replies         any
 }
 
 func (f *fakeAgent) Tools() []voice.Tool { return []voice.Tool{namedTool("delegate")} }
@@ -77,6 +79,28 @@ func (f *fakeAgent) UpdatesSeen(ids []uint64) {
 	f.mu.Lock()
 	f.seen = append(f.seen, ids)
 	f.mu.Unlock()
+}
+func (f *fakeAgent) RepliesShown(ids []uint64) {
+	f.mu.Lock()
+	f.shown = append(f.shown, ids)
+	f.mu.Unlock()
+}
+func (f *fakeAgent) PendingReplies() any {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.replies == nil {
+		return []any{} // never nil, as the real one
+	}
+	return f.replies
+}
+func (f *fakeAgent) shownReplies() []uint64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var all []uint64
+	for _, ids := range f.shown {
+		all = append(all, ids...)
+	}
+	return all
 }
 func (f *fakeAgent) UpdatesDismissed(ids []uint64) {
 	f.mu.Lock()
@@ -390,6 +414,40 @@ func TestTheBubbleTypedAnswerAndChatReachTheAgent(t *testing.T) {
 	defer f.mu.Unlock()
 	if !slices.Equal(f.decided, []string{"hawk:typed MariaDB", "owl:chat"}) {
 		t.Fatal(f.decided)
+	}
+}
+
+func TestRepliesCallsReachTheAgent(t *testing.T) {
+	f := &fakeAgent{}
+	h := newHarness(t, withAgent(f))
+	h.call("agent.repliesShown", map[string]any{"ids": []uint64{3, 4}})
+	if got := f.shownReplies(); !slices.Equal(got, []uint64{3, 4}) {
+		t.Fatal(got)
+	}
+	if out := h.call("agent.replies", map[string]any{}); !strings.HasPrefix(string(out), `{"cards":`) {
+		t.Fatal(string(out))
+	}
+}
+
+func TestTheReplyHookEmitsAReplyCardEvent(t *testing.T) {
+	f := &fakeAgent{}
+	h := newHarness(t, withAgent(f))
+	f.hooks.Reply(map[string]any{"id": 7, "text": "Done."})
+	e := h.waitFor("reply.card", nil, time.Second)
+	if b, _ := json.Marshal(e); string(b) != `{"id":7,"kind":"reply.card","text":"Done."}` {
+		t.Fatal(string(b))
+	}
+}
+
+func TestTheRepliesCallsAreNoOpsWithoutAnAgent(t *testing.T) {
+	h := newHarness(t, func(d *Deps, _ *harness) {
+		d.Agent = func(settings.Config, string, AgentHooks) Agent { return nil }
+	})
+	if out := h.call("agent.repliesShown", map[string]any{"ids": []uint64{1}}); string(out) != "{}" {
+		t.Fatal(string(out))
+	}
+	if out := h.call("agent.replies", map[string]any{}); string(out) != `{"cards":[]}` {
+		t.Fatal(string(out))
 	}
 }
 

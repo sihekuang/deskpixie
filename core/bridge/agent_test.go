@@ -32,6 +32,8 @@ func (b *bridgeAgent) OnMouth(int)                               {}
 func (b *bridgeAgent) Shutdown()                                 { b.mu.Lock(); b.shut++; b.mu.Unlock() }
 func (b *bridgeAgent) UpdatesSeen([]uint64)                      {}
 func (b *bridgeAgent) UpdatesDismissed([]uint64)                 {}
+func (b *bridgeAgent) RepliesShown([]uint64)                     {}
+func (b *bridgeAgent) PendingReplies() any                       { return []any{} }
 func (b *bridgeAgent) Decide(string, bool)                       {}
 func (b *bridgeAgent) Choose(string, int)                        {}
 func (b *bridgeAgent) TypedAnswer(string, string)                {}

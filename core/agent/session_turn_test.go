@@ -54,18 +54,16 @@ func TestYourOwnShortTurnStaysQuiet(t *testing.T) {
 }
 
 func TestYourOwnLongTurnIsAnnouncedWithItsGist(t *testing.T) {
-	fx := sessionTurn(turnCtl(nil), longTurn, T0)
+	c := turnCtl(nil)
+	fx := sessionTurn(c, longTurn, T0)
 	wantContains(t, fx, eNotify(longTurnLine))
 	if !anyKind(fx, EfChime) || !anyKind(fx, EfAppend) {
 		t.Fatal(fmtEffects(fx))
 	}
-	var bubble []UpdateItem
-	for _, e := range effectsOfKind(fx, EfUpdates) {
-		bubble = e.Value.([]UpdateItem)
-	}
-	if len(bubble) != 1 || bubble[0].Kind != LineSession || bubble[0].App != webstorm || bubble[0].Text != longTurnLine ||
-		bubble[0].Session != "api-claude" {
-		t.Fatalf("the bubble line brings up its session: %+v", bubble)
+	// #286: a done line is a reply, not a bubble line; the outbox line still knows its session.
+	l := c.outbox.lines[len(c.outbox.lines)-1]
+	if len(bubbleOf(fx)) != 0 || l.Kind != LineSession || l.App != webstorm || l.Text != longTurnLine || l.Session != "api-claude" {
+		t.Fatalf("%+v %+v", bubbleOf(fx), l)
 	}
 }
 
@@ -134,8 +132,10 @@ func TestASessionOnAnOlderPixIsToldOnce(t *testing.T) {
 // #194: told again, a line replaces the unheard one saying the same: the bubble lists it once.
 func TestALineToldAgainIsListedOnce(t *testing.T) {
 	c := turnCtl(nil)
-	sessionTurn(c, longTurn, T0)
-	fx := sessionTurn(c, longTurn, T0+120_000)
+	asks := longTurn // #286: only a question is in the bubble
+	asks.Reply = "Shall I go ahead and push?"
+	sessionTurn(c, asks, T0)
+	fx := sessionTurn(c, asks, T0+120_000)
 	items, ok := lastUpdates(t, fx)
 	if !ok || len(items) != 1 || items[0].At != T0+120_000 {
 		t.Fatalf("%+v", items)
@@ -151,8 +151,8 @@ func TestAnOlderPixIsNotToldAgainAfterARestart(t *testing.T) {
 	ev := PaneEvent{Kind: PaneEventOutdated, Agent: "api-claude", Outdated: &SessionOutdated{Label: "landing", Tool: "claude", App: webstorm}}
 	first := ctl()
 	fx := first.Step(PaneInput(ev), T0)
-	items, _ := lastUpdates(t, fx)
-	if len(items) != 1 || items[0].Session != "api-claude" {
+	// #286: an info line is not in the bubble; its outbox line still has the session.
+	if items, _ := lastUpdates(t, fx); len(items) != 0 || first.outbox.lines[0].Session != "api-claude" {
 		t.Fatalf("%+v", items)
 	}
 	restarted := func(now Millis) *AgentController {

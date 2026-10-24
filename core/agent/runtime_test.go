@@ -953,17 +953,21 @@ func TestTheUpdatesBubbleGetsTheListAtStartAndWhenALineIsOutboxed(t *testing.T) 
 		stopHook(r, `<spoken ref="job_000000000001" status="done">There are 12.</spoken>`)
 		settle()
 		lists = r.updates.Lists()
+		// #286: a done line is a reply, so the list stays as it was.
+		if len(lists) != 1 || len(r.h.Updates()) != 0 {
+			t.Fatalf("%+v", lists)
+		}
+		delegate(t, r, "name the branch")
+		settle()
+		stopHook(r, `<spoken ref="job_000000000002" status="question">Which branch?</spoken>`)
+		settle()
+		lists = r.updates.Lists()
 		last := lists[len(lists)-1]
-		if len(lists) != 2 || len(last) != 1 || last[0].Text != "There are 12." || last[0].Job != JobIDFromBits(1) {
+		if len(lists) != 2 || len(last) != 1 || last[0].Text != "Which branch?" || last[0].Job != JobIDFromBits(2) {
 			t.Fatalf("%+v", lists)
 		}
 		if got := r.h.Updates(); len(got) != 1 || got[0].ID != last[0].ID {
 			t.Fatalf("Updates is the current list: %+v", got)
-		}
-		r.h.UpdatesSeen([]uint64{last[0].ID})
-		settle()
-		if lists = r.updates.Lists(); len(lists) != 3 || len(lists[2]) != 0 {
-			t.Fatalf("seen lines leave the list: %+v", lists)
 		}
 	})
 }

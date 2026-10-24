@@ -1,13 +1,14 @@
 package agent
 
 import (
+	"fmt"
 	"reflect"
 	"regexp"
 )
 
-// The updates bubble (spec docs/specs/2026-10-14-updates-bubble-design.md): the outbox's
-// undelivered lines, shown beside Pixie while Pixie isn't opening conversations for them, and
-// permission questions still waiting, always (their Allow and Deny, #97).
+// The updates bubble (spec docs/specs/2026-10-14-updates-bubble-design.md): what needs you
+// (#286): permission questions and menus still waiting (their Allow and Deny, #97), job
+// questions, and sessions asking something. Everything else is a reply, not a bubble line.
 
 // UpdateItem is one line in the bubble (the `updates` event's lines; kind lowercase, at in ms).
 type UpdateItem struct {
@@ -41,17 +42,94 @@ type UpdateItem struct {
 	Note string `json:"note,omitempty"`
 }
 
-// bubbleItems: the undelivered lines, minus permission questions no longer pending, while Pixie
-// isn't opening conversations for updates; and always every permission question still pending,
-// heard or not, so its Allow and Deny stay reachable (#97). Never nil.
+// alerting: a line that needs you to act (#286): a question (permission, menu or job) or a
+// session asking something. The rest are replies.
+func alerting(l OutboxLine) bool {
+	return l.Kind == LineQuestion || (l.Kind == LineSession && l.Asking)
+}
+
+// asksSession: a session's own question with no confirm word or job (a turn that asks, a
+// notice, a menu without options): it waits until that session's next turn or end.
+func asksSession(l OutboxLine) bool {
+	return l.Session != "" && l.Token == nil && (l.Asking || (l.Kind == LineQuestion && l.Job == ""))
+}
+
+// alertKey: what an alerting line asks about; one badge item each, the newest line (a question
+// said, then rerouted unsaid, is in the outbox twice).
+func alertKey(l OutboxLine) string {
+	switch {
+	case l.Token != nil:
+		return "token:" + *l.Token
+	case l.Job != "":
+		return "job:" + string(l.Job)
+	case l.Session != "":
+		return "session:" + l.Session
+	}
+	return fmt.Sprint("line:", l.ID)
+}
+
+// unresolved: an alerting line still waiting for you: its permission pending, its session's
+// question still the latest thing it said, its job still in question.
+func (c *AgentController) unresolved(l OutboxLine) bool {
+	switch {
+	case l.Token != nil:
+		return c.confirms.IsPendingToken(*l.Token)
+	case asksSession(l):
+		return c.asking[l.Session] == l.ID
+	case l.Kind == LineQuestion && l.Job != "":
+		j, ok := c.jobs.Get(l.Job)
+		return ok && j.Status == JobQuestion
+	}
+	return !l.Delivered
+}
+
+// keepHeardAlert: an alerting line said in a conversation or shown in the text box never
+// reaches the outbox; it is kept there as heard, so it waits on the badge until answered and a
+// later conversation doesn't say it again (#286).
+func (c *AgentController) keepHeardAlert(line Line, now Millis, fx *[]Effect) {
+	if !alerting(OutboxLine{Kind: line.Kind, Asking: line.Asking}) {
+		return
+	}
+	*fx = append(*fx, Effect{Kind: EfAppend, File: OutboxFile, Line: c.outbox.PushHeard(line, now)})
+	c.noteAsking(c.outbox.lines[len(c.outbox.lines)-1])
+}
+
+// noteAsking: l, just added to the outbox, is its session's open question if it asks.
+func (c *AgentController) noteAsking(l OutboxLine) {
+	if asksSession(l) {
+		c.asking[l.Session] = l.ID
+	}
+}
+
+// dropAsking: session took its next turn or ended, so its open question is answered: it leaves
+// the badge and is marked delivered, so a later conversation doesn't replay it.
+func (c *AgentController) dropAsking(session string, fx *[]Effect) {
+	id, ok := c.asking[session]
+	if !ok {
+		return
+	}
+	delete(c.asking, session)
+	for _, r := range c.outbox.MarkDeliveredWhere(func(l OutboxLine) bool { return l.ID == id }) {
+		*fx = append(*fx, Effect{Kind: EfAppend, File: OutboxFile, Line: r})
+	}
+}
+
+// bubbleItems: the alerting lines still unresolved: permission questions pending (heard or
+// not, so Allow and Deny stay reachable, #97), job questions, sessions asking; one per
+// alertKey. Never nil.
 func (c *AgentController) bubbleItems() []UpdateItem {
 	items := []UpdateItem{}
 	if c.shutDown {
 		return items
 	}
+	newest := map[string]uint64{}
 	for _, l := range c.outbox.lines {
-		pending := l.Token != nil && c.confirms.IsPendingToken(*l.Token)
-		if !pending && (l.Token != nil || l.Delivered || c.settings.OpenConversation) {
+		if alerting(l) {
+			newest[alertKey(l)] = l.ID
+		}
+	}
+	for _, l := range c.outbox.lines {
+		if !alerting(l) || !c.unresolved(l) || newest[alertKey(l)] != l.ID {
 			continue
 		}
 		item := updateItem(l)
@@ -110,23 +188,10 @@ func (c *AgentController) syncUpdates(fx *[]Effect) {
 	*fx = append(*fx, Effect{Kind: EfUpdates, Value: items})
 }
 
-// updatesSeen: lines were seen in the bubble: they count as heard, except a question still
-// waiting for its answer (a pending permission, or a job still in question). Clicked away by
-// the user (#199), a job's question goes too: only a pending permission keeps its buttons.
+// updatesSeen: lines were seen in the bubble: they count as heard, except an alerting line
+// still unresolved, clicked or not (#286). A reply line falls through as before.
 func (c *AgentController) updatesSeen(ids []uint64, clicked bool, fx *[]Effect) {
-	keep := func(l OutboxLine) bool {
-		if l.Kind != LineQuestion {
-			return false
-		}
-		if l.Token != nil {
-			return c.confirms.IsPendingToken(*l.Token)
-		}
-		if clicked {
-			return false
-		}
-		j, ok := c.jobs.Get(l.Job)
-		return ok && j.Status == JobQuestion
-	}
+	keep := func(l OutboxLine) bool { return alerting(l) && c.unresolved(l) }
 	for _, r := range c.outbox.MarkSeen(ids, keep) {
 		*fx = append(*fx, Effect{Kind: EfAppend, File: OutboxFile, Line: r})
 	}

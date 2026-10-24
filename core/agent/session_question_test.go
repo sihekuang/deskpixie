@@ -61,7 +61,8 @@ func TestAConfirmWordAllowsItInTheSession(t *testing.T) {
 	}
 	// "allowed" is said once pix says the session took it (#268), not before.
 	b = bubbleOf(c.Step(SessionAnsweredInput(sessionName, a[0].Line), T0+2))
-	if len(b) != 1 || b[0].Token != "" || b[0].Text != "api: allowed" {
+	// #286: "api: allowed" is a reply: it is said, but is not a bubble line.
+	if len(b) != 0 || c.outbox.lines[len(c.outbox.lines)-1].Text != "api: allowed" {
 		t.Fatalf("the answer is said: %+v", b)
 	}
 }
@@ -175,9 +176,11 @@ func TestAPickIsSaidOnlyOnceTheSessionTookIt(t *testing.T) {
 		t.Fatalf("a double click's second tap stays quiet: %s", fmtEffects(fx))
 	}
 	fx = c.Step(SessionAnswerFailedInput(sessionName, "The session didn't take the answer."), T0+2)
-	if b := bubbleOf(fx); len(b) != 1 || strings.Contains(b[0].Text, "picked") ||
-		b[0].Text != "Couldn't answer in api-claude: The session didn't take the answer. Answer it in its terminal." {
-		t.Fatalf("%+v", b)
+	// #286: the failure line is info, not a bubble line.
+	last := c.outbox.lines[len(c.outbox.lines)-1].Text
+	if b := bubbleOf(fx); len(b) != 0 || strings.Contains(last, "picked") ||
+		last != "Couldn't answer in api-claude: The session didn't take the answer. Answer it in its terminal." {
+		t.Fatalf("%+v %q", b, last)
 	}
 }
 

@@ -82,6 +82,8 @@ type Settings struct {
 	// shorter than this stays quiet. One Pixie started is always announced, setting or not.
 	SessionTurns      bool
 	SessionTurnsMinMs Millis
+	// ReplyHistoryMs: how far back the reply deck brings unseen replies after a restart (#286).
+	ReplyHistoryMs Millis
 	// OpenConversation (`agent.openConversationForUpdates`, a feature flag, off by default): a job's done
 	// or failed line, an agent question or a spoken worker report that comes while no
 	// conversation is open makes Pixie open one and say it (opener.go).
@@ -98,7 +100,7 @@ type Settings struct {
 
 // DefaultSettings: 4 notifications a minute, 2-minute permission timeout, narration on.
 func DefaultSettings() Settings {
-	return Settings{NotifyPerMinute: 4, PermissionTimeoutMs: 120_000, Narration: true, UpdateQuietMs: UpdateQuietMs, Workers: DefaultWorkerPolicy(), SessionTurns: true, SessionTurnsMinMs: 30_000}
+	return Settings{NotifyPerMinute: 4, PermissionTimeoutMs: 120_000, Narration: true, UpdateQuietMs: UpdateQuietMs, Workers: DefaultWorkerPolicy(), SessionTurns: true, SessionTurnsMinMs: 30_000, ReplyHistoryMs: 300_000}
 }
 
 // WorkerPolicy is `agent.workers` (spec §12): whether the coordinator may start workers, how
@@ -161,6 +163,7 @@ const (
 	InLateSessionSent                      // Job, Name, Text, Message, Reason: a session tool done after its call was answered (#246); Job: the request then in flight ("" = none); Reason: its error
 	InSessionSent                          // Name, Text, Message: the coordinator's message_session reached your session Name, described Text (#177); Message: why it waits ("" = typed, #183)
 	InTextMode                             // Away: text mode on (#221): no conversation is opened for updates
+	InRepliesShown                         // IDs: the reply deck showed these lines (#286)
 )
 
 // Input is one stimulus for AgentController.Step. Build it with the *Input constructors.
@@ -375,6 +378,7 @@ const (
 	EfAnswerSession    // Name, Text, Answer, Line: type your answer to session Name's prompt Text (#105); taken, InSessionAnswered says Line; a failure comes back as InSessionAnswerFailed
 	EfTellSession      // Name, Text: type your answer to the question session Name's turn ended on (#161); a failure comes back as InSessionAnswerFailed
 	EfChat             // Chat: a spoken line for a job typed in the text box (#221)
+	EfReply            // Reply: a card for the reply deck (#286)
 )
 
 // Effect is one thing the caller must do, in order. Err set (non-empty) is the Err branch of
@@ -406,6 +410,8 @@ type Effect struct {
 	Update *UpdateItem
 	// Chat (EfChat): the line for the text box.
 	Chat ChatLine
+	// Reply (EfReply): the card for the reply deck.
+	Reply *ReplyCard
 }
 
 type coordinatorState int
@@ -503,6 +509,15 @@ type AgentController struct {
 	typedTo map[string]JobID
 	// jobSessions: the sessions each job was passed to, in order (#261).
 	jobSessions map[JobID][]string
+	// asking: each session's open question, the outbox line id; its next turn or its end
+	// clears it (#286).
+	asking map[string]uint64
+	// lastCard: the reply card the next update may join (#286). heldCards: cards held while
+	// Pixie opens a conversation to say them, shown if it can't; heldSince: when the first was
+	// held, so none waits longer than OpenWaitMs.
+	lastCard  *ReplyCard
+	heldCards []ReplyCard
+	heldSince Millis
 	// boxAsker: the session whose question the box shows, answered from the box (#241).
 	boxAsker string
 	// boxAnswered: the typed job a session already answered in the box; the coordinator's
@@ -550,6 +565,7 @@ func NewAgentController(settings Settings) *AgentController {
 		handedOff:   map[JobID]bool{},
 		typedTo:     map[string]JobID{},
 		jobSessions: map[JobID][]string{},
+		asking:      map[string]uint64{},
 		typed:       map[JobID]bool{},
 		opener:      newOpener(settings.NotifyPerMinute),
 		modes:       map[string]bool{},
@@ -698,6 +714,7 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 			c.onWorkerStatus(ev.Agent, ev.Status, now, &fx)
 		default:
 			c.confirms.TakeSession(ev.Agent, "") // a session that closed asks nothing any more
+			c.dropAsking(ev.Agent, &fx)
 			c.workerGone(ev.Agent, now, &fx)
 		}
 	case InMode:
@@ -725,12 +742,12 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 	case InVoice:
 		switch in.Voice.Kind {
 		case voice.SigOpened:
-			c.openerSaw(voice.SigOpened)
+			c.openerSaw(voice.SigOpened, now, &fx)
 			c.voiceOpened(&fx)
 			// #118: a request made in this conversation never waits on a cold start.
 			c.ensureCoordinator(&fx)
 		case voice.SigClosed:
-			c.openerSaw(voice.SigClosed)
+			c.openerSaw(voice.SigClosed, now, &fx)
 			c.conversationClosed(now, &fx)
 			for _, n := range in.Voice.Undelivered {
 				c.reroute(n, now, &fx)
@@ -805,6 +822,8 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 		c.openRefused(now, &fx)
 	case InUpdatesSeen:
 		c.updatesSeen(in.IDs, in.Clicked, &fx)
+	case InRepliesShown:
+		c.repliesShown(in.IDs, &fx)
 	case InDetachConfirm:
 		if job := c.confirms.Detach(in.RequestID); job != "" {
 			c.resumeJob(job, now, &fx)
@@ -834,6 +853,7 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 	// A question answered or decided puts its job back to work: the hold follows (#119).
 	c.syncHold(&fx)
 	c.syncCoordTab(&fx)
+	c.settleHeldCards(now, &fx)
 	c.syncUpdates(&fx)
 	return fx
 }
@@ -905,6 +925,15 @@ func (c *AgentController) restore(jobs, outbox []string, keep bool, now Millis, 
 	table, restarted := RestoreJobTable(jobs, now, keep)
 	c.jobs = table
 	c.outbox = RestoreOutbox(outbox, now)
+	c.asking = map[string]uint64{}
+	for _, l := range c.outbox.lines {
+		switch {
+		case asksSession(l) && !l.Delivered: // delivered: answered (dropAsking) or said before the restart
+			c.asking[l.Session] = l.ID
+		case l.Session != "" && l.Kind == LineSession: // live, only a session's turn opens or clears its question
+			delete(c.asking, l.Session)
+		}
+	}
 	// Queued only: the runtime ensures the coordinator once setup problems are known.
 	for _, j := range c.jobs.Open() {
 		c.inbox.Push(MessageForJob(j.ID, CoordinatorRestartNote))
@@ -1805,6 +1834,7 @@ const MaxSessionDetailBytes = 2 << 10
 // (never held by the cap). Pending confirm words are masked in all of it: the label is
 // agent-settable too.
 func (c *AgentController) onSessionTurn(name string, t SessionTurn, now Millis, fx *[]Effect) {
+	c.dropAsking(name, fx)
 	if c.shutDown {
 		return
 	}
@@ -1821,21 +1851,8 @@ func (c *AgentController) onSessionTurn(name string, t SessionTurn, now Millis, 
 	if !told {
 		return
 	}
-	if job, ok := c.typedTo[name]; ok {
-		if c.boxShows(job) {
-			// #241: the answer to a message typed in the box, so it goes there.
-			status := "done"
-			c.boxAsker = ""
-			if asking {
-				status, c.boxAsker = "question", name
-			}
-			c.boxAnswered = job
-			*fx = append(*fx, Effect{Kind: EfChat, Chat: ChatLine{Job: job, Status: status, Text: SessionTurnBrief(gist), Sessions: []string{name}}})
-			return
-		}
-	}
 	label := maskPendingTokens(t.Label, tokens)
-	c.deliverUpdate(Line{
+	line := Line{
 		Kind:    LineSession,
 		Text:    SessionTurnLine(label, gist, asking),
 		Title:   label,
@@ -1844,13 +1861,29 @@ func (c *AgentController) onSessionTurn(name string, t SessionTurn, now Millis, 
 		App:     t.App,
 		Session: name,
 		Detail:  truncateBytes(strings.Join(strings.Fields(reply), " "), MaxSessionDetailBytes),
-	}, now, fx)
+	}
+	if job, ok := c.typedTo[name]; ok {
+		if c.boxShows(job) {
+			// #241: the answer to a message typed in the box, so it goes there.
+			status := "done"
+			c.boxAsker = ""
+			if asking {
+				status, c.boxAsker = "question", name
+				c.keepHeardAlert(line, now, fx) // on the badge too, until answered (#286 call 7)
+			}
+			c.boxAnswered = job
+			*fx = append(*fx, Effect{Kind: EfChat, Chat: ChatLine{Job: job, Status: status, Text: SessionTurnBrief(gist), Sessions: []string{name}}})
+			return
+		}
+	}
+	c.deliverUpdate(line, now, fx)
 }
 
 func (c *AgentController) deliverUpdate(line Line, now Millis, fx *[]Effect) {
 	for _, d := range c.router.RouteUpdate(c.voiceOpen, line, now) {
 		if d.Kind == DeliverInject {
 			d.Notice = c.remember(d.Notice, []Line{line})
+			c.keepHeardAlert(line, now, fx)
 		}
 		c.applyDelivery(d, now, fx)
 	}
@@ -1948,6 +1981,7 @@ func (c *AgentController) deliver(line Line, now Millis, fx *[]Effect) bool {
 	if c.typed[line.Job] {
 		*fx = append(*fx, Effect{Kind: EfChat, Chat: c.chatLine(line)})
 		if line.Token == nil {
+			c.keepHeardAlert(line, now, fx) // a question is on the badge too, until answered (#286 call 7)
 			return true
 		}
 		// A permission request also goes where it can be allowed: the bubble or a notification.
@@ -1956,6 +1990,7 @@ func (c *AgentController) deliver(line Line, now Millis, fx *[]Effect) bool {
 	for _, d := range c.router.Route(c.voiceOpen, line, now) {
 		if d.Kind == DeliverInject {
 			d.Notice = c.remember(d.Notice, []Line{line})
+			c.keepHeardAlert(line, now, fx)
 		}
 		reached = reached || d.Kind == DeliverInject || d.Kind == DeliverNotify
 		c.applyDelivery(d, now, fx)
@@ -2099,6 +2134,11 @@ func (c *AgentController) applyDelivery(d RouteDelivery, now Millis, fx *[]Effec
 		record := c.outbox.Push(d.Line, now)
 		*fx = append(*fx, Effect{Kind: EfAppend, File: OutboxFile, Line: record})
 		c.attachNotification(*fx, d.Line)
+		pushed := c.outbox.lines[len(c.outbox.lines)-1]
+		c.noteAsking(pushed)
+		if !alerting(pushed) {
+			c.cardFor(pushed, fx)
+		}
 	}
 }
 

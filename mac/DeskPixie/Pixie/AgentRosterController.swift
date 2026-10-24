@@ -39,9 +39,11 @@ final class AgentRosterController {
     /// captionDismissSecs: the words are put away this long after they were said (0 keeps them).
     private var dismissSecs = 120
     private var hovering = false
+    /// Keeps the card up while the pointer is around Pixie and its cards, or a swipe runs (#286).
+    private var keeper = HoverKeeper()
+    /// Hide put the deck away: hovering doesn't bring it back until the pointer has left.
+    private var latch = CollapseLatch()
     private var agoShown: String?
-    /// How near Pixie, in points, the pointer brings the last words back.
-    static let hoverMargin: CGFloat = 24
     private var typeTimer: Timer?
     private var clickAway: Any?
     static let typeInterval: TimeInterval = 0.12
@@ -79,6 +81,7 @@ final class AgentRosterController {
         pixie.view.onDrop = { [weak self] board in self?.attach.drop(board: board) ?? false }
         fetchCurrent()
         fetchMode()
+        fetchReplies()
     }
 
     // MARK: - attachments (#240)
@@ -175,9 +178,11 @@ final class AgentRosterController {
         render()
     }
 
-    /// The ✕ on the card: the words go at once.
+    /// Hide on the card: the words go at once, and the deck stays away until the pointer has
+    /// left the region around Pixie (#286).
     private func dismissWords() {
-        chat.dismiss()
+        // Latched whenever Hide was there to press (#286), the "Earlier replies" bar included.
+        if chat.hide() { latch.collapse() }
         typeTimer?.invalidate()
         typeTimer = nil
         render()
@@ -188,6 +193,43 @@ final class AgentRosterController {
         chat.apply(chatLine)
         if chat.phase == .answering { startTyping() }
         render()
+    }
+
+    /// An update card (#286): it shows on its own or goes into the history, and either way it is
+    /// in the deck, so its lines count as shown.
+    func replyCard(_ card: ReplyCard) {
+        latch.release() // a new card pops up as usual
+        chat.update(card)
+        call("agent.repliesShown", ShownArgs(ids: card.lines))
+        render()
+    }
+
+    /// Cards still undelivered from before launch (#286), oldest first: fed like new ones.
+    private func fetchReplies() {
+        let engine = engine, worker = worker
+        Task { @MainActor [weak self] in
+            let cards: [ReplyCard]?? = await worker.run {
+                do {
+                    return try engine.call("agent.replies", as: RepliesReply.self).cards
+                } catch {
+                    Self.log.error("agent.replies: \(String(describing: error), privacy: .public)")
+                    return nil
+                }
+            }
+            guard let self, let cards = cards ?? nil else { return }
+            for card in cards { self.replyCard(card) }
+        }
+    }
+
+    private func call(_ method: String, _ args: some Encodable & Sendable) {
+        let engine = engine
+        worker.async {
+            do {
+                _ = try engine.call(method, args)
+            } catch {
+                Self.log.error("\(method, privacy: .public): \(String(describing: error), privacy: .public)")
+            }
+        }
     }
 
     /// Your words so far while you talk (#251): shown at once, over Pixie's last reply. Not once
@@ -447,12 +489,14 @@ final class AgentRosterController {
             let flipped = CGPoint(x: p.x, y: hosting.bounds.height - p.y)
             inside = model.open || chipFrame.insetBy(dx: -3, dy: -3).contains(flipped)
         }
-        // Near Pixie, or on the card it brought back: the last words show (#224).
-        let near = pixie.isShown
-            && (pixie.panel.frame.insetBy(dx: -Self.hoverMargin, dy: -Self.hoverMargin).contains(mouse)
-                || (overPanel && captionCard))
-        // Put away once old enough (captionDismissSecs).
-        let expired = chat.dismissIfOlder(than: dismissSecs, now: Date())
+        // Around Pixie, its buttons and cards (or just left, or mid-swipe): the last words show
+        // (#224, #286).
+        keeper.pointer(at: pixie.hoverPointer, frames: pixie.hoverFrames, now: Self.uptime)
+        let keep = keeper.keepsShowing(now: Self.uptime)
+        if !keeper.inside { latch.release() }
+        let near = pixie.isShown && latch.hover(keep)
+        // Put away once old enough (captionDismissSecs), but not while you're there.
+        let expired = !keep && chat.dismissIfOlder(than: dismissSecs, now: Date())
         let pruned = chat.prune(now: Date())
         let ago = cardUp ? chat.ago(now: Date()) : nil
         if offerChanged || expired || pruned || inside != model.open || near != hovering || ago != agoShown {
@@ -507,7 +551,7 @@ final class AgentRosterController {
                 self.render()
             },
             onRow: { [weak self] in self?.clicked($0) },
-            chat: chat, chatState: chatState, captionCard: captionCard, ago: agoShown,
+            chat: chat, chatState: chatState, captionCard: captionCard,
             earlier: chat.earlier, earlierPhase: chat.earlierPhase(now: Date()),
             onMode: { [weak self] in self?.pick($0) },
             onSend: { [weak self] in self?.send() },
@@ -520,7 +564,12 @@ final class AgentRosterController {
             onDismiss: { [weak self] in self?.dismissWords() },
             onStep: { [weak self] in self?.step($0) },
             attachments: attach == nil ? .none : attachmentUI,
-            sessionButtons: AgentRosterModel.buttons(for: chat.shownSessions, in: model.view),
+            onPage: { [weak self] in
+                guard let self else { return }
+                self.chat.show(page: $0)
+                self.render()
+            },
+            onScroll: { [weak self] in self?.keeper.scroll(active: $0, now: Self.uptime) },
             onSession: { [weak self] in self?.focusSession($0) },
             offer: offer.kind, onOffer: { [weak self] in self?.takeOffer() })
             .onPreferenceChange(ChipFrameKey.self) { [weak self] frame in
@@ -540,10 +589,21 @@ final class AgentRosterController {
         }
         let size = hosting.fittingSize
         guard size.width > 0, size.height > 0 else {
-            hide()
+            // Right after a new root view (a swipe's card, say) SwiftUI may not have measured it
+            // yet: keep the panel where it is and try again, rather than hide it for a moment.
+            if panel.isVisible && zeroSizeRetries < 3 {
+                zeroSizeRetries += 1
+                DispatchQueue.main.async { [weak self] in self?.layout() }
+            } else {
+                hide()
+            }
             return
         }
-        if !model.open && !cardUp && offer.kind == nil { chipHeight = size.height }
+        zeroSizeRetries = 0
+        if !model.open && !cardUp && offer.kind == nil {
+            chipHeight = size.height
+            pixie.chipHeight = size.height
+        }
         let top = ScreenDisplays.primaryMaxY
         let bit = pixie.panel.frame
         let screen = NSScreen.screens.first { $0.frame.contains(NSPoint(x: bit.midX, y: bit.midY)) }
@@ -571,8 +631,9 @@ final class AgentRosterController {
             if !(s.width > 0 && s.height > 0) { hide(); return }
         }
         panel.setFrame(ScreenDisplays.appKitFrame(topLeft: rect.origin, size: rect.size), display: true)
-        if (model.open || cardUp) && panel.parent != nil {
-            // Above the updates bubble (a sibling child panel): re-adding puts it last.
+        if (model.open || cardUp) && panel.parent != nil && pixie.panel.childWindows?.last !== panel {
+            // Above the updates bubble (a sibling child panel): re-adding puts it last. Only
+            // when it isn't already: re-ordering on every layout made the windows flicker (#286).
             pixie.panel.removeChildWindow(panel)
         }
         if panel.parent == nil { pixie.panel.addChildWindow(panel, ordered: .above) }
@@ -583,12 +644,17 @@ final class AgentRosterController {
     /// The card is drawn: the text box, or a caption on its own in voice mode (#224).
     private var cardUp: Bool { chat.open || captionCard }
 
+    /// Layouts in a row that found the view unmeasured (see `layout`).
+    private var zeroSizeRetries = 0
+
     private func hide() {
         if panel.parent != nil { pixie.panel.removeChildWindow(panel) }
         if panel.isVisible { panel.orderOut(nil) }
         model.open = false
         setRoot()
     }
+
+    private static var uptime: TimeInterval { ProcessInfo.processInfo.systemUptime }
 
     private struct RosterReply: Decodable { var roster: RosterView }
     private struct ModeReply: Decodable {
@@ -601,6 +667,26 @@ final class AgentRosterController {
     private struct SendArgs: Encodable, Sendable { let text: String }
     private struct SendReply: Decodable { var job: String }
     private struct FocusAgentArgs: Encodable, Sendable { let name: String }
+    private struct ShownArgs: Encodable, Sendable { let ids: [UInt64] }
+    private struct RepliesReply: Decodable { var cards: [ReplyCard] }
+}
+
+extension PixieController {
+    /// The hover region's frames (#286), in desktop space: everywhere the cards and the badge can
+    /// show around Pixie at this spot, plus whatever shows now (a long list, say).
+    var hoverFrames: [CGRect] {
+        let top = ScreenDisplays.primaryMaxY
+        let bit = panel.frame
+        let screen = NSScreen.screens.first { $0.frame.contains(NSPoint(x: bit.midX, y: bit.midY)) }
+            ?? panel.screen ?? NSScreen.main
+        let area = DesktopSpace.desktopRect(screen?.visibleFrame ?? bit, primaryMaxY: top)
+        let shown = (panel.childWindows ?? []).filter(\.isVisible).map { DesktopSpace.desktopRect($0.frame, primaryMaxY: top) }
+        return HoverKeeper.reach(pixie: DesktopSpace.desktopRect(bit, primaryMaxY: top), screen: area,
+                                 chipHeight: chipHeight, cardWidth: QuickChatCard.width) + shown
+    }
+
+    /// The pointer, in the same space.
+    var hoverPointer: CGPoint { DesktopSpace.desktopPoint(NSEvent.mouseLocation, primaryMaxY: ScreenDisplays.primaryMaxY) }
 }
 
 /// Takes the first click even though the panel never becomes key (non-activating).

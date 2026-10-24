@@ -51,6 +51,20 @@ public struct UpdateLine: Codable, Sendable, Equatable, Identifiable {
     /// Whether the menu also shows "Type something…" and "Chat about this" (#268).
     public var offersTyped: Bool { offersOptions && typed == true }
 
+    /// The line asks you something but offers no buttons (#286): its card offers its terminal.
+    public var offersTerminal: Bool {
+        !offersDecision && !offersOptions && (kind == "question" || asking == true)
+    }
+
+    /// The badge card's header (#286): "Permission · <who>", "<who> is asking", else who it is
+    /// about.
+    public var deckHeader: String {
+        let who = title.flatMap { $0.isEmpty ? nil : $0 }
+        if offersDecision { return who.map { "Permission · \($0)" } ?? "Permission" }
+        if kind == "question" || asking == true { return who.map { "\($0) is asking" } ?? "Question" }
+        return who ?? "Update"
+    }
+
     /// Option i's description, or nil when it has none.
     public func detail(of i: Int) -> String? {
         guard let details, details.indices.contains(i), !details[i].isEmpty else { return nil }
@@ -138,6 +152,8 @@ public struct UpdatesBubbleModel: Sendable {
     public private(set) var phase: Phase = .hidden
     /// The core's list, oldest first.
     public private(set) var lines: [UpdateLine] = []
+    /// The badge deck's card (#286): an index into `lines`, oldest first.
+    public private(set) var deckIndex = 0
 
     /// What the expanded bubble shows, newest first: the list as it was on opening plus lines
     /// added since, so rows don't move under the pointer: a line the core drops (answered or
@@ -170,6 +186,36 @@ public struct UpdatesBubbleModel: Sendable {
     /// Newest first, at most `maxLines`.
     public var shown: [UpdateLine] { Array(display.prefix(max(0, maxLines))) }
 
+    /// The badge deck's card, nil when nothing is unheard.
+    public var current: UpdateLine? { lines.indices.contains(deckIndex) ? lines[deckIndex] : nil }
+
+    /// Where the deck is, counting from 1 ("1 of 1" alone); nil with nothing in it.
+    public var deckPosition: (index: Int, count: Int)? {
+        lines.isEmpty ? nil : (deckIndex + 1, lines.count)
+    }
+
+    /// Moves the deck by `delta` cards (+1 newer, −1 older), stopping at either end.
+    /// With `now`, the card that comes up has its buttons stamped then (the stray-click guard).
+    public mutating func step(_ delta: Int, now: TimeInterval? = nil) {
+        deckIndex = min(max(0, deckIndex + delta), max(0, lines.count - 1))
+        if let now { noteDecisions(now) }
+    }
+
+    /// Scrolled to `id`'s card (#286); nothing when it isn't listed.
+    public mutating func show(id: UInt64, now: TimeInterval? = nil) {
+        if let i = lines.firstIndex(where: { $0.id == id }) { deckIndex = i }
+        if let now { noteDecisions(now) }
+    }
+
+    /// Keeps the deck on `id`'s card if it is still listed, else on the nearest one.
+    private mutating func settleDeck(on id: UInt64?) {
+        if let id, let i = lines.firstIndex(where: { $0.id == id }) {
+            deckIndex = i
+        } else {
+            deckIndex = min(max(0, deckIndex), max(0, lines.count - 1))
+        }
+    }
+
     /// The "+N more" row's N.
     public var more: Int { max(0, display.count - max(0, maxLines)) }
 
@@ -197,7 +243,9 @@ public struct UpdatesBubbleModel: Sendable {
         let typingEnded = typing.map { t in !new.contains(where: { $0.token == t && $0.offersTyped }) } ?? false
         let old = Set(lines.map(\.id))
         let added = new.filter { !old.contains($0.id) }
+        let onCard = current?.id
         lines = new
+        settleDeck(on: onCard)
         if typingEnded { // answered elsewhere, or its wait ran out
             typing = nil
             if leftWhileTyping { pointerLeft() }
@@ -219,7 +267,10 @@ public struct UpdatesBubbleModel: Sendable {
         if !added.isEmpty {
             switch pop {
             case .allowed:
-                if !isExpanded { phase = .popped(until: now + popSecs) }
+                if !isExpanded {
+                    phase = .popped(until: now + popSecs)
+                    latch.release()
+                }
             case .hold:
                 heldPop = true
                 if !isExpanded { phase = .badge }
@@ -233,7 +284,7 @@ public struct UpdatesBubbleModel: Sendable {
 
     /// The pointer entered the bubble or badge at `at` (a click also lands here): open it.
     public mutating func pointerEntered(now: TimeInterval, at: CGPoint? = nil) {
-        guard !lines.isEmpty || isPopped else { return }
+        guard !collapsed, !lines.isEmpty || isPopped else { return }
         leftWhileTyping = false
         phase = .expanded(since: now)
         frozen = lines.reversed()
@@ -260,6 +311,27 @@ public struct UpdatesBubbleModel: Sendable {
         if !pointerInside || leftWhileTyping { pointerLeft() }
     }
 
+    /// The deck was closed to the badge with Hide (#286): everything stays waiting, and the
+    /// pointer, still around, doesn't open it again until it has left (`regionLeft`). A new item
+    /// may still pop it.
+    public var collapsed: Bool { latch.collapsed }
+    private var latch = CollapseLatch()
+
+    public mutating func collapse() {
+        typing = nil
+        leftWhileTyping = false
+        latch.collapse()
+        frozen = nil
+        phase = lines.isEmpty ? .hidden : .badge
+        decisionsSince = [:]
+        hoverOpened = []
+    }
+
+    /// The pointer left the region around Pixie: hovering the badge opens the deck again.
+    public mutating func regionLeft() {
+        latch.release()
+    }
+
     /// The pointer left: back to the badge, or hidden when nothing unheard is left. Not while you
     /// type an answer in it.
     public mutating func pointerLeft() {
@@ -275,9 +347,10 @@ public struct UpdatesBubbleModel: Sendable {
     }
 
     /// Advances timers: a pop runs out to the badge (unless a question waits on you).
-    public mutating func tick(now: TimeInterval) {
+    /// `holding`: you're around (#286), so a pop doesn't run out yet.
+    public mutating func tick(now: TimeInterval, holding: Bool = false) {
         defer { noteDecisions(now) }
-        if case .popped(let until) = phase, now >= until, !waitsOnYou {
+        if case .popped(let until) = phase, now >= until, !waitsOnYou, !holding {
             phase = .badge
         }
     }
@@ -290,7 +363,9 @@ public struct UpdatesBubbleModel: Sendable {
         guard let line = display.first(where: { $0.id == id }),
               !line.offersDecision, !line.offersOptions else { return false }
         dismissed.insert(id)
+        let onCard = current?.id
         lines.removeAll { $0.id == id }
+        settleDeck(on: onCard)
         frozen?.removeAll { $0.id == id }
         if display.isEmpty {
             frozen = nil
@@ -299,25 +374,30 @@ public struct UpdatesBubbleModel: Sendable {
         return true
     }
 
+    /// You acted on a card (#286): Allow, Deny, an option, a typed answer, "Chat about this" or
+    /// "Open its terminal". It leaves the deck at once and the next slides into its place,
+    /// without waiting for the core; a list from the core that still has it doesn't bring it
+    /// back, until the core drops it too.
+    public mutating func act(on id: UInt64, now: TimeInterval? = nil) {
+        guard lines.contains(where: { $0.id == id }) else { return }
+        defer { if let now { noteDecisions(now) } }
+        dismissed.insert(id)
+        let onCard = current?.id
+        lines.removeAll { $0.id == id }
+        settleDeck(on: onCard == id ? nil : onCard)
+        frozen?.removeAll { $0.id == id }
+        if lines.isEmpty {
+            frozen = nil
+            phase = .hidden
+        }
+    }
+
     /// A notification's line (#199) that no longer matches the line listed under its id: ids can
     /// repeat across restarts, so an old notification must not dismiss a newer line.
     public func isStale(_ line: UpdateLine) -> Bool {
         guard let listed = (display + lines).first(where: { $0.id == line.id }) else { return false }
         return listed.at != line.at || listed.text != line.text
     }
-
-    /// "Clear all" (#198): every line but the questions leaves at once (a question waiting on
-    /// you is clicked away on its own). Returns their ids for `agent.updatesSeen`.
-    public mutating func dismissAll() -> [UInt64] {
-        let ids = display.filter(Self.clearable).map(\.id)
-        for id in ids { _ = dismiss(id) }
-        return ids
-    }
-
-    private static func clearable(_ line: UpdateLine) -> Bool { line.kind != "question" }
-
-    /// The "Clear all" row shows: more than one line could be cleared.
-    public var offersClearAll: Bool { display.filter(Self.clearable).count > 1 }
 
     /// Presence came back: one pop if anything arrived while away.
     public mutating func back(now: TimeInterval, pop: PopPermission) {
@@ -342,15 +422,17 @@ public struct UpdatesBubbleModel: Sendable {
     /// How far the pointer moves after opening the bubble for a tap to count as aimed (points).
     public static let movedDistance: CGFloat = 4
 
-    /// Stamps the questions whose Allow and Deny show now (the bubble is open and the row is
-    /// listed) and forgets the rest, so buttons that reappear are guarded again.
+    /// Stamps the question whose buttons show now: the deck's card while the bubble is open
+    /// (#286), the only one on screen. The rest are forgotten, so buttons that come back (a step,
+    /// or the next card sliding up once one is answered) are guarded again.
     private mutating func noteDecisions(_ now: TimeInterval) {
         guard isExpanded || isPopped else {
             decisionsSince = [:]
             hoverOpened = []
             return
         }
-        let showing = Set(shown.filter { $0.offersDecision || $0.offersOptions }.compactMap(\.token))
+        let showing = Set([current].compactMap { $0 }
+            .filter { $0.offersDecision || $0.offersOptions }.compactMap(\.token))
         decisionsSince = decisionsSince.filter { showing.contains($0.key) }
         hoverOpened.formIntersection(showing)
         for token in showing where decisionsSince[token] == nil {

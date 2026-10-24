@@ -2,20 +2,25 @@ import AppKit
 import DeskPixieCore
 import SwiftUI
 
-/// The updates bubble's content (spec §3): a count badge, or the bubble listing the latest
-/// unheard lines newest first. Rows are buttons (a click focuses the line's herdr pane); the
-/// "+N more" row starts a conversation. Drawn by `UpdatesBubbleController` from its model.
+/// The updates bubble's content (spec §3, #286): a count badge, or the badge deck: one card at a
+/// time for what waits on you, oldest first, with ‹ i of n › and the edge of the next one behind.
+/// A click on the card brings up the line's pane; a two-finger swipe steps like the arrows.
+/// Drawn by `UpdatesBubbleController` from its model.
 struct UpdatesBubbleView: View {
     let count: Int
     let phase: UpdatesBubbleModel.Phase
-    let shown: [UpdateLine]
-    let more: Int
-    /// Whether the "Clear all" row shows (#198).
-    let clearAll: Bool
+    /// The deck's cards (oldest first) and the one shown.
+    let lines: [UpdateLine]
+    let current: UpdateLine?
+    /// The deck keeps one width as you step through it.
+    let width: CGFloat
     let onLine: (UpdateLine) -> Void
-    let onMore: () -> Void
-    /// "Clear all": every line that isn't waiting on an answer leaves the bubble.
-    let onClearAll: () -> Void
+    /// A scroll or a card's arrows to another card, by its id.
+    var onSelect: (UInt64) -> Void = { _ in }
+    /// The deck changed height: the panel is sized from the view.
+    var onResize: () -> Void = {}
+    /// A swipe on the deck started or came to rest.
+    var onScroll: (Bool) -> Void = { _ in }
     /// Allow or Deny on a permission question (token, allow). The controller ignores a tap that
     /// comes too soon after the buttons appear (`UpdatesBubbleModel.acceptsDecision`).
     let onDecide: (String, Bool) -> Void
@@ -32,6 +37,11 @@ struct UpdatesBubbleView: View {
     var onSendTyped: (String) -> Void = { _ in }
     var onStopTyping: () -> Void = {}
     var onChat: (String) -> Void = { _ in }
+    /// "Open its terminal" on a line that asks without buttons: its pane comes up and the card
+    /// leaves (#286).
+    var onTerminal: (UpdateLine) -> Void = { _ in }
+    /// Hide on a card: the deck closes to the badge, everything still waiting (#286).
+    var onCollapse: () -> Void = {}
 
     /// The bubble sizes to its lines (UpdatesBubbleLayout, #105, #278).
     static func width(for lines: [UpdateLine]) -> CGFloat { UpdatesBubbleLayout.width(for: lines) }
@@ -62,97 +72,115 @@ struct UpdatesBubbleView: View {
         .fixedSize()
     }
 
-    private var bubble: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            ForEach(shown) { line in
-                VStack(alignment: .leading, spacing: 0) {
-                    Button { if !RichTextClicks.takeSpanPress() { onLine(line) } } label: { row(line) }
-                        .buttonStyle(.plain)
-                    if line.offersDecision, let token = line.token {
-                        HStack(spacing: 6) {
-                            Button("Allow") { onDecide(token, true) }
-                                .buttonStyle(.borderedProminent)
-                            Button("Deny") { onDecide(token, false) }
-                                .buttonStyle(.bordered)
-                        }
-                        .controlSize(.small)
-                        .padding(.horizontal, 8)
-                        .padding(.bottom, 4)
-                    }
-                    if line.offersOptions, let token = line.token, let options = line.options {
-                        VStack(alignment: .leading, spacing: 4) {
-                            ForEach(Array(options.enumerated()), id: \.offset) { i, option in
-                                Button { onChoose(token, i + 1) } label: {
-                                    VStack(alignment: .leading, spacing: 1) {
-                                        Text(option)
-                                        if let detail = line.detail(of: i) {
-                                            Text(detail)
-                                                .font(.caption)
-                                                .opacity(0.75)
-                                        }
-                                    }
-                                    .multilineTextAlignment(.leading)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                }
-                                .buttonStyle(OptionButtonStyle(prominent: i == 0 && typing != token))
-                                .disabled(typing == token)
-                            }
-                            if line.offersTyped {
-                                Divider().padding(.vertical, 2)
-                                if typing == token {
-                                    typedField(token)
-                                } else {
-                                    Button { onStartTyping(token) } label: {
-                                        Label("Type something…", systemImage: "pencil")
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                    }
-                                    .buttonStyle(OutlineButtonStyle())
-                                    Button { onChat(token) } label: {
-                                        Label("Chat about this", systemImage: "bubble.left")
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                    }
-                                    .buttonStyle(OutlineButtonStyle())
-                                }
-                            }
-                        }
-                        .controlSize(.small)
-                        .padding(.horizontal, 8)
-                        .padding(.bottom, 4)
-                    }
-                }
+    @ViewBuilder private var bubble: some View {
+        if let line = current {
+            // The cards side by side (#286), each on its own: a two-finger swipe or a card's
+            // arrows page them.
+            DeckPager(ids: lines.map(\.id), selected: line.id, width: width,
+                      onSelect: onSelect, onResize: onResize, onScroll: onScroll) { id in
+                if let i = lines.firstIndex(where: { $0.id == id }) { card(i) }
             }
-            if more > 0 || clearAll {
-                HStack {
-                    if more > 0 {
-                        Button(action: onMore) {
-                            Text("+\(more) more")
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
-                                .contentShape(Rectangle())
+            .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// "Permission · coordinator" in amber with a lock, or "<session> is asking"; then ‹ i of n ›.
+    private func header(_ i: Int) -> some View {
+        let line = lines[i]
+        return HStack(spacing: 4) {
+            Group {
+                if line.offersDecision {
+                    Image(systemName: "lock.fill")
+                } else if line.kind == "question" || line.asking == true {
+                    Image(systemName: "questionmark.circle")
+                }
+                Text(line.deckHeader)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            .foregroundStyle(line.offersDecision ? Color.orange : Color.secondary)
+            Spacer(minLength: 4)
+            DeckArrows(index: i, count: lines.count, label: " of ",
+                       onBack: { onSelect(lines[i - 1].id) }, onForward: { onSelect(lines[i + 1].id) })
+                .foregroundStyle(.secondary)
+            DeckHideButton(action: onCollapse)
+        }
+        .font(.caption.weight(.semibold))
+        .padding(.horizontal, 8)
+        .padding(.top, 4)
+    }
+
+    private func card(_ i: Int) -> some View {
+        let line = lines[i]
+        return VStack(alignment: .leading, spacing: 0) {
+            header(i)
+            Button { if !RichTextClicks.takeSpanPress() { onLine(line) } } label: { row(line) }
+                .buttonStyle(.plain)
+            if line.offersDecision, let token = line.token {
+                HStack(spacing: 6) {
+                    Button("Allow") { onDecide(token, true) }
+                        .buttonStyle(.borderedProminent)
+                    Button("Deny") { onDecide(token, false) }
+                        .buttonStyle(.bordered)
+                }
+                .controlSize(.small)
+                .padding(.horizontal, 8)
+                .padding(.bottom, 4)
+            }
+            if line.offersOptions, let token = line.token, let options = line.options {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(Array(options.enumerated()), id: \.offset) { i, option in
+                        Button { onChoose(token, i + 1) } label: {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(option)
+                                if let detail = line.detail(of: i) {
+                                    Text(detail)
+                                        .font(.caption)
+                                        .opacity(0.75)
+                                }
+                            }
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(OptionButtonStyle(prominent: i == 0 && typing != token))
+                        .disabled(typing == token)
                     }
-                    Spacer(minLength: 0)
-                    if clearAll {
-                        Button(action: onClearAll) {
-                            Text("Clear all")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .contentShape(Rectangle())
+                    if line.offersTyped {
+                        Divider().padding(.vertical, 2)
+                        if typing == token {
+                            typedField(token)
+                        } else {
+                            Button { onStartTyping(token) } label: {
+                                Label("Type something…", systemImage: "pencil")
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .buttonStyle(OutlineButtonStyle())
+                            Button { onChat(token) } label: {
+                                Label("Chat about this", systemImage: "bubble.left")
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .buttonStyle(OutlineButtonStyle())
                         }
-                        .buttonStyle(.plain)
                     }
                 }
+                .controlSize(.small)
                 .padding(.horizontal, 8)
-                .padding(.vertical, 4)
+                .padding(.bottom, 4)
+            }
+            if line.offersTerminal {
+                // Asks without buttons: the answer goes in its terminal.
+                Button { onTerminal(line) } label: {
+                    Label("Open its terminal", systemImage: "terminal")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(OptionButtonStyle(prominent: true))
+                .padding(.horizontal, 8)
+                .padding(.bottom, 4)
             }
         }
-        .padding(6)
-        .frame(width: Self.width(for: shown), alignment: .leading)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.separator))
-        .fixedSize(horizontal: false, vertical: true)
+        .padding(4)
+        .deckCard()
     }
 
     /// The typed answer's field (#268): Return sends, Esc goes back to the options.
@@ -197,36 +225,23 @@ struct UpdatesBubbleView: View {
     @FocusState private var fieldFocused: Bool
 
     private func row(_ line: UpdateLine) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            if line.kind == "question" || line.asking == true {
-                Image(systemName: "questionmark.circle")
-                    .foregroundStyle(.orange)
-            }
-            VStack(alignment: .leading, spacing: 1) {
-                if let title = line.title, !title.isEmpty {
-                    Text(title)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-                // Links, files and code can be clicked (#277); a question is read in full.
-                RichMessage(text: line.shownText, sessions: line.session.map { [$0] } ?? [],
-                            maxLines: line.kind == "question" ? 0 : UpdatesBubbleLayout.maxLines)
+        VStack(alignment: .leading, spacing: 1) {
+            // Links, files and code can be clicked (#277); a question is read in full.
+            RichMessage(text: line.shownText, sessions: line.session.map { [$0] } ?? [],
+                        maxLines: line.kind == "question" ? 0 : UpdatesBubbleLayout.maxLines)
+                .fixedSize(horizontal: false, vertical: true)
+            if let note = line.note, !note.isEmpty {
+                Text(note)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(6)
+                    .truncationMode(.tail)
                     .fixedSize(horizontal: false, vertical: true)
-                if let note = line.note, !note.isEmpty {
-                    Text(note)
-                        .font(.caption.monospaced())
-                        .foregroundStyle(.secondary)
-                        .lineLimit(6)
-                        .truncationMode(.tail)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                TimelineView(.periodic(from: .now, by: 30)) { context in
-                    Text(updateAge(seconds: context.date.timeIntervalSince1970 - Double(line.at) / 1000))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+            }
+            TimelineView(.periodic(from: .now, by: 30)) { context in
+                Text(updateAge(seconds: context.date.timeIntervalSince1970 - Double(line.at) / 1000))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

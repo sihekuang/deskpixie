@@ -8,6 +8,99 @@ final class UpdatesBubbleModelTests: XCTestCase {
         UpdateLine(id: id, text: "line \(id)", kind: "reply", at: Int64(id), job: nil, worker: nil)
     }
 
+    /// #286: the badge deck shows one card at a time, oldest first; +1 is newer.
+    func testTheBadgeDeckShowsOneAtATimeAndClampsWhenOneIsAnswered() {
+        var m = UpdatesBubbleModel()
+        m.apply([line(1), line(2), line(3)], now: 0, pop: .allowed)
+        XCTAssertEqual(m.current?.id, 1)
+        m.step(1); m.step(1); m.step(1)
+        XCTAssertEqual(m.current?.id, 3)
+        m.apply([line(1), line(2)], now: 1, pop: .allowed) // 3 was answered
+        XCTAssertEqual(m.current?.id, 2)
+        XCTAssertEqual(m.deckPosition?.index, 2)
+    }
+
+    /// #286: a card you act on leaves at once, the next slides in, and the core's list that
+    /// still has it doesn't bring it back; once the core drops it, the id is forgotten.
+    func testACardYouActOnLeavesAtOnceAndStaysGone() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        let lines = [question(1, "hawk"), question(2, "lynx"), question(3, "owl")]
+        m.apply(lines, now: 1, pop: .allowed)
+        m.pointerEntered(now: 2)
+        m.step(1)
+        XCTAssertEqual(m.current?.id, 2)
+        m.act(on: 2)
+        XCTAssertEqual(m.count, 2)
+        XCTAssertEqual(m.current?.id, 3, "the next slides into its place")
+        m.apply(lines, now: 3, pop: .allowed)              // the core hasn't caught up
+        XCTAssertEqual(m.lines.map(\.id), [1, 3])
+        m.act(on: 3)
+        XCTAssertEqual(m.current?.id, 1, "the last one gone: the one before")
+        m.act(on: 1)
+        XCTAssertEqual(m.phase, .hidden)
+        m.apply([question(1, "hawk"), question(3, "owl")], now: 4, pop: .allowed) // core dropped 2
+        m.apply([question(1, "hawk"), question(2, "lynx2"), question(3, "owl")], now: 5, pop: .allowed)
+        XCTAssertEqual(m.lines.map(\.id), [2], "2 was forgotten once dropped; 1 and 3 are still acted on")
+    }
+
+    /// #286: Hide closes the deck to the badge; it stays closed until the pointer has left the
+    /// region, nothing is dismissed, and a new item may pop it.
+    func testCollapsingKeepsTheDeckClosedUntilThePointerHasLeft() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        m.apply([line(1), line(2)], now: 1, pop: .allowed)
+        m.pointerEntered(now: 2)
+        m.collapse()
+        XCTAssertEqual(m.phase, .badge)
+        XCTAssertEqual(m.count, 2, "nothing dismissed")
+        m.pointerEntered(now: 3)
+        XCTAssertEqual(m.phase, .badge, "still around: stays closed")
+        m.regionLeft()
+        m.pointerEntered(now: 4)
+        XCTAssertEqual(m.phase, .expanded(since: 4))
+        m.collapse()
+        m.apply([line(1), line(2), line(3)], now: 5, pop: .allowed)
+        XCTAssertEqual(m.phase, .popped(until: 5 + m.popSecs), "a new item pops it")
+        m.pointerEntered(now: 6)
+        XCTAssertEqual(m.phase, .expanded(since: 6))
+    }
+
+    /// #286: a scroll to a card moves the deck there; an id no longer listed changes nothing.
+    func testAScrollToACardMovesTheDeck() {
+        var m = UpdatesBubbleModel()
+        m.apply([line(1), line(2), line(3)], now: 0, pop: .allowed)
+        m.show(id: 3)
+        XCTAssertEqual(m.current?.id, 3)
+        XCTAssertEqual(m.deckPosition?.index, 3)
+        m.show(id: 9)
+        XCTAssertEqual(m.current?.id, 3)
+    }
+
+    func testTheDeckKeepsItsCardWhenOthersArriveAndSaysOneOfOneAlone() {
+        var m = UpdatesBubbleModel()
+        m.apply([line(1), line(2)], now: 0, pop: .allowed)
+        m.step(1)
+        XCTAssertEqual(m.current?.id, 2)
+        m.apply([line(1), line(2), line(3)], now: 1, pop: .allowed)
+        XCTAssertEqual(m.current?.id, 2)
+        m.step(-1); m.step(-1)
+        XCTAssertEqual(m.current?.id, 1, "stops at the oldest")
+        m.apply([line(1)], now: 2, pop: .allowed)
+        XCTAssertEqual(m.deckPosition?.index, 1)
+        XCTAssertEqual(m.deckPosition?.count, 1)
+        m.apply([], now: 3, pop: .allowed)
+        XCTAssertNil(m.deckPosition)
+        XCTAssertNil(m.current)
+    }
+
+    func testDismissingTheCurrentCardClampsTheDeck() {
+        var m = UpdatesBubbleModel()
+        m.apply([line(1), line(2)], now: 0, pop: .allowed)
+        m.step(1)
+        XCTAssertTrue(m.dismiss(2))
+        XCTAssertEqual(m.current?.id, 1)
+        XCTAssertEqual(m.deckIndex, 0)
+    }
+
     /// #105: a session's menu offers its options instead of Allow and Deny.
     /// #105: a session's dialog carries its command, shown small under the line.
     /// #105: a question waiting on your answer keeps the bubble open; it collapses once answered.
@@ -114,15 +207,13 @@ final class UpdatesBubbleModelTests: XCTestCase {
         XCTAssertEqual(m.count, 1)
     }
 
-    /// #199: a job's question (no buttons) is clicked away like any line; Clear all leaves it.
-    func testAJobsQuestionIsDismissedByAClickButNotByClearAll() {
+    /// #199: a job's question (no buttons) is clicked away like any line.
+    func testAJobsQuestionIsDismissedByAClick() {
         var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
         let ask = UpdateLine(id: 1, text: "Which branch?", kind: "question", at: 1, job: "job_1", worker: nil)
-        m.apply([ask, line(2), line(3)], now: 1, pop: .allowed)
-        XCTAssertEqual(Set(m.dismissAll()), [2, 3])
-        XCTAssertEqual(m.count, 1)
+        m.apply([ask, line(2)], now: 1, pop: .allowed)
         XCTAssertTrue(m.dismiss(1))
-        XCTAssertEqual(m.count, 0)
+        XCTAssertEqual(m.count, 1)
     }
 
     /// #199 review: an old notification whose id now names another line is stale.
@@ -178,13 +269,90 @@ final class UpdatesBubbleModelTests: XCTestCase {
         XCTAssertTrue(m.acceptsDecision(token: "hawk", now: 10.8))
     }
 
+    /// #286: the deck's card can be older than the newest maxLines; its buttons still count.
+    func testTheDecksCardIsGuardedThenAcceptedWhateverItsPlace() {
+        var m = UpdatesBubbleModel(maxLines: 2); m.apply([], now: 0, pop: .allowed)
+        m.apply([question(1, "hawk"), line(2), line(3)], now: 10, pop: .allowed)
+        XCTAssertEqual(m.current?.id, 1)
+        XCTAssertFalse(m.acceptsDecision(token: "hawk", now: 10.2))
+        XCTAssertTrue(m.acceptsDecision(token: "hawk", now: 10.8))
+    }
+
+    /// #286: the badge card's header names the kind and who it is about.
+    func testTheDeckHeaderNamesTheKindAndSource() {
+        var perm = question(1, "hawk")
+        XCTAssertEqual(perm.deckHeader, "Permission")
+        perm = UpdateLine(id: 1, text: "Run it?", kind: "question", at: 1, job: nil, worker: nil,
+                          token: "hawk", title: "coordinator")
+        XCTAssertEqual(perm.deckHeader, "Permission · coordinator")
+        XCTAssertFalse(perm.offersTerminal)
+        let asks = UpdateLine(id: 2, text: "Resize the VM?", kind: "session", at: 2, job: nil, worker: nil,
+                              session: "trader", title: "trader", asking: true)
+        XCTAssertEqual(asks.deckHeader, "trader is asking")
+        XCTAssertTrue(asks.offersTerminal)
+        let menu = UpdateLine(id: 3, text: "Push?", kind: "question", at: 3, job: nil, worker: nil,
+                              token: "owl", title: "deskpixie", options: ["Push", "Don't"])
+        XCTAssertEqual(menu.deckHeader, "deskpixie is asking")
+        XCTAssertFalse(menu.offersTerminal)
+        let jobQuestion = UpdateLine(id: 4, text: "Which branch?", kind: "question", at: 4, job: "job_1", worker: nil)
+        XCTAssertEqual(jobQuestion.deckHeader, "Question")
+        XCTAssertTrue(jobQuestion.offersTerminal)
+        XCTAssertEqual(line(5).deckHeader, "Update")
+        XCTAssertFalse(line(5).offersTerminal)
+    }
+
     func testTheGuardIsPerQuestion() {
         var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
         m.apply([question(1, "hawk")], now: 10, pop: .allowed)
         m.apply([question(1, "hawk"), question(2, "lynx")], now: 11, pop: .allowed)
         XCTAssertTrue(m.acceptsDecision(token: "hawk", now: 11.2))
+        XCTAssertFalse(m.acceptsDecision(token: "lynx", now: 11.2), "not on screen: the deck shows hawk")
+        m.step(1)                                                    // lynx's buttons appear at 12
+        XCTAssertFalse(m.acceptsDecision(token: "lynx", now: 12))
+        XCTAssertFalse(m.acceptsDecision(token: "lynx", now: 12.5))
+        XCTAssertTrue(m.acceptsDecision(token: "lynx", now: 12.8))
+        XCTAssertFalse(m.acceptsDecision(token: "hawk", now: 12.8), "stepped away from")
+    }
+
+    /// #286 re-review: a card brought up by a step, a scroll or acting on the one before is
+    /// stamped then, so a tap after the guard counts with no tick in between.
+    func testACardBroughtUpIsStampedWhenItComesUp() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        m.apply([question(1, "hawk"), question(2, "lynx"), question(3, "owl")], now: 10, pop: .allowed)
+        m.pointerEntered(now: 11)
+        m.step(1, now: 20)
+        XCTAssertFalse(m.acceptsDecision(token: "lynx", now: 20.1))
+        XCTAssertTrue(m.acceptsDecision(token: "lynx", now: 20 + UpdatesBubbleModel.decisionGuard))
+        m.act(on: 2, now: 30)
+        XCTAssertEqual(m.current?.id, 3)
+        XCTAssertFalse(m.acceptsDecision(token: "owl", now: 30.1))
+        XCTAssertTrue(m.acceptsDecision(token: "owl", now: 30 + UpdatesBubbleModel.decisionGuard))
+        m.show(id: 1, now: 40)
+        XCTAssertFalse(m.acceptsDecision(token: "hawk", now: 40.1))
+        XCTAssertTrue(m.acceptsDecision(token: "hawk", now: 40 + UpdatesBubbleModel.decisionGuard))
+    }
+
+    /// #286: while you're around a pop holds, but its buttons are still stamped.
+    func testAHeldPopStaysAndStillStamps() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        m.apply([line(1)], now: 1, pop: .allowed)
+        m.tick(now: 100, holding: true)
+        XCTAssertEqual(m.phase, .popped(until: 1 + m.popSecs))
+        m.tick(now: 101)
+        XCTAssertEqual(m.phase, .badge)
+    }
+
+    /// #286 review: once a card is answered the next slides up under the pointer; a second tap
+    /// meant for the first never answers it.
+    func testTheCardThatSlidesUpIsGuardedAgain() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        m.apply([question(1, "hawk"), question(2, "lynx")], now: 10, pop: .allowed)
+        XCTAssertTrue(m.acceptsDecision(token: "hawk", now: 11))
+        m.apply([question(2, "lynx")], now: 11.1, pop: .allowed)     // hawk answered
+        XCTAssertEqual(m.current?.id, 2)
         XCTAssertFalse(m.acceptsDecision(token: "lynx", now: 11.2))
-        XCTAssertTrue(m.acceptsDecision(token: "lynx", now: 11.8))
+        XCTAssertFalse(m.acceptsDecision(token: "lynx", now: 11.8))
+        XCTAssertTrue(m.acceptsDecision(token: "lynx", now: 11.1 + UpdatesBubbleModel.decisionGuard))
     }
 
     /// #268: buttons you open the bubble onto (hovering its badge) take your tap at once once you
@@ -224,7 +392,8 @@ final class UpdatesBubbleModelTests: XCTestCase {
         var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
         m.apply([line(1)], now: 10, pop: .allowed)
         m.pointerEntered(now: 11, at: CGPoint(x: 300, y: 40))
-        m.apply([line(1), question(2, "hawk")], now: 12, pop: .allowed) // appears under the pointer
+        m.apply([line(1), question(2, "hawk")], now: 12, pop: .allowed)
+        m.step(1); m.tick(now: 12)                                       // its card comes up
         XCTAssertFalse(m.acceptsDecision(token: "hawk", now: 12.2, at: CGPoint(x: 120, y: 90)))
         XCTAssertTrue(m.acceptsDecision(token: "hawk", now: 12.8))
     }
@@ -293,16 +462,6 @@ final class UpdatesBubbleModelTests: XCTestCase {
         XCTAssertEqual(m.count, 2)
         m.pointerEntered(now: 6)
         XCTAssertEqual(m.shown.map(\.id), [3, 1])
-    }
-
-    func testClearAllLeavesQuestionsWaitingOnYou() {
-        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
-        m.apply([line(1), question(2, "hawk"), line(3)], now: 1, pop: .allowed)
-        m.pointerEntered(now: 2)
-        XCTAssertTrue(m.offersClearAll)
-        XCTAssertEqual(Set(m.dismissAll()), [1, 3])
-        XCTAssertEqual(m.shown.map(\.id), [2])
-        XCTAssertFalse(m.offersClearAll)
     }
 
     func testPointerOverAnEmptyHiddenBubbleDoesNothing() {
