@@ -415,17 +415,12 @@ func TestSessionPlaceIsYourSessionsFolderAndApp(t *testing.T) {
 			t.Fatal(err)
 		}
 		time.Sleep(time.Second)
-		folder, app, ok := r.h.SessionPlace(context.Background(), "api-claude")
-		if !ok || folder != "/work/api" || app != "com.googlecode.iterm2" {
-			t.Fatal(folder, app, ok)
-		}
-		for _, name := range []string{"nobody-claude", Coordinator} {
-			if _, _, ok := r.h.SessionPlace(context.Background(), name); ok {
-				t.Fatalf("%s has a place", name)
-			}
+		got := r.h.SessionPlaces(context.Background(), []string{"nobody-claude", "api-claude", Coordinator})
+		if !reflect.DeepEqual(got, []SessionPlace{{Name: "api-claude", Folder: "/work/api", App: "com.googlecode.iterm2"}}) {
+			t.Fatalf("only your sessions have a place: %+v", got)
 		}
 		r.host.FailList(true)
-		if _, _, ok := r.h.SessionPlace(context.Background(), "api-claude"); !ok {
+		if got := r.h.SessionPlaces(context.Background(), []string{"api-claude"}); len(got) != 1 {
 			t.Fatal("Pixie's host failing to list doesn't hide your session")
 		}
 	})

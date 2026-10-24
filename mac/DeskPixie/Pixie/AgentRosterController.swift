@@ -529,6 +529,9 @@ final class AgentRosterController {
             .environmentObject(richText))
     }
 
+    /// A setting changed: where files open may have too, so the reply card's words fetch their spans again.
+    func settingsChanged() { richText.reset() }
+
     private func layout() {
         // The toggle is always there, so the row shows whenever Pixie does (#221).
         guard pixie.isShown else {

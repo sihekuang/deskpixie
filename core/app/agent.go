@@ -89,9 +89,9 @@ type Agent interface {
 	FocusAgent(name string)
 	// FocusSession is a click on one of your own sessions in the roster: the tab it runs in (async).
 	FocusSession(name string)
-	// SessionPlace is where your session name runs (#277): its folder and its terminal app's
-	// bundle id, for the paths in its replies. False when it isn't one of yours.
-	SessionPlace(name string) (folder, app string, ok bool)
+	// SessionPlaces are where your sessions named run (#277), in order, from one listing: their
+	// folders and terminal apps, for the paths in their replies. Names not yours are left out.
+	SessionPlaces(names []string) []SessionPlace
 	// ReportFocusOutcome: the shell finished executing a FocusPlan (#116). Failure becomes the
 	// tray status line, as for OpenTerminal.
 	ReportFocusOutcome(success bool, detail string)
@@ -106,6 +106,12 @@ type Agent interface {
 	// Shutdown is the app's quit: deny pending permissions, stop the panes, clear the MCP
 	// configs, stop the session host and the hook server. Idempotent; blocks ~3 s at most.
 	Shutdown()
+}
+
+// SessionPlace is where one of your sessions runs (#277): its folder and its terminal app's
+// bundle id ("" = unknown).
+type SessionPlace struct {
+	Folder, App string
 }
 
 // AgentFacts is an Agent that also gives each voice session a context block (its recent jobs),

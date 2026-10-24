@@ -713,11 +713,18 @@ func (a *Agent) FocusSession(name string) {
 	})
 }
 
-// SessionPlace: where your session name runs, for the paths in its replies (#277).
-func (a *Agent) SessionPlace(name string) (folder, app string, ok bool) {
+// SessionPlaces: where your sessions named run, for the paths in their replies (#277).
+func (a *Agent) SessionPlaces(names []string) []app.SessionPlace {
+	if len(names) == 0 {
+		return nil
+	}
 	ctx, cancel := context.WithTimeout(a.ctx, 2*time.Second)
 	defer cancel()
-	return a.handle.SessionPlace(ctx, name)
+	var out []app.SessionPlace
+	for _, p := range a.handle.SessionPlaces(ctx, names) {
+		out = append(out, app.SessionPlace{Folder: p.Folder, App: p.App})
+	}
+	return out
 }
 
 // ReportFocusOutcome: the shell finished executing a FocusPlan (#116). A failure becomes the

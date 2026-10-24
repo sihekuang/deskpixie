@@ -795,19 +795,29 @@ func (h *AgentHandle) yourSessions(ctx context.Context) ([]AgentInfo, error) {
 	return slices.DeleteFunc(list, func(a AgentInfo) bool { return a.Origin != OriginUser || a.User == nil }), nil
 }
 
-// SessionPlace is where your session name runs (#277): its folder and its terminal app's
-// bundle id ("" = unknown). False when no session of yours has that name.
-func (h *AgentHandle) SessionPlace(ctx context.Context, name string) (folder, app string, ok bool) {
+// SessionPlace is where one of your sessions runs (#277): its folder and its terminal app's
+// bundle id ("" = unknown).
+type SessionPlace struct {
+	Name, Folder, App string
+}
+
+// SessionPlaces are where your sessions named run, in the order named, from one listing; a name
+// that isn't one of yours is left out.
+func (h *AgentHandle) SessionPlaces(ctx context.Context, names []string) []SessionPlace {
 	list, err := h.yourSessions(ctx)
 	if err != nil {
-		return "", "", false
+		return nil
 	}
-	for _, a := range list {
-		if a.Name == name {
-			return a.Cwd, a.User.App, true
+	var out []SessionPlace
+	for _, n := range names {
+		for _, a := range list {
+			if a.Name == n {
+				out = append(out, SessionPlace{Name: n, Folder: a.Cwd, App: a.User.App})
+				break
+			}
 		}
 	}
-	return "", "", false
+	return out
 }
 
 // MatchSession picks the one session of yours that said names: its name; else its repo or its

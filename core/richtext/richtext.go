@@ -36,8 +36,11 @@ type Span struct {
 	// Path is a file or folder that exists, absolute; Line and Col are where in it (0 = none).
 	Path string `json:"path,omitempty"`
 	Dir  bool   `json:"dir,omitempty"`
-	Line int    `json:"line,omitempty"`
-	Col  int    `json:"col,omitempty"`
+	// Reveal: opening it would launch or run something (an app, a package, a script, an
+	// executable), so a click only shows it in the file manager.
+	Reveal bool `json:"reveal,omitempty"`
+	Line   int  `json:"line,omitempty"`
+	Col    int  `json:"col,omitempty"`
 	// Open is how a path opens: addresses to try in order (OpenPlan).
 	Open []string `json:"open,omitempty"`
 }
@@ -52,7 +55,9 @@ type Resolver struct {
 var (
 	heading  = regexp.MustCompile(`^#{1,6}[ \t]+`)
 	listItem = regexp.MustCompile(`^([ \t]*)[-*+][ \t]+`)
-	mdLink   = regexp.MustCompile(`^\[([^\]\n]+)\]\((https?://[^)\s]+)\)`)
+	// A label stops at the next bracket and both parts are capped, so a line of brackets
+	// doesn't scan to its end once per bracket.
+	mdLink   = regexp.MustCompile(`^\[([^\[\]\n]{1,300})\]\((https?://[^)\s]{1,1000})\)`)
 	webLink  = regexp.MustCompile(`^(?:https?://[^\s/]+|www\.[^\s/]+\.[a-z]{2,})\S*$`)
 	email    = regexp.MustCompile(`^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$`)
 	commit   = regexp.MustCompile(`^[0-9a-f]{7,40}$`)
@@ -60,8 +65,24 @@ var (
 	bareFile = regexp.MustCompile(`^[\w.-]*[\w-]\.[A-Za-z0-9]{1,10}$`)
 )
 
+// MaxText is the longest message Parse reads; a longer one (a dump) is left plain.
+const MaxText = 16 << 10
+
+// launchers are files whose default app runs or installs them rather than showing them.
+var launchers = map[string]bool{
+	".app": true, ".pkg": true, ".mpkg": true, ".bundle": true, ".framework": true, ".plugin": true,
+	".kext": true, ".prefpane": true, ".saver": true, ".appex": true, ".xpc": true, ".workflow": true,
+	".action": true, ".command": true, ".tool": true, ".terminal": true, ".webloc": true, ".inetloc": true,
+	".fileloc": true, ".url": true, ".jar": true, ".mobileconfig": true, ".shortcut": true, ".scpt": true,
+	".scptd": true, ".applescript": true, ".dmg": true, ".exe": true, ".msi": true, ".bat": true, ".cmd": true,
+	".ps1": true, ".lnk": true, ".desktop": true, ".appimage": true, ".deb": true, ".rpm": true,
+}
+
 // Parse splits text into spans.
 func Parse(text string, r Resolver) []Span {
+	if len(text) > MaxText {
+		return []Span{{Kind: KindText, Text: text, Raw: text}}
+	}
 	var out []Span
 	lines := strings.SplitAfter(text, "\n")
 	for _, line := range lines {
@@ -222,7 +243,9 @@ func (r Resolver) path(w string) (Span, bool) {
 	}
 	for _, c := range candidates {
 		if info, err := os.Stat(c); err == nil {
-			return Span{Kind: KindPath, Path: filepath.Clean(c), Dir: info.IsDir(), Line: line, Col: col}, true
+			reveal := launchers[strings.ToLower(filepath.Ext(filepath.Clean(c)))] ||
+				!info.IsDir() && info.Mode()&0o111 != 0
+			return Span{Kind: KindPath, Path: filepath.Clean(c), Dir: info.IsDir(), Reveal: reveal, Line: line, Col: col}, true
 		}
 	}
 	return Span{}, false

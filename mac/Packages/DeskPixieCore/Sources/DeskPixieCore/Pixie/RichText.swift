@@ -13,13 +13,15 @@ public struct RichSpan: Codable, Sendable, Equatable {
     /// A file or folder, absolute; `line` and `col` are where in it (0 = none).
     public let path: String?
     public let dir: Bool
+    /// Opening it would launch or run something (an app, a script): a click only shows it.
+    public let reveal: Bool
     public let line: Int
     public let col: Int
     /// How a path opens: addresses to try in order, the first there is an app for wins.
     public let open: [String]
 
     public init(kind: String, text: String, raw: String, bold: Bool, url: String?, path: String?, dir: Bool,
-                line: Int, col: Int, open: [String]) {
+                reveal: Bool = false, line: Int, col: Int, open: [String]) {
         self.kind = kind
         self.text = text
         self.raw = raw
@@ -27,6 +29,7 @@ public struct RichSpan: Codable, Sendable, Equatable {
         self.url = url
         self.path = path
         self.dir = dir
+        self.reveal = reveal
         self.line = line
         self.col = col
         self.open = open
@@ -40,12 +43,19 @@ public struct RichSpan: Codable, Sendable, Equatable {
                   url: try c.decodeIfPresent(String.self, forKey: .url),
                   path: try c.decodeIfPresent(String.self, forKey: .path),
                   dir: try c.decodeIfPresent(Bool.self, forKey: .dir) ?? false,
+                  reveal: try c.decodeIfPresent(Bool.self, forKey: .reveal) ?? false,
                   line: try c.decodeIfPresent(Int.self, forKey: .line) ?? 0,
                   col: try c.decodeIfPresent(Int.self, forKey: .col) ?? 0,
                   open: try c.decodeIfPresent([String].self, forKey: .open) ?? [])
     }
 
-    private enum CodingKeys: String, CodingKey { case kind, text, raw, bold, url, path, dir, line, col, open }
+    private enum CodingKeys: String, CodingKey { case kind, text, raw, bold, url, path, dir, reveal, line, col, open }
+
+    /// Plain text: what shows until the core's spans come, or when they can't.
+    public static func plain(_ text: String) -> RichSpan {
+        RichSpan(kind: "text", text: text, raw: text, bold: false, url: nil, path: nil, dir: false, line: 0, col: 0,
+                 open: [])
+    }
 
     /// It does something when clicked.
     public var isActionable: Bool { action != nil }
@@ -57,6 +67,7 @@ public struct RichSpan: Codable, Sendable, Equatable {
             guard let url, let u = URL(string: url) else { return nil }
             return .open([u])
         case "path":
+            if reveal, let path { return .reveal(path) }
             let urls = open.compactMap(URL.init(string:))
             return urls.isEmpty ? nil : .open(urls)
         case "code", "commit", "email":
@@ -72,6 +83,7 @@ public struct RichSpan: Codable, Sendable, Equatable {
         case "link":
             return "Open link\n\(url ?? "")"
         case "path":
+            if reveal { return "Show in Finder" }
             if dir { return "Open folder" }
             let at = line > 0 && open.count > 1 ? " · line \(line)" : ""
             let what = open.count > 1 ? "Open in your editor" : "Open file"
@@ -88,6 +100,8 @@ public struct RichSpan: Codable, Sendable, Equatable {
 /// What a click on a span does.
 public enum RichAction: Equatable, Sendable {
     case open([URL])
+    /// Shows the file or folder in the file manager.
+    case reveal(String)
     case copy(String)
 }
 
@@ -192,6 +206,8 @@ public final class RichTextStore: ObservableObject {
     private var cache: [Key: [RichSpan]] = [:]
     private var order: [Key] = []
     private var pending: Set<Key> = []
+    /// Spans kept from before a reset: shown until they are fetched again.
+    private var stale: Set<Key> = []
     /// Bumped when spans arrive, so the views showing them draw again.
     @Published public private(set) var version = 0
     /// Called after spans arrive: the text may have changed size, so the panel lays out again.
@@ -212,27 +228,36 @@ public final class RichTextStore: ObservableObject {
         }
     }
 
+    /// Every message's spans are fetched again (a setting changed where files open); the old
+    /// ones show meanwhile.
+    public func reset() {
+        stale = Set(cache.keys)
+        version += 1
+    }
+
     /// The spans of text, or nil while they are on their way (asked for on first use).
     public func spans(_ text: String, sessions: [String]) -> [RichSpan]? {
         let key = Key(text: text, sessions: sessions)
-        if let have = cache[key] { return have }
+        if let have = cache[key], !stale.contains(key) { return have }
         guard !text.isEmpty else { return [] }
+        stale.remove(key)
         if pending.insert(key).inserted {
             let fetch = fetch
             queue.async { [weak self] in
-                let spans = (try? fetch(text, sessions)) ?? []
+                let spans = (try? fetch(text, sessions)) ?? [RichSpan.plain(text)]
                 Task { @MainActor in self?.arrived(key, spans) }
             }
         }
-        return nil
+        return cache[key]
     }
 
     private func arrived(_ key: Key, _ spans: [RichSpan]) {
         pending.remove(key)
-        cache[key] = spans
-        order.append(key)
+        if cache.updateValue(spans, forKey: key) == nil { order.append(key) }
         if order.count > Self.limit {
-            cache[order.removeFirst()] = nil
+            let old = order.removeFirst()
+            cache[old] = nil
+            stale.remove(old)
         }
         version += 1
         onChange?()
@@ -279,6 +304,9 @@ public struct RichTextActions: Sendable {
         case .copy(let text):
             os.copy(text)
             return .copied
+        case .reveal(let path):
+            os.reveal(path)
+            return .revealed
         case .open(let urls):
             if reveal, span.kind == "path", let path = span.path {
                 os.reveal(path)

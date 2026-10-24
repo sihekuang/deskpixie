@@ -306,6 +306,9 @@ final class UpdatesBubbleController {
 
     /// Sizes the panel to its content and places it beside Pixie (BubblePlacement, desktop space),
     /// or hides it.
+    /// A setting changed: where files open may have too, so the lines fetch their spans again.
+    func settingsChanged() { richText.reset() }
+
     private func layout() {
         guard model.phase != .hidden, settings.enabled, pixie.isShown else {
             hide()

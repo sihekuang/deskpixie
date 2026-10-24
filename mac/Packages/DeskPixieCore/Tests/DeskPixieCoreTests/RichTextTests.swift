@@ -99,7 +99,8 @@ final class RichTextTests: XCTestCase {
         XCTAssertEqual(calls.all, ["hi|a", "hi|b"])
     }
 
-    // A failed call is not asked again for the same text: the plain text stays.
+    // A failed call is not asked again for the same text, and the text shows plain (review of #277:
+    // it used to show nothing).
     @MainActor
     func testAFailedFetchKeepsThePlainText() async {
         let calls = Counter()
@@ -110,7 +111,7 @@ final class RichTextTests: XCTestCase {
         XCTAssertNil(store.spans("hi", sessions: []))
         await waitUntil { calls.all.count == 1 }
         try? await Task.sleep(nanoseconds: 50_000_000)
-        XCTAssertEqual(store.spans("hi", sessions: []), [])
+        XCTAssertEqual(store.spans("hi", sessions: []), [RichSpan.plain("hi")])
         XCTAssertEqual(calls.all, ["hi"])
     }
 
@@ -123,6 +124,38 @@ final class RichTextTests: XCTestCase {
         XCTAssertFalse(RichTextClicks.takeSpanPress(now: 10.3), "only once")
         RichTextClicks.spanPressed(at: 10)
         XCTAssertFalse(RichTextClicks.takeSpanPress(now: 12), "a stale press doesn't swallow a later click")
+    }
+
+    // A settings change (where files open) fetches the spans again, their open plans changed;
+    // the old ones show meanwhile, so nothing flashes plain.
+    @MainActor
+    func testResetFetchesAgain() async {
+        let calls = Counter()
+        let store = RichTextStore { text, _ in
+            calls.add(text)
+            return [RichSpan.plain(text)]
+        }
+        _ = store.spans("hi", sessions: [])
+        await waitUntil { store.spans("hi", sessions: []) != nil }
+        let before = store.version
+        store.reset()
+        XCTAssertGreaterThan(store.version, before, "the views draw again")
+        XCTAssertEqual(store.spans("hi", sessions: []), [RichSpan.plain("hi")], "the old spans meanwhile")
+        await waitUntil { calls.all.count == 2 }
+        _ = store.spans("hi", sessions: [])
+        try? await Task.sleep(nanoseconds: 30_000_000)
+        XCTAssertEqual(calls.all, ["hi", "hi"], "fetched again once")
+    }
+
+    // Review of #277: what would launch or run (an app, a script) only shows in Finder.
+    func testARevealSpanOnlyShowsInFinder() {
+        let app = RichSpan(kind: "path", text: "Tool.app", raw: "Tool.app", bold: false, url: nil, path: "/w/Tool.app",
+                           dir: true, reveal: true, line: 0, col: 0, open: [])
+        XCTAssertEqual(app.action, .reveal("/w/Tool.app"))
+        XCTAssertEqual(app.tooltip(copied: false), "Show in Finder")
+        let json = #"{"kind":"path","text":"go.command","raw":"go.command","path":"/w/go.command","reveal":true}"#
+        let decoded = try? JSONDecoder().decode(RichSpan.self, from: Data(json.utf8))
+        XCTAssertEqual(decoded?.action, .reveal("/w/go.command"))
     }
 
     @MainActor
@@ -172,6 +205,15 @@ final class RichTextActionsTests: XCTestCase {
         let os = FakeOS()
         XCTAssertEqual(RichTextActions(os: os).perform(file, reveal: false), .opened)
         XCTAssertEqual(os.opened, [URL(string: "file:///w/a.go")!])
+    }
+
+    func testARevealSpanIsShownNotOpened() {
+        let os = FakeOS()
+        let app = RichSpan(kind: "path", text: "Tool.app", raw: "Tool.app", bold: false, url: nil, path: "/w/Tool.app",
+                           dir: true, reveal: true, line: 0, col: 0, open: ["file:///w/Tool.app"])
+        XCTAssertEqual(RichTextActions(os: os).perform(app, reveal: false), .revealed)
+        XCTAssertEqual(os.revealed, ["/w/Tool.app"])
+        XCTAssertEqual(os.opened, [])
     }
 
     func testOptionClickShowsItInFinder() {

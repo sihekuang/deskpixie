@@ -19,15 +19,11 @@ struct RichMessage: View {
 
     var body: some View {
         let _ = store.version
-        let spans = store.spans(text, sessions: sessions) ?? [Self.plain(text)]
+        let spans = store.spans(text, sessions: sessions) ?? [RichSpan.plain(text)]
         RichTextView(spans: shown.map { RichText.prefix(spans, shown: $0) } ?? spans, font: font, maxLines: maxLines,
                      selectable: selectable)
     }
 
-    static func plain(_ text: String) -> RichSpan {
-        RichSpan(kind: "text", text: text, raw: text, bold: false, url: nil, path: nil, dir: false, line: 0, col: 0,
-                 open: [])
-    }
 }
 
 struct RichTextView: NSViewRepresentable {
@@ -107,12 +103,18 @@ final class SpanTextView: NSTextView {
         invalidateIntrinsicContentSize()
     }
 
-    /// The text's size laid out at width.
+    /// The text's size laid out at width, measured apart from the view's own layout so a
+    /// measuring pass (SwiftUI asks with no width too) never leaves it laid out too wide.
     func fitting(width: CGFloat) -> CGSize {
-        guard let container = textContainer, let layout = layoutManager else { return .zero }
-        if container.containerSize.width != width {
-            container.containerSize = NSSize(width: width, height: CGFloat.greatestFiniteMagnitude)
-        }
+        guard let text = textStorage, let mine = textContainer else { return .zero }
+        let storage = NSTextStorage(attributedString: text)
+        let layout = NSLayoutManager()
+        storage.addLayoutManager(layout)
+        let container = NSTextContainer(size: NSSize(width: width, height: CGFloat.greatestFiniteMagnitude))
+        container.lineFragmentPadding = 0
+        container.maximumNumberOfLines = mine.maximumNumberOfLines
+        container.lineBreakMode = mine.lineBreakMode
+        layout.addTextContainer(container)
         layout.ensureLayout(for: container)
         let used = layout.usedRect(for: container)
         return CGSize(width: ceil(used.width), height: ceil(used.height))
@@ -155,7 +157,9 @@ final class SpanTextView: NSTextView {
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {
         clearHover()
-        NotificationCenter.default.removeObserver(self)
+        for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification] {
+            NotificationCenter.default.removeObserver(self, name: name, object: nil)
+        }
         super.viewWillMove(toWindow: newWindow)
     }
 
@@ -242,32 +246,33 @@ final class SpanTextView: NSTextView {
 
     // MARK: Clicks
 
-    /// A press that began on a span: its release is ours too, so it never reaches what is
-    /// behind (a bubble row's button fires on release).
-    private var pressedSpan = false
+    /// The span a press began on: its release is ours too, so it never reaches what is behind
+    /// (a bubble row's button fires on release). The span acts on release over it, as a button.
+    private var pressed: Int?
 
     override func mouseDown(with event: NSEvent) {
         guard let hit = span(at: point(of: event)) else {
-            pressedSpan = false
+            pressed = nil
             if selectableText { super.mouseDown(with: event) }
             return
         }
-        pressedSpan = true
+        pressed = hit.index
         RichTextClicks.spanPressed(at: event.timestamp)
-        let outcome = actions.perform(spans[hit.index], reveal: event.modifierFlags.contains(.option))
-        if outcome == .copied { flashCopied(hit.index, hit.range) }
     }
 
     override func mouseUp(with event: NSEvent) {
-        if pressedSpan {
-            pressedSpan = false
+        guard let index = pressed else {
+            super.mouseUp(with: event)
             return
         }
-        super.mouseUp(with: event)
+        pressed = nil
+        guard let hit = span(at: point(of: event)), hit.index == index else { return }
+        let outcome = actions.perform(spans[index], reveal: event.modifierFlags.contains(.option))
+        if outcome == .copied { flashCopied(index, hit.range) }
     }
 
     override func mouseDragged(with event: NSEvent) {
-        if !pressedSpan { super.mouseDragged(with: event) }
+        if pressed == nil { super.mouseDragged(with: event) }
     }
 
     /// The chip turns green and its tooltip says "Copied" for a moment.

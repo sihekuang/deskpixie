@@ -51,6 +51,12 @@ func TestTextSpansResolveAgainstTheSessionsFolder(t *testing.T) {
 	if k[richtext.KindLink].URL != "https://x.com" {
 		t.Fatalf("%+v", spans)
 	}
+	f.mu.Lock()
+	calls := f.placeCalls
+	f.mu.Unlock()
+	if calls != 1 {
+		t.Fatalf("your sessions are listed once per call, not once per name: %d", calls)
+	}
 
 	// The chosen editor is read on every call.
 	h.set("agent.editor", richtext.EditorZed)
@@ -72,6 +78,21 @@ func TestTextSpansWithoutASessionOnlyKnowAbsolutePaths(t *testing.T) {
 	k := kindsOf(spansOf(t, h.call("text.spans", map[string]any{"text": "a.txt and " + file})))
 	if p := k[richtext.KindPath]; p.Path != file || p.Text != file || len(p.Open) != 1 {
 		t.Fatalf("%+v", k)
+	}
+}
+
+// Review of #277: a path that would launch or run something only shows in Finder.
+func TestTextSpansNeverPlanToOpenAnApp(t *testing.T) {
+	folder := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(folder, "Tool.app"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	h := newHarness(t, func(d *Deps, _ *harness) {
+		d.Agent = func(settings.Config, string, AgentHooks) Agent { return nil }
+	})
+	p := kindsOf(spansOf(t, h.call("text.spans", map[string]any{"text": filepath.Join(folder, "Tool.app")})))[richtext.KindPath]
+	if !p.Reveal || len(p.Open) != 0 {
+		t.Fatalf("%+v", p)
 	}
 }
 

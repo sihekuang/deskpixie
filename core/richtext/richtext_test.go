@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // tree makes files (and folders, ending in "/") under a temporary folder and returns it.
@@ -207,5 +208,51 @@ func TestAdjacentTextIsMerged(t *testing.T) {
 	spans := Parse("just some words, nothing more.", Resolver{})
 	if len(spans) != 1 {
 		t.Fatalf("%+v", spans)
+	}
+}
+
+// Review of #277: a click must never launch an app or run something. App bundles and other
+// packages, launcher files and executables are shown in Finder instead of opened.
+func TestThingsThatWouldRunAreOnlyShown(t *testing.T) {
+	root := tree(t, "Tool.app/Contents/", "Setup.pkg", "go.command", "site.webloc", "notes.txt", "docs/")
+	if err := os.WriteFile(filepath.Join(root, "run"), nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r := Resolver{Folders: []string{root}}
+	want := map[string]bool{"Tool.app": true, "Setup.pkg": true, "go.command": true, "site.webloc": true,
+		"run/": false, "notes.txt": false, "docs/": false}
+	for word, reveal := range want {
+		spans := only(Parse(word, r))
+		if word == "run/" {
+			// an executable with no dot is only found with a slash; ./run names it
+			spans = only(Parse("./run", r))
+			reveal = true
+		}
+		if len(spans) != 1 || spans[0].Kind != KindPath || spans[0].Reveal != reveal {
+			t.Errorf("%s: %+v", word, spans)
+		}
+	}
+}
+
+// Review of #277: a line of brackets used to take seconds (each `[` scanned to the line's end).
+func TestALineOfBracketsIsQuick(t *testing.T) {
+	in := strings.Repeat("[", 50_000) + "](https://x.com)"
+	done := make(chan []Span)
+	go func() { done <- Parse(in, Resolver{}) }()
+	select {
+	case spans := <-done:
+		if raws(spans) != in {
+			t.Fatal("raws must join to the input")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("too slow")
+	}
+}
+
+func TestAHugeMessageIsLeftPlain(t *testing.T) {
+	in := strings.Repeat("see https://x.com ", MaxText/10)
+	spans := Parse(in, Resolver{})
+	if len(spans) != 1 || spans[0].Kind != KindText || spans[0].Raw != in {
+		t.Fatalf("%d spans", len(spans))
 	}
 }
