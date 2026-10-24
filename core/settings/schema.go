@@ -39,27 +39,27 @@ func CurrentPlatform() Platform {
 // MaxWorkers is the most workers at once.
 const MaxWorkers = 4
 
-// Section is a Settings window tab. It serializes as its Rust name ("Pixie", …).
+// Section is a Settings window page (a sidebar row); it serializes as its title.
 type Section string
 
 const (
-	SectionPixie         Section = "Pixie"
+	SectionGeneral       Section = "General"
 	SectionVoice         Section = "Voice"
-	SectionAgent         Section = "Agent"
+	SectionCoordinator   Section = "Coordinator"
+	SectionSessions      Section = "Sessions"
 	SectionWorkers       Section = "Workers"
 	SectionNotifications Section = "Notifications"
-	SectionCanvas        Section = "Canvas"
 	SectionAdvanced      Section = "Advanced"
 )
 
-// Title is the page's name in the window's sidebar (mac: SettingsLayout.tabs), which Pixie
-// names too: Agent's page is "Coordinator".
-func (s Section) Title() string {
-	if s == SectionAgent {
-		return "Coordinator"
-	}
-	return string(s)
-}
+// Sections are the pages, in sidebar order.
+var Sections = []Section{SectionGeneral, SectionVoice, SectionCoordinator, SectionSessions, SectionWorkers, SectionNotifications, SectionAdvanced}
+
+// MaxPageRows is the most rows a page shows (#290): settings guidelines put the limit at 10–15.
+const MaxPageRows = 15
+
+// Title is the page's name in the window's sidebar, which Pixie names too.
+func (s Section) Title() string { return string(s) }
 
 // Apply says when a change takes effect.
 type Apply string
@@ -138,6 +138,8 @@ type Kind struct {
 	Type     KindType
 	Min, Max int64
 	Menu     bool
+	// Unit is shown after a number ("seconds"); empty shows none.
+	Unit     string
 	Choices  Choices
 	Optional bool
 	Dir      bool
@@ -146,8 +148,11 @@ type Kind struct {
 // FieldSpec describes one leaf of settings.json.
 type FieldSpec struct {
 	// Path is the dotted camelCase path, e.g. agent.workers.max.
-	Path      string
-	Section   Section
+	Path    string
+	Section Section
+	// Group is the heading the field sits under on its page (#290). A page's fields of one
+	// group are next to each other.
+	Group     string
 	Label     string
 	Help      string
 	Kind      Kind
@@ -156,6 +161,9 @@ type FieldSpec struct {
 	// VisibleWhen: the field shows only while every condition holds (nil: always shown).
 	// A hidden field keeps its stored value.
 	VisibleWhen []Condition
+	// EnabledWhen: the field can be changed only while every condition holds; otherwise it is
+	// shown greyed out, with a note naming the switch to turn on (a master switch that's off).
+	EnabledWhen []Condition
 }
 
 // Condition holds while the field at Key has one of the values In. Values compare as the
@@ -171,11 +179,44 @@ func visibleWhen(f FieldSpec, conds ...Condition) FieldSpec {
 	return f
 }
 
+// enabledWhen adds conditions for f to be changeable; all of them must hold.
+func enabledWhen(f FieldSpec, conds ...Condition) FieldSpec {
+	f.EnabledWhen = append(append([]Condition{}, f.EnabledWhen...), conds...)
+	return f
+}
+
+// on is the condition that the switch at path is on.
+func on(path string) Condition { return Condition{Key: path, In: []string{"true"}} }
+
+// unit puts u after f's number.
+func unit(f FieldSpec, u string) FieldSpec {
+	f.Kind.Unit = u
+	return f
+}
+
+// group puts fields under one heading of section, in order.
+func group(section Section, name string, fields ...FieldSpec) []FieldSpec {
+	for i := range fields {
+		fields[i].Section, fields[i].Group = section, name
+	}
+	return fields
+}
+
+// concat joins groups in page order.
+func concat(groups ...[]FieldSpec) []FieldSpec {
+	var out []FieldSpec
+	for _, g := range groups {
+		out = append(out, g...)
+	}
+	return out
+}
+
 // gptLiveOnly is the condition that the voice service is OpenAI GPT-Live.
 var gptLiveOnly = Condition{Key: "voice.provider", In: []string{ProviderOpenAILive}}
 
-func spec(path string, section Section, label, help string, kind Kind, apply Apply) FieldSpec {
-	return FieldSpec{Path: path, Section: section, Label: label, Help: help, Kind: kind, Apply: apply, Platforms: AllPlatforms}
+// spec is a field; group sets its section and heading.
+func spec(path string, label, help string, kind Kind, apply Apply) FieldSpec {
+	return FieldSpec{Path: path, Label: label, Help: help, Kind: kind, Apply: apply, Platforms: AllPlatforms}
 }
 
 func macOnly(f FieldSpec) FieldSpec {
@@ -380,82 +421,124 @@ var (
 	terminalNames = []Opt{{"warp", "Warp", mac}, {"iterm", "iTerm", mac}}
 )
 
-// Fields is every leaf of Config, in page order within each section. A test fails when a
-// Config leaf has no entry.
-var Fields = []FieldSpec{
-	spec("hotkey", SectionPixie, "Voice hotkey", "Starts or ends a conversation with Pixie from any app.", hotkeyKind, ApplyLive),
-	spec("pack", SectionPixie, "Pixie", "Which pixie pack is shown.", choiceKind(SourcePacks), ApplyLive),
-	spec("pixiesFolder", SectionPixie, "Your pixies folder", "Pixies you made, one folder each. Empty uses the app's own pixies folder. New or changed pixies show up when you pick the folder or open Settings.", pathKind(true, true), ApplyLive),
-	spec("scale", SectionPixie, "Size", "Whole-number sizes keep the pixel art crisp.", intKind(1, MaxScale, true), ApplyLive),
-	spec("replyMode", SectionPixie, "Talk to Pixie by", "Voice: talk and Pixie answers aloud. Text: type a quick message under Pixie and read the coordinator's answer.", staticChoice(ReplyModes), ApplyLive),
-	spec("alwaysShowCaption", SectionPixie, "Always show what Pixie said", "Keeps Pixie's last words under it, with how long ago. Off, they show while Pixie talks and when you hover near Pixie.", boolKind, ApplyLive),
-	spec("captionDismissSecs", SectionPixie, "Put away what Pixie said after", "Seconds after Pixie said it; 0 keeps it until something new. The ✕ on it puts it away at once.", intKind(0, 86400, false), ApplyLive),
-	spec("captionFadeSecs", SectionPixie, "Fade the earlier caption after", "When you or Pixie start talking, the last caption moves up and fades this many seconds later; 0 shows only the latest.", intKind(0, 60, false), ApplyLive),
-	spec("replyHistoryMins", SectionPixie, "Keep Pixie's replies for", "Minutes to keep Pixie's earlier replies, to step back through with the arrows on the reply; 0 keeps only the latest.", intKind(0, 60, false), ApplyLive),
-	spec("proximityFade.enabled", SectionPixie, "Fade near the pointer", "Pixie fades as the pointer comes close, so it never blocks your work.", boolKind, ApplyLive),
-	spec("proximityFade.radius", SectionPixie, "Fade distance", "How far from Pixie, in points, the fading starts.", intKind(0, 1000, false), ApplyLive),
-	spec("position", SectionPixie, "Position", "Where Pixie was last dragged; written by the app.", managedKind, ApplyLive),
-	spec("voice.provider", SectionVoice, "Voice service", "The realtime voice service Pixie talks through.", choiceKind(SourceVoiceProviders), ApplyRestart),
-	// The GPT-Live fields sit right under the voice service and show only for GPT-Live.
-	visibleWhen(spec("voice.liveDelegation", SectionVoice, "GPT-Live delegation", "OpenAI backend model: a backend model runs Pixie's tools (time, weather, timers, music) and hands other work to the coordinator. Straight to the coordinator: GPT-Live hands everything it can't answer to the coordinator, with no backend model.", staticChoice(LiveDelegations), ApplyRestart), gptLiveOnly),
-	// The backend model is unused when GPT-Live delegates straight to the coordinator.
-	visibleWhen(spec("voice.liveBackendModel", SectionVoice, "Backend model (GPT-Live)", "The model that runs Pixie's tools while GPT-Live talks.", openChoice(Choices{Source: SourceStatic, Static: LiveBackendModels}), ApplyRestart),
-		gptLiveOnly, Condition{Key: "voice.liveDelegation", In: []string{LiveDelegationBackend}}),
-	spec("voice.audio", SectionVoice, "Audio", "The microphone and speaker backend.", choiceKind(SourceAudioBackends), ApplyRestart),
-	// voice.model, voice.voice and agent.model are free Text in Rust; here they are open
-	// choices (suggestions; any text still validates) — a deliberate deviation (#45).
-	spec("voice.model", SectionVoice, "Model", "The voice model. The choices follow the voice service.", openChoice(Choices{Source: SourceVoiceModels}), ApplyRestart),
-	spec("voice.voice", SectionVoice, "Voice", "The voice Pixie speaks with. The choices follow the voice service.", openChoice(Choices{Source: SourceVoiceVoices}), ApplyRestart),
-	spec("voice.chimes", SectionVoice, "Chimes", "A rising chime when Pixie listens, a falling one when it stops.", boolKind, ApplyRestart),
-	macOnly(spec("voice.noiseFilter", SectionVoice, "Noise filter", "Cleans background noise (fans, typing, hum) from your mic on this Mac. With Hush it also turns quieter background voices down, like a TV.", boolKind, ApplyLive)),
-	macOnly(spec("voice.noiseModel", SectionVoice, "Noise model", "Hush also turns quieter background voices down by up to 18 dB. DeepFilterNet3 cleans steady noise only.", staticChoice(NoiseModels), ApplyRestart)),
-	macOnly(spec("voice.inputDevice", SectionVoice, "Microphone", "The mic Pixie listens with. If it isn't connected, Pixie uses the system default until it is. Bluetooth mics are slow to start and can cut off your first words.", choiceKind(SourceInputDevices), ApplyLive)),
-	macOnly(spec("voice.outputDevice", SectionVoice, "Speaker", "Where Pixie's voice plays. If it isn't connected, Pixie uses the system default until it is.", choiceKind(SourceOutputDevices), ApplyLive)),
-	spec("voice.noisyRoom", SectionVoice, "Noisy room", "Pixie ignores quieter voices in the background, like a TV or people nearby. Speak up a little to interrupt Pixie. With OpenAI GPT-Live this only changes Pixie's instructions.", boolKind, ApplyRestart),
-	spec("voice.handOffWhenUnsure", SectionVoice, "Hand off when Pixie doesn't know", "When Pixie can't answer a question or request itself, it hands it to the coordinator instead of saying it doesn't know.", boolKind, ApplyRestart),
-	spec("voice.checkClaims", SectionVoice, "Check Pixie's claims", "When Pixie says it did something, like setting a timer or handing a task off, the app checks it really did and corrects it if not.", boolKind, ApplyRestart),
-	spec("voice.idleTimeoutSecs", SectionVoice, "Silence timeout (seconds)", "A conversation ends after this much silence.", intKind(1, 600, false), ApplyRestart),
-	spec("voice.homeCity", SectionVoice, "Home city", "Where Pixie checks the weather when you don't name a place, e.g. Portland, Oregon.", textKind(true), ApplyRestart),
-	spec("voice.personaPath", SectionVoice, "Persona file", "A Markdown file that replaces Pixie's personality. Empty uses the built-in one.", pathKind(false, true), ApplyRestart),
-	spec("agent.enabled", SectionAgent, "Delegation", "Let Pixie hand work to the coordinator, a Claude Code or Codex agent.", boolKind, ApplyRestart),
-	spec("agent.terminal", SectionAgent, "Terminal", "Where the coordinator's session opens when you click Pixie.", choiceKind(SourceTerminals), ApplyRestart),
-	spec("agent.coordinatorKind", SectionAgent, "Coordinator agent", "The agent that runs as the coordinator: Claude Code, or OpenAI's Codex.", staticChoice(CoordinatorKinds), ApplyRestart),
-	// The model list follows the coordinator agent. agent.model also applies to Claude workers.
-	visibleWhen(spec("agent.model", SectionAgent, "Coordinator model", "Claude Code's --model for the coordinator (and Claude workers). Default lets Claude Code decide.", openChoice(Choices{Source: SourceStatic, Static: AgentModels, Null: true}), ApplyRestart), claudeCoordinator),
-	visibleWhen(spec("agent.codexModel", SectionAgent, "Coordinator model", "Codex's model for the coordinator. Default lets Codex decide.", openChoice(Choices{Source: SourceStatic, Static: CodexModels, Null: true}), ApplyRestart), codexCoordinator),
-	spec("agent.coordinatorEffort", SectionAgent, "Coordinator effort", "How hard the coordinator thinks before it acts. Low hands work off and answers soonest; higher thinks longer. Takes effect when the coordinator restarts.", staticChoice(CoordinatorEfforts), ApplyRestart),
-	spec("agent.warm", SectionAgent, "Start at launch", "Start the coordinator when the app starts, not on first use.", boolKind, ApplyRestart),
-	spec("agent.narration", SectionAgent, "Narration", "Pixie says what the coordinator is doing.", boolKind, ApplyRestart),
-	spec("agent.openConversationForUpdates", SectionAgent, "Open a conversation for updates", "When a job finishes or fails, or the coordinator asks you something, while you're not talking to Pixie, Pixie starts a conversation to tell you and then listens for your answer.", boolKind, ApplyRestart),
-	spec("agent.alwaysForceSend", SectionAgent, "Always send messages at once", "Messages Pixie passes to your sessions go in right away, with any still waiting, even while you're typing there. A busy session still gets them with its next step.", boolKind, ApplyRestart),
-	spec("agent.questionWaitSecs", SectionAgent, "Wait for Pixie's answer (seconds)", "How long a question from a session you started with pix waits for your answer in Pixie before the session shows it in its terminal. 0 shows it there at once; Pixie's buttons then type your answer.", intKind(0, int64(pix.MaxHold.Seconds()), false), ApplyRestart),
-	spec("agent.editor", SectionAgent, "Open files in", "Where a file named in Pixie's bubbles opens when you click it. Automatic uses the editor the session runs in (VS Code, Cursor, Zed or a JetBrains IDE), else the file's default app.", staticChoice(Editors), ApplyLive),
-	spec("agent.holdOpenSecs", SectionAgent, "Hold open (seconds)", "How long a conversation stays open while a job runs.", intKind(0, 3600, false), ApplyRestart),
-	spec("agent.projectsRoot", SectionAgent, "Projects folder", "The folder whose repositories workers may use, inside your home folder. DeskPixie creates it when it's missing.", pathKind(true, false), ApplyRestart),
-	spec("agent.workers.enabled", SectionWorkers, "Workers", "Let the coordinator start worker agents in git worktrees.", boolKind, ApplyRestart),
-	spec("agent.workers.max", SectionWorkers, "Most workers at once", "Up to four workers run at the same time.", intKind(1, MaxWorkers, true), ApplyRestart),
-	spec("agent.workers.kinds", SectionWorkers, "Worker kinds", "Which agents may work as workers.", Kind{Type: KindMultiChoice, Choices: Choices{Source: SourceStatic, Static: WorkerKinds}}, ApplyRestart),
-	spec("agent.workers.speakResults", SectionWorkers, "Speak worker reports", "Pixie tells you as soon as a worker says it's done, couldn't finish or is stuck, before the coordinator has checked its work.", boolKind, ApplyRestart),
-	spec("canvas.autoOpen", SectionCanvas, "Open new pages", "Show new and changed canvas pages automatically.", boolKind, ApplyLive),
-	spec("canvas.keep", SectionCanvas, "Pages kept", "Older pages are deleted at startup.", intKind(1, 1000, false), ApplyRestart),
-	spec("canvas.window", SectionCanvas, "Canvas window", "The canvas window's last place and size; written by the app.", managedKind, ApplyLive),
-	spec("agent.sessionHost", SectionAdvanced, "Session host", "The terminal multiplexer that runs the coordinator. Supported: "+compat.SupportedVersions+", or "+tmuxcompat.SupportedVersions+".", choiceKind(SourceSessionHosts), ApplyRestart),
-	spec("agent.session", SectionAdvanced, "Session name", "The coordinator session's name: a-z, 0-9 and -, not \"default\".", textKind(false), ApplyRestart),
-	spec("agent.herdrPath", SectionAdvanced, "Herdr program", "Empty finds herdr on PATH or in ~/.local/bin, /opt/homebrew/bin or /usr/local/bin. Supported: "+compat.SupportedVersions+".", pathKind(false, true), ApplyRestart),
-	spec("agent.tmuxPath", SectionAdvanced, "tmux program", "Empty finds tmux on PATH or in /opt/homebrew/bin or /usr/local/bin. Supported: "+tmuxcompat.SupportedVersions+".", pathKind(false, true), ApplyRestart),
-	spec("agent.port", SectionAdvanced, "Hook server port", "The local port agents report to.", intKind(1024, 65535, false), ApplyRestart),
-	spec("agent.keepPanesOnQuit", SectionAdvanced, "Keep agent panes on quit", "Leave the coordinator's and workers' terminal panes open when the app quits.", boolKind, ApplyRestart),
-	spec("logMaxMB", SectionAdvanced, "Log size (MB)", "Each log (the app's, pix's, the voice log, metrics) keeps at most this much on disk; older lines go first.", intKind(1, 100, false), ApplyLive),
-	spec("agent.permissionTimeoutSecs", SectionAdvanced, "Permission timeout (seconds)", "An unanswered permission request is denied after this long.", intKind(1, 120, false), ApplyRestart),
-	spec("agent.notifyPerMinute", SectionNotifications, "Notifications per minute", "The most coordinator notifications shown in one minute.", intKind(1, 60, false), ApplyRestart),
-	spec("notifications.debounceSecs", SectionNotifications, "Notification debounce (seconds)", "A job's updates wait until it has been quiet this long, then go out together. 0 sends each one as it comes. Questions never wait.", intKind(0, 300, false), ApplyRestart),
-	spec("notifications.bubble.enabled", SectionNotifications, "Updates bubble", "Shows what happened since you last talked to Pixie in a bubble beside it.", boolKind, ApplyLive),
-	spec("notifications.bubble.popSecs", SectionNotifications, "Pop for (seconds)", "How long the bubble shows a new update before it shrinks to a badge.", intKind(1, 60, false), ApplyLive),
-	spec("notifications.bubble.lines", SectionNotifications, "Updates shown", "The most updates the bubble lists.", intKind(1, 10, false), ApplyLive),
-	spec("notifications.awayAfterMins", SectionNotifications, "Away after (minutes idle)", "With no keyboard or mouse input for this long, nothing pops and Pixie doesn't start a conversation until you're back.", intKind(1, 60, false), ApplyLive),
-	spec("notifications.sessionTurns", SectionNotifications, "Announce finished sessions", "Pixie tells you when a session you started with pix finishes a turn. Off, it only tells you about turns Pixie started.", boolKind, ApplyRestart),
-	spec("notifications.sessionTurnsMinSeconds", SectionNotifications, "Only turns longer than (seconds)", "Shorter turns stay quiet; you were probably watching. Turns Pixie started are always announced.", intKind(0, 3600, false), ApplyRestart),
-}
+// Fields is every leaf of Config, page by page in sidebar order, group by group (#290). A test
+// fails when a Config leaf has no entry.
+var Fields = concat(
+	group(SectionGeneral, "Talking to Pixie",
+		spec("hotkey", "Voice hotkey", "Starts or ends a conversation with Pixie from any app.", hotkeyKind, ApplyLive),
+		spec("replyMode", "Talk to Pixie by", "Voice: talk and Pixie answers aloud. Text: type a quick message under Pixie and read the coordinator's answer.", staticChoice(ReplyModes), ApplyLive),
+	),
+	group(SectionGeneral, "Look",
+		spec("pack", "Character", "Which pixie is shown.", choiceKind(SourcePacks), ApplyLive),
+		spec("scale", "Size", "Whole-number sizes keep the pixel art crisp.", intKind(1, MaxScale, true), ApplyLive),
+		spec("pixiesFolder", "Your pixies folder", "Pixies you made, one folder each. Empty uses the app's own pixies folder. New or changed pixies show up when you pick the folder or open Settings.", pathKind(true, true), ApplyLive),
+		spec("proximityFade.enabled", "Fade near the pointer", "Pixie fades as the pointer comes close, so it never blocks your work.", boolKind, ApplyLive),
+		enabledWhen(unit(spec("proximityFade.radius", "Fade distance", "How far from Pixie the fading starts.", intKind(0, 1000, false), ApplyLive), "points"), on("proximityFade.enabled")),
+		spec("position", "Position", "Where Pixie was last dragged; written by the app.", managedKind, ApplyLive),
+	),
+	group(SectionGeneral, "What Pixie said",
+		spec("alwaysShowCaption", "Always show what Pixie said", "Keeps Pixie's last words under it, with how long ago. Off, they show while Pixie talks and when you hover near Pixie.", boolKind, ApplyLive),
+		unit(spec("captionDismissSecs", "Put away what Pixie said after", "0 keeps it until something new. The ✕ on it puts it away at once.", intKind(0, 86400, false), ApplyLive), "seconds"),
+		unit(spec("captionFadeSecs", "Fade the earlier caption after", "When you or Pixie start talking, the last caption moves up and fades this long after; 0 shows only the latest.", intKind(0, 60, false), ApplyLive), "seconds"),
+		unit(spec("replyHistoryMins", "Keep Pixie's replies for", "To step back through with the arrows on the reply; 0 keeps only the latest.", intKind(0, 60, false), ApplyLive), "minutes"),
+	),
+
+	group(SectionVoice, "Voice service",
+		spec("voice.provider", "Voice service", "The realtime voice service Pixie talks through.", choiceKind(SourceVoiceProviders), ApplyRestart),
+		// The GPT-Live fields sit right under the voice service and show only for GPT-Live.
+		visibleWhen(spec("voice.liveDelegation", "GPT-Live delegation", "OpenAI backend model: a backend model runs Pixie's tools (time, weather, timers, music) and hands other work to the coordinator. Straight to the coordinator: GPT-Live hands everything it can't answer to the coordinator, with no backend model.", staticChoice(LiveDelegations), ApplyRestart), gptLiveOnly),
+		// The backend model is unused when GPT-Live delegates straight to the coordinator.
+		visibleWhen(spec("voice.liveBackendModel", "Backend model (GPT-Live)", "The model that runs Pixie's tools while GPT-Live talks.", openChoice(Choices{Source: SourceStatic, Static: LiveBackendModels}), ApplyRestart),
+			gptLiveOnly, Condition{Key: "voice.liveDelegation", In: []string{LiveDelegationBackend}}),
+		// voice.model, voice.voice and agent.model are free Text in Rust; here they are open
+		// choices (suggestions; any text still validates) — a deliberate deviation (#45).
+		spec("voice.model", "Model", "The voice model. The choices follow the voice service.", openChoice(Choices{Source: SourceVoiceModels}), ApplyRestart),
+		spec("voice.voice", "Voice", "The voice Pixie speaks with. The choices follow the voice service.", openChoice(Choices{Source: SourceVoiceVoices}), ApplyRestart),
+	),
+	group(SectionVoice, "Microphone and speaker",
+		macOnly(spec("voice.inputDevice", "Microphone", "The mic Pixie listens with. If it isn't connected, Pixie uses the system default until it is. Bluetooth mics are slow to start and can cut off your first words.", choiceKind(SourceInputDevices), ApplyLive)),
+		macOnly(spec("voice.outputDevice", "Speaker", "Where Pixie's voice plays. If it isn't connected, Pixie uses the system default until it is.", choiceKind(SourceOutputDevices), ApplyLive)),
+		macOnly(spec("voice.noiseFilter", "Noise filter", "Cleans background noise (fans, typing, hum) from your mic on this Mac. With Hush it also turns quieter background voices down, like a TV.", boolKind, ApplyLive)),
+		enabledWhen(macOnly(spec("voice.noiseModel", "Noise model", "Hush also turns quieter background voices down by up to 18 dB. DeepFilterNet3 cleans steady noise only.", staticChoice(NoiseModels), ApplyRestart)), on("voice.noiseFilter")),
+		spec("voice.noisyRoom", "Noisy room", "Pixie ignores quieter voices in the background, like a TV or people nearby. Speak up a little to interrupt Pixie. With OpenAI GPT-Live this only changes Pixie's instructions.", boolKind, ApplyRestart),
+		spec("voice.chimes", "Chimes", "A rising chime when Pixie listens, a falling one when it stops.", boolKind, ApplyRestart),
+	),
+	group(SectionVoice, "Conversation",
+		unit(spec("voice.idleTimeoutSecs", "Silence timeout", "A conversation ends after this much silence.", intKind(1, 600, false), ApplyRestart), "seconds"),
+		spec("voice.homeCity", "Home city", "Where Pixie checks the weather when you don't name a place, e.g. Portland, Oregon.", textKind(true), ApplyRestart),
+	),
+
+	group(SectionCoordinator, "Coordinator",
+		spec("agent.enabled", "Hand work to the coordinator", "Pixie hands work it can't do itself to the coordinator, a Claude Code or Codex agent.", boolKind, ApplyRestart),
+		enabledWhen(spec("agent.coordinatorKind", "Coordinator agent", "The agent that runs as the coordinator: Claude Code, or OpenAI's Codex.", staticChoice(CoordinatorKinds), ApplyRestart), on("agent.enabled")),
+		// The model list follows the coordinator agent. agent.model also applies to Claude workers.
+		enabledWhen(visibleWhen(spec("agent.model", "Coordinator model", "Claude Code's --model for the coordinator (and Claude workers). Default lets Claude Code decide.", openChoice(Choices{Source: SourceStatic, Static: AgentModels, Null: true}), ApplyRestart), claudeCoordinator), on("agent.enabled")),
+		enabledWhen(visibleWhen(spec("agent.codexModel", "Coordinator model", "Codex's model for the coordinator. Default lets Codex decide.", openChoice(Choices{Source: SourceStatic, Static: CodexModels, Null: true}), ApplyRestart), codexCoordinator), on("agent.enabled")),
+		enabledWhen(spec("agent.coordinatorEffort", "Coordinator effort", "How hard the coordinator thinks before it acts. Low hands work off and answers soonest; higher thinks longer. Takes effect when the coordinator restarts.", staticChoice(CoordinatorEfforts), ApplyRestart), on("agent.enabled")),
+		enabledWhen(spec("agent.warm", "Start at launch", "Start the coordinator when the app starts, not on first use.", boolKind, ApplyRestart), on("agent.enabled")),
+		enabledWhen(spec("agent.terminal", "Terminal", "Where the coordinator's session opens when you click Pixie.", choiceKind(SourceTerminals), ApplyRestart), on("agent.enabled")),
+	),
+	group(SectionCoordinator, "Handing work off",
+		enabledWhen(spec("voice.handOffWhenUnsure", "Hand off when Pixie doesn't know", "When Pixie can't answer a question or request itself, it hands it to the coordinator instead of saying it doesn't know.", boolKind, ApplyRestart), on("agent.enabled")),
+		enabledWhen(unit(spec("agent.holdOpenSecs", "Keep listening while a job runs", "How long a conversation stays open while the coordinator works on something you asked.", intKind(0, 3600, false), ApplyRestart), "seconds"), on("agent.enabled")),
+	),
+	group(SectionCoordinator, "Updates",
+		enabledWhen(spec("agent.narration", "Say what the coordinator is doing", "Pixie tells you what the coordinator is up to while it works.", boolKind, ApplyRestart), on("agent.enabled")),
+		enabledWhen(spec("agent.openConversationForUpdates", "Start a conversation for updates", "When a job finishes or fails, or the coordinator asks you something, while you're not talking to Pixie, Pixie starts a conversation to tell you and then listens for your answer.", boolKind, ApplyRestart), on("agent.enabled")),
+	),
+	group(SectionCoordinator, "Canvas",
+		spec("canvas.autoOpen", "Open new pages", "Show new and changed canvas pages automatically.", boolKind, ApplyLive),
+		unit(spec("canvas.keep", "Pages kept", "Older pages are deleted at startup.", intKind(1, 1000, false), ApplyRestart), "pages"),
+		spec("canvas.window", "Canvas window", "The canvas window's last place and size; written by the app.", managedKind, ApplyLive),
+	),
+
+	group(SectionSessions, "Sessions you start with pix",
+		spec("notifications.sessionTurns", "Announce finished sessions", "Pixie tells you when a session you started with pix finishes a turn. Off, it only tells you about turns Pixie started.", boolKind, ApplyRestart),
+		enabledWhen(unit(spec("notifications.sessionTurnsMinSeconds", "Only turns longer than", "Shorter turns stay quiet; you were probably watching. Turns Pixie started are always announced.", intKind(0, 3600, false), ApplyRestart), "seconds"), on("notifications.sessionTurns")),
+		unit(spec("agent.questionWaitSecs", "Wait for Pixie's answer", "How long a question from a session you started with pix waits for your answer in Pixie before the session shows it in its terminal. 0 shows it there at once; Pixie's buttons then type your answer.", intKind(0, int64(pix.MaxHold.Seconds()), false), ApplyRestart), "seconds"),
+		spec("agent.alwaysForceSend", "Always send messages at once", "Messages Pixie passes to your sessions go in right away, with any still waiting, even while you're typing there. A busy session still gets them with its next step.", boolKind, ApplyRestart),
+		spec("agent.editor", "Open files in", "Where a file named in Pixie's bubbles opens when you click it. Automatic uses the editor the session runs in (VS Code, Cursor, Zed or a JetBrains IDE), else the file's default app.", staticChoice(Editors), ApplyLive),
+	),
+
+	group(SectionWorkers, "Workers",
+		spec("agent.workers.enabled", "Workers", "Let the coordinator start worker agents in git worktrees.", boolKind, ApplyRestart),
+		enabledWhen(spec("agent.workers.max", "Most workers at once", "Up to four workers run at the same time.", intKind(1, MaxWorkers, true), ApplyRestart), on("agent.workers.enabled")),
+		enabledWhen(spec("agent.workers.kinds", "Worker kinds", "Which agents may work as workers.", Kind{Type: KindMultiChoice, Choices: Choices{Source: SourceStatic, Static: WorkerKinds}}, ApplyRestart), on("agent.workers.enabled")),
+		enabledWhen(spec("agent.workers.speakResults", "Speak worker reports", "Pixie tells you as soon as a worker says it's done, couldn't finish or is stuck, before the coordinator has checked its work.", boolKind, ApplyRestart), on("agent.workers.enabled")),
+		enabledWhen(spec("agent.projectsRoot", "Projects folder", "The folder whose repositories workers may use, inside your home folder. DeskPixie creates it when it's missing.", pathKind(true, false), ApplyRestart), on("agent.workers.enabled")),
+	),
+
+	group(SectionNotifications, "Updates bubble",
+		spec("notifications.bubble.enabled", "Updates bubble", "Shows what happened since you last talked to Pixie in a bubble beside it.", boolKind, ApplyLive),
+		enabledWhen(unit(spec("notifications.bubble.popSecs", "Show new updates for", "How long the bubble shows a new update before it shrinks to a badge.", intKind(1, 60, false), ApplyLive), "seconds"), on("notifications.bubble.enabled")),
+		enabledWhen(spec("notifications.bubble.lines", "Most updates shown", "The most updates the bubble lists.", intKind(1, 10, false), ApplyLive), on("notifications.bubble.enabled")),
+	),
+	group(SectionNotifications, "When you're away",
+		unit(spec("notifications.awayAfterMins", "You're away after", "With no keyboard or mouse input for this long, nothing pops and Pixie doesn't start a conversation until you're back.", intKind(1, 60, false), ApplyLive), "minutes idle"),
+	),
+
+	group(SectionAdvanced, "Session host",
+		spec("agent.sessionHost", "Session host", "The terminal multiplexer that runs the coordinator. Supported: "+compat.SupportedVersions+", or "+tmuxcompat.SupportedVersions+".", choiceKind(SourceSessionHosts), ApplyRestart),
+		spec("agent.session", "Session name", "The coordinator session's name: a-z, 0-9 and -, not \"default\".", textKind(false), ApplyRestart),
+		spec("agent.herdrPath", "Herdr program", "Empty finds herdr on PATH or in ~/.local/bin, /opt/homebrew/bin or /usr/local/bin. Supported: "+compat.SupportedVersions+".", pathKind(false, true), ApplyRestart),
+		spec("agent.tmuxPath", "tmux program", "Empty finds tmux on PATH or in /opt/homebrew/bin or /usr/local/bin. Supported: "+tmuxcompat.SupportedVersions+".", pathKind(false, true), ApplyRestart),
+		spec("agent.keepPanesOnQuit", "Keep agent panes on quit", "Leave the coordinator's and workers' terminal panes open when the app quits.", boolKind, ApplyRestart),
+	),
+	group(SectionAdvanced, "Coordinator",
+		spec("agent.port", "Agent report port", "The local port agents report to.", intKind(1024, 65535, false), ApplyRestart),
+		unit(spec("agent.permissionTimeoutSecs", "Permission timeout", "An unanswered permission request is denied after this long.", intKind(1, 120, false), ApplyRestart), "seconds"),
+		unit(spec("agent.notifyPerMinute", "Most coordinator notifications", "The most coordinator notifications shown in one minute.", intKind(1, 60, false), ApplyRestart), "a minute"),
+		unit(spec("notifications.debounceSecs", "Group a job's updates for", "A job's updates wait until it has been quiet this long, then go out together. 0 sends each one as it comes. Questions never wait.", intKind(0, 300, false), ApplyRestart), "seconds"),
+	),
+	group(SectionAdvanced, "Voice",
+		spec("voice.audio", "Audio engine", "The microphone and speaker backend.", choiceKind(SourceAudioBackends), ApplyRestart),
+		spec("voice.personaPath", "Persona file", "A Markdown file that replaces Pixie's personality. Empty uses the built-in one.", pathKind(false, true), ApplyRestart),
+		spec("voice.checkClaims", "Check Pixie's claims", "When Pixie says it did something, like setting a timer or handing a task off, the app checks it really did and corrects it if not.", boolKind, ApplyRestart),
+	),
+	group(SectionAdvanced, "Files",
+		unit(spec("logMaxMB", "Log size", "Each log (the app's, pix's, the voice log, metrics) keeps at most this much on disk; older lines go first.", intKind(1, 100, false), ApplyLive), "MB"),
+	),
+)
 
 // FieldByPath is the field at path, or nil.
 func FieldByPath(path string) *FieldSpec {
@@ -614,6 +697,7 @@ type KindView struct {
 	Type     KindType
 	Min, Max int64
 	Menu     bool
+	Unit     string
 	Options  []OptionView
 	Optional bool
 	Dir      bool
@@ -630,7 +714,8 @@ func (k KindView) MarshalJSON() ([]byte, error) {
 			Min  int64  `json:"min"`
 			Max  int64  `json:"max"`
 			Menu bool   `json:"menu"`
-		}{"int", k.Min, k.Max, k.Menu})
+			Unit string `json:"unit,omitempty"`
+		}{"int", k.Min, k.Max, k.Menu, k.Unit})
 	case KindChoice, KindMultiChoice:
 		name := "choice"
 		if k.Type == KindMultiChoice {
@@ -665,6 +750,7 @@ func (k KindView) MarshalJSON() ([]byte, error) {
 type FieldView struct {
 	Path      string     `json:"path"`
 	Section   Section    `json:"section"`
+	Group     string     `json:"group"`
 	Label     string     `json:"label"`
 	Help      string     `json:"help"`
 	Kind      KindView   `json:"kind"`
@@ -672,6 +758,8 @@ type FieldView struct {
 	Platforms []Platform `json:"platforms"`
 	// VisibleWhen is left out when the field always shows.
 	VisibleWhen []Condition `json:"visibleWhen,omitempty"`
+	// EnabledWhen is left out when the field can always be changed.
+	EnabledWhen []Condition `json:"enabledWhen,omitempty"`
 }
 
 // Views is the schema for the window: every field with a control, options resolved from src.
@@ -681,14 +769,15 @@ func Views(src OptionSources) []FieldView {
 		if f.Kind.Type == KindManaged {
 			continue
 		}
-		k := KindView{Type: f.Kind.Type, Min: f.Kind.Min, Max: f.Kind.Max, Menu: f.Kind.Menu, Optional: f.Kind.Optional, Dir: f.Kind.Dir}
+		k := KindView{Type: f.Kind.Type, Min: f.Kind.Min, Max: f.Kind.Max, Menu: f.Kind.Menu, Unit: f.Kind.Unit, Optional: f.Kind.Optional, Dir: f.Kind.Dir}
 		if f.Kind.Type == KindChoice || f.Kind.Type == KindMultiChoice {
 			k.Options = Options(f.Kind.Choices, src)
 		}
 		out = append(out, FieldView{
-			Path: f.Path, Section: f.Section, Label: f.Label, Help: f.Help, Kind: k, Apply: f.Apply,
+			Path: f.Path, Section: f.Section, Group: f.Group, Label: f.Label, Help: f.Help, Kind: k, Apply: f.Apply,
 			Platforms:   append([]Platform{}, f.Platforms...),
 			VisibleWhen: conditionsView(f.VisibleWhen),
+			EnabledWhen: conditionsView(f.EnabledWhen),
 		})
 	}
 	return out

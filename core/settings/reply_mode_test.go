@@ -18,7 +18,7 @@ func TestReplyModeDefaultsToVoice(t *testing.T) {
 
 func TestReplyModeIsALivePixieChoice(t *testing.T) {
 	f := FieldByPath("replyMode")
-	if f.Section != SectionPixie || f.Apply != ApplyLive {
+	if f.Section != SectionGeneral || f.Apply != ApplyLive {
 		t.Fatalf("%+v", f)
 	}
 	var vals []string
@@ -56,7 +56,7 @@ func TestAlwaysShowCaptionIsALivePixieSwitchOffByDefault(t *testing.T) {
 		t.Fatal("an old settings.json without the key is off:", c.AlwaysShowCaption, err)
 	}
 	f := FieldByPath("alwaysShowCaption")
-	if f.Section != SectionPixie || f.Apply != ApplyLive || f.Kind.Type != KindBool {
+	if f.Section != SectionGeneral || f.Apply != ApplyLive || f.Kind.Type != KindBool {
 		t.Fatalf("%+v", f)
 	}
 	if r, ok := RouteFor("alwaysShowCaption"); !ok || r != RouteCaptions {
@@ -74,7 +74,7 @@ func TestCaptionDismissSecsIsALivePixieNumber(t *testing.T) {
 		t.Fatal("an old settings.json gets the default:", c.CaptionDismissSecs, err)
 	}
 	f := FieldByPath("captionDismissSecs")
-	if f.Section != SectionPixie || f.Apply != ApplyLive || f.Kind.Type != KindInt {
+	if f.Section != SectionGeneral || f.Apply != ApplyLive || f.Kind.Type != KindInt {
 		t.Fatalf("%+v", f)
 	}
 	if r, ok := RouteFor("captionDismissSecs"); !ok || r != RouteCaptions {
@@ -103,7 +103,7 @@ func TestCaptionFadeSecsIsALivePixieNumber(t *testing.T) {
 		t.Fatal("an old settings.json gets the default:", c.CaptionFadeSecs, err)
 	}
 	f := FieldByPath("captionFadeSecs")
-	if f.Section != SectionPixie || f.Apply != ApplyLive || f.Kind.Type != KindInt {
+	if f.Section != SectionGeneral || f.Apply != ApplyLive || f.Kind.Type != KindInt {
 		t.Fatalf("%+v", f)
 	}
 	if r, ok := RouteFor("captionFadeSecs"); !ok || r != RouteCaptions {
@@ -132,7 +132,7 @@ func TestReplyHistoryMinsIsALivePixieNumber(t *testing.T) {
 		t.Fatal("an old settings.json gets the default:", c.ReplyHistoryMins, err)
 	}
 	f := FieldByPath("replyHistoryMins")
-	if f.Section != SectionPixie || f.Apply != ApplyLive || f.Kind.Type != KindInt {
+	if f.Section != SectionGeneral || f.Apply != ApplyLive || f.Kind.Type != KindInt {
 		t.Fatalf("%+v", f)
 	}
 	if r, ok := RouteFor("replyHistoryMins"); !ok || r != RouteCaptions {

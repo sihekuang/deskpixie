@@ -17,7 +17,7 @@ func TestEditorIsALiveAgentChoice(t *testing.T) {
 		t.Fatal("an old settings.json gets the default:", c.Agent.Editor, err)
 	}
 	f := FieldByPath("agent.editor")
-	if f.Section != SectionAgent || f.Apply != ApplyLive || f.Kind.Type != KindChoice {
+	if f.Section != SectionSessions || f.Apply != ApplyLive || f.Kind.Type != KindChoice {
 		t.Fatalf("%+v", f)
 	}
 	if r, ok := RouteFor("agent.editor"); !ok || r != RouteReadEachTick {

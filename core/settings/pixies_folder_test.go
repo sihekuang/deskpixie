@@ -13,7 +13,7 @@ func TestPixiesFolderIsALiveOptionalFolder(t *testing.T) {
 		t.Fatal("no folder by default")
 	}
 	f := FieldByPath("pixiesFolder")
-	if f.Section != SectionPixie || f.Apply != ApplyLive || f.Kind.Type != KindPath || !f.Kind.Dir || !f.Kind.Optional {
+	if f.Section != SectionGeneral || f.Apply != ApplyLive || f.Kind.Type != KindPath || !f.Kind.Dir || !f.Kind.Optional {
 		t.Fatalf("%+v", f)
 	}
 	if r, ok := RouteFor("pixiesFolder"); !ok || r != RoutePixiesFolder {

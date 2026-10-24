@@ -109,6 +109,8 @@ type Snapshot struct {
 	// Values is Config as JSON, without unknown keys. It holds no secrets.
 	Values map[string]any `json:"values"`
 	Fields []FieldView    `json:"fields"`
+	// Extras place the window's other rows (buttons, API keys, pix) on their pages.
+	Extras []ExtraView `json:"extras"`
 	// RestartPending are the Restart fields whose value differs from the one the app started with.
 	RestartPending []string `json:"restartPending"`
 	// FileError is why settings.json can't be read, while it can't.
@@ -166,6 +168,7 @@ func (s *Service) Snapshot(env Env) Snapshot {
 		Platform:       env.Platform,
 		Values:         values,
 		Fields:         Views(sourcesFor(env.Sources, current)),
+		Extras:         ExtraViews(env.Platform),
 		RestartPending: s.RestartPending(),
 		FileError:      clonePtr(s.fileErr),
 		Warning:        clonePtr(s.warning),
