@@ -89,6 +89,9 @@ type Agent interface {
 	FocusAgent(name string)
 	// FocusSession is a click on one of your own sessions in the roster: the tab it runs in (async).
 	FocusSession(name string)
+	// SessionPlace is where your session name runs (#277): its folder and its terminal app's
+	// bundle id, for the paths in its replies. False when it isn't one of yours.
+	SessionPlace(name string) (folder, app string, ok bool)
 	// ReportFocusOutcome: the shell finished executing a FocusPlan (#116). Failure becomes the
 	// tray status line, as for OpenTerminal.
 	ReportFocusOutcome(success bool, detail string)

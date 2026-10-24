@@ -44,6 +44,7 @@ type fakeAgent struct {
 	stops           int
 	textModes       []bool
 	attach          *attach.Store
+	places          map[string][2]string // session → folder, app
 }
 
 func (f *fakeAgent) Tools() []voice.Tool { return []voice.Tool{namedTool("delegate")} }
@@ -112,6 +113,12 @@ func (f *fakeAgent) FocusSession(name string) {
 	f.mu.Lock()
 	f.focusedSessions = append(f.focusedSessions, name)
 	f.mu.Unlock()
+}
+func (f *fakeAgent) SessionPlace(name string) (string, string, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	p, ok := f.places[name]
+	return p[0], p[1], ok
 }
 func (f *fakeAgent) ReportFocusOutcome(success bool, detail string) {
 	f.mu.Lock()

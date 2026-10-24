@@ -18,31 +18,32 @@ type bridgeAgent struct {
 	opened, shut int
 }
 
-func (b *bridgeAgent) Tools() []voice.Tool             { return nil }
-func (b *bridgeAgent) Persona() string                 { return "" }
-func (b *bridgeAgent) Tray() app.AgentTray             { return app.AgentTray{Enabled: true} }
-func (b *bridgeAgent) Menu(string) bool                { return true }
-func (b *bridgeAgent) ChatSend(string) (string, error) { return "", nil }
-func (b *bridgeAgent) ChatStop()                       {}
-func (b *bridgeAgent) SetTextMode(bool)                {}
-func (b *bridgeAgent) Attachments() *attach.Store      { return nil }
-func (b *bridgeAgent) OpenTerminal()                   { b.mu.Lock(); b.opened++; b.mu.Unlock() }
-func (b *bridgeAgent) AttachVoice(app.AgentVoice)      {}
-func (b *bridgeAgent) OnMouth(int)                     {}
-func (b *bridgeAgent) Shutdown()                       { b.mu.Lock(); b.shut++; b.mu.Unlock() }
-func (b *bridgeAgent) UpdatesSeen([]uint64)            {}
-func (b *bridgeAgent) UpdatesDismissed([]uint64)       {}
-func (b *bridgeAgent) Decide(string, bool)             {}
-func (b *bridgeAgent) Choose(string, int)              {}
-func (b *bridgeAgent) TypedAnswer(string, string)      {}
-func (b *bridgeAgent) ChatAbout(string)                {}
-func (b *bridgeAgent) Updates() any                    { return []any{} }
-func (b *bridgeAgent) SetAway(bool)                    {}
-func (b *bridgeAgent) FocusJob(string, string)         {}
-func (b *bridgeAgent) Roster() any                     { return struct{}{} }
-func (b *bridgeAgent) FocusAgent(string)               {}
-func (b *bridgeAgent) FocusSession(string)             {}
-func (b *bridgeAgent) ReportFocusOutcome(bool, string) {}
+func (b *bridgeAgent) Tools() []voice.Tool                        { return nil }
+func (b *bridgeAgent) Persona() string                            { return "" }
+func (b *bridgeAgent) Tray() app.AgentTray                        { return app.AgentTray{Enabled: true} }
+func (b *bridgeAgent) Menu(string) bool                           { return true }
+func (b *bridgeAgent) ChatSend(string) (string, error)            { return "", nil }
+func (b *bridgeAgent) ChatStop()                                  {}
+func (b *bridgeAgent) SetTextMode(bool)                           {}
+func (b *bridgeAgent) Attachments() *attach.Store                 { return nil }
+func (b *bridgeAgent) OpenTerminal()                              { b.mu.Lock(); b.opened++; b.mu.Unlock() }
+func (b *bridgeAgent) AttachVoice(app.AgentVoice)                 {}
+func (b *bridgeAgent) OnMouth(int)                                {}
+func (b *bridgeAgent) Shutdown()                                  { b.mu.Lock(); b.shut++; b.mu.Unlock() }
+func (b *bridgeAgent) UpdatesSeen([]uint64)                       {}
+func (b *bridgeAgent) UpdatesDismissed([]uint64)                  {}
+func (b *bridgeAgent) Decide(string, bool)                        {}
+func (b *bridgeAgent) Choose(string, int)                         {}
+func (b *bridgeAgent) TypedAnswer(string, string)                 {}
+func (b *bridgeAgent) ChatAbout(string)                           {}
+func (b *bridgeAgent) Updates() any                               { return []any{} }
+func (b *bridgeAgent) SetAway(bool)                               {}
+func (b *bridgeAgent) FocusJob(string, string)                    {}
+func (b *bridgeAgent) Roster() any                                { return struct{}{} }
+func (b *bridgeAgent) FocusAgent(string)                          {}
+func (b *bridgeAgent) FocusSession(string)                        {}
+func (b *bridgeAgent) SessionPlace(string) (string, string, bool) { return "", "", false }
+func (b *bridgeAgent) ReportFocusOutcome(bool, string)            {}
 
 func TestTheEngineBuildsTheAgentAndCloseShutsItDown(t *testing.T) {
 	ag := &bridgeAgent{}

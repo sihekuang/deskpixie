@@ -45,7 +45,7 @@ func RouteFor(path string) (Route, bool) {
 		return RoutePixiesFolder, true
 	case "scale":
 		return RouteScale, true
-	case "proximityFade.enabled", "proximityFade.radius", "logMaxMB":
+	case "proximityFade.enabled", "proximityFade.radius", "logMaxMB", "agent.editor":
 		return RouteReadEachTick, true
 	case "canvas.autoOpen":
 		return RouteAutoOpen, true
