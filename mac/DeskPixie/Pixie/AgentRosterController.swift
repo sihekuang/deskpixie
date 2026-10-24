@@ -41,6 +41,8 @@ final class AgentRosterController {
     private var hovering = false
     /// Keeps the card up while the pointer is around Pixie and its cards, or a swipe runs (#286).
     private var keeper = HoverKeeper()
+    /// The « put the deck away: hovering doesn't bring it back until the pointer has left.
+    private var latch = CollapseLatch()
     private var agoShown: String?
     private var typeTimer: Timer?
     private var clickAway: Any?
@@ -176,9 +178,11 @@ final class AgentRosterController {
         render()
     }
 
-    /// The ✕ on the card: the words go at once.
+    /// The « on the card: the words go at once, and the deck stays away until the pointer has
+    /// left the region around Pixie (#286).
     private func dismissWords() {
         chat.dismiss()
+        latch.collapse()
         typeTimer?.invalidate()
         typeTimer = nil
         render()
@@ -194,6 +198,7 @@ final class AgentRosterController {
     /// An update card (#286): it shows on its own or goes into the history, and either way it is
     /// in the deck, so its lines count as shown.
     func replyCard(_ card: ReplyCard) {
+        latch.release() // a new card pops up as usual
         chat.update(card)
         call("agent.repliesShown", ShownArgs(ids: card.lines))
         render()
@@ -488,7 +493,8 @@ final class AgentRosterController {
         // (#224, #286).
         keeper.pointer(at: pixie.hoverPointer, frames: pixie.hoverFrames, now: Self.uptime)
         let keep = keeper.keepsShowing(now: Self.uptime)
-        let near = pixie.isShown && keep
+        if !keeper.inside { latch.release() }
+        let near = pixie.isShown && latch.hover(keep)
         // Put away once old enough (captionDismissSecs), but not while you're there.
         let expired = !keep && chat.dismissIfOlder(than: dismissSecs, now: Date())
         let pruned = chat.prune(now: Date())

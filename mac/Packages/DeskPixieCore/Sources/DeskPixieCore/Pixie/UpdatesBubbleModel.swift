@@ -269,7 +269,7 @@ public struct UpdatesBubbleModel: Sendable {
             case .allowed:
                 if !isExpanded {
                     phase = .popped(until: now + popSecs)
-                    collapsed = false
+                    latch.release()
                 }
             case .hold:
                 heldPop = true
@@ -314,12 +314,13 @@ public struct UpdatesBubbleModel: Sendable {
     /// The deck was closed to the badge with its « (#286): everything stays waiting, and the
     /// pointer, still around, doesn't open it again until it has left (`regionLeft`). A new item
     /// may still pop it.
-    public private(set) var collapsed = false
+    public var collapsed: Bool { latch.collapsed }
+    private var latch = CollapseLatch()
 
     public mutating func collapse() {
         typing = nil
         leftWhileTyping = false
-        collapsed = true
+        latch.collapse()
         frozen = nil
         phase = lines.isEmpty ? .hidden : .badge
         decisionsSince = [:]
@@ -328,7 +329,7 @@ public struct UpdatesBubbleModel: Sendable {
 
     /// The pointer left the region around Pixie: hovering the badge opens the deck again.
     public mutating func regionLeft() {
-        collapsed = false
+        latch.release()
     }
 
     /// The pointer left: back to the badge, or hidden when nothing unheard is left. Not while you
