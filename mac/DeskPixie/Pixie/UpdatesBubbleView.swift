@@ -37,6 +37,9 @@ struct UpdatesBubbleView: View {
     var onSendTyped: (String) -> Void = { _ in }
     var onStopTyping: () -> Void = {}
     var onChat: (String) -> Void = { _ in }
+    /// "Open its terminal" on a line that asks without buttons: its pane comes up and the card
+    /// leaves (#286).
+    var onTerminal: (UpdateLine) -> Void = { _ in }
 
     /// The bubble sizes to its lines (UpdatesBubbleLayout, #105, #278).
     static func width(for lines: [UpdateLine]) -> CGFloat { UpdatesBubbleLayout.width(for: lines) }
@@ -164,7 +167,7 @@ struct UpdatesBubbleView: View {
             }
             if line.offersTerminal {
                 // Asks without buttons: the answer goes in its terminal.
-                Button { onLine(line) } label: {
+                Button { onTerminal(line) } label: {
                     Label("Open its terminal", systemImage: "terminal")
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }

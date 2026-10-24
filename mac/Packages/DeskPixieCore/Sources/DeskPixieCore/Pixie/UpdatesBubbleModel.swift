@@ -346,6 +346,23 @@ public struct UpdatesBubbleModel: Sendable {
         return true
     }
 
+    /// You acted on a card (#286): Allow, Deny, an option, a typed answer, "Chat about this" or
+    /// "Open its terminal". It leaves the deck at once and the next slides into its place,
+    /// without waiting for the core; a list from the core that still has it doesn't bring it
+    /// back, until the core drops it too.
+    public mutating func act(on id: UInt64) {
+        guard lines.contains(where: { $0.id == id }) else { return }
+        dismissed.insert(id)
+        let onCard = current?.id
+        lines.removeAll { $0.id == id }
+        settleDeck(on: onCard == id ? nil : onCard)
+        frozen?.removeAll { $0.id == id }
+        if lines.isEmpty {
+            frozen = nil
+            phase = .hidden
+        }
+    }
+
     /// A notification's line (#199) that no longer matches the line listed under its id: ids can
     /// repeat across restarts, so an old notification must not dismiss a newer line.
     public func isStale(_ line: UpdateLine) -> Bool {

@@ -1,3 +1,4 @@
+import DeskPixieCore
 import SwiftUI
 
 /// A deck's cards side by side, one page at a time (#286): SwiftUI's own horizontal paging, so a
@@ -24,9 +25,6 @@ struct DeckPager<ID: Hashable, Page: View>: View {
     /// report its first card (the oldest) and move the model there at launch.
     @State private var scrolled: ID?
     @State private var heights: [ID: CGFloat] = [:]
-    /// A scroll by you is under way (macOS 15 tells): only then does a new position go back
-    /// to the model, never when the view moves itself (a resize, a programmatic scroll).
-    @State private var userScroll = false
 
     init(ids: [ID], selected: ID?, width: CGFloat, onSelect: @escaping (ID) -> Void,
          onResize: @escaping () -> Void = {}, onScroll: @escaping (Bool) -> Void = { _ in },
@@ -45,34 +43,44 @@ struct DeckPager<ID: Hashable, Page: View>: View {
     private var pageWidth: CGFloat { max(40, width - 2 * Self.peek) }
 
     var body: some View {
-        ScrollView(.horizontal) {
-            HStack(alignment: .top, spacing: Self.gap) {
-                ForEach(ids, id: \.self) { id in
-                    page(id)
-                        .frame(width: pageWidth, alignment: .topLeading)
-                        .background(GeometryReader { g in
-                            Color.clear.preference(key: PageHeights.self, value: [AnyHashable(id): g.size.height])
-                        })
-                        // Off-centre pages sit back a little, so the one in the middle reads as on top.
-                        .scrollTransition(.interactive, axis: .horizontal) { content, phase in
-                            content
-                                .scaleEffect(reduceMotion || phase.isIdentity ? 1 : 0.95)
-                                .opacity(reduceMotion || phase.isIdentity ? 1 : 0.6)
-                        }
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal) {
+                HStack(alignment: .top, spacing: Self.gap) {
+                    ForEach(ids, id: \.self) { id in
+                        page(id)
+                            .frame(width: pageWidth, alignment: .topLeading)
+                            .background(GeometryReader { g in
+                                Color.clear.preference(key: PageHeights.self, value: [AnyHashable(id): g.size.height])
+                            })
+                            // Off-centre pages sit back a little, so the one in the middle reads as on top.
+                            .scrollTransition(.interactive, axis: .horizontal) { content, phase in
+                                content
+                                    .scaleEffect(reduceMotion || phase.isIdentity ? 1 : 0.95)
+                                    .opacity(reduceMotion || phase.isIdentity ? 1 : 0.6)
+                            }
+                            .id(id)
+                    }
                 }
+                .scrollTargetLayout()
+                // An answered card leaves and the next slides into its place.
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: ids)
             }
-            .scrollTargetLayout()
-            // An answered card leaves and the next slides into its place.
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: ids)
+            .scrollIndicators(.hidden)
+            // A card at rest starts at the margin, which is where centring puts it: snapping and
+            // the arrows land on the same spot, one card in the middle and both neighbours peeking.
+            .contentMargins(.horizontal, Self.peek, for: .scrollContent)
+            .deckPaging()
+            .scrollPosition(id: $scrolled, anchor: .center)
+            .modifier(SwipeWatch(stride: pageWidth + Self.gap, onChange: onScroll, onRest: { nearest in
+                // Comes to rest on one card, centred: the nearest, whatever the scroll view did.
+                guard !ids.isEmpty else { return }
+                let id = ids[min(nearest, ids.count - 1)]
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { proxy.scrollTo(id, anchor: .center) }
+                scrolled = id
+                forward(id)
+            }))
+            .frame(width: width, height: selected.flatMap { heights[$0] }, alignment: .topLeading)
         }
-        .scrollIndicators(.hidden)
-        // A card at rest starts at the margin, which is where centring puts it: snapping and
-        // the arrows land on the same spot, one card in the middle and both neighbours peeking.
-        .contentMargins(.horizontal, Self.peek, for: .scrollContent)
-        .deckPaging()
-        .scrollPosition(id: $scrolled, anchor: .center)
-        .modifier(UserScrollWatch(userScroll: $userScroll, onChange: onScroll) { forward(scrolled) })
-        .frame(width: width, height: selected.flatMap { heights[$0] }, alignment: .topLeading)
         .onPreferenceChange(PageHeights.self) { new in
             MainActor.assumeIsolated {
                 let typed = Dictionary(uniqueKeysWithValues: new.compactMap { k, v in (k.base as? ID).map { ($0, v) } })
@@ -92,7 +100,9 @@ struct DeckPager<ID: Hashable, Page: View>: View {
             onResize()
         }
         .onChange(of: scrolled) { _, new in
-            if userScroll || !UserScrollWatch.knowsPhases { forward(new) }
+            // macOS 15 tells the model once the swipe has come to rest (`onRest`), so the
+            // panel isn't redrawn mid-swipe; macOS 14 has no scroll phases to tell by.
+            if !SwipeWatch.knowsPhases { forward(new) }
         }
     }
 
@@ -101,11 +111,16 @@ struct DeckPager<ID: Hashable, Page: View>: View {
     }
 }
 
-/// Tells when a scroll is yours (macOS 15's scroll phases), and when it has come to rest.
-private struct UserScrollWatch: ViewModifier {
-    @Binding var userScroll: Bool
+/// Tells when a swipe is yours and where it came to rest (macOS 15's scroll phases and
+/// geometry): the card nearest the middle, by `DeckSnap`.
+private struct SwipeWatch: ViewModifier {
+    /// A card's width plus the gap.
+    let stride: CGFloat
     let onChange: (Bool) -> Void
-    let onRest: () -> Void
+    let onRest: (Int) -> Void
+
+    @State private var yours = false
+    @State private var offset: CGFloat = 0
 
     static var knowsPhases: Bool {
         if #available(macOS 15, *) { return true }
@@ -114,12 +129,17 @@ private struct UserScrollWatch: ViewModifier {
 
     func body(content: Content) -> some View {
         if #available(macOS 15, *) {
-            content.onScrollPhaseChange { _, phase in
-                let yours = phase == .tracking || phase == .interacting || phase == .decelerating
-                if userScroll && !yours { onRest() }
-                if userScroll != yours { onChange(yours) }
-                userScroll = yours
-            }
+            content
+                .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.x + $0.contentInsets.leading } action: { _, new in
+                    offset = new
+                }
+                .onScrollPhaseChange { _, phase in
+                    let now = phase == .tracking || phase == .interacting || phase == .decelerating
+                    guard now != yours else { return }
+                    yours = now
+                    onChange(now)
+                    if !now { onRest(DeckSnap.nearest(offset: offset, stride: stride)) }
+                }
         } else {
             content
         }

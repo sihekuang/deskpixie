@@ -20,6 +20,29 @@ final class UpdatesBubbleModelTests: XCTestCase {
         XCTAssertEqual(m.deckPosition?.index, 2)
     }
 
+    /// #286: a card you act on leaves at once, the next slides in, and the core's list that
+    /// still has it doesn't bring it back; once the core drops it, the id is forgotten.
+    func testACardYouActOnLeavesAtOnceAndStaysGone() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        let lines = [question(1, "hawk"), question(2, "lynx"), question(3, "owl")]
+        m.apply(lines, now: 1, pop: .allowed)
+        m.pointerEntered(now: 2)
+        m.step(1)
+        XCTAssertEqual(m.current?.id, 2)
+        m.act(on: 2)
+        XCTAssertEqual(m.count, 2)
+        XCTAssertEqual(m.current?.id, 3, "the next slides into its place")
+        m.apply(lines, now: 3, pop: .allowed)              // the core hasn't caught up
+        XCTAssertEqual(m.lines.map(\.id), [1, 3])
+        m.act(on: 3)
+        XCTAssertEqual(m.current?.id, 1, "the last one gone: the one before")
+        m.act(on: 1)
+        XCTAssertEqual(m.phase, .hidden)
+        m.apply([question(1, "hawk"), question(3, "owl")], now: 4, pop: .allowed) // core dropped 2
+        m.apply([question(1, "hawk"), question(2, "lynx2"), question(3, "owl")], now: 5, pop: .allowed)
+        XCTAssertEqual(m.lines.map(\.id), [2], "2 was forgotten once dropped; 1 and 3 are still acted on")
+    }
+
     /// #286: a scroll to a card moves the deck there; an id no longer listed changes nothing.
     func testAScrollToACardMovesTheDeck() {
         var m = UpdatesBubbleModel()

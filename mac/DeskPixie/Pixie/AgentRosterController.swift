@@ -583,9 +583,17 @@ final class AgentRosterController {
         }
         let size = hosting.fittingSize
         guard size.width > 0, size.height > 0 else {
-            hide()
+            // Right after a new root view (a swipe's card, say) SwiftUI may not have measured it
+            // yet: keep the panel where it is and try again, rather than hide it for a moment.
+            if panel.isVisible && zeroSizeRetries < 3 {
+                zeroSizeRetries += 1
+                DispatchQueue.main.async { [weak self] in self?.layout() }
+            } else {
+                hide()
+            }
             return
         }
+        zeroSizeRetries = 0
         if !model.open && !cardUp && offer.kind == nil { chipHeight = size.height }
         let top = ScreenDisplays.primaryMaxY
         let bit = pixie.panel.frame
@@ -625,6 +633,9 @@ final class AgentRosterController {
 
     /// The card is drawn: the text box, or a caption on its own in voice mode (#224).
     private var cardUp: Bool { chat.open || captionCard }
+
+    /// Layouts in a row that found the view unmeasured (see `layout`).
+    private var zeroSizeRetries = 0
 
     private func hide() {
         if panel.parent != nil { pixie.panel.removeChildWindow(panel) }

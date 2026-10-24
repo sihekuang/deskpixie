@@ -105,6 +105,19 @@ final class UpdatesBubbleController {
         guard model.typing == token, !text.isEmpty else { return }
         call("agent.typedAnswer", TypedArgs(token: token, text: text))
         stopTyping()
+        acted(token: token)
+    }
+
+    /// You acted on a card (#286): it leaves the deck at once, the next slides in.
+    private func acted(token: String) {
+        guard let line = model.lines.first(where: { $0.token == token }) else { return }
+        acted(line)
+    }
+
+    private func acted(_ line: UpdateLine) {
+        model.act(on: line.id)
+        SystemNotificationSink.removeNotifications(updates: [line.id])
+        render()
     }
 
     private func stopTyping() {
@@ -282,10 +295,12 @@ final class UpdatesBubbleController {
                 // A tap within decisionGuard of the buttons appearing is a stray click: ignored.
                 guard let self, self.model.acceptsDecision(token: token, now: Self.now, at: NSEvent.mouseLocation) else { return }
                 self.call("agent.decide", DecideArgs(token: token, allow: allow))
+                self.acted(token: token)
             },
             onChoose: { [weak self] token, option in
                 guard let self, self.model.acceptsDecision(token: token, now: Self.now, at: NSEvent.mouseLocation) else { return }
                 self.call("agent.choose", ChooseArgs(token: token, option: option))
+                self.acted(token: token)
             },
             onBadge: { [weak self] in
                 guard let self, self.panel.alphaValue >= UpdatesBubbleModel.hoverMinAlpha else { return }
@@ -299,6 +314,12 @@ final class UpdatesBubbleController {
             onChat: { [weak self] token in
                 guard let self, self.model.acceptsDecision(token: token, now: Self.now, at: NSEvent.mouseLocation) else { return }
                 self.call("agent.chatAbout", ChatArgs(token: token))
+                self.acted(token: token)
+            },
+            onTerminal: { [weak self] line in
+                guard let self else { return }
+                self.focus(line)
+                self.acted(line)
             }).environmentObject(richText))
         layout()
     }
@@ -315,9 +336,17 @@ final class UpdatesBubbleController {
         }
         let size = hosting.fittingSize
         guard size.width > 0, size.height > 0 else {
-            hide()
+            // Right after a new root view (a swipe's card, say) SwiftUI may not have measured it
+            // yet: keep the panel where it is and try again, rather than hide it for a moment.
+            if panel.isVisible && zeroSizeRetries < 3 {
+                zeroSizeRetries += 1
+                DispatchQueue.main.async { [weak self] in self?.layout() }
+            } else {
+                hide()
+            }
             return
         }
+        zeroSizeRetries = 0
         let top = ScreenDisplays.primaryMaxY
         let bit = pixie.panel.frame
         let screen = NSScreen.screens.first { $0.frame.contains(NSPoint(x: bit.midX, y: bit.midY)) }
@@ -335,6 +364,9 @@ final class UpdatesBubbleController {
         if !panel.isVisible { panel.orderFrontRegardless() }
         updateAlpha()
     }
+
+    /// Layouts in a row that found the view unmeasured (see `layout`).
+    private var zeroSizeRetries = 0
 
     private func hide() {
         if panel.parent != nil { pixie.panel.removeChildWindow(panel) }
