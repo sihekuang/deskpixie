@@ -23,15 +23,29 @@ public struct SettingsPlatform: RawRepresentable, Codable, Hashable, Sendable {
     }
 }
 
-/// A Settings window tab.
+/// A Settings window page (Go `Section`), in sidebar order; the raw value is its title.
 public enum SettingsSection: String, Codable, Sendable, CaseIterable {
-    case pixie = "Pixie"
+    case general = "General"
     case voice = "Voice"
-    case agent = "Agent"
+    case coordinator = "Coordinator"
+    case sessions = "Sessions"
     case workers = "Workers"
     case notifications = "Notifications"
-    case canvas = "Canvas"
     case advanced = "Advanced"
+}
+
+/// Where one of the window's other rows sits (Go `ExtraView`): its page and group. The row's
+/// look is `SettingsLayout.extra(id)`.
+public struct SettingsExtraPlace: Codable, Equatable, Sendable {
+    public var id: String
+    public var section: SettingsSection
+    public var group: String
+
+    public init(id: String, section: SettingsSection, group: String) {
+        self.id = id
+        self.section = section
+        self.group = group
+    }
 }
 
 /// One search result (Go `Hit`, #287): a setting, or one of the window's other rows, whose
@@ -39,14 +53,37 @@ public enum SettingsSection: String, Codable, Sendable, CaseIterable {
 public struct SettingsHit: Codable, Equatable, Sendable {
     public var path: String
     public var section: SettingsSection
+    /// The group heading it sits under (#290); "" from a core that has none.
+    public var group: String
     public var label: String
     public var help: String
 
-    public init(path: String, section: SettingsSection, label: String, help: String = "") {
+    public init(path: String, section: SettingsSection, group: String = "", label: String, help: String = "") {
         self.path = path
         self.section = section
+        self.group = group
         self.label = label
         self.help = help
+    }
+
+    private enum Keys: String, CodingKey { case path, section, group, label, help }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Keys.self)
+        path = try c.decode(String.self, forKey: .path)
+        section = try c.decode(SettingsSection.self, forKey: .section)
+        group = try c.decodeIfPresent(String.self, forKey: .group) ?? ""
+        label = try c.decode(String.self, forKey: .label)
+        help = try c.decodeIfPresent(String.self, forKey: .help) ?? ""
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Keys.self)
+        try c.encode(path, forKey: .path)
+        try c.encode(section, forKey: .section)
+        try c.encode(group, forKey: .group)
+        try c.encode(label, forKey: .label)
+        try c.encode(help, forKey: .help)
     }
 }
 
@@ -143,6 +180,8 @@ public struct SettingsCondition: Codable, Equatable, Sendable {
 public struct SettingsField: Codable, Equatable, Sendable {
     public var path: String
     public var section: SettingsSection
+    /// The group heading it sits under on its page (#290).
+    public var group: String
     public var label: String
     public var help: String
     public var kind: SettingsKind
@@ -151,18 +190,52 @@ public struct SettingsField: Codable, Equatable, Sendable {
     public var platforms: [SettingsPlatform]?
     /// The field shows only while every condition holds; nil (absent) means always.
     public var visibleWhen: [SettingsCondition]?
+    /// The field can be changed only while every condition holds (a master switch is on);
+    /// otherwise it is greyed out. Nil (absent) means always.
+    public var enabledWhen: [SettingsCondition]?
+    /// Shown after a number ("seconds"); from the kind's `unit`.
+    public var unit: String?
 
-    public init(path: String, section: SettingsSection, label: String, help: String = "", kind: SettingsKind,
-                apply: String = "live", platforms: [SettingsPlatform]? = SettingsPlatform.all,
-                visibleWhen: [SettingsCondition]? = nil) {
+    public init(path: String, section: SettingsSection, group: String = "", label: String, help: String = "",
+                kind: SettingsKind, apply: String = "live", platforms: [SettingsPlatform]? = SettingsPlatform.all,
+                visibleWhen: [SettingsCondition]? = nil, enabledWhen: [SettingsCondition]? = nil, unit: String? = nil) {
         self.path = path
         self.section = section
+        self.group = group
         self.label = label
         self.help = help
         self.kind = kind
         self.apply = apply
         self.platforms = platforms
         self.visibleWhen = visibleWhen
+        self.enabledWhen = enabledWhen
+        self.unit = unit
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case path, section, group, label, help, kind, apply, platforms, visibleWhen, enabledWhen
+    }
+
+    private enum UnitKey: String, CodingKey { case unit }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        path = try c.decode(String.self, forKey: .path)
+        section = try c.decode(SettingsSection.self, forKey: .section)
+        group = try c.decodeIfPresent(String.self, forKey: .group) ?? ""
+        label = try c.decode(String.self, forKey: .label)
+        help = try c.decodeIfPresent(String.self, forKey: .help) ?? ""
+        kind = try c.decode(SettingsKind.self, forKey: .kind)
+        apply = try c.decodeIfPresent(String.self, forKey: .apply) ?? "live"
+        platforms = try c.decodeIfPresent([SettingsPlatform].self, forKey: .platforms)
+        visibleWhen = try c.decodeIfPresent([SettingsCondition].self, forKey: .visibleWhen)
+        enabledWhen = try c.decodeIfPresent([SettingsCondition].self, forKey: .enabledWhen)
+        unit = try c.nestedContainer(keyedBy: UnitKey.self, forKey: .kind).decodeIfPresent(String.self, forKey: .unit)
+    }
+
+    /// Whether the field can be changed for `values`: every `enabledWhen` condition holds.
+    public func isEnabled(_ values: JSONValue) -> Bool {
+        (enabledWhen ?? []).allSatisfy { $0.holds(values) }
     }
 
     /// Whether the field shows for `values`: every `visibleWhen` condition holds. A hidden
@@ -225,6 +298,8 @@ public struct SettingsSnapshot: Codable, Equatable, Sendable {
     public var platform: SettingsPlatform
     public var values: JSONValue
     public var fields: [SettingsField]
+    /// Where the window's other rows sit (#290).
+    public var extras: [SettingsExtraPlace]
     /// Restart fields that differ from the startup config, by path.
     public var restartPending: [String]
     public var fileError: String?
@@ -234,11 +309,12 @@ public struct SettingsSnapshot: Codable, Equatable, Sendable {
     public var setError: SettingsSetError?
 
     public init(platform: SettingsPlatform = .macos, values: JSONValue = [:], fields: [SettingsField] = [],
-                restartPending: [String] = [], fileError: String? = nil, warning: String? = nil, seq: UInt64 = 0,
+                extras: [SettingsExtraPlace] = [], restartPending: [String] = [], fileError: String? = nil, warning: String? = nil, seq: UInt64 = 0,
                 setError: SettingsSetError? = nil) {
         self.platform = platform
         self.values = values
         self.fields = fields
+        self.extras = extras
         self.restartPending = restartPending
         self.fileError = fileError
         self.warning = warning
@@ -247,7 +323,7 @@ public struct SettingsSnapshot: Codable, Equatable, Sendable {
     }
 
     private enum Keys: String, CodingKey {
-        case platform, values, fields, restartPending, fileError, warning, seq, setError
+        case platform, values, fields, extras, restartPending, fileError, warning, seq, setError
     }
 
     public init(from decoder: Decoder) throws {
@@ -255,6 +331,7 @@ public struct SettingsSnapshot: Codable, Equatable, Sendable {
         platform = try c.decodeIfPresent(SettingsPlatform.self, forKey: .platform) ?? .macos
         values = try c.decodeIfPresent(JSONValue.self, forKey: .values) ?? [:]
         fields = try c.decodeIfPresent([SettingsField].self, forKey: .fields) ?? []
+        extras = try c.decodeIfPresent([SettingsExtraPlace].self, forKey: .extras) ?? []
         restartPending = try c.decodeIfPresent([String].self, forKey: .restartPending) ?? []
         fileError = try c.decodeIfPresent(String.self, forKey: .fileError)
         warning = try c.decodeIfPresent(String.self, forKey: .warning)

@@ -51,7 +51,7 @@ final class SettingsSearchTests: XCTestCase {
     func test_a_page_points_out_a_reveal_once_even_when_the_window_is_reopened() {
         XCTAssertNil(model.takeReveal(for: .voice))
         model.reveal(mic)
-        XCTAssertNil(model.takeReveal(for: .pixie))
+        XCTAssertNil(model.takeReveal(for: .general))
         XCTAssertEqual(model.takeReveal(for: .voice), mic)
         // A new page view (the window reopened) asks again: already pointed out.
         XCTAssertNil(model.takeReveal(for: .voice))
@@ -85,16 +85,16 @@ final class SettingsSearchTests: XCTestCase {
 
     func test_every_extra_row_has_the_id_the_core_searches_by() {
         // Go settings.Extras, in page order.
-        let ids = SettingsLayout.tabs.flatMap { SettingsLayout.extras($0.section) }.map(\.id)
+        let ids = SettingsLayout.allExtras.map(\.id)
         XCTAssertEqual(Set(ids), ["resetPosition", "key.openai", "key.gemini", "pix", "restartCoordinator",
                                   "openFile", "exportLogs"])
         XCTAssertEqual(ids.count, Set(ids).count)
-        XCTAssertEqual(SettingsLayout.extras(.voice).first?.path, "extra:key.openai")
+        XCTAssertEqual(SettingsFixture.extras(on: .voice).first?.path, "extra:key.openai")
     }
 
     func test_the_extra_rows_read_as_the_core_searches_them() {
         // Word for word Go's settings.Extras: the search matches on and shows these.
-        let all = SettingsLayout.tabs.flatMap { SettingsLayout.extras($0.section) }
+        let all = SettingsLayout.allExtras
         let rows = Dictionary(uniqueKeysWithValues: all.map { ($0.id, [$0.label, $0.help]) })
         XCTAssertEqual(rows, [
             "resetPosition": ["Reset position", "Move Pixie back to the bottom-right corner of the main screen."],
@@ -102,7 +102,7 @@ final class SettingsSearchTests: XCTestCase {
             "key.gemini": ["Gemini key", "Type the key here to keep it in the Keychain (used first), or set GEMINI_API_KEY in your environment or a .env file. Keys are never shown here."],
             "pix": ["pix command", "Start Claude Code or Codex with `pix claude` or `pix codex` in any terminal (WebStorm, iTerm, …) and Pixie can see, message and interrupt that session. Quitting DeskPixie never ends it."],
             "restartCoordinator": ["Restart coordinator", "Stops the coordinator and starts it again on your next request, with its conversation. Asks first."],
-            "openFile": ["Settings file", "settings.json holds every setting on this page."],
+            "openFile": ["Settings file", "settings.json holds every setting."],
             "exportLogs": ["Logs", "Saves the app's log, pix's log, the voice log and metrics in one zip to share. It can include what you said to Pixie."],
         ])
         // Go's Extra.Title: the buttons' titles.
@@ -115,7 +115,7 @@ final class SettingsSearchTests: XCTestCase {
     }
 
     func test_a_hit_names_its_page_as_the_sidebar_does() {
-        XCTAssertEqual(SettingsLayout.tabTitle(.agent), "Coordinator")
+        XCTAssertEqual(SettingsLayout.tabTitle(.coordinator), "Coordinator")
         XCTAssertEqual(SettingsLayout.tabIndex(.voice), 1)
         XCTAssertEqual(SettingsLayout.noResultsText(" zebra "), "No settings match “zebra”.")
     }

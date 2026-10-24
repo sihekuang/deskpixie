@@ -37,12 +37,12 @@ public enum SettingsLayout {
 
     /// The sidebar's pages, in order.
     public static let tabs: [Tab] = [
-        Tab(section: .pixie, title: "Pixie", symbol: "face.smiling", tint: .pink),
+        Tab(section: .general, title: "General", symbol: "face.smiling", tint: .pink),
         Tab(section: .voice, title: "Voice", symbol: "waveform", tint: .purple),
-        Tab(section: .agent, title: "Coordinator", symbol: "sparkles", tint: .orange),
+        Tab(section: .coordinator, title: "Coordinator", symbol: "sparkles", tint: .orange),
+        Tab(section: .sessions, title: "Sessions", symbol: "terminal", tint: .teal),
         Tab(section: .workers, title: "Workers", symbol: "person.2", tint: .indigo),
         Tab(section: .notifications, title: "Notifications", symbol: "bell.badge", tint: .red),
-        Tab(section: .canvas, title: "Canvas", symbol: "rectangle.on.rectangle", tint: .teal),
         Tab(section: .advanced, title: "Advanced", symbol: "gearshape.2", tint: .gray),
     ]
 
@@ -54,6 +54,12 @@ public enum SettingsLayout {
     /// The page title a search result names (the sidebar's, e.g. "Coordinator" for Agent).
     public static func tabTitle(_ section: SettingsSection) -> String {
         tabs.first { $0.section == section }?.title ?? section.rawValue
+    }
+
+    /// Where a search result is: its page, and its group when it has one ("Voice › Microphone
+    /// and speaker", #290).
+    public static func place(_ hit: SettingsHit) -> String {
+        hit.group.isEmpty ? tabTitle(hit.section) : "\(tabTitle(hit.section)) › \(hit.group)"
     }
 
     /// The search's line when nothing matches (#287).
@@ -514,28 +520,73 @@ public enum SettingsLayout {
     /// The pix row's help.
     public static let pixHelp = "Start Claude Code or Codex with `pix claude` or `pix codex` in any terminal (WebStorm, iTerm, …) and Pixie can see, message and interrupt that session. Quitting DeskPixie never ends it."
 
-    public static func extras(_ section: SettingsSection) -> [Extra] {
-        switch section {
-        case .pixie:
-            return [.button(label: "Reset position",
-                            help: "Move Pixie back to the bottom-right corner of the main screen.",
-                            title: "Reset Position", action: .resetPosition)]
-        case .voice:
-            return SettingsSecretID.allCases.map { .secret(id: $0, label: $0.label, help: $0.help) }
-        case .advanced:
-            return [.button(label: "Settings file", help: "settings.json holds every setting on this page.",
-                            title: "Open Settings File", action: .openFile),
-                    .button(label: "Logs",
-                            help: "Saves the app's log, pix's log, the voice log and metrics in one zip to share. It can include what you said to Pixie.",
-                            title: "Export Logs…", action: .exportLogs)]
-        case .agent:
-            return [.pix(help: pixHelp),
-                    .button(label: "Restart coordinator",
-                            help: "Stops the coordinator and starts it again on your next request, with its conversation. Asks first.",
-                            title: "Restart Coordinator…", action: .restartCoordinator)]
-        case .workers, .notifications, .canvas:
-            return []
+    /// Every extra row's look; the core places them (`SettingsSnapshot.extras`).
+    public static let allExtras: [Extra] = [
+        .button(label: "Reset position", help: "Move Pixie back to the bottom-right corner of the main screen.",
+                title: "Reset Position", action: .resetPosition),
+    ] + SettingsSecretID.allCases.map { .secret(id: $0, label: $0.label, help: $0.help) } + [
+        .button(label: "Restart coordinator",
+                help: "Stops the coordinator and starts it again on your next request, with its conversation. Asks first.",
+                title: "Restart Coordinator…", action: .restartCoordinator),
+        .pix(help: pixHelp),
+        .button(label: "Settings file", help: "settings.json holds every setting.",
+                title: "Open Settings File", action: .openFile),
+        .button(label: "Logs",
+                help: "Saves the app's log, pix's log, the voice log and metrics in one zip to share. It can include what you said to Pixie.",
+                title: "Export Logs…", action: .exportLogs),
+    ]
+
+    /// The extra row with `id`; nil for one this app doesn't draw.
+    public static func extra(_ id: String) -> Extra? {
+        allExtras.first { $0.id == id }
+    }
+
+    // MARK: Groups (#290)
+
+    /// One row of a page: a setting, or one of the window's other rows.
+    public enum Row: Equatable, Sendable {
+        case field(SettingsField)
+        case extra(Extra)
+
+        /// The row's id: the field's path, or the extra's search path.
+        public var id: String {
+            switch self {
+            case .field(let f): return f.path
+            case .extra(let e): return e.path
+            }
         }
+    }
+
+    /// A heading and the rows under it.
+    public struct Group: Equatable, Sendable {
+        public var title: String
+        public var rows: [Row]
+    }
+
+    /// `fields` (a page's, already filtered) and `section`'s extra rows, in groups in the order
+    /// they first appear; each group's extras end it, and a group with only extras comes last.
+    public static func groups(in section: SettingsSection, fields: [SettingsField],
+                              extras: [SettingsExtraPlace]) -> [Group] {
+        var out: [Group] = []
+        func add(_ row: Row, to title: String) {
+            if let i = out.firstIndex(where: { $0.title == title }) {
+                out[i].rows.append(row)
+            } else {
+                out.append(Group(title: title, rows: [row]))
+            }
+        }
+        for f in fields { add(.field(f), to: f.group) }
+        for place in extras where place.section == section {
+            if let e = extra(place.id) { add(.extra(e), to: place.group) }
+        }
+        return out
+    }
+
+    /// Under a greyed-out field: which switch turns it on, e.g. "Turn on Workers to change this."
+    public static func disabledNote(_ field: SettingsField, fields: [SettingsField], values: JSONValue) -> String? {
+        guard let off = (field.enabledWhen ?? []).first(where: { !$0.holds(values) }) else { return nil }
+        let name = fields.first { $0.path == off.key }?.label ?? off.key
+        return "Turn on “\(name)” to change this."
     }
 
     /// "From environment", "From Keychain", "From .env" (or "Found" when the core names no
