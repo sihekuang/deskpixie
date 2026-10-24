@@ -925,12 +925,10 @@ func (c *AgentController) restore(jobs, outbox []string, keep bool, now Millis, 
 	c.outbox = RestoreOutbox(outbox, now)
 	c.asking = map[string]uint64{}
 	for _, l := range c.outbox.lines {
-		if l.Session == "" || l.Kind != LineSession {
-			continue // live, only a session's turn opens or clears its question
-		}
-		if l.Asking && !l.Delivered { // delivered: answered (dropAsking) or said before the restart
+		switch {
+		case asksSession(l) && !l.Delivered: // delivered: answered (dropAsking) or said before the restart
 			c.asking[l.Session] = l.ID
-		} else {
+		case l.Session != "" && l.Kind == LineSession: // live, only a session's turn opens or clears its question
 			delete(c.asking, l.Session)
 		}
 	}

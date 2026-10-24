@@ -311,3 +311,57 @@ func TestARestartDropsADeliveredSessionQuestion(t *testing.T) {
 		t.Fatalf("%+v", got)
 	}
 }
+
+// injected: the notice the step said.
+func injected(t *testing.T, fx []Effect) Notice {
+	t.Helper()
+	for _, e := range fx {
+		if e.Kind == EfInject {
+			return e.Notice
+		}
+	}
+	t.Fatalf("nothing said: %s", fmtEffects(fx))
+	return Notice{}
+}
+
+// A question kept as heard that turns out unsaid (the inject bounced, or the conversation closed
+// first) goes the usual route, and is still one badge item.
+func TestAnUnsaidQuestionIsOneBadgeItem(t *testing.T) {
+	for name, ask := range map[string]func(c *AgentController) []Effect{
+		"job question": func(c *AgentController) []Effect {
+			return stop(c, `<spoken ref="job_000000000001" status="question">Which branch?</spoken>`, T0+10)
+		},
+		"permission": func(c *AgentController) []Effect { return askPush(c, 7, T0+10) },
+	} {
+		for how, unsaid := range map[string]func(n Notice) Input{
+			"bounced": InjectBouncedInput,
+			"closed":  func(n Notice) Input { return voiceClosed(n) },
+		} {
+			t.Run(name+" "+how, func(t *testing.T) {
+				c := workingOnJob1()
+				openVoice(c)
+				n := injected(t, ask(c))
+				c.Step(unsaid(n), T0+20)
+				if got := c.Updates(); len(got) != 1 {
+					t.Fatalf("%+v", got)
+				}
+			})
+		}
+	}
+}
+
+// Spec call 3: a session's question with no buttons (a notice) said in a conversation waits on
+// the badge until that session's next turn.
+func TestASpokenSessionNoticeWaitsOnTheBadge(t *testing.T) {
+	c := ctlWith(func(s *Settings) { s.SessionTurns = true })
+	openVoice(c)
+	fx := askSession(c, SessionQuestion{ID: "q6", Label: "api", Kind: "notice", Text: "needs your attention"}, T0+10)
+	injected(t, fx)
+	if got := c.Updates(); len(got) != 1 || got[0].Session != sessionName {
+		t.Fatalf("%+v", got)
+	}
+	sessionTurn(c, longTurn, T0+20)
+	if got := c.Updates(); len(got) != 0 {
+		t.Fatalf("still there after its next turn: %+v", got)
+	}
+}

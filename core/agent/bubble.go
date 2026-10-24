@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"reflect"
 	"regexp"
 )
@@ -47,13 +48,33 @@ func alerting(l OutboxLine) bool {
 	return l.Kind == LineQuestion || (l.Kind == LineSession && l.Asking)
 }
 
+// asksSession: a session's own question with no confirm word or job (a turn that asks, a
+// notice, a menu without options): it waits until that session's next turn or end.
+func asksSession(l OutboxLine) bool {
+	return l.Session != "" && l.Token == nil && (l.Asking || (l.Kind == LineQuestion && l.Job == ""))
+}
+
+// alertKey: what an alerting line asks about; one badge item each, the newest line (a question
+// said, then rerouted unsaid, is in the outbox twice).
+func alertKey(l OutboxLine) string {
+	switch {
+	case l.Token != nil:
+		return "token:" + *l.Token
+	case l.Job != "":
+		return "job:" + string(l.Job)
+	case l.Session != "":
+		return "session:" + l.Session
+	}
+	return fmt.Sprint("line:", l.ID)
+}
+
 // unresolved: an alerting line still waiting for you: its permission pending, its session's
 // question still the latest thing it said, its job still in question.
 func (c *AgentController) unresolved(l OutboxLine) bool {
 	switch {
 	case l.Token != nil:
 		return c.confirms.IsPendingToken(*l.Token)
-	case l.Asking && l.Session != "":
+	case asksSession(l):
 		return c.asking[l.Session] == l.ID
 	case l.Kind == LineQuestion && l.Job != "":
 		j, ok := c.jobs.Get(l.Job)
@@ -75,7 +96,7 @@ func (c *AgentController) keepHeardAlert(line Line, now Millis, fx *[]Effect) {
 
 // noteAsking: l, just added to the outbox, is its session's open question if it asks.
 func (c *AgentController) noteAsking(l OutboxLine) {
-	if l.Asking && l.Session != "" {
+	if asksSession(l) {
 		c.asking[l.Session] = l.ID
 	}
 }
@@ -94,14 +115,21 @@ func (c *AgentController) dropAsking(session string, fx *[]Effect) {
 }
 
 // bubbleItems: the alerting lines still unresolved: permission questions pending (heard or
-// not, so Allow and Deny stay reachable, #97), job questions, sessions asking. Never nil.
+// not, so Allow and Deny stay reachable, #97), job questions, sessions asking; one per
+// alertKey. Never nil.
 func (c *AgentController) bubbleItems() []UpdateItem {
 	items := []UpdateItem{}
 	if c.shutDown {
 		return items
 	}
+	newest := map[string]uint64{}
 	for _, l := range c.outbox.lines {
-		if !alerting(l) || !c.unresolved(l) {
+		if alerting(l) {
+			newest[alertKey(l)] = l.ID
+		}
+	}
+	for _, l := range c.outbox.lines {
+		if !alerting(l) || !c.unresolved(l) || newest[alertKey(l)] != l.ID {
 			continue
 		}
 		item := updateItem(l)
