@@ -468,16 +468,6 @@ public final class ChatThreadModel {
         wasAtBottom && heightChanged
     }
 
-    /// At the bottom after a layout report. While the lazy stack measures its rows the content's
-    /// height flickers (on macOS 15 between two estimates, 121 pt apart) and the end jumps with
-    /// it: a view at the bottom stays there through a height change, and scrolls back
-    /// (`keepsBottom`). Only a report at the same height, a scroll, takes it off the bottom.
-    public static func atBottomAfterLayout(wasAtBottom: Bool, heightChanged: Bool,
-                                           sentinelMaxY: Double, viewportHeight: Double) -> Bool {
-        keepsBottom(wasAtBottom: wasAtBottom, heightChanged: heightChanged)
-            || isAtBottom(sentinelMaxY: sentinelMaxY, viewportHeight: viewportHeight)
-    }
-
     /// The thread's viewport changed height (the box under it grew or shrank: a chip, the @
     /// list, more lines typed; or the window was resized): a view that was at the bottom before
     /// stays there. Decided by where it was, not by the end's position now: the new height may

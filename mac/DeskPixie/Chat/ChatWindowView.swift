@@ -114,9 +114,9 @@ private struct NeedsStrip: View {
 }
 
 /// The thread's content in the scroll view's coordinates: where it ends (after its bottom
-/// padding) and how tall it is. Measured outside the lazy stack, so it is always laid out. Set straight from the
-/// content's own GeometryReader: a preference set inside a macOS ScrollView's content never
-/// reaches `onPreferenceChange` outside it.
+/// padding) and how tall it is. Measured outside the lazy stack, so it is always laid out. Set
+/// straight from the content's own GeometryReader: a preference set inside a macOS ScrollView's
+/// content never reaches `onPreferenceChange` outside it.
 private struct ThreadGeometry: Equatable {
     var bottom = CGFloat.infinity
     var height: CGFloat = 0
@@ -140,12 +140,12 @@ private struct ChatThreadView: View {
     /// Which scroll `awaitingLayout` waits on, so a late give-up can't end a newer wait.
     @State private var layoutWaits = 0
 
-    /// Kept from report to report, so the content's height flickering while the lazy stack
-    /// measures can't take it off the bottom (`atBottomAfterLayout`).
-    @State private var atBottom = false
+    /// Held at the bottom through the content's height flickering (`ChatBottom`).
+    @State private var bottom = ChatBottom()
 
-    private func isAtBottom(_ g: ThreadGeometry) -> Bool {
-        ChatThreadModel.isAtBottom(sentinelMaxY: Double(g.bottom), viewportHeight: Double(viewport))
+    /// From the layout as it stands, so it holds from the first layout, reported or not.
+    private var atBottom: Bool {
+        bottom.atBottom(sentinelMaxY: Double(geometry.bottom), viewportHeight: Double(viewport))
     }
 
     var body: some View {
@@ -210,27 +210,27 @@ private struct ChatThreadView: View {
             .onChange(of: viewport) { old, new in
                 // The box under the thread grew (a chip, the @ list, more lines): at the bottom
                 // before, stay there instead of showing ↓ Latest.
-                let stays = state.opened && ChatThreadModel.staysAtBottom(wasAtBottom: atBottom,
-                                                                           oldViewport: Double(old), newViewport: Double(new))
-                atBottom = stays || isAtBottom(geometry)
-                if stays { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
+                if bottom.resized(sentinelMaxY: Double(geometry.bottom), oldViewport: Double(old),
+                                  newViewport: Double(new), following: state.opened && !awaitingLayout) {
+                    proxy.scrollTo(Self.bottomID, anchor: .bottom)
+                }
             }
             .onChange(of: geometry) { old, new in
                 // The layout after the opening scroll: only now does at-bottom hold, from where
                 // the end is.
                 if awaitingLayout {
                     awaitingLayout = false
-                    atBottom = isAtBottom(new)
+                    bottom.settled()
                     markRead()
                     return
                 }
                 // Rows grow after they are drawn (links found, text wrapped), and live lines grow
                 // as the words come: at the bottom, stay there.
-                let heightChanged = new.height != old.height
-                let follow = state.opened && ChatThreadModel.keepsBottom(wasAtBottom: atBottom, heightChanged: heightChanged)
-                atBottom = ChatThreadModel.atBottomAfterLayout(wasAtBottom: state.opened && atBottom, heightChanged: heightChanged,
-                                                               sentinelMaxY: Double(new.bottom), viewportHeight: Double(viewport))
-                if follow && !isAtBottom(new) { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
+                if bottom.laidOut(oldMaxY: Double(old.bottom), oldHeight: Double(old.height),
+                                  newMaxY: Double(new.bottom), newHeight: Double(new.height),
+                                  viewportHeight: Double(viewport), following: state.opened) {
+                    proxy.scrollTo(Self.bottomID, anchor: .bottom)
+                }
             }
             .accessibilityIdentifier("chat.thread")
             .overlay(alignment: .bottom) {
