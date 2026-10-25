@@ -453,6 +453,13 @@ public final class ChatThreadModel {
         wasAtBottom && heightChanged
     }
 
+    /// The thread's viewport changed height (the box under it grew or shrank: a chip, the @
+    /// list, more lines typed; or the window was resized): a view that was at the bottom before
+    /// stays there. Measured against the old height, since the new one may hide the end.
+    public static func staysAtBottom(sentinelMaxY: Double, oldViewport: Double, newViewport: Double) -> Bool {
+        oldViewport != newViewport && isAtBottom(sentinelMaxY: sentinelMaxY, viewportHeight: oldViewport)
+    }
+
     /// The newest entry counts as seen (`sawBottom`) only after the opening scroll, with the
     /// window on screen, and the end in view.
     public static func marksRead(opened: Bool, visible: Bool, atBottom: Bool) -> Bool {

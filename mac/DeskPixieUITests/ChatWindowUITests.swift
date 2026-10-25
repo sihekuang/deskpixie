@@ -369,10 +369,17 @@ final class ChatWindowUITests: XCTestCase {
     /// With the agent on (it keeps the attachments; off, the box says "The coordinator is off."),
     /// but no coordinator started: nothing is sent.
     func testTheHintRowAttachesACopiedImage() throws {
-        let h = try start(agent: true)
+        // Taller than the window, read: it opens at the bottom.
+        let lines = (0..<40).map { i in
+            SeedEntry(id: "p\(i)", at: SeedEntry.ms(ago: TimeInterval(400 - i)), who: .init(kind: "pixie"),
+                      text: "Line \(i) of a thread taller than the window.")
+        }
+        let h = try start(lines, agent: true)
         let window = h.openChat()
         XCTAssertTrue(window.element("chat.composer").waitForExistence(timeout: 10))
+        XCTAssertTrue(entry("p39", in: window).waitForExistence(timeout: 10))
         XCTAssertEqual(chips(in: window).count, 0)
+        XCTAssertFalse(window.element("chat.latest").exists, "opened at the bottom")
 
         // Copied after launch: only a new copy is offered.
         copyImage()
@@ -383,6 +390,9 @@ final class ChatWindowUITests: XCTestCase {
         attach.click()
         XCTAssertTrue(chips(in: window).firstMatch.waitForExistence(timeout: 10), "no chip for the copy")
         XCTAssertTrue(attach.waitForGone(timeout: 5), "the hint goes once it is attached")
+        // The chip made the thread shorter: it stays at the bottom, with no ↓ Latest.
+        Thread.sleep(forTimeInterval: 1)
+        XCTAssertFalse(window.element("chat.latest").exists, "the chip took the thread off the bottom")
     }
 
     func testCmdVAttachesAnImageAndPastesText() throws {

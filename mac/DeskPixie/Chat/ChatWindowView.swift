@@ -200,7 +200,15 @@ private struct ChatThreadView: View {
             .background(GeometryReader { g in
                 Color.clear
                     .onAppear { viewport = g.size.height }
-                    .onChange(of: g.size.height) { viewport = g.size.height }
+                    .onChange(of: g.size.height) { old, new in
+                        viewport = new
+                        // The box under the thread grew (a chip, the @ list, more lines): at
+                        // the bottom before, stay there instead of showing ↓ Latest.
+                        if state.opened, ChatThreadModel.staysAtBottom(sentinelMaxY: Double(geometry.bottom),
+                                                                       oldViewport: Double(old), newViewport: Double(new)) {
+                            proxy.scrollTo(Self.bottomID, anchor: .bottom)
+                        }
+                    }
             })
             .onChange(of: geometry) { old, new in
                 // The layout after the opening scroll: only now does at-bottom hold.

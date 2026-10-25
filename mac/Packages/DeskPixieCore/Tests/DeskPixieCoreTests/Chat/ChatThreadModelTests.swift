@@ -486,6 +486,19 @@ final class ChatThreadModelTests: XCTestCase {
         XCTAssertFalse(ChatThreadModel.keepsBottom(wasAtBottom: false, heightChanged: true), "reading further up")
     }
 
+    /// Found by hand: Attach on the hint row put a chip above the box, the thread got shorter,
+    /// and "↓ Latest" showed. At the bottom before, it stays at the bottom.
+    func testTheBoxGrowingKeepsTheBottom() {
+        // The end was at 600 in a 600 pt viewport; a chip takes 40 pt.
+        XCTAssertTrue(ChatThreadModel.staysAtBottom(sentinelMaxY: 600, oldViewport: 600, newViewport: 560))
+        XCTAssertTrue(ChatThreadModel.staysAtBottom(sentinelMaxY: 604, oldViewport: 600, newViewport: 640), "and shrinking")
+        XCTAssertFalse(ChatThreadModel.staysAtBottom(sentinelMaxY: 900, oldViewport: 600, newViewport: 560),
+                       "scrolled up: left where you were")
+        XCTAssertFalse(ChatThreadModel.staysAtBottom(sentinelMaxY: 600, oldViewport: 600, newViewport: 600), "no change")
+        XCTAssertFalse(ChatThreadModel.staysAtBottom(sentinelMaxY: .infinity, oldViewport: 600, newViewport: 560),
+                       "not laid out yet")
+    }
+
     func testTheBottomIsSeenOnlyOnceOpenedOnScreenAndInView() {
         XCTAssertTrue(ChatThreadModel.isAtBottom(sentinelMaxY: 600, viewportHeight: 600))
         XCTAssertTrue(ChatThreadModel.isAtBottom(sentinelMaxY: 606, viewportHeight: 600), "within the tolerance")
