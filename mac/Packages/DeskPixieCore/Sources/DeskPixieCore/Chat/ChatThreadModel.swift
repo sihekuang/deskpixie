@@ -32,7 +32,8 @@ public final class ChatThreadModel {
     @ObservationIgnored private let client: any ChatClient
     @ObservationIgnored private var loads = 0
     @ObservationIgnored private var readUpTo: String?
-    @ObservationIgnored private var inflight: [Task<Void, Never>] = []
+    @ObservationIgnored private var loading = false
+    @ObservationIgnored private var replay: [ChatEntry] = []
     @ObservationIgnored private static let log = Logger(subsystem: "com.sihekuang.deskpixie", category: "chat")
 
     public init(client: any ChatClient) {
@@ -41,25 +42,33 @@ public final class ChatThreadModel {
 
     // MARK: Reading
 
-    /// Shows the last page and the open requests. A newer load drops an older one's result.
+    /// Shows the last page, the open requests and the badge counts. A newer load drops an older
+    /// one's result; events that came while it ran are applied over the page.
     public func load() async {
         loads += 1
         let mine = loads
+        loading = true
+        replay = []
         let client = client
-        let result = await Task.detached { () -> Result<([ChatEntry], [ChatEntry]), Error> in
-            Result { (try client.entries(before: nil, limit: Self.pageSize), try client.needs()) }
+        let result = await Task.detached { () -> Result<([ChatEntry], [ChatEntry], ChatBadge), Error> in
+            Result { (try client.entries(before: nil, limit: Self.pageSize), try client.needs(), try client.badge()) }
         }.value
         guard mine == loads else { return }
+        loading = false
         switch result {
-        case .success(let (page, open)):
-            entries = page.reversed()
+        case .success(let (page, open, badge)):
+            entries = Self.unique(page.reversed())
             needs = open
+            unread = badge.unread
             hasOlder = page.count >= Self.pageSize
             readUpTo = nil
             error = nil
+            let missed = replay
+            for e in missed { apply(e) }
         case .failure(let err):
             fail("chat.entries", err)
         }
+        replay = []
     }
 
     /// Puts the page before the oldest entry shown in front of it.
@@ -73,7 +82,8 @@ public final class ChatThreadModel {
         guard mine == loads, entries.first?.id == first else { return }
         switch result {
         case .success(let page):
-            entries = page.reversed() + entries
+            let shown = Set(entries.map(\.id))
+            entries = Self.unique(page.reversed()).filter { !shown.contains($0.id) } + entries
             hasOlder = page.count >= Self.pageSize
             error = nil
         case .failure(let err):
@@ -81,19 +91,28 @@ public final class ChatThreadModel {
         }
     }
 
+    private static func unique(_ es: [ChatEntry]) -> [ChatEntry] {
+        var seen = Set<String>()
+        return es.filter { seen.insert($0.id).inserted }
+    }
+
     // MARK: Events
 
-    /// `chat.entry`: an entry with an ID already shown replaces it in place; a new one goes last.
-    /// Pixie's or the coordinator's entry ends the wait for an answer.
+    /// `chat.entry`: an entry with an ID already shown replaces it in place; a new one goes
+    /// last, unless it is older than what is shown: then the page of older entries carries it
+    /// (`hasOlder`) or it goes in by time. Pixie's or the coordinator's new entry ends the wait
+    /// for an answer.
     public func apply(_ e: ChatEntry) {
-        if let i = entries.firstIndex(where: { $0.id == e.id }) {
-            entries[i] = e
-        } else {
-            entries.append(e)
-        }
+        if loading { replay.append(e) }
         if let i = needs.firstIndex(where: { $0.id == e.id }) {
             if e.request?.outcome.isEmpty == false { needs.remove(at: i) } else { needs[i] = e }
         }
+        if let i = entries.firstIndex(where: { $0.id == e.id }) {
+            entries[i] = e
+            return
+        }
+        if let first = entries.first, e.at < first.at, hasOlder { return }
+        entries.insert(e, at: entries.firstIndex { $0.at > e.at } ?? entries.count)
         if e.who.kind == "pixie" || e.who.kind == "coordinator" { thinking = false }
     }
 
@@ -110,6 +129,9 @@ public final class ChatThreadModel {
 
     /// `chat.reset`: entries went; start again from the end.
     public func reset() async {
+        entries = []
+        needs = []
+        hasOlder = false
         await load()
     }
 
@@ -120,11 +142,11 @@ public final class ChatThreadModel {
         guard let newest = entries.last?.id, newest != readUpTo else { return }
         readUpTo = newest
         let client = client
-        track { [weak self] in
+        Task { @MainActor [weak self] in
             let result = await Task.detached { Result { try client.read(upTo: newest) } }.value
-            if case .failure(let err) = result {
-                self?.readUpTo = nil
-                self?.fail("chat.read", err)
+            if case .failure(let err) = result, let self {
+                if self.readUpTo == newest { self.readUpTo = nil }
+                self.fail("chat.read", err)
             }
         }
     }
@@ -143,7 +165,7 @@ public final class ChatThreadModel {
         switch result {
         case .success: error = nil
         case .failure(let err):
-            replyTo = target
+            if replyTo == nil { replyTo = target }
             thinking = false
             fail("chat.send", err)
         }
@@ -151,18 +173,18 @@ public final class ChatThreadModel {
 
     public func decide(token: String, allow: Bool) async {
         let client = client
-        await call("chat.decide") { try client.decide(token: token, allow: allow) }
+        await call("agent.decide") { try client.decide(token: token, allow: allow) }
     }
 
     /// `option` counts from 1.
     public func choose(token: String, option: Int) async {
         let client = client
-        await call("chat.choose") { try client.choose(token: token, option: option) }
+        await call("agent.choose") { try client.choose(token: token, option: option) }
     }
 
     public func typedAnswer(token: String, text: String) async {
         let client = client
-        await call("chat.typedAnswer") { try client.typedAnswer(token: token, text: text) }
+        await call("agent.typedAnswer") { try client.typedAnswer(token: token, text: text) }
     }
 
     public func stop() async {
@@ -171,16 +193,17 @@ public final class ChatThreadModel {
         await call("chat.stop") { try client.stop() }
     }
 
+    /// Empties the thread. The core's `chat.reset` that follows reloads it.
+    public func clear() async {
+        let client = client
+        await call("chat.clear") { try client.clear() }
+    }
+
     /// Aims the box at the session at this address: its label comes from the newest entry that
     /// has the address, else the address itself.
     public func reply(toSession address: String) {
         let newest = (entries + needs).last { $0.who.name == address && !$0.who.label.isEmpty }
         replyTo = newest?.who ?? ChatWho(kind: "session", name: address, label: address)
-    }
-
-    /// Waits for the calls the model started without being awaited (`sawBottom`).
-    public func settled() async {
-        while let t = inflight.popLast() { await t.value }
     }
 
     // MARK: Copy
@@ -214,10 +237,6 @@ public final class ChatThreadModel {
         case .success: error = nil
         case .failure(let err): fail(what, err)
         }
-    }
-
-    private func track(_ body: @escaping @MainActor () async -> Void) {
-        inflight.append(Task { @MainActor in await body() })
     }
 
     private func fail(_ what: String, _ err: Error) {

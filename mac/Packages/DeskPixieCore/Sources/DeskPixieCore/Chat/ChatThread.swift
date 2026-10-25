@@ -164,6 +164,10 @@ public protocol ChatClient: Sendable {
     func entries(before: String?, limit: Int) throws -> [ChatEntry]
     /// `chat.needs`: the open requests, oldest first.
     func needs() throws -> [ChatEntry]
+    /// `chat.badge`: the requests waiting and the entries unread.
+    func badge() throws -> ChatBadge
+    /// `chat.clear`: empties the thread; the core follows with `chat.reset`.
+    func clear() throws
     /// `chat.read {upTo}`: marks every entry up to and including this one read.
     func read(upTo: String) throws
     /// Sends a message typed in the box; `session` is a session's address when it replies to one.

@@ -13,11 +13,19 @@ final class FakeChatClient: ChatClient, @unchecked Sendable {
     private var _sent: [Sent] = []
     private var _reads: [String] = []
     private var failing = false
+    private var _badge = ChatBadge()
+    private var _clears = 0
 
     init(_ thread: [ChatEntry] = []) { self.thread = thread }
 
     var sent: [Sent] { lock.withLock { _sent } }
     var reads: [String] { lock.withLock { _reads } }
+    var clears: Int { lock.withLock { _clears } }
+    /// Runs inside `entries`, off the main actor, like an event arriving during a load.
+    nonisolated(unsafe) var whileLoading: (@Sendable () -> Void)?
+    func setBadge(_ b: ChatBadge) { lock.withLock { _badge = b } }
+    func badge() throws -> ChatBadge { try check(); return lock.withLock { _badge } }
+    func clear() throws { try check(); lock.withLock { _clears += 1; thread = []; open = [] } }
     func setFailing(_ f: Bool) { lock.withLock { failing = f } }
     func setNeeds(_ n: [ChatEntry]) { lock.withLock { open = n } }
 
@@ -25,6 +33,7 @@ final class FakeChatClient: ChatClient, @unchecked Sendable {
 
     func entries(before: String?, limit: Int) throws -> [ChatEntry] {
         try check()
+        whileLoading?()
         return lock.withLock {
             var end = thread.count
             if let before {
@@ -50,6 +59,12 @@ final class FakeChatClient: ChatClient, @unchecked Sendable {
 final class ChatThreadModelTests: XCTestCase {
     private func entry(_ n: Int, kind: String = "pixie", name: String = "", label: String = "") -> ChatEntry {
         ChatEntry(id: "e\(n)", at: Int64(n), who: ChatWho(kind: kind, name: name, label: label), text: "t\(n)")
+    }
+
+    nonisolated(unsafe) static let event7 = ChatEntry(id: "e7", at: 7, who: ChatWho(kind: "pixie"), text: "t7")
+
+    private func waitFor(_ ok: @Sendable () -> Bool) async {
+        for _ in 0..<200 where !ok() { try? await Task.sleep(for: .milliseconds(10)) }
     }
 
     func testLoadShowsTheLastPageOldestFirst() async {
@@ -135,13 +150,12 @@ final class ChatThreadModelTests: XCTestCase {
         let model = ChatThreadModel(client: client)
         await model.load()
         model.sawBottom()
+        await waitFor { client.reads == ["e2"] }
         model.sawBottom()
-        await model.settled()
-        XCTAssertEqual(client.reads, ["e2"], "the same bottom is told once")
         model.apply(entry(3))
         model.sawBottom()
-        await model.settled()
-        XCTAssertEqual(client.reads, ["e2", "e3"])
+        await waitFor { client.reads == ["e2", "e3"] }
+        XCTAssertEqual(client.reads, ["e2", "e3"], "the same bottom is told once")
     }
 
     func testUnreadComesFromTheBadge() {
@@ -212,5 +226,83 @@ final class ChatThreadModelTests: XCTestCase {
         XCTAssertEqual(e.request?.options, ["a", "b"])
         XCTAssertEqual(e.lines, [4])
         XCTAssertTrue(e.read)
+    }
+
+    func testAnOlderEntryNotLoadedIsDroppedWhileThereIsMoreAndNeverShownTwice() async {
+        let client = FakeChatClient((0..<60).map { entry($0) })
+        let model = ChatThreadModel(client: client)
+        await model.load()
+        var old = entry(3)
+        old.text = "answered"
+        model.apply(old)
+        XCTAssertEqual(model.entries.count, 50)
+        await model.loadOlder()
+        XCTAssertEqual(model.entries.count, 60)
+        XCTAssertEqual(Set(model.entries.map(\.id)).count, 60)
+    }
+
+    func testAnOlderEntryGoesInByTimeWhenThereIsNoMore() async {
+        let model = ChatThreadModel(client: FakeChatClient([entry(2), entry(4)]))
+        await model.load()
+        model.apply(entry(1))
+        model.apply(entry(3))
+        XCTAssertEqual(model.entries.map(\.id), ["e1", "e2", "e3", "e4"])
+    }
+
+    func testLoadOlderSkipsEntriesAlreadyShown() async {
+        let client = FakeChatClient((0..<60).map { entry($0) })
+        let model = ChatThreadModel(client: client)
+        await model.load()
+        await model.loadOlder()
+        XCTAssertEqual(model.entries.map(\.id), (0..<60).map { "e\($0)" })
+    }
+
+    func testLoadFetchesTheBadge() async {
+        let client = FakeChatClient()
+        client.setBadge(ChatBadge(needs: 2, unread: 5))
+        let model = ChatThreadModel(client: client)
+        await model.load()
+        XCTAssertEqual(model.unread, 5)
+    }
+
+    func testClearCallsTheCoreAndResetEmptiesTheThread() async {
+        let client = FakeChatClient((0..<3).map { entry($0) })
+        let model = ChatThreadModel(client: client)
+        await model.load()
+        await model.clear()
+        XCTAssertEqual(client.clears, 1)
+        client.setFailing(true)
+        await model.reset()
+        XCTAssertTrue(model.entries.isEmpty, "a failed reload after Clear shows nothing")
+        XCTAssertNotNil(model.error)
+    }
+
+    func testAnEventDuringLoadIsKept() async {
+        let client = FakeChatClient((0..<3).map { entry($0) })
+        let model = ChatThreadModel(client: client)
+        client.whileLoading = {
+            DispatchQueue.main.sync { MainActor.assumeIsolated { model.apply(ChatThreadModelTests.event7) } }
+        }
+        await model.load()
+        XCTAssertEqual(model.entries.map(\.id), ["e0", "e1", "e2", "e7"])
+    }
+
+    func testAFailedSendDoesNotOverwriteANewTarget() async {
+        let client = FakeChatClient()
+        let model = ChatThreadModel(client: client)
+        model.replyTo = ChatWho(kind: "session", name: "a", label: "a")
+        client.setFailing(true)
+        async let sending: Void = model.send("x")
+        model.replyTo = ChatWho(kind: "session", name: "b", label: "b")
+        await sending
+        XCTAssertEqual(model.replyTo?.name, "b")
+    }
+
+    func testAReplacedPixieEntryDoesNotEndThinking() async {
+        let model = ChatThreadModel(client: FakeChatClient([entry(1)]))
+        await model.load()
+        await model.send("go")
+        model.apply(entry(1))
+        XCTAssertTrue(model.thinking)
     }
 }
