@@ -30,3 +30,31 @@ public struct ChatOpening: Equatable, Sendable {
     /// view could see the request.
     public var scrollsOnAppear: Bool { !opened && scrollPending }
 }
+
+/// What showing the chat window does (#302), from how it stands when asked. A real open (the
+/// window was closed) loads the thread again; a window that comes back from hidden, covered or
+/// minimized keeps what it has (events kept it current) and where it was scrolled to. Coming
+/// back with something unread opens it again: nothing counts as read until the scroll to the
+/// oldest unread has run, so what came while it was away isn't marked read off-screen.
+public struct ChatShow: Equatable, Sendable {
+    /// The thread is loaded again (only on a real open).
+    public let reloads: Bool
+    /// Wait for this show's own scroll before anything counts as read (`ChatOpening.opening`).
+    public let reopens: Bool
+    /// A scroll runs: to the entry asked for, else where the thread opens.
+    public let scrolls: Bool
+
+    /// `opening`: the window was closed (or never made). `onScreen`: it is shown and not
+    /// covered or minimized. `unread`: the core's count.
+    public init(opening: Bool, onScreen: Bool, entryID: String?, unread: Int) {
+        if opening {
+            (reloads, reopens, scrolls) = (true, true, true)
+        } else if onScreen {
+            (reloads, reopens, scrolls) = (false, false, true)
+        } else {
+            reloads = false
+            reopens = unread > 0
+            scrolls = reopens || entryID != nil
+        }
+    }
+}

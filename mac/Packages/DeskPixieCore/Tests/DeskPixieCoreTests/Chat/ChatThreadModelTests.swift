@@ -357,6 +357,14 @@ final class ChatThreadModelTests: XCTestCase {
         push.text = "  "
         XCTAssertEqual(ChatThreadModel.pillLabel(push), "api-server wants permission", "no text: the generic words")
         XCTAssertEqual(ChatThreadModel.pillLabel(ask(2, kind: "question")), "docs asks a question")
+        push.text = "wants to run git push"
+        XCTAssertEqual(ChatThreadModel.pillLabel(push), "api-server wants to run git push", "said once, not twice")
+        push.text = "wants to edit main.go"
+        XCTAssertEqual(ChatThreadModel.pillLabel(push), "api-server wants to edit main.go")
+        push.text = "asks to read ~/.ssh"
+        XCTAssertEqual(ChatThreadModel.pillLabel(push), "api-server asks to read ~/.ssh")
+        push.text = "wantsomething"
+        XCTAssertEqual(ChatThreadModel.pillLabel(push), "api-server wants to run wantsomething", "a whole word only")
     }
 
     func testAPlainSessionMessageOffersReply() async {

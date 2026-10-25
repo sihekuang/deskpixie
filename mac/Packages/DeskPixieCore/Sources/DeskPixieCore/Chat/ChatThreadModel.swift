@@ -345,7 +345,10 @@ public final class ChatThreadModel {
         let who = name(of: e.who)
         guard e.request?.kind == "permission" else { return "\(who) asks a question" }
         let text = e.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return text.isEmpty ? "\(who) wants permission" : "\(who) wants to run \(text)"
+        if text.isEmpty { return "\(who) wants permission" }
+        // Some requests already say what they want ("wants to edit …", from Codex).
+        if text.hasPrefix("wants ") || text.hasPrefix("asks ") { return "\(who) \(text)" }
+        return "\(who) wants to run \(text)"
     }
 
     /// Reply… beside Open in terminal on a session's own message (not a card): the box then

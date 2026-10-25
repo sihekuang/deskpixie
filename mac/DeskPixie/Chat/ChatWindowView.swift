@@ -130,6 +130,8 @@ private struct ChatThreadView: View {
     @State private var viewport: CGFloat = 0
     /// A scroll was asked for and its layout hasn't been reported yet: nothing counts as read.
     @State private var awaitingLayout = false
+    /// Which scroll `awaitingLayout` waits on, so a late give-up can't end a newer wait.
+    @State private var layoutWaits = 0
 
     private var atBottom: Bool { atBottom(geometry) }
 
@@ -265,6 +267,19 @@ private struct ChatThreadView: View {
         .id(e.id)
     }
 
+    /// A window shown again after a hide keeps its rows, so its opening scroll may not move
+    /// anything (already at the bottom, or the end can't scroll further) and no layout report
+    /// follows: when none has come in a moment, what is known holds.
+    private func giveUpWaiting() {
+        layoutWaits += 1
+        let mine = layoutWaits
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            guard awaitingLayout, layoutWaits == mine else { return }
+            awaitingLayout = false
+            markRead()
+        }
+    }
+
     /// To an entry (nil: where the thread opens). The first one, once laid out, opens the
     /// thread: from then on new entries scroll and count as read.
     private func scroll(_ proxy: ScrollViewProxy, to id: String?) {
@@ -281,6 +296,7 @@ private struct ChatThreadView: View {
             if !state.opened {
                 awaitingLayout = ChatThreadModel.scrollMoves(contentHeight: Double(geometry.height) + 40,
                                                              viewportHeight: Double(viewport))
+                if awaitingLayout { giveUpWaiting() }
             }
             state.scrolled()
             markRead()

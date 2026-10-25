@@ -7,7 +7,7 @@ public struct ChatToggle: Equatable, Sendable {
     /// The key the menu's Chat… shows, with ⌘⇧ (`TrayMenu`).
     public static let shortcutKey: Character = "c"
 
-    /// The window is on screen (not closed, hidden or minimized).
+    /// The window is on screen: not closed, hidden, minimized, covered or on another Space.
     public let shown: Bool
     /// Entries you haven't read, as the core counts them.
     public let unread: Int
@@ -15,6 +15,13 @@ public struct ChatToggle: Equatable, Sendable {
     public init(shown: Bool, unread: Int) {
         self.shown = shown
         self.unread = unread
+    }
+
+    /// Shown, for the button and for what counts as read: ordered in (`visible`), some of it
+    /// not covered by other windows or on another Space (`unoccluded`), and not minimized. A
+    /// window buried under others is not shown: a click brings it to the front.
+    public static func isOnScreen(visible: Bool, unoccluded: Bool, miniaturized: Bool) -> Bool {
+        visible && unoccluded && !miniaturized
     }
 
     public var action: Action { shown ? .hide : .show }

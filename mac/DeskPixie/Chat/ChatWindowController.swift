@@ -42,26 +42,33 @@ final class ChatWindowController: NSObject, NSToolbarDelegate {
     }
 
     /// Opens the window (or brings it forward), at this entry or, with none, at the oldest
-    /// unread, else the newest. Shown again after `hide()` with nothing new, it stays where it
-    /// was. The thread is loaded again each time it opens.
+    /// unread, else the newest. Shown again after `hide()` (or from under other windows) with
+    /// nothing new, it stays where it was; with something new, it goes to the oldest unread
+    /// before any of it counts as read. The thread is loaded again only on a real open.
     func show(at entryID: String? = nil) {
         let opening = self.window == nil
         let window = self.window ?? makeWindow()
-        let hidden = !opening && !window.isVisible
-        if opening { state.opening() }
+        let plan = ChatShow(opening: opening, onScreen: !opening && Self.onScreen(window),
+                            entryID: entryID, unread: model.unread)
+        // Before the window is visible again, so nothing is read until the scroll has run.
+        if plan.reopens { state.opening() }
         WindowFocus.bringForward(window, app: NSApp, showInDock: true)
         updateVisible()
         state.focusRequests += 1
+        guard plan.scrolls else { return }
+        guard plan.reloads else { return state.scroll(to: entryID) }
         let model = model, state = state
         Task { @MainActor in
             await model.load()
-            if hidden && entryID == nil && model.unread == 0 { return }
             state.scroll(to: entryID)
         }
     }
 
-    /// The window is on screen: not closed, hidden or minimized.
-    var isShown: Bool { window.map { $0.isVisible && !$0.isMiniaturized } ?? false }
+    /// On screen: shown, not minimized, and not covered by other windows or on another Space.
+    private static func onScreen(_ window: NSWindow) -> Bool {
+        ChatToggle.isOnScreen(visible: window.isVisible, unoccluded: window.occlusionState.contains(.visible),
+                              miniaturized: window.isMiniaturized)
+    }
 
     /// Puts the window away, keeping it (its size, place and scroll) for the next `show`.
     func hide() {
@@ -142,10 +149,11 @@ final class ChatWindowController: NSObject, NSToolbarDelegate {
         return ui.onPaste()
     }
 
+    /// The button and the read rule use the same test: a covered window reads "Show chat".
     private func updateVisible() {
-        presence.shown = isShown
-        guard let window else { return state.visible = false }
-        state.visible = window.isVisible && window.occlusionState.contains(.visible) && !window.isMiniaturized
+        let shown = window.map(Self.onScreen) ?? false
+        presence.shown = shown
+        state.visible = shown
     }
 
     private func closed() {

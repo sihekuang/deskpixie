@@ -59,13 +59,14 @@ struct ChatWindowButton: View {
                 .frame(width: Self.size, height: Self.size)
                 .background(Circle().fill(toggle.filled ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.regularMaterial)))
                 .overlay(Circle().strokeBorder(toggle.filled ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.separator)))
+                // In the button's own corner: the panel is sized to fit the row, so a dot
+                // reaching outside it would be cut off.
                 .overlay(alignment: .topTrailing) {
                     if toggle.dot {
                         Circle()
                             .fill(Color.blue)
                             .frame(width: 10, height: 10)
                             .overlay(Circle().strokeBorder(.background, lineWidth: 2))
-                            .offset(x: 2, y: -2)
                     }
                 }
                 .contentShape(Circle())

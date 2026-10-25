@@ -48,4 +48,18 @@ final class ChatToggleTests: XCTestCase {
         XCTAssertEqual(rows.first?.shortcut, ChatToggle.shortcutKey)
         XCTAssertEqual(rows.first?.shift, true)
     }
+
+    /// Review I2: a window under other windows (or on another Space) isn't shown: the button
+    /// reads "Show chat", has the dot, and a click shows it.
+    func testACoveredWindowIsNotShown() {
+        XCTAssertTrue(ChatToggle.isOnScreen(visible: true, unoccluded: true, miniaturized: false))
+        let covered = ChatToggle.isOnScreen(visible: true, unoccluded: false, miniaturized: false)
+        XCTAssertFalse(covered)
+        XCTAssertFalse(ChatToggle.isOnScreen(visible: true, unoccluded: true, miniaturized: true))
+        XCTAssertFalse(ChatToggle.isOnScreen(visible: false, unoccluded: true, miniaturized: false))
+        let t = ChatToggle(shown: covered, unread: 2)
+        XCTAssertEqual(t.action, .show)
+        XCTAssertTrue(t.dot)
+        XCTAssertEqual(t.label, "Show chat, 2 unread")
+    }
 }

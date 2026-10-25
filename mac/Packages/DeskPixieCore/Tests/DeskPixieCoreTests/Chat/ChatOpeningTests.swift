@@ -35,4 +35,39 @@ final class ChatOpeningTests: XCTestCase {
         o.opening()
         XCTAssertFalse(o.scrollsOnAppear)
     }
+
+    // MARK: ChatShow
+
+    func testARealOpenLoadsWaitsAndScrolls() {
+        let s = ChatShow(opening: true, onScreen: false, entryID: nil, unread: 0)
+        XCTAssertEqual(s, ChatShow(opening: true, onScreen: true, entryID: "e1", unread: 3))
+        XCTAssertTrue(s.reloads && s.reopens && s.scrolls)
+    }
+
+    /// Review I1: unread came while the window was hidden; showing it opens it again (nothing
+    /// is read until the scroll to the oldest unread ran) without reloading (M1).
+    func testUnreadThatCameWhileHiddenWaitsForTheScroll() {
+        let s = ChatShow(opening: false, onScreen: false, entryID: nil, unread: 2)
+        XCTAssertTrue(s.reopens, "not marked read before the scroll")
+        XCTAssertTrue(s.scrolls, "the open always runs its scroll")
+        XCTAssertFalse(s.reloads, "older pages you scrolled into stay")
+    }
+
+    func testHiddenWithNothingNewStaysWhereItWas() {
+        let s = ChatShow(opening: false, onScreen: false, entryID: nil, unread: 0)
+        XCTAssertFalse(s.reloads || s.reopens || s.scrolls)
+    }
+
+    func testHiddenAtAnEntryScrollsThereWithoutReopening() {
+        let s = ChatShow(opening: false, onScreen: false, entryID: "e4", unread: 0)
+        XCTAssertTrue(s.scrolls)
+        XCTAssertFalse(s.reopens || s.reloads)
+    }
+
+    func testAlreadyOnScreenOnlyScrolls() {
+        let s = ChatShow(opening: false, onScreen: true, entryID: nil, unread: 2)
+        XCTAssertTrue(s.scrolls)
+        XCTAssertFalse(s.reopens, "what's in view may already count as read")
+        XCTAssertFalse(s.reloads)
+    }
 }
