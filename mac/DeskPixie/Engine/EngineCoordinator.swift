@@ -203,7 +203,7 @@ final class EngineCoordinator {
         guard configured, let chatModel else { return }
         if chatWindow == nil {
             chatWindow = ChatWindowController(model: chatModel(), engine: engine, worker: worker,
-                                              attachments: { [weak self] in self?.roster?.attachments })
+                                              attachments: { [weak self] in self?.roster?.attachmentUI })
         }
         chatWindow?.show(at: entryID)
     }

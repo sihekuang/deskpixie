@@ -2,36 +2,46 @@ import DeskPixieCore
 import SwiftUI
 
 /// The message box pinned under the thread (spec §4.3): the "Replying to docs ×" chip, the
-/// attachments waiting, + to attach, 1–5 lines (Return sends, Shift-Return adds a line), and
-/// Send, which turns into Stop while a typed message is at work.
+/// attachments waiting and the "Screenshot copied · Attach" row, + to attach, 1–5 lines
+/// (Return sends, Shift-Return adds a line), and Send, which turns into Stop while a typed
+/// message is at work.
 struct ChatComposer: View {
     let model: ChatThreadModel
     @Bindable var state: ChatWindowState
-    /// The attachments waiting for the next request, shared with the box under Pixie; nil
-    /// before Pixie is up. Read on each draw (each open bumps `focusRequests`), so Pixie
-    /// coming up after the window opened is picked up.
-    let attachmentsNow: () -> AttachmentsController?
+    /// The attachments, as the box under Pixie has them (shared with it); nil before Pixie is
+    /// up. Read on each draw (each open bumps `focusRequests`), so Pixie coming up after the
+    /// window opened is picked up.
+    let attachmentsNow: () -> AttachmentUI?
 
     @FocusState private var focused: Bool
 
-    private var attachments: AttachmentsController? { attachmentsNow() }
-
     var body: some View {
-        let attachments = attachments
+        let attachments = attachmentsNow()
         return VStack(alignment: .leading, spacing: 8) {
             if let who = model.replyTo {
                 replyChip(who)
             }
             if let attachments, attachments.model.chipsVisible {
-                AttachmentChips(items: attachments.model.items, onRemove: { attachments.remove($0) })
+                AttachmentChips(items: attachments.model.items, onRemove: attachments.onRemove)
             }
             if let notice = attachments?.model.notice ?? model.error {
                 Text(notice)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            } else if let attachments, let hint = attachments.hint {
+                // Something copied and not attached yet (#240): one click attaches it.
+                HStack(spacing: 4) {
+                    Image(systemName: "doc.on.clipboard")
+                    Text(hint)
+                    Text("·")
+                    Button("Attach", action: attachments.onAttachHint)
+                        .buttonStyle(.link)
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
             HStack(alignment: .bottom, spacing: 8) {
-                Button { attachments?.pick() } label: {
+                Button { attachments?.onPick() } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(.primary)
@@ -54,7 +64,7 @@ struct ChatComposer: View {
                     .accessibilityIdentifier("chat.composer")
                     // Return sends (after an input method has taken its own Return);
                     // Shift-Return adds a line where the cursor is.
-                    .onSubmit(send)
+                    .onSubmit { send(attachments) }
                     .onKeyPress(.return, phases: .down) { press in
                         guard press.modifiers.contains(.shift) else { return .ignored }
                         NSApp.sendAction(#selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)), to: nil, from: nil)
@@ -79,16 +89,17 @@ struct ChatComposer: View {
                     .help("Stop")
                     .accessibilityLabel("Stop")
                 } else {
-                    Button(action: send) {
+                    let can = canSend(attachments)
+                    Button { send(attachments) } label: {
                         Image(systemName: "arrow.up")
                             .font(.system(size: 14, weight: .bold))
                             .foregroundStyle(.white)
                             .frame(width: 32, height: 32)
-                            .background(Circle().fill(canSend ? ChatColors.bubble : ChatColors.border))
+                            .background(Circle().fill(can ? ChatColors.bubble : ChatColors.border))
                             .contentShape(Circle())
                     }
                     .buttonStyle(.plain)
-                    .disabled(!canSend)
+                    .disabled(!can)
                     .help("Send")
                     .accessibilityLabel("Send")
                 }
@@ -133,27 +144,24 @@ struct ChatComposer: View {
         .accessibilityIdentifier("chat.replyChip")
     }
 
-    private var paths: [String] { attachments?.model.items.map(\.path) ?? [] }
-
-    private var canSend: Bool {
-        !state.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !paths.isEmpty
+    private func canSend(_ attachments: AttachmentUI?) -> Bool {
+        model.canSend(state.draft, attachments: attachments?.model.items.count ?? 0)
     }
 
     /// The text and the attachments' paths go through `chat.send` (or the typed answer); a
-    /// failed send puts the words back and keeps the copy on offer.
-    private func send() {
+    /// failed send puts the words back and keeps the copy on offer. One at a time: the model
+    /// refuses a second while the first is on its way.
+    private func send(_ attachments: AttachmentUI?) {
+        guard canSend(attachments) else { return }
         let text = state.draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        let paths = paths
-        let attachments = attachments
-        guard canSend else { return }
+        let paths = attachments?.model.items.map(\.path) ?? []
         state.draft = ""
         Task {
-            await model.send(text, attachments: paths)
-            if model.error == nil {
-                attachments?.sent()
-            } else if state.draft.isEmpty {
-                state.draft = text
+            guard await model.send(text, attachments: paths) else {
+                if state.draft.isEmpty { state.draft = text }
+                return
             }
+            attachments?.onSent()
         }
     }
 }

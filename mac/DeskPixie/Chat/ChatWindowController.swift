@@ -20,14 +20,15 @@ final class ChatWindowController: NSObject, NSToolbarDelegate {
     private let engine: CoreEngine
     private let worker: CoreWorker
     /// The attachments shared with the box under Pixie; nil until Pixie is up.
-    private let attachments: () -> AttachmentsController?
+    private let attachments: () -> AttachmentUI?
     private let state = ChatWindowState()
     private let richText: RichTextStore
     private var window: NSWindow?
     private var tokens: [NSObjectProtocol] = []
+    private var pasteMonitor: Any?
 
     init(model: ChatThreadModel, engine: CoreEngine, worker: CoreWorker,
-         attachments: @escaping () -> AttachmentsController?) {
+         attachments: @escaping () -> AttachmentUI?) {
         self.model = model
         self.engine = engine
         self.worker = worker
@@ -99,8 +100,27 @@ final class ChatWindowController: NSObject, NSToolbarDelegate {
                 MainActor.assumeIsolated { self?.updateVisible() }
             }
         }
+        if pasteMonitor == nil {
+            // Cmd-V in the box with only an image or files on the clipboard attaches them, as in
+            // the box under Pixie; text pastes as usual.
+            pasteMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                let isPaste = ClipboardRules.isPasteShortcut(flags: event.modifierFlags.rawValue,
+                                                             key: event.charactersIgnoringModifiers)
+                guard isPaste else { return event }
+                let took = MainActor.assumeIsolated { self?.pasteAttaches(event) ?? false }
+                return took ? nil : event
+            }
+        }
         self.window = window
         return window
+    }
+
+    /// Only while the box is being typed in (an editable text view of this window has the keys).
+    private func pasteAttaches(_ event: NSEvent) -> Bool {
+        guard let window, event.window === window, window.isKeyWindow,
+              let editor = window.firstResponder as? NSTextView, editor.isEditable,
+              let ui = attachments() else { return false }
+        return ui.onPaste()
     }
 
     private func updateVisible() {
@@ -111,6 +131,10 @@ final class ChatWindowController: NSObject, NSToolbarDelegate {
     private func closed() {
         tokens.forEach(NotificationCenter.default.removeObserver)
         tokens = []
+        if let m = pasteMonitor {
+            NSEvent.removeMonitor(m)
+            pasteMonitor = nil
+        }
         window = nil
         state.visible = false
         model.cancelReply()

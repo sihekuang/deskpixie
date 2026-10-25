@@ -25,6 +25,8 @@ public final class ChatThreadModel {
     /// The question the box answers (its token), when Reply… was on a card that takes a typed
     /// answer: the message goes as `agent.typedAnswer` while the question is still open.
     public private(set) var replyToken: String?
+    /// A message is on its way to the core.
+    public private(set) var sending = false
     /// A typed message is being worked on; the coordinator's or Pixie's answer clears it.
     public private(set) var thinking = false
     /// Older entries remain to load.
@@ -158,7 +160,13 @@ public final class ChatThreadModel {
     /// failed send puts it back and keeps the entries.
     /// Replying to a question that takes a typed answer sends it as that answer
     /// (`agent.typedAnswer`) while the question is open; otherwise the message goes to its session.
-    public func send(_ text: String, attachments: [String] = []) async {
+    /// One at a time: while a send is on its way another is refused (a second Return would send
+    /// the same attachments again). True when it went.
+    @discardableResult
+    public func send(_ text: String, attachments: [String] = []) async -> Bool {
+        guard !sending else { return false }
+        sending = true
+        defer { sending = false }
         let target = replyTo
         let token = target == nil ? nil : replyToken
         replyTo = nil
@@ -177,7 +185,9 @@ public final class ChatThreadModel {
             }
         }.value
         switch result {
-        case .success: error = nil
+        case .success:
+            error = nil
+            return true
         case .failure(let err):
             if replyTo == nil {
                 replyTo = target
@@ -185,7 +195,13 @@ public final class ChatThreadModel {
             }
             thinking = false
             fail(answer == nil ? "chat.send" : "agent.typedAnswer", err)
+            return false
         }
+    }
+
+    /// Send is offered: words or attachments to send, and no send already on its way.
+    public func canSend(_ text: String, attachments: Int) -> Bool {
+        !sending && (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || attachments > 0)
     }
 
     public func decide(token: String, allow: Bool) async {
@@ -245,10 +261,12 @@ public final class ChatThreadModel {
         return newest?.who ?? ChatWho(kind: "session", name: address, label: address)
     }
 
-    /// Where the window opens: the oldest entry you haven't read (your own words never are),
-    /// else the newest.
+    /// Where the window opens: the oldest entry you haven't read, else the newest. The core's
+    /// unread count (from the badge `load()` fetched) decides how many: the oldest of the last
+    /// that many entries not marked read and not yours (your own words never are).
     public var openTarget: String? {
-        if unread > 0, let first = entries.first(where: { !$0.read && $0.who.kind != "you" }) { return first.id }
+        let notRead = entries.filter { !$0.read && $0.who.kind != "you" }
+        if unread > 0, !notRead.isEmpty { return notRead[max(0, notRead.count - unread)].id }
         return entries.last?.id
     }
 
@@ -298,6 +316,19 @@ public final class ChatThreadModel {
     /// coordinates, is within a few points of the viewport's height (infinite = not laid out).
     public static func isAtBottom(sentinelMaxY: Double, viewportHeight: Double, tolerance: Double = 8) -> Bool {
         viewportHeight > 0 && sentinelMaxY.isFinite && sentinelMaxY <= viewportHeight + tolerance
+    }
+
+    /// A scroll can move the content: it is taller than the viewport. The opening scroll then
+    /// waits for the layout after it before anything counts as read; content that fits never
+    /// moves, so its first layout already holds.
+    public static func scrollMoves(contentHeight: Double, viewportHeight: Double) -> Bool {
+        contentHeight > viewportHeight
+    }
+
+    /// The content changed height (rows grow once their links are found or their text wraps):
+    /// a view that was at the bottom scrolls back to it. Scrolling alone never follows.
+    public static func keepsBottom(wasAtBottom: Bool, heightChanged: Bool) -> Bool {
+        wasAtBottom && heightChanged
     }
 
     /// The newest entry counts as seen (`sawBottom`) only after the opening scroll, with the

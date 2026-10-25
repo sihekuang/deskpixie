@@ -300,9 +300,9 @@ final class ChatThreadModelTests: XCTestCase {
         let model = ChatThreadModel(client: client)
         model.replyTo = ChatWho(kind: "session", name: "a", label: "a")
         client.setFailing(true)
-        async let sending: Void = model.send("x")
+        async let sending = model.send("x")
         model.replyTo = ChatWho(kind: "session", name: "b", label: "b")
-        await sending
+        _ = await sending
         XCTAssertEqual(model.replyTo?.name, "b")
     }
 
@@ -372,6 +372,51 @@ final class ChatThreadModelTests: XCTestCase {
         await model.send("rebase it")
         XCTAssertEqual(client.sent, [.init(text: "rebase it", attachments: [], session: "herdr:1.2")])
         XCTAssertTrue(client.typed.isEmpty)
+    }
+
+    func testItOpensAtTheOldestOfTheUnreadTheLoadCounted() async {
+        // Like a seeded thread: older entries never marked read, the core counting the last two.
+        let client = FakeChatClient((1...8).map { entry($0) })
+        client.setBadge(ChatBadge(unread: 2))
+        let model = ChatThreadModel(client: client)
+        await model.load()
+        XCTAssertEqual(model.unread, 2, "the count comes with the load")
+        XCTAssertEqual(model.openTarget, "e7")
+        model.applyBadge(ChatBadge(unread: 20))
+        XCTAssertEqual(model.openTarget, "e1", "more than there are: the oldest")
+        model.applyBadge(ChatBadge(unread: 0))
+        XCTAssertEqual(model.openTarget, "e8")
+    }
+
+    func testASecondSendWhileOneIsOnItsWayIsRefused() async {
+        let client = FakeChatClient()
+        let model = ChatThreadModel(client: client)
+        XCTAssertTrue(model.canSend("", attachments: 1))
+        XCTAssertFalse(model.canSend("  ", attachments: 0))
+        async let first = model.send("look", attachments: ["/a.png"])
+        async let second = model.send("look", attachments: ["/a.png"])
+        let (a, b) = await (first, second)
+        XCTAssertEqual([a, b].filter { $0 }.count, 1, "one went, one was refused")
+        XCTAssertEqual(client.sent.count, 1, "the files go once")
+        XCTAssertFalse(model.sending)
+        XCTAssertTrue(model.canSend("again", attachments: 0))
+        let again = await model.send("again")
+        XCTAssertTrue(again)
+        client.setFailing(true)
+        let failed = await model.send("no")
+        XCTAssertFalse(failed, "a failed send says so")
+    }
+
+    func testOnlyContentTallerThanTheViewportMovesOnTheOpeningScroll() {
+        XCTAssertTrue(ChatThreadModel.scrollMoves(contentHeight: 900, viewportHeight: 600))
+        XCTAssertFalse(ChatThreadModel.scrollMoves(contentHeight: 600, viewportHeight: 600))
+        XCTAssertFalse(ChatThreadModel.scrollMoves(contentHeight: 120, viewportHeight: 600))
+    }
+
+    func testAViewAtTheBottomFollowsItsContentGrowing() {
+        XCTAssertTrue(ChatThreadModel.keepsBottom(wasAtBottom: true, heightChanged: true))
+        XCTAssertFalse(ChatThreadModel.keepsBottom(wasAtBottom: true, heightChanged: false), "you scrolled up")
+        XCTAssertFalse(ChatThreadModel.keepsBottom(wasAtBottom: false, heightChanged: true), "reading further up")
     }
 
     func testTheBottomIsSeenOnlyOnceOpenedOnScreenAndInView() {

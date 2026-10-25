@@ -36,7 +36,7 @@ struct ChatWindowView: View {
     let model: ChatThreadModel
     let state: ChatWindowState
     /// Read on each draw: Pixie (and its attachments) may come up after the window opened.
-    let attachments: () -> AttachmentsController?
+    let attachments: () -> AttachmentUI?
     let actions: ChatActions
 
     static let column: CGFloat = 680
@@ -55,7 +55,7 @@ struct ChatWindowView: View {
         }
         .frame(minWidth: 400, minHeight: 480)
         .background(Color(nsColor: .textBackgroundColor))
-        .onDrop(of: [.fileURL, .image], isTargeted: nil) { attachments()?.drop($0) ?? false }
+        .onDrop(of: [.fileURL, .image], isTargeted: nil) { attachments()?.onDrop($0) ?? false }
     }
 }
 
@@ -101,11 +101,16 @@ private struct NeedsStrip: View {
     }
 }
 
-/// Where the bottom marker's lower edge is, in the scroll view's coordinates (infinite while
-/// it isn't laid out: a lazy stack drops it far off screen).
-private struct BottomEdgeKey: PreferenceKey {
-    static let defaultValue = CGFloat.infinity
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+/// The thread's content in the scroll view's coordinates: where its last row ends and how tall
+/// it is. Measured outside the lazy stack, so it is always laid out.
+private struct ThreadGeometry: Equatable {
+    var bottom = CGFloat.infinity
+    var height: CGFloat = 0
+}
+
+private struct ThreadGeometryKey: PreferenceKey {
+    static let defaultValue = ThreadGeometry()
+    static func reduce(value: inout ThreadGeometry, nextValue: () -> ThreadGeometry) { value = nextValue() }
 }
 
 /// The thread, newest at the bottom. It opens at the message asked for, else the oldest unread,
@@ -119,16 +124,21 @@ private struct ChatThreadView: View {
 
     private static let bottomID = "chat.bottom"
     private static let space = "chat.scroll"
-    @State private var bottomEdge = CGFloat.infinity
+    @State private var geometry = ThreadGeometry()
     @State private var viewport: CGFloat = 0
+    /// A scroll was asked for and its layout hasn't been reported yet: nothing counts as read.
+    @State private var awaitingLayout = false
 
-    private var atBottom: Bool {
-        ChatThreadModel.isAtBottom(sentinelMaxY: Double(bottomEdge), viewportHeight: Double(viewport))
+    private var atBottom: Bool { atBottom(geometry) }
+
+    private func atBottom(_ g: ThreadGeometry) -> Bool {
+        ChatThreadModel.isAtBottom(sentinelMaxY: Double(g.bottom), viewportHeight: Double(viewport))
     }
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
+                VStack(spacing: 0) {
                 LazyVStack(alignment: .leading, spacing: 18) {
                     if model.hasOlder {
                         ProgressView()
@@ -147,26 +157,40 @@ private struct ChatThreadView: View {
                         .font(.system(size: 13))
                         .foregroundStyle(ChatColors.label)
                     }
-                    Color.clear
-                        .frame(height: 1)
-                        .id(Self.bottomID)
-                        .background(GeometryReader { g in
-                            Color.clear.preference(key: BottomEdgeKey.self, value: g.frame(in: .named(Self.space)).maxY)
-                        })
                 }
+                // Right under the last row, so the padding below doesn't count against the
+                // bottom; the opening scroll and ↓ Latest both go here.
+                Color.clear
+                    .frame(height: 1)
+                    .id(Self.bottomID)
+                }
+                .background(GeometryReader { g in
+                    let f = g.frame(in: .named(Self.space))
+                    Color.clear.preference(key: ThreadGeometryKey.self, value: ThreadGeometry(bottom: f.maxY, height: f.height))
+                })
                 .frame(maxWidth: ChatWindowView.column)
                 .padding(.horizontal, 24)
                 .padding(.vertical, 20)
                 .frame(maxWidth: .infinity)
             }
-            .defaultScrollAnchor(.bottom)
             .coordinateSpace(name: Self.space)
             .background(GeometryReader { g in
                 Color.clear
                     .onAppear { viewport = g.size.height }
                     .onChange(of: g.size.height) { viewport = g.size.height }
             })
-            .onPreferenceChange(BottomEdgeKey.self) { bottomEdge = $0 }
+            .onPreferenceChange(ThreadGeometryKey.self) { geometry = $0 }
+            .onChange(of: geometry) { old, new in
+                // The layout after the opening scroll: only now does at-bottom hold.
+                if awaitingLayout {
+                    awaitingLayout = false
+                    markRead()
+                    return
+                }
+                // Rows grow after they are drawn (links found, text wrapped): at the bottom, stay there.
+                let follow = ChatThreadModel.keepsBottom(wasAtBottom: atBottom(old), heightChanged: new.height != old.height)
+                if state.opened && follow && !atBottom(new) { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
+            }
             .accessibilityIdentifier("chat.thread")
             .overlay(alignment: .bottom) {
                 if state.opened && !atBottom {
@@ -197,12 +221,14 @@ private struct ChatThreadView: View {
             }
             .onChange(of: atBottom) { markRead() }
             .onChange(of: state.visible) { markRead() }
-            .onChange(of: state.opened) { markRead() }
             .onChange(of: state.scrollRequests) { scroll(proxy, to: state.scrollTarget) }
+            // A request made before this view's first update never reaches onChange.
+            .onAppear { if !state.opened && state.scrollRequests > 0 { scroll(proxy, to: state.scrollTarget) } }
         }
     }
 
     private func markRead() {
+        guard !awaitingLayout else { return }
         if ChatThreadModel.marksRead(opened: state.opened, visible: state.visible, atBottom: atBottom) {
             model.sawBottom()
         }
@@ -229,11 +255,19 @@ private struct ChatThreadView: View {
         let target = id ?? model.openTarget
         DispatchQueue.main.async {
             if let target, target != model.entries.last?.id, model.entries.contains(where: { $0.id == target }) {
-                proxy.scrollTo(target, anchor: .center)
+                // The oldest unread (or the message asked for) at the top, what came after below.
+                proxy.scrollTo(target, anchor: .top)
             } else {
                 proxy.scrollTo(Self.bottomID, anchor: .bottom)
             }
+            // The geometry known now is from before the scroll: the next report decides. Content
+            // that fits doesn't move, so what is known holds.
+            if !state.opened {
+                awaitingLayout = ChatThreadModel.scrollMoves(contentHeight: Double(geometry.height) + 40,
+                                                             viewportHeight: Double(viewport))
+            }
             if !state.opened { state.didOpen() }
+            markRead()
         }
     }
 }

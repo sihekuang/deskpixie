@@ -118,13 +118,22 @@ final class AgentRosterController {
 
     /// Cmd-V in the open box: attaches when the clipboard holds only an image or files.
     private func pasteAttaches() -> Bool {
-        guard chat.open, panel.isKeyWindow, ClipboardRules.pasteAttaches(attach.clipboard.detectedTypes()) else { return false }
+        guard chat.open, panel.isKeyWindow else { return false }
+        return attachCopy()
+    }
+
+    /// Cmd-V with only an image or files on the clipboard: they are attached, and Pixie's offer
+    /// of the same copy goes. False: the text pastes.
+    private func attachCopy() -> Bool {
+        guard ClipboardRules.pasteAttaches(attach.clipboard.detectedTypes()) else { return false }
         offer.take()
         attach.attachClipboard()
         return true
     }
 
-    private var attachmentUI: AttachmentUI {
+    /// The attachments as a box shows them: here, and in the chat window (#302), which gets
+    /// the same hint row, Attach (taking Pixie's offer too) and Cmd-V.
+    var attachmentUI: AttachmentUI {
         let a = attach!
         return AttachmentUI(model: a.model, hint: a.hint,
                             onAttachHint: { [weak self] in
@@ -134,7 +143,9 @@ final class AgentRosterController {
                             },
                             onRemove: { a.remove($0) },
                             onPick: { a.pick() },
-                            onDrop: { a.drop($0) })
+                            onDrop: { a.drop($0) },
+                            onPaste: { [weak self] in self?.attachCopy() ?? false },
+                            onSent: { a.sent() })
     }
 
     func stop() {
