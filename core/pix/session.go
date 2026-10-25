@@ -76,30 +76,33 @@ type Session struct {
 	queue  Queue
 	gate   Gate
 
-	mu         sync.Mutex
-	status     string // idle | working | blocked
-	afterStop  bool   // the next prompt starts new work (an auto description)
-	sessionID  string
-	userDesc   string // --description
-	outdated   bool   // the app says this pix is older than its own (#189)
-	agentDesc  string // set_description
-	autoDesc   string // first prompt of the current work
-	flushing   bool
-	flushMu    sync.Mutex // one typing of the queue at a time
-	posted     []string   // Pixie's messages not yet seen as prompts (normalized)
-	q          *question  // the prompt waiting on you that Pixie may answer (#105)
-	landing    *landing   // an answer typed from Pixie, until its prompt leaves the screen (#268)
-	screen     string     // what the agent's screen shows now, without spaces (#268)
-	qseq       int
-	hold       time.Duration // how long a question waits in its hook for Pixie (0: not held, #268)
-	menu       string        // the menu on screen in place of the agent's prompt ("": none, #306)
-	menuAt     time.Time     // when a menu last showed, or Codex first drew its prompt
-	settle     time.Duration // how long after menuAt Codex waits (menuSettle)
-	holdLog    time.Duration // how often a long wait is logged (holdLogEvery)
-	promptSeen bool          // Codex has drawn its prompt
-	freshAt    time.Time     // when the screen was last drawn again from nothing (a resize)
-	unsent     *unsent       // a message a menu kept from being sent (#306)
-	turns      int           // turns started (working), to tell you sent an unsent message
+	mu          sync.Mutex
+	status      string // idle | working | blocked
+	afterStop   bool   // the next prompt starts new work (an auto description)
+	sessionID   string
+	userDesc    string // --description
+	outdated    bool   // the app says this pix is older than its own (#189)
+	agentDesc   string // set_description
+	autoDesc    string // first prompt of the current work
+	flushing    bool
+	flushMu     sync.Mutex // one typing of the queue at a time
+	posted      []string   // Pixie's messages not yet seen as prompts (normalized)
+	q           *question  // the prompt waiting on you that Pixie may answer (#105)
+	landing     *landing   // an answer typed from Pixie, until its prompt leaves the screen (#268)
+	screen      string     // what the agent's screen shows now, without spaces (#268)
+	bottom      string     // its bottom rows (its prompt), the same way (#306)
+	qseq        int
+	hold        time.Duration // how long a question waits in its hook for Pixie (0: not held, #268)
+	menu        string        // the menu on screen in place of the agent's prompt ("": none, #306)
+	menuAt      time.Time     // when a menu last showed, or Codex first drew its prompt
+	settle      time.Duration // how long after menuAt Codex waits (menuSettle)
+	holdLog     time.Duration // how often a long wait is logged (holdLogEvery)
+	promptSeen  bool          // Codex has drawn its prompt
+	freshAt     time.Time     // when the screen was last drawn again from nothing (a resize)
+	unsent      *unsent       // a message a menu kept from being sent (#306)
+	turns       int           // turns started (working), to tell you sent an unsent message
+	startAt     time.Time     // when the agent started
+	hookPrompts bool          // a hook said what prompt the agent took (submitted)
 
 	turnStart     time.Time        // when this turn went working (zero: none seen)
 	turnFromPixie bool             // a prompt of this turn was Pixie's
@@ -350,6 +353,7 @@ func (s *Session) Hook(event string, p map[string]any) string {
 		s.mu.Unlock()
 		s.setStatus("working")
 		prompt, _ := p["prompt"].(string)
+		s.submitted(prompt) // a message a menu stopped, sent from the terminal (#306)
 		pixie := s.fromPixie(prompt)
 		if !pixie {
 			s.gate.Sent() // your prompt went in (#185)
@@ -372,7 +376,14 @@ func (s *Session) Hook(event string, p map[string]any) string {
 		s.clearQuestion()
 		pixie := false
 		if s.o.tool == "codex" { // its notify carries the turn's prompts; there is no prompt hook
-			if in, _ := p["input-messages"].([]any); len(in) > 0 {
+			s.promptDrawn() // a turn ran, so its prompt is up (#306)
+			in, _ := p["input-messages"].([]any)
+			for _, m := range in {
+				if text, _ := m.(string); text != "" {
+					s.submitted(text)
+				}
+			}
+			if len(in) > 0 {
 				if first, _ := in[0].(string); first != "" {
 					if s.fromPixie(first) {
 						pixie = true
@@ -595,7 +606,7 @@ func (s *Session) flushSoon() {
 				s.flushMu.Lock()
 				sent := s.finishUnsent()
 				s.flushMu.Unlock()
-				if sent {
+				if sent && s.queue.Len() == 0 && !s.hasUnsent() { // all of them in
 					s.delivered()
 				}
 			} else if s.flushNow() {
@@ -792,6 +803,7 @@ func (s *Session) start(ctx context.Context) error {
 	s.o.log.Printf("start in %s (%s)", cwd, strings.TrimSpace(s.o.where+" "+s.o.app))
 	s.mu.Lock()
 	s.menuAt = s.now() // a startup menu may show in a moment (#306)
+	s.startAt = s.menuAt
 	s.mu.Unlock()
 	if err := s.runner.Start(); err != nil {
 		s.o.log.Printf("couldn't start the agent: %v", err)

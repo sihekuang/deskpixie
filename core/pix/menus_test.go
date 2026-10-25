@@ -78,12 +78,14 @@ func TestOnlyAMenuAtTheBottomOfTheScreenIsOne(t *testing.T) {
 			"  enter continue · esc skip", "", "› Ask Codex to do anything", "  ? for shortcuts"}, ""},
 		"codex agents": {"codex", []string{"  Agent command center", "  No tasks yet", "  ? help  esc back  ↑/↓ move  enter open  n new"}, "agents"},
 		"claude trust": {"claude", claudeTrust, "trust"},
-		"claude trust, Yes highlighted": {"claude", append(append([]string(nil), claudeTrust[:9]...),
-			"   No, exit", " ❯ Yes, I trust this folder", "", " Enter to confirm · Esc to cancel"), "trust"},
-		"claude trust, numbered": {"claude", append(append([]string(nil), claudeTrust[:9]...),
-			" ❯ 1. Yes, I trust this folder", "   2. No, exit", "", " Enter to confirm · Esc to cancel"), "trust"},
-		"claude trust far above its footer": {"claude", append(append(append([]string(nil), claudeTrust[:12]...),
-			strings.Split(strings.Repeat("x\n", claudeMenuRows), "\n")...), " Enter to confirm · Esc to cancel"), ""},
+		"claude trust, Yes highlighted": {"claude", append(append([]string(nil), claudeTrust[:7]...),
+			"   No, exit", " ❯ Yes, I trust this folder", " Enter to confirm · Esc to cancel"), "trust"},
+		"claude trust, numbered": {"claude", append(append([]string(nil), claudeTrust[:7]...),
+			" ❯ 1. Yes, I trust this folder", "   2. No, exit", " Enter to confirm · Esc to cancel"), "trust"},
+		"claude trust after one Ctrl-C": {"claude", append(append([]string(nil), claudeTrust[:9]...),
+			" Press Ctrl-C again to exit"), "trust"},
+		"claude trust far above its footer": {"claude", append(append(append([]string(nil), claudeTrust[:9]...),
+			strings.Split(strings.TrimSuffix(strings.Repeat("x\n", claudeMenuRows), "\n"), "\n")...), claudeTrust[9]), ""},
 		"quoted in a claude reply": {"claude", quoted, ""},
 		"quoted in claude's diff": {"claude", []string{"⏺ Update(menus_test.go)", `  12 + "Quick safety check: Is this a project"`,
 			`  13 + "Yes, I trust this folder"`, "", "❯ ", "  ? for shortcuts"}, ""},
@@ -96,22 +98,18 @@ func TestOnlyAMenuAtTheBottomOfTheScreenIsOne(t *testing.T) {
 	}
 }
 
-// claudeTrust is Claude Code 2.1.310's folder trust dialog, built from its source (not captured:
-// running Claude Code to see it changes your own Claude config): a titled panel, its options
-// unnumbered with "No, exit" first and highlighted, the key hints under them.
+// claudeTrust is Claude Code 2.1.310's folder trust dialog as it showed in a 160x45 terminal
+// (tmux capture-pane, its non-blank lines): unnumbered options, "No, exit" first and highlighted.
 var claudeTrust = []string{
-	"────────────────────────────────────────",
+	"────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
 	" Accessing workspace:",
-	"",
-	" /tmp/project",
-	"",
-	" Quick safety check: Is this a project you created or one you trust? (Like your own code, a",
-	" well-known open source project, or work from your team). If not, take a moment to review",
-	" what's in this folder first.",
+	" /private/tmp/claude-501/-Users-daniel-Documents-Projects-deskpixie/dfed7d1c-6e30-4740-b42b-cc9efc3a91d5/scratchpad/e2e305/work",
+	" Quick safety check: Is this a project you created or one you trust? (Like your own code, a well-known open source project, or work from your team). If not,",
+	" take a moment to review what's in this folder first.",
 	" Claude Code'll be able to read, edit, and execute files here.",
+	" Security guide",
 	" ❯ No, exit",
 	"   Yes, I trust this folder",
-	"",
 	" Enter to confirm · Esc to cancel",
 }
 
@@ -460,5 +458,125 @@ func TestALongHoldIsLogged(t *testing.T) {
 		if time.Now().After(end) {
 			t.Fatalf("log: %s", b)
 		}
+	}
+}
+
+// Codex's grace waits for its prompt, but not for good: a screen that keeps changing without
+// its usual prompt stops holding 20 s after the start, and its first turn ending ends it too.
+func TestCodexsGraceEndsWithoutItsPrompt(t *testing.T) {
+	t0 := time.Now()
+	for _, c := range []struct {
+		name string
+		at   time.Duration // checked at, frames every second until then
+		want string
+		turn bool
+	}{{"19 s", 19 * time.Second, "starting", false}, {"25 s", 25 * time.Second, "", false}, {"a turn ended", 5 * time.Second, "", true}} {
+		s := newSession(sessionOpts{tool: "codex"})
+		s.settle, s.startAt = 3*time.Second, t0
+		frame := []string{"  Loading…"}
+		for d := time.Duration(0); d <= c.at; d += time.Second {
+			s.now = func() time.Time { return t0.Add(d) }
+			if c.turn && d == c.at-3*time.Second {
+				s.promptDrawn() // what Codex's Stop does
+			}
+			s.noteMenu(frame, "Loading…")
+		}
+		if got := s.menuHold(); got != c.want {
+			t.Errorf("%s: %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// A turn counts as you sending the stopped message only if its prompt holds it.
+func TestATurnWithAnotherPromptDidntSendTheStoppedMessage(t *testing.T) {
+	for name, c := range map[string]struct {
+		prompt string
+		sent   bool
+	}{"its own": {"hello", true}, "another": {"something else", false}} {
+		s := newSession(sessionOpts{tool: "codex"})
+		s.unsent = &unsent{text: "hello", msgs: []string{"hello"}}
+		s.turns++
+		s.submitted(c.prompt)
+		if got := s.finishUnsent(); got != c.sent || s.hasUnsent() {
+			t.Errorf("%s: sent %v, unsent %v", name, got, s.hasUnsent())
+		}
+		if q := s.queue.Len(); c.sent && q != 0 || !c.sent && q != 1 { // not sent: it waits to be typed again
+			t.Errorf("%s: %d queued", name, q)
+		}
+	}
+}
+
+// The prompt is the bottom of the screen: the message quoted above it in the transcript isn't in it.
+func TestOnlyTheBottomRowsAreThePrompt(t *testing.T) {
+	s := newSession(sessionOpts{tool: "codex"})
+	v := newScreen(30, 40)
+	v.Write([]byte("hello\r\n" + strings.Repeat("line\r\n", promptRows) + "› "))
+	s.noteScreen(v)
+	if s.promptHolds("hello") {
+		t.Fatal("the transcript counted as the prompt")
+	}
+	v.Write([]byte("hello"))
+	s.noteScreen(v)
+	if !s.promptHolds("hello") {
+		t.Fatal("the prompt didn't count")
+	}
+}
+
+// "Send it anyway" stopped by a menu before its paste stays forced: once the menu is answered the
+// messages go in, then your draft. If the deletes went to the menu, your draft is still in the
+// prompt: it is deleted again, not typed twice.
+func TestSendAnywayStoppedBeforeItsPasteIsStillForced(t *testing.T) {
+	for name, c := range map[string]struct {
+		after []byte
+		want  string
+	}{
+		"draft deleted": {readTestdata(t, "codex-update-answered.raw"),
+			"ab\x7f\x7f\x1b\x1b[200~hello\x1b[201~\r\x1b[200~ab\x1b[201~"},
+		"deletes went to the menu": {withPrompt(t, "codex-update-answered.raw", "ab"),
+			"ab\x7f\x7f\x1b\x7f\x7f\x1b[200~hello\x1b[201~\r\x1b[200~ab\x1b[201~"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := stagedHarness(t, "codex", 0, stage{0, readTestdata(t, "codex-prompt.raw")},
+				stage{2 + 2, readTestdata(t, "codex-update-menu.raw")}, // your "ab", pix's 2 deletes: the menu
+				stage{1, c.after}) // your Esc
+			agentShown(t, h, "Ask Codex")
+			waitMenu(t, h, "")
+			h.stdinW.Write([]byte("ab"))
+			time.Sleep(100 * time.Millisecond)
+			promptCmd(t, h, "1", "prompt", "hello")
+			if r := promptCmd(t, h, "2", "flush", ""); r.Status != "waiting" || r.Reason != "update" {
+				t.Fatalf("flush: %+v", r)
+			}
+			if got := h.s.typedForTest(); got != "ab\x7f\x7f" {
+				t.Fatalf("typed %q into the menu", got)
+			}
+			h.stdinW.Write([]byte{0x1b})
+			waitEvent(t, h.d.events, "delivered", func(m wire.Msg) bool { return m.Event == "delivered" })
+			for end := time.Now().Add(2 * time.Second); h.s.typedForTest() != c.want && time.Now().Before(end); {
+				time.Sleep(20 * time.Millisecond)
+			}
+			if got := h.s.typedForTest(); got != c.want {
+				t.Fatalf("typed %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// Delivered means all of them: a message that came while one waited behind the menu is typed
+// before it is said.
+func TestDeliveredWaitsForEveryMessage(t *testing.T) {
+	h := stagedHarness(t, "codex", 0, stage{0, readTestdata(t, "codex-prompt.raw")},
+		stage{1, readTestdata(t, "codex-update-menu.raw")},
+		stage{pasteLen - 1 + 1, withPrompt(t, "codex-update-answered.raw", "hello")})
+	agentShown(t, h, "Ask Codex")
+	waitMenu(t, h, "")
+	promptCmd(t, h, "1", "prompt", "hello")
+	if r := promptCmd(t, h, "2", "prompt", "second"); r.Status != "waiting" || r.Reason != "update" {
+		t.Fatalf("%+v", r)
+	}
+	h.stdinW.Write([]byte{0x1b})
+	waitEvent(t, h.d.events, "delivered", func(m wire.Msg) bool { return m.Event == "delivered" })
+	if got := h.s.typedForTest(); !strings.HasSuffix(got, "\r\x1b[200~second\x1b[201~\r") {
+		t.Fatalf("delivered with %q typed", got)
 	}
 }

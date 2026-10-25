@@ -15,12 +15,13 @@ import (
 // last line on the screen; at its prompt Codex shows its own footer there instead.
 var codexMenuFoot = regexp.MustCompile(`^enter \S.* · esc \S+$`)
 
-// claudeMenuFoot is the last line of Claude Code's trust dialog; claudeMenuRows how far up from
-// it the dialog's question and option are.
-const (
-	claudeMenuFoot = "Enter to confirm · Esc to cancel"
-	claudeMenuRows = 15
-)
+// claudeMenuRows: how far up from Claude Code's trust dialog's footer (its last line, "Enter to
+// confirm · Esc to cancel", or "Press Ctrl-C again to exit" after one Ctrl-C) its question and
+// option are.
+const claudeMenuRows = 15
+
+// promptRows: the bottom rows that hold the agent's prompt, not its transcript.
+const promptRows = 10
 
 // codexPromptMarks show in Codex's empty prompt and under it: pix knows it has drawn its prompt.
 var codexPromptMarks = []string{noSpace("Ask Codex to do anything"), noSpace("? for shortcuts")}
@@ -57,7 +58,8 @@ func menuOn(tool string, lines []string) string {
 			}
 		}
 		return "menu"
-	case tool == "claude" && last == claudeMenuFoot:
+	case tool == "claude" && (strings.Contains(last, "to confirm") && strings.Contains(last, "to cancel") ||
+		strings.HasSuffix(last, "again to exit")):
 		// Its question and its option, right above its footer.
 		ask, yes := false, false
 		for _, t := range rows[max(0, len(rows)-claudeMenuRows):] {
@@ -143,6 +145,9 @@ func (s *Session) noteMenu(lines []string, text string) {
 		menu = was // a resize: the menu is drawn again in a moment
 	}
 	s.menu = menu
+	if !s.promptSeen && now.Sub(s.startAt) >= promptWait {
+		s.promptSeen = true // it never showed its usual prompt: stop waiting for it
+	}
 	if menu != "" || !s.promptSeen {
 		s.menuAt = now
 	}
@@ -165,13 +170,37 @@ func (s *Session) noteMenu(lines []string, text string) {
 	s.o.log.Printf("menu %s on screen: holding messages", menu)
 }
 
+// promptWait: how long after the start Codex's grace waits for its prompt at most (its first
+// turn ending ends it too).
+const promptWait = 20 * time.Second
+
+// promptDrawn: Codex's prompt is up (its first turn ended), whatever its screen shows.
+func (s *Session) promptDrawn() {
+	s.mu.Lock()
+	s.promptSeen = true
+	s.mu.Unlock()
+}
+
 // unsent is a message a menu kept from being sent (#306): its text, typed behind the menu (""
 // when the menu showed before it was), the messages in it, your draft pix set aside for it
-// (typed back once it's sent), and the turns started when it was typed.
+// (typed back once it's sent), the turns started when it was typed, and whether a hook said
+// you sent it.
 type unsent struct {
 	text, draft string
 	msgs        []string
 	turns       int
+	sent        bool
+}
+
+// submitted: the agent took prompt (its hook says so); if it holds the unsent message, you
+// sent it from the terminal.
+func (s *Session) submitted(prompt string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.hookPrompts = s.hookPrompts || prompt != ""
+	if u := s.unsent; u != nil && u.text != "" && strings.Contains(norm(prompt), norm(u.text)) {
+		u.sent = true
+	}
 }
 
 // holdBack keeps msgs that a menu stopped (err, a menuUp): queued again if nothing was typed
@@ -203,17 +232,19 @@ func (s *Session) hasUnsent() bool {
 
 // finishUnsent sends the unsent message once its menu is gone, the agent idle and you aren't
 // typing: Enter if its prompt still holds it, then your draft back. If the prompt doesn't (you
-// cleared it), it is queued again; if a turn started, you sent it. sent: it reached the agent.
-// Under flushMu.
+// cleared it), it is queued again; forced past your draft before the menu, it is forced again.
+// A prompt the agent took that holds it (submitted) means you sent it. sent: it reached the
+// agent. Under flushMu.
 func (s *Session) finishUnsent() (sent bool) {
 	s.mu.Lock()
 	u := s.unsent
-	ranTurn := u != nil && s.turns != u.turns
+	// Without a hook that says what it took, a turn that ran with the message in the transcript.
+	yours := u != nil && (u.sent || s.turns != u.turns && !s.hookPrompts && s.inTranscript(u.text))
 	s.mu.Unlock()
 	switch {
 	case u == nil:
 		return false
-	case ranTurn: // you pressed Enter on it yourself
+	case yours: // you pressed Enter on it yourself
 		s.dropUnsent()
 		s.o.log.Printf("the message a menu stopped was sent from the terminal")
 		return true
@@ -231,6 +262,27 @@ func (s *Session) finishUnsent() (sent bool) {
 		return true
 	}
 	s.dropUnsent()
+	if u.text == "" && u.draft != "" {
+		// "Send it anyway" before the menu: still forced, the messages ahead of your draft. Its
+		// deletes may have gone to the menu, leaving your draft in the prompt.
+		if s.promptHolds(u.draft) {
+			s.gate.Restore(u.draft)
+		} else {
+			s.gate.Sent()
+		}
+		if err := s.forceIn(u.msgs); err != nil {
+			s.o.log.Printf("sending the messages a menu stopped: %v", err)
+			s.queue.Requeue(u.msgs)
+			return false
+		}
+		if s.hasUnsent() { // a menu stopped them again
+			return false
+		}
+		if !s.promptHolds(u.draft) { // your draft was set aside, not deleted for good
+			s.restoreDraft(u.draft)
+		}
+		return true
+	}
 	if u.text != "" {
 		s.o.log.Printf("the message a menu stopped is no longer in the prompt: typing it again")
 	}
@@ -239,31 +291,45 @@ func (s *Session) finishUnsent() (sent bool) {
 	return false
 }
 
+// inTranscript: text shows on screen above the prompt, sent. Under mu.
+func (s *Session) inTranscript(text string) bool {
+	t := noSpace(text)
+	return t != "" && strings.Contains(s.screen, t) && !strings.Contains(s.bottom, t)
+}
+
 func (s *Session) dropUnsent() {
 	s.mu.Lock()
 	s.unsent = nil
 	s.mu.Unlock()
 }
 
-// promptHolds: the agent's prompt shows text, or a long paste it shows as a marker.
+// promptHolds: the agent's prompt (its bottom rows) shows text, or a long paste it shows as a
+// marker.
 func (s *Session) promptHolds(text string) bool {
+	if noSpace(text) == "" {
+		return false
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, m := range []string{noSpace(text), noSpace("[Pasted Content"), noSpace("[Pasted text")} {
-		if m != "" && strings.Contains(s.screen, m) {
+		if strings.Contains(s.bottom, m) {
 			return true
 		}
 	}
 	return false
 }
 
-// restoreDraft types your draft back after pix set it aside ("": none).
+// restoreDraft types your draft back after pix set it aside ("": none), unless the prompt still
+// shows it (what deleted it went to a menu).
 func (s *Session) restoreDraft(draft string) {
 	if draft == "" {
 		return
 	}
 	time.Sleep(forceSettle)
 	s.gate.Restore(draft)
+	if s.promptHolds(draft) {
+		return
+	}
 	s.runner.WriteToAgent(Paste(draft))
 }
 
