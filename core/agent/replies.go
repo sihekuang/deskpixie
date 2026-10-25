@@ -118,10 +118,19 @@ func (c *AgentController) settleHeldCards(now Millis, fx *[]Effect) {
 }
 
 // repliesShown marks the lines of a card the deck showed delivered, so they aren't replayed.
+// A line held for the conversation opening to say it stays (#319): the deck never shows a held
+// card, so only the chat thread read it, and Pixie still says it; if the open fails, the card
+// shows and the deck reports it.
 func (c *AgentController) repliesShown(ids []uint64, fx *[]Effect) {
+	held := map[uint64]bool{}
+	for _, card := range c.heldCards {
+		for _, id := range card.Lines {
+			held[id] = true
+		}
+	}
 	shown := map[uint64]bool{}
 	for _, id := range ids {
-		shown[id] = true
+		shown[id] = !held[id]
 	}
 	for _, r := range c.outbox.MarkDeliveredWhere(func(l OutboxLine) bool { return shown[l.ID] }) {
 		*fx = append(*fx, Effect{Kind: EfAppend, File: OutboxFile, Line: r})

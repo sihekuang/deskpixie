@@ -215,6 +215,31 @@ func TestAnOpenedConversationDropsTheHeldCard(t *testing.T) {
 	}
 }
 
+// #319: the chat window shows the update and reads it while the conversation opens; Pixie still
+// says it when it opens.
+func TestAChatReadWhileItOpensStillLetsPixieSayIt(t *testing.T) {
+	c := ctlWith(func(s *Settings) { s.OpenConversation = true; s.SessionTurns = true })
+	lines := outboxLines(sessionTurn(c, longTurn, T0))
+	c.Step(RepliesShownInput([]uint64{lines[0].ID}), T0+100)
+	wantContains(t, c.Step(voiceOpened(), T0+300),
+		eInject("Coordinator replies while you were away:\n- Session update: "+longTurnLine), "said")
+}
+
+// #319: the open fails after the chat window read it: the card shows and the read counts.
+func TestAChatReadWhileItOpensCountsOnceTheOpenFails(t *testing.T) {
+	c := ctlWith(func(s *Settings) { s.OpenConversation = true; s.SessionTurns = true })
+	lines := outboxLines(sessionTurn(c, longTurn, T0))
+	c.Step(RepliesShownInput([]uint64{lines[0].ID}), T0+100)
+	cards := replies(c.Step(voiceClosed(), T0+1_000)) // failed connect
+	if len(cards) != 1 {
+		t.Fatal("no card after the failed open")
+	}
+	c.Step(RepliesShownInput(cards[0].Lines), T0+1_100)
+	if n := len(c.outbox.Undelivered()); n != 0 {
+		t.Fatalf("%d lines undelivered once shown", n)
+	}
+}
+
 // Once no open is coming (here: refused, to be retried, then text mode turned on), the card
 // shows at once.
 func TestAHeldCardShowsWhenNoOpenIsComing(t *testing.T) {
