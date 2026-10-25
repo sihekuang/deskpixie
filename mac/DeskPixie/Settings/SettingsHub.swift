@@ -14,7 +14,7 @@ enum SettingsHub {
     static func model(for composition: CompositionRoot) -> SettingsModel {
         if let shared { return shared }
         let model = SettingsModel(client: EngineSettingsClient(engine: composition.engine))
-        model.keyStore = KeychainSecrets()
+        model.keyStore = KeychainSecrets.forApp(bundleID: Bundle.main.bundleIdentifier)
         model.rebindHotkey = { [weak composition] combo, previous in
             guard let composition else { return false }
             return bind(combo, previous: previous, composition: composition)

@@ -12,10 +12,23 @@ import (
 	"github.com/sihekuang/deskpixie/core/agent/agenttest"
 )
 
-// recChat records the text box's lines.
+// recChat records the text box's lines, and the typed jobs that ended with none.
 type recChat struct {
 	mu    sync.Mutex
 	lines []ChatLine
+	ended []JobID
+}
+
+func (r *recChat) ChatEnded(job JobID) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ended = append(r.ended, job)
+}
+
+func (r *recChat) Ended() []JobID {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.ended)
 }
 
 func (r *recChat) Chat(l ChatLine) {
@@ -119,6 +132,9 @@ func TestChatStopCancelsTheTypedJob(t *testing.T) {
 		}
 		if r.h.JobStatus()[0].Status != JobCancelled {
 			t.Fatal(r.h.JobStatus())
+		}
+		if got := r.chat.Ended(); !slices.Equal(got, []JobID{"job_000000000001"}) {
+			t.Fatal("the chat sink is told the stopped job ended:", got)
 		}
 		r.h.ChatStop() // nothing open: no-op
 		settle()

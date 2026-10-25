@@ -3,11 +3,13 @@ package app
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -105,28 +107,141 @@ func TestSendingAddsYourMessage(t *testing.T) {
 	}
 }
 
+// rosterWith is a roster where w1 is a running session of yours and w2 one of Pixie's workers.
+func rosterWith() map[string]any {
+	return map[string]any{
+		"agents": []map[string]any{{"name": "coordinator", "kind": "coordinator", "reachable": true},
+			{"name": "w2", "label": "w2", "kind": "worker", "reachable": true}},
+		"yours": []map[string]any{{"name": "w1", "label": "docs", "kind": "session", "reachable": true},
+			{"name": "w3", "label": "gone", "kind": "session", "reachable": false}},
+	}
+}
+
 func TestSendingToASessionAsksTheCoordinatorToTellIt(t *testing.T) {
-	f := &fakeAgent{tray: AgentTray{Enabled: true}}
+	f := &fakeAgent{tray: AgentTray{Enabled: true}, roster: rosterWith()}
 	h := newHarness(t, withAgent(f))
 	now := time.Now().UnixMilli()
 	f.hooks.ThreadLine(sessionLine(1, "w1", "docs (old)", "started", now-2*(chat.JoinMs+1)))
-	f.hooks.ThreadLine(sessionLine(2, "w1", "docs", "done", now-(chat.JoinMs+1)))
+	f.hooks.ThreadLine(sessionLine(2, "w1", "docs (renamed)", "done", now-(chat.JoinMs+1)))
 	f.hooks.ThreadLine(sessionLine(3, "w2", "api", "busy", now))
 	h.call("chat.send", map[string]any{"text": "ship it", "session": "w1"})
-	h.call("chat.send", map[string]any{"text": "hi", "session": "w9"}) // nothing from it: its address
-	if !slices.Equal(f.sent, []string{"Tell the docs session: ship it", "Tell the w9 session: hi"}) {
+	h.call("chat.send", map[string]any{"text": "hi", "session": "w2"}) // a worker
+	// Named as the roster names them now (#302 review M5), not as the thread last did.
+	if !slices.Equal(f.sent, []string{"Tell the docs session: ship it", "Tell the w2 worker: hi"}) {
 		t.Fatal(f.sent)
 	}
 	got := h.entries(nil)
 	if got[1].Who.Kind != "you" || got[1].Text != "ship it" || !slices.Equal(got[1].Sessions, []string{"w1"}) {
 		t.Fatalf("your reply = %+v", got[1])
 	}
-	if got[0].Text != "hi" || !slices.Equal(got[0].Sessions, []string{"w9"}) {
+	if got[0].Text != "hi" || !slices.Equal(got[0].Sessions, []string{"w2"}) {
 		t.Fatalf("your reply = %+v", got[0])
 	}
 	// The session's lines keep the label they came with.
 	if old := got[4]; old.Text != "started" || old.Who.Label != "docs (old)" {
 		t.Fatalf("relabelled: %+v", old)
+	}
+	h.call("chat.send", map[string]any{"text": "and you", "session": "w4"}) // in neither: its address
+	if last := f.sent[len(f.sent)-1]; last != "Tell the w4 session: and you" {
+		t.Fatal(last)
+	}
+}
+
+// #302 (one recipient per message): chat.send refuses, adds nothing and tells no one.
+func TestChatSendRefusesMoreThanOneRecipient(t *testing.T) {
+	f := &fakeAgent{tray: AgentTray{Enabled: true}, roster: rosterWith()}
+	h := newHarness(t, withAgent(f))
+	f.hooks.ThreadLine(sessionLine(1, "w3", "docs (gone)", "done", 0))
+	f.hooks.ThreadLine(sessionLine(2, "w5", "old docs", "done", 0))
+	f.hooks.ThreadLine(sessionLine(3, "w1", "docs (renamed)", "done", 0))
+	cases := []struct {
+		args map[string]any
+		want string
+	}{
+		{map[string]any{"text": "ship it, @w2", "session": "w1"}, "This goes to docs only. Remove @w2, or pick them instead."},
+		{map[string]any{"text": "@w1 and @W2"}, "Send to one at a time: pick @w1 or @W2."},
+		{map[string]any{"text": "@w1 ship it"}, "Pick @w1 from the list to send it to them."},
+		{map[string]any{"text": "ship it, @w2", "session": "w1"}, "This goes to docs only. Remove @w2, or pick them instead."},
+		// w3 is still listed, not reachable: its roster label, not the thread's.
+		{map[string]any{"text": "hi", "session": "w3"}, "gone isn't running anymore."},
+		// w5 isn't listed at all: the thread's label.
+		{map[string]any{"text": "hi", "session": "w5"}, "old docs isn't running anymore."},
+		{map[string]any{"text": "hi", "session": "w9"}, "w9 isn't running anymore."},
+		{map[string]any{"text": "hi", "session": ""}, "That session isn't running anymore."},
+	}
+	before := len(h.entries(nil))
+	for _, c := range cases {
+		c.args["from"] = "window"
+		_, err := h.callErr("chat.send", c.args)
+		if err == nil || err.Error() != c.want {
+			t.Errorf("%v: %v, want %q", c.args, err, c.want)
+		}
+		if code := codeOf(err); code != "refused" {
+			t.Errorf("%v: code %q, want refused (the shell shows it as a refusal)", c.args, code)
+		}
+	}
+	if f.delegated != 0 || len(f.sent) != 0 {
+		t.Fatalf("a refused message went: delegated %d, sent %q", f.delegated, f.sent)
+	}
+	if n := len(h.entries(nil)); n != before {
+		t.Fatalf("a refused message joined the thread: %d entries, was %d", n, before)
+	}
+	// Fine: a mention of the target itself, a word that names no one, an email address.
+	h.call("chat.send", map[string]any{"text": "@w1 ship it", "session": "w1", "from": "window"})
+	h.call("chat.send", map[string]any{"text": "ask @nobody, mail me@w1.com", "from": "window"})
+	if !slices.Equal(f.sent, []string{"Tell the docs session: @w1 ship it", "ask @nobody, mail me@w1.com"}) {
+		t.Fatalf("sent %q", f.sent)
+	}
+}
+
+// codeOf is the code a call's error carries to the shell (bridge.Coder), "" for none.
+func codeOf(err error) string {
+	var c interface{ Code() string }
+	if errors.As(err, &c) {
+		return c.Code()
+	}
+	return ""
+}
+
+// The box under Pixie keeps today's behaviour (#302 scope): no `from`, no one-recipient rule.
+func TestTheBoxUnderPixieSendsAsBefore(t *testing.T) {
+	f := &fakeAgent{tray: AgentTray{Enabled: true}, roster: rosterWith()}
+	h := newHarness(t, withAgent(f))
+	h.call("chat.send", map[string]any{"text": "@w1 and @w2, both of you"})
+	h.call("chat.send", map[string]any{"text": "@w1 ship it", "session": ""})
+	if !slices.Equal(f.sent, []string{"@w1 and @w2, both of you", "@w1 ship it"}) || f.delegated != 0 {
+		t.Fatalf("sent %q, delegated %d", f.sent, f.delegated)
+	}
+	// The same text from the window is refused.
+	if _, err := h.callErr("chat.send", map[string]any{"text": "@w1 and @w2, both of you", "from": "window"}); err == nil ||
+		err.Error() != "Send to one at a time: pick @w1 or @w2." {
+		t.Fatal("the window's send went:", err)
+	}
+	if len(f.sent) != 2 {
+		t.Fatal("a refused send went:", f.sent)
+	}
+}
+
+func TestChatRecipientsAreTheRostersRunningSessionsAndWorkers(t *testing.T) {
+	f := &fakeAgent{roster: rosterWith()}
+	h := newHarness(t, withAgent(f))
+	out := string(h.call("chat.recipients", nil))
+	want := `{"recipients":[{"name":"w1","label":"docs","kind":"session","yours":true,"color":` +
+		strconv.Itoa(chat.ColorFor("w1")) + `},{"name":"w2","label":"w2","kind":"worker","color":` + strconv.Itoa(chat.ColorFor("w2")) + `}]}`
+	if out != want {
+		t.Fatal(out)
+	}
+	f.hooks.Roster(map[string]any{"yours": []map[string]any{{"name": "w5", "label": "new", "kind": "session", "reachable": true}}})
+	e := h.waitFor("chat.recipients", nil, time.Second)
+	if b, _ := json.Marshal(e); !strings.Contains(string(b), `"name":"w5"`) {
+		t.Fatal("the roster changed and the recipients didn't follow:", string(b))
+	}
+}
+
+func TestChatRecipientsWithTheAgentOff(t *testing.T) {
+	h := newHarness(t)
+	if out := string(h.call("chat.recipients", nil)); out != `{"recipients":[]}` {
+		t.Fatal(out)
 	}
 }
 
@@ -444,7 +559,7 @@ func TestOneTypedJobKeepsEveryTurn(t *testing.T) {
 
 // #302 review (I4): a reply to a session is never taken for the answer to a waiting question.
 func TestASessionReplyIsNeverTakenForAWaitingAnswer(t *testing.T) {
-	f := &fakeAgent{tray: AgentTray{Enabled: true}}
+	f := &fakeAgent{tray: AgentTray{Enabled: true}, roster: rosterWith()}
 	h := newHarness(t, withAgent(f))
 	f.hooks.ThreadRequests([]chat.Entry{jobQuestion(1, "job_000000000009", "Which repo?")})
 	f.asking = "job_000000000009"
@@ -594,5 +709,105 @@ func TestLinesHeardElsewhereAreRead(t *testing.T) {
 	h.call("chat.read", map[string]any{"upTo": h.entries(nil)[0].ID})
 	if !slices.Equal(f.shownReplies(), []uint64{8}) {
 		t.Fatal("a heard line was shown again:", f.shownReplies())
+	}
+}
+
+// liveOf is a chat.live event's who, job and text.
+func liveOf(ev event) string {
+	job, _ := ev["job"].(string)
+	return fmt.Sprintf("%v/%s/%v", ev["who"], job, ev["text"])
+}
+
+// #302 Task 8b: live lines come from heard, saying and a typed job's steps; each clears before
+// its final entry (on a transcript, the job's answer, the mic going off, or a reset); none is
+// stored.
+func TestLiveLinesComeAndGo(t *testing.T) {
+	f := &fakeAgent{tray: AgentTray{Enabled: true}}
+	h := newHarness(t, withAgent(f))
+	h.take()
+	order := func(evs []event) []string {
+		var out []string
+		for _, ev := range evs {
+			switch ev["kind"] {
+			case "chat.live":
+				out = append(out, "live "+liveOf(ev))
+			case "chat.entry":
+				out = append(out, "entry "+entryOf(t, ev).Text)
+			}
+		}
+		return out
+	}
+	expect := func(what string, want ...string) {
+		t.Helper()
+		if got := order(h.take()); !slices.Equal(got, want) {
+			t.Fatalf("%s: got %q, want %q", what, got, want)
+		}
+	}
+
+	// Yours: the caption grows, then your transcript clears it before its entry.
+	h.app.onVoiceEvent(voice.UIEvent{Kind: "heard", Text: "what"})
+	h.app.onVoiceEvent(voice.UIEvent{Kind: "heard", Text: "what time"})
+	h.app.onVoiceEvent(voice.UIEvent{Kind: "heard", Text: "what time"}) // the same: nothing new
+	h.app.onVoiceEvent(voice.UIEvent{Kind: "transcript", Role: "user", Text: "what time is it"})
+	expect("yours", "live you//what", "live you//what time", "live you//", "entry what time is it")
+
+	// Pixie's, the same way; a blank transcript still clears.
+	h.app.onVoiceEvent(voice.UIEvent{Kind: "saying", Text: "Ten"})
+	h.app.onVoiceEvent(voice.UIEvent{Kind: "transcript", Role: "assistant", Text: "Ten past three."})
+	h.app.onVoiceEvent(voice.UIEvent{Kind: "saying", Text: "And"})
+	h.app.onVoiceEvent(voice.UIEvent{Kind: "transcript", Role: "assistant", Text: " "})
+	expect("Pixie's", "live pixie//Ten", "live pixie//", "entry Ten past three.", "live pixie//And", "live pixie//")
+
+	// The mic going off clears what was cut off.
+	h.app.onVoiceEvent(voice.UIEvent{Kind: "heard", Text: "never mind"})
+	h.app.onVoiceEvent(voice.UIEvent{Kind: "saying", Text: "Sure"})
+	h.app.onVoiceEvent(voice.UIEvent{Kind: "mic", Text: "stop"})
+	expect("mic off", "live you//never mind", "live pixie//Sure", "live you//", "live pixie//")
+
+	// The coordinator's step, by job, cleared by the job's answer (the feed clears first).
+	f.hooks.ThreadLive("j1", "Reading the logs.")
+	f.hooks.ThreadLive("j2", "Looking.")
+	f.hooks.ThreadLive("j1", "")
+	f.hooks.ThreadAnswer(chat.Entry{ID: "jobj1.1", Who: chat.Who{Kind: "coordinator"}, Text: "Found it."})
+	expect("coordinator", "live coordinator/j1/Reading the logs.", "live coordinator/j2/Looking.",
+		"live coordinator/j1/", "entry Found it.")
+
+	// A reset clears every line still live.
+	h.app.onVoiceEvent(voice.UIEvent{Kind: "heard", Text: "hey"})
+	h.take()
+	h.call("chat.clear", nil)
+	evs := h.take()
+	if r := h.kinds(evs, "chat.reset"); len(r) != 1 {
+		t.Fatal("no reset")
+	}
+	if got := order(evs); !slices.Equal(got, []string{"live coordinator/j2/", "live you//"}) {
+		t.Fatalf("reset: %q", got)
+	}
+	h.app.onVoiceEvent(voice.UIEvent{Kind: "heard", Text: "again"}) // live again after a reset
+	if got := order(h.take()); !slices.Equal(got, []string{"live you//again"}) {
+		t.Fatalf("after reset: %q", got)
+	}
+
+	// Nothing live is stored: only the finished words are entries, and live events alone
+	// don't touch the badge.
+	h.app.onVoiceEvent(voice.UIEvent{Kind: "saying", Text: "Hmm"})
+	if n := len(h.kinds(h.take(), "chat.badge")); n != 0 {
+		t.Fatalf("a live line sent %d badges", n)
+	}
+	if n := len(h.entries(nil)); n != 0 {
+		t.Fatalf("entries after clear = %d", n)
+	}
+	f.hooks.ThreadAnswer(chat.Entry{ID: "jobj2.1", Who: chat.Who{Kind: "coordinator"}, Text: "Done."})
+	for _, e := range h.entries(nil) {
+		if e.Text != "Done." {
+			t.Fatalf("a live line was stored: %+v", e)
+		}
+	}
+	b, err := os.ReadFile(filepath.Join(h.dir, "chat", "thread.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(b, []byte("Done.")) || (bytes.Contains(b, []byte("Hmm")) || bytes.Contains(b, []byte("again")) || bytes.Contains(b, []byte("Looking."))) {
+		t.Fatalf("a live line is in thread.jsonl: %s", b)
 	}
 }

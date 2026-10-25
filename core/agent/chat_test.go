@@ -390,3 +390,20 @@ func TestATypedMessagesLinesNameItsSessions(t *testing.T) {
 		t.Fatalf("no session: %+v", got)
 	}
 }
+
+// #302 Task 8b fix round 1: Stop on a typed job says no line, so it says the job ended (the
+// chat thread's live step for it goes); a job not typed doesn't.
+func TestStoppingATypedJobSaysItEnded(t *testing.T) {
+	c := typedOnJob1()
+	fx := c.Step(CancelInput(job(1)), T0+10)
+	if !slices.ContainsFunc(fx, func(e Effect) bool { return e.Kind == EfChatEnded && e.Job == job(1) }) {
+		t.Fatalf("no EfChatEnded: %s", fmtEffects(fx))
+	}
+	if len(chats(fx)) != 0 {
+		t.Fatalf("Stop says no line: %s", fmtEffects(fx))
+	}
+	c = workingOnJob1()
+	if fx := c.Step(CancelInput(job(1)), T0); anyKind(fx, EfChatEnded) {
+		t.Fatalf("a job not typed: %s", fmtEffects(fx))
+	}
+}

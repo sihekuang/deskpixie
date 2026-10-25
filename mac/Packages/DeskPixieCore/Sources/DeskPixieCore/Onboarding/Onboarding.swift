@@ -464,11 +464,11 @@ public enum OnboardingChecks {
     }
 }
 
-/// Whether the app stays in the Dock when one of its windows closes: Settings and the first-run
-/// window each make it a regular app while open, so closing one must not drop the other's Dock
+/// Whether the app stays in the Dock when one of its windows closes: Settings, the first-run
+/// window and the chat window (#302) each make it a regular app while open, so closing one must not drop the other's Dock
 /// icon (a minimized one still needs its tile). Other windows (the canvas) never show in the Dock.
 public enum DockPresence {
-    public static let windowIDs: Set<String> = ["settings", "onboarding"]
+    public static let windowIDs: Set<String> = ["settings", "onboarding", "chat"]
 
     public struct Window: Equatable, Sendable {
         public let id: String

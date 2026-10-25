@@ -15,6 +15,9 @@ import (
 // chat.clear; every change comes back as `chat.entry` (an entry added or changed), `chat.needs`
 // (the open requests, when they change) and `chat.badge` (what Pixie's badge shows), and
 // `chat.reset` when entries went (cleared, or older than chatKeepDays): the window reloads.
+// `chat.live {who, text, job?}` is words still coming, never stored: yours and Pixie's while
+// you talk, a typed job's step while it works; an empty text clears that line, and every line
+// clears before its final entry comes.
 // What you send, what you and Pixie say aloud, the agent's lines and requests, and your answers
 // to them all land here.
 
@@ -92,13 +95,46 @@ func (op *threadOp) sent(e chat.Entry) {
 	op.a.emit("chat.entry", map[string]any{"entry": e})
 }
 
-// end sends chat.reset when entries went, the open requests when they changed and the badge
+// liveKey is one live line: who (you, pixie or coordinator), and the job for the coordinator.
+type liveKey struct{ who, job string }
+
+// live sets who's live line (job's, for the coordinator) to text, "" clears it, and says so
+// when it changed.
+func (op *threadOp) live(who, job, text string) {
+	a, k := op.a, liveKey{who, job}
+	if a.live[k] == text {
+		return
+	}
+	if text == "" {
+		delete(a.live, k)
+	} else {
+		if a.live == nil {
+			a.live = map[liveKey]string{}
+		}
+		a.live[k] = text
+	}
+	f := map[string]any{"who": who, "text": text}
+	if job != "" {
+		f["job"] = job
+	}
+	a.emit("chat.live", f)
+}
+
+// end sends chat.reset when entries went (and clears every live line), the open requests when they changed and the badge
 // after any change, then unlocks.
 func (op *threadOp) end() {
 	a := op.a
 	defer a.threadMu.Unlock()
 	if op.reset {
 		a.emit("chat.reset", nil)
+		keys := make([]liveKey, 0, len(a.live))
+		for k := range a.live {
+			keys = append(keys, k)
+		}
+		slices.SortFunc(keys, func(x, y liveKey) int { return strings.Compare(x.who+"\x00"+x.job, y.who+"\x00"+y.job) })
+		for _, k := range keys {
+			op.live(k.who, k.job, "")
+		}
 	}
 	if !op.changed && !op.reset {
 		return
@@ -251,11 +287,16 @@ func fixedOutcome(text string) func(chat.Entry) string {
 	return func(chat.Entry) string { return text }
 }
 
-// threadSpoken is a transcript from the voice loop: yours, or Pixie's (read: you heard it).
+// threadLive is who's live line now (job's, for the coordinator); "" clears it.
+func (a *App) threadLive(who, job, text string) {
+	op := a.beginThread()
+	defer op.end()
+	op.live(who, job, text)
+}
+
+// threadSpoken is a transcript from the voice loop: yours, or Pixie's (read: you heard it). Its
+// live line clears first, so it never shows after the words it was.
 func (a *App) threadSpoken(role, text string) {
-	if strings.TrimSpace(text) == "" {
-		return
-	}
 	var e chat.Entry
 	switch role {
 	case "user":
@@ -265,8 +306,14 @@ func (a *App) threadSpoken(role, text string) {
 	default:
 		return
 	}
+	op := a.beginThread()
+	defer op.end()
+	op.live(e.Who.Kind, "", "")
+	if strings.TrimSpace(text) == "" {
+		return
+	}
 	e.Text, e.Spoken = text, true
-	a.threadAdd(e)
+	op.add(e)
 }
 
 // sessionLabel is the label of the newest entry from the session at this address, else the

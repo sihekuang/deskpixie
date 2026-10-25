@@ -269,3 +269,45 @@ func TestADoneChatLineReachesThreadAnswer(t *testing.T) {
 		t.Fatalf("%+v", got)
 	}
 }
+
+// #302 Task 8b: a coordinator's working line is its job's live step; the job's next other line
+// clears it before the thread gets that line. A session's own turn has no live line.
+func TestAWorkingLineIsTheJobsLiveStepUntilItsAnswer(t *testing.T) {
+	var got []string
+	f := newThreadFeed(app.AgentHooks{
+		ThreadLive:   func(job, text string) { got = append(got, "live "+job+" "+text) },
+		ThreadAnswer: func(e chat.Entry) { got = append(got, "entry "+e.Text) },
+	})
+	answers(f, agent.ChatLine{Job: "j1", Status: "working", Text: "Looking at the logs."},
+		agent.ChatLine{Job: "j1", Status: "working", Text: "Running the tests."},
+		agent.ChatLine{Job: "j1", Status: "done", Text: "All green."},
+		agent.ChatLine{Job: "j2", Status: "working", Text: "Asking."},
+		agent.ChatLine{Job: "j2", Status: "question", Text: "Which repo?", Asking: true},
+		agent.ChatLine{Job: "j3", Status: "working", Text: "Typing.", Session: "api-claude"},
+		agent.ChatLine{Job: "j3", Status: "failed", Text: "It stopped."})
+	want := []string{"live j1 Looking at the logs.", "live j1 Running the tests.", "live j1 ", "entry All green.",
+		"live j2 Asking.", "live j2 ", "live j3 ", "entry It stopped."}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %q", got)
+	}
+	// No live hook: answers still reach the thread.
+	var n int
+	answers(newThreadFeed(app.AgentHooks{ThreadAnswer: func(chat.Entry) { n++ }}), agent.ChatLine{Job: "j", Status: "done", Text: "ok"})
+	if n != 1 {
+		t.Fatal("an answer was lost with no live hook")
+	}
+}
+
+// #302 Task 8b fix round 1: a stopped typed job (no line follows) clears its live step.
+func TestAStoppedJobsStepClears(t *testing.T) {
+	var got []string
+	f := newThreadFeed(app.AgentHooks{ThreadLive: func(job, text string) { got = append(got, job+" "+text) }})
+	sink := chatSink{hooks: app.AgentHooks{Chat: func(any) {}}, feed: f}
+	sink.Chat(agent.ChatLine{Job: "j1", Status: "working", Text: "Reading the logs."})
+	var ender agent.ChatEnder = sink // the runtime finds it on the chat sink
+	ender.ChatEnded("j1")
+	chatSink{hooks: app.AgentHooks{Chat: func(any) {}}}.ChatEnded("j2") // nil feed: nothing
+	if !reflect.DeepEqual(got, []string{"j1 Reading the logs.", "j1 "}) {
+		t.Fatalf("%q", got)
+	}
+}

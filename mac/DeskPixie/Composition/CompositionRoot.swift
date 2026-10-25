@@ -47,5 +47,6 @@ final class CompositionRoot {
         coordinator = EngineCoordinator(appState: appState, engine: engine, voiceIO: voiceIO,
                                         ring: ring, micRing: micRing, pump: pump, hotkey: hotkey)
         coordinator.settingsModel = { [unowned self] in SettingsHub.model(for: self) }
+        coordinator.chatModel = { [unowned self] in ChatHub.model(for: self) }
     }
 }

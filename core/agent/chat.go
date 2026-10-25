@@ -32,6 +32,12 @@ type ChatSink interface {
 	Chat(ChatLine)
 }
 
+// ChatEnder is a ChatSink that is also told when a typed job ends with no line to say so
+// (Stop), so what it shows of the job's work in progress can go (#302).
+type ChatEnder interface {
+	ChatEnded(JobID)
+}
+
 // LastTyped is the newest job typed in the text box ("" = none).
 func (c *AgentController) LastTyped() JobID { return c.lastTyped }
 

@@ -47,6 +47,9 @@ type AgentHooks struct {
 	// ThreadAnswer is a typed job's answer (a done or failed ChatLine), one entry per turn; an
 	// answer that grows comes again with the same id.
 	ThreadAnswer func(chat.Entry)
+	// ThreadLive is a typed job's step while it works (a working ChatLine's text), shown live in
+	// the chat window and never stored; "" clears it. It clears before the job's answer comes.
+	ThreadLive func(job, text string)
 	// ThreadDelivered: these outbox lines were heard (replayed in a conversation) or seen (in the
 	// bubble), so the entries holding them are read.
 	ThreadDelivered func([]uint64)

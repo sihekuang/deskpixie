@@ -35,6 +35,9 @@ struct AgentRosterView: View {
     /// Pixie's "Want me to take this?" for a new copy (#240), nil when not up.
     let offer: ClipboardKind?
     let onOffer: () -> Void
+    /// The round button that shows and hides the chat window (#302).
+    let chatWindow: ChatWindowPresence
+    let onChatWindow: () -> Void
 
     static let listWidth: CGFloat = 260
 
@@ -50,6 +53,9 @@ struct AgentRosterView: View {
                     })
                 }
                 ReplyModeToggle(mode: chat.mode, onPick: onMode)
+                // A window, not a third mode: set apart from the toggle.
+                Rectangle().fill(.separator).frame(width: 1, height: 22)
+                ChatWindowButton(toggle: chatWindow.toggle, onClick: onChatWindow)
             }
             // Its own width, not the card's: a wider card would stretch the chip's frame up to
             // maxChipWidth and open a gap before the toggle (#227).

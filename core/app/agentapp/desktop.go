@@ -124,6 +124,9 @@ func (c chatSink) Chat(l agent.ChatLine) {
 	c.feed.answer(l)
 }
 
+// ChatEnded: a typed job ended with no line (Stop): its live step goes from the thread.
+func (c chatSink) ChatEnded(job agent.JobID) { c.feed.stopped(job) }
+
 // replySink: a reply card → the app's `reply.card` event.
 type replySink struct{ hooks app.AgentHooks }
 

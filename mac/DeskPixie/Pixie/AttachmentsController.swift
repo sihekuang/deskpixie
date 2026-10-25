@@ -1,12 +1,15 @@
 import AppKit
 import DeskPixieCore
+import Observation
 import os
 import UniformTypeIdentifiers
 
 /// The attachments waiting for the next request (#240), on the shell's side: the chips' model,
 /// the hint row ("Screenshot copied · Attach"), and every way in (the hint, Cmd-V, a drop, 📎,
-/// Pixie's take_clipboard). The core keeps the files; this hands it what to add.
+/// Pixie's take_clipboard). The core keeps the files; this hands it what to add. Observable, so
+/// the chat window's box (#302) redraws with the same chips as the box under Pixie.
 @MainActor
+@Observable
 final class AttachmentsController {
     nonisolated private static let log = Logger(subsystem: "com.sihekuang.deskpixie", category: "attachments")
 

@@ -139,6 +139,9 @@ type App struct {
 	thread   *chat.Store
 	threadMu sync.Mutex
 	sentSeq  int64 // the last of your sent entries' numbers (threadSent); under threadMu
+	// live is the words still coming (chat.live): yours and Pixie's while you speak, and each
+	// typed job's step while it works. Never stored; under threadMu.
+	live map[liveKey]string
 
 	// localTools are built once and shared by the voice loop (voiceTools) and the agent.
 	localTools []tools.Tool
@@ -250,15 +253,19 @@ func New(d Deps) (*App, error) {
 			NotifyUpdate: func(title, body string, update any) {
 				a.emit("notify", map[string]any{"title": title, "body": body, "update": update})
 			},
-			Updates:         func(items any) { a.emit("updates", map[string]any{"lines": items}) },
-			Reply:           func(c any) { a.emit("reply.card", fieldsOf(c)) },
-			Roster:          func(view any) { a.emit("agents", map[string]any{"roster": view}) },
+			Updates: func(items any) { a.emit("updates", map[string]any{"lines": items}) },
+			Reply:   func(c any) { a.emit("reply.card", fieldsOf(c)) },
+			Roster: func(view any) {
+				a.emit("agents", map[string]any{"roster": view})
+				a.emit("chat.recipients", map[string]any{"recipients": recipientsOf(view)})
+			},
 			ShowPane:        func(job, worker string) { a.emit("showPane", map[string]any{"job": job, "worker": worker}) },
 			Focus:           func(plan any) { a.emit("focusPlan", map[string]any{"plan": plan}) },
 			Chat:            func(line any) { a.emit("chat.line", fieldsOf(line)) },
 			ThreadLine:      a.threadAdd,
 			ThreadRequests:  a.threadRequests,
 			ThreadAnswer:    a.threadAdd,
+			ThreadLive:      func(job, text string) { a.threadLive("coordinator", job, text) },
 			ThreadDelivered: a.threadDelivered,
 		})
 		if a.agent != nil {
@@ -488,6 +495,16 @@ func (a *App) onVoiceEvent(ev voice.UIEvent) {
 		return
 	case "transcript":
 		a.threadSpoken(ev.Role, ev.Text)
+	case "heard":
+		a.threadLive("you", "", ev.Text)
+	case "saying":
+		a.threadLive("pixie", "", ev.Text)
+	case "mic":
+		if ev.Text == "stop" {
+			// The conversation ended: words cut off with no transcript don't stay live.
+			a.threadLive("you", "", "")
+			a.threadLive("pixie", "", "")
+		}
 	case "mouth":
 		// Non-zero only while Pixie's reply is audibly playing: feeds the agent's echo gate.
 		if a.agent != nil {

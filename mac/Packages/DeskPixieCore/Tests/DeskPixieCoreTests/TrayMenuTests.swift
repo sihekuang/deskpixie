@@ -75,7 +75,7 @@ final class TrayMenuTests: XCTestCase {
             "label:Voice: connection lost", "--",
             "label:Coordinator: herdr not found", "--",
             "menu:Size", "reset-position", "menu:Pixie", "menu:Canvas",
-            "menu:Coordinator", "--", "mic-mode", "onboarding", "settings", "--", "quit",
+            "menu:Coordinator", "--", "chat", "mic-mode", "onboarding", "settings", "--", "quit",
         ])
         XCTAssertTrue(items.contains(.action(.init(id: "settings", title: "Settings…", shortcut: ","))))
         let pixie = try XCTUnwrap(submenu(items, "Pixie"))
@@ -126,7 +126,7 @@ final class TrayMenuTests: XCTestCase {
 
     func testNoAppStateShowsOnlyAppItems() {
         let items = TrayMenu.build(nil, localStatusLines: ["Engine error: x"], micModeAvailable: true)
-        XCTAssertEqual(titles(items), ["label:Engine error: x", "--", "mic-mode", "onboarding", "settings", "--", "quit"])
+        XCTAssertEqual(titles(items), ["label:Engine error: x", "--", "chat", "mic-mode", "onboarding", "settings", "--", "quit"])
     }
 
     func testEmptyAgentHasDisabledCancel() throws {
@@ -146,6 +146,17 @@ final class TrayMenuTests: XCTestCase {
         XCTAssertTrue(TrayMenu.isLocal("settings"))
         XCTAssertTrue(TrayMenu.isLocal("mic-mode"))
         XCTAssertFalse(TrayMenu.isLocal("state:idle"))
+    }
+
+    func testChatIsALocalTrayRoute() {
+        // #302: Chat… opens the chat window in Swift; it never reaches app.action.
+        XCTAssertTrue(TrayMenu.isLocal("chat"))
+        XCTAssertEqual(TrayMenu.route("chat"), .chat)
+        let items = TrayMenu.build(nil, localStatusLines: [], micModeAvailable: false)
+        XCTAssertTrue(items.contains(.action(.init(id: "chat", title: "Chat…", shortcut: "c", shift: true))))
+        let starting = TrayMenu.build(nil, localStatusLines: [], micModeAvailable: false, starting: true)
+        XCTAssertTrue(starting.contains(.action(.init(id: "chat", title: "Chat…", enabled: false, shortcut: "c", shift: true))),
+                      "the window reads the core, so it waits like Settings…")
     }
 
     // MARK: Mic Mode (ports of crates/audio-macos/src/mic_modes.rs tests, 2)

@@ -121,6 +121,18 @@ public enum EngineEvent: Sendable, Equatable {
     case attachments([AttachmentItem])
     /// Pixie's take_clipboard: read the clipboard, add what's there, then call clipboard.done.
     case clipboardRead(request: String)
+    /// An entry in the chat thread was added or changed (#302).
+    case chatEntry(ChatEntry)
+    /// The open requests in the chat thread, the whole set (#302).
+    case chatNeeds([ChatEntry])
+    /// What Pixie's badge shows, with the newest entry that came (#302).
+    case chatBadge(ChatBadge)
+    /// The thread's entries went (cleared, or aged out): load it again (#302).
+    case chatReset
+    /// Words still coming in the chat thread, never stored; empty text clears (#302).
+    case chatLive(ChatLive)
+    /// Who a message in the chat window can go to on its own now, the whole list (#302).
+    case chatRecipients([ChatRecipient])
 
     private struct Kind: Decodable { var kind: String }
 
@@ -143,6 +155,9 @@ public enum EngineEvent: Sendable, Equatable {
     private struct ReplyModeEvent: Decodable { var mode: String }
     private struct CaptionsEvent: Decodable { var always: Bool; var dismissSecs: Int; var fadeSecs: Int?; var historyMins: Int? }
     private struct AttachmentsEvent: Decodable { var items: [AttachmentItem] }
+    private struct ChatEntryEvent: Decodable { var entry: ChatEntry }
+    private struct ChatNeedsEvent: Decodable { var entries: [ChatEntry] }
+    private struct ChatRecipientsEvent: Decodable { var recipients: [ChatRecipient] }
     private struct ClipboardRead: Decodable { var request: String }
 
     /// Decodes one event JSON object; unknown kinds, malformed JSON and events missing a
@@ -188,6 +203,12 @@ public enum EngineEvent: Sendable, Equatable {
         case "captions": return get(CaptionsEvent.self).map { .captions(always: $0.always, dismissSecs: $0.dismissSecs, fadeSecs: $0.fadeSecs ?? 4, historyMins: $0.historyMins ?? 5) }
         case "attachments": return get(AttachmentsEvent.self).map { .attachments($0.items) }
         case "clipboard.read": return get(ClipboardRead.self).map { .clipboardRead(request: $0.request) }
+        case "chat.entry": return get(ChatEntryEvent.self).map { .chatEntry($0.entry) }
+        case "chat.needs": return get(ChatNeedsEvent.self).map { .chatNeeds($0.entries) }
+        case "chat.badge": return get(ChatBadge.self).map { .chatBadge($0) }
+        case "chat.reset": return .chatReset
+        case "chat.live": return get(ChatLive.self).map { .chatLive($0) }
+        case "chat.recipients": return get(ChatRecipientsEvent.self).map { .chatRecipients($0.recipients) }
         default: return nil
         }
     }
