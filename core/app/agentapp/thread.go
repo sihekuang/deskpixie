@@ -134,9 +134,23 @@ func (f *threadFeed) line(l agent.OutboxLine) {
 
 // answer is a typed job's line. It grows its turn's entry while it adds to what that said;
 // anything else is a turn of its own: after a send or the question itself, a line from someone else (a
-// session answering), or a line that says something new.
+// session answering), or a line that says something new. A coordinator's line still working is
+// the job's live step instead; any other line clears that step before it reaches the thread.
 func (f *threadFeed) answer(l agent.ChatLine) {
-	if f == nil || f.hooks.ThreadAnswer == nil {
+	if f == nil {
+		return
+	}
+	if f.hooks.ThreadLive != nil {
+		switch {
+		case !l.Asking && l.Status == "working":
+			if l.Session == "" { // a session's own turn has no live line
+				f.hooks.ThreadLive(string(l.Job), l.Text)
+			}
+		default:
+			f.hooks.ThreadLive(string(l.Job), "")
+		}
+	}
+	if f.hooks.ThreadAnswer == nil {
 		return
 	}
 	f.mu.Lock()

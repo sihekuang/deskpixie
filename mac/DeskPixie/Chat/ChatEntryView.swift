@@ -5,6 +5,8 @@ import SwiftUI
 /// The chat window's colours (#302), from the approved mockup, each with a dark-mode twin.
 enum ChatColors {
     static let bubble = adaptive(0x0A66D8, 0x0A66D8)
+    /// Your words still coming: a lighter bubble than the sent one.
+    static let liveBubble = adaptive(0xD8E7FB, 0x1D3A5E)
     static let link = adaptive(0x0A5FC4, 0x5AA2F5)
     static let label = adaptive(0x5C5C61, 0xA1A1A6)
     static let faint = adaptive(0x6E6E73, 0x8E8E93)
@@ -159,6 +161,42 @@ struct ChatEntryView: View {
 }
 
 /// A coloured dot, its name in bold, then "· your session · working" (`ChatThreadModel.header`).
+/// Words still coming (`chat.live`), never stored: yours as a lighter bubble on the right,
+/// Pixie's under its name in the secondary colour. The final entry takes their place.
+struct ChatLiveView: View {
+    let line: ChatLive
+
+    var body: some View {
+        Group {
+            if line.who == "you" {
+                Text(line.text)
+                    .font(.system(size: 14))
+                    .lineSpacing(2)
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(UnevenRoundedRectangle(topLeadingRadius: 18, bottomLeadingRadius: 18,
+                                                       bottomTrailingRadius: 4, topTrailingRadius: 18)
+                        .fill(ChatColors.liveBubble))
+                    .padding(.leading, 120)
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(ChatThreadModel.header(ChatWho(kind: line.who)))
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(ChatColors.label)
+                    Text(line.text)
+                        .font(.system(size: 14))
+                        .lineSpacing(2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: line.who == "you" ? .trailing : .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("chat.live.\(line.who)")
+    }
+}
+
 struct ChatWhoHeader: View {
     let who: ChatWho
     var size: CGFloat = 12

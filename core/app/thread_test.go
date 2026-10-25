@@ -596,3 +596,103 @@ func TestLinesHeardElsewhereAreRead(t *testing.T) {
 		t.Fatal("a heard line was shown again:", f.shownReplies())
 	}
 }
+
+// liveOf is a chat.live event's who, job and text.
+func liveOf(ev event) string {
+	job, _ := ev["job"].(string)
+	return fmt.Sprintf("%v/%s/%v", ev["who"], job, ev["text"])
+}
+
+// #302 Task 8b: live lines come from heard, saying and a typed job's steps; each clears before
+// its final entry (on a transcript, the job's answer, the mic going off, or a reset); none is
+// stored.
+func TestLiveLinesComeAndGo(t *testing.T) {
+	f := &fakeAgent{tray: AgentTray{Enabled: true}}
+	h := newHarness(t, withAgent(f))
+	h.take()
+	order := func(evs []event) []string {
+		var out []string
+		for _, ev := range evs {
+			switch ev["kind"] {
+			case "chat.live":
+				out = append(out, "live "+liveOf(ev))
+			case "chat.entry":
+				out = append(out, "entry "+entryOf(t, ev).Text)
+			}
+		}
+		return out
+	}
+	expect := func(what string, want ...string) {
+		t.Helper()
+		if got := order(h.take()); !slices.Equal(got, want) {
+			t.Fatalf("%s: got %q, want %q", what, got, want)
+		}
+	}
+
+	// Yours: the caption grows, then your transcript clears it before its entry.
+	h.app.onVoiceEvent(voice.UIEvent{Kind: "heard", Text: "what"})
+	h.app.onVoiceEvent(voice.UIEvent{Kind: "heard", Text: "what time"})
+	h.app.onVoiceEvent(voice.UIEvent{Kind: "heard", Text: "what time"}) // the same: nothing new
+	h.app.onVoiceEvent(voice.UIEvent{Kind: "transcript", Role: "user", Text: "what time is it"})
+	expect("yours", "live you//what", "live you//what time", "live you//", "entry what time is it")
+
+	// Pixie's, the same way; a blank transcript still clears.
+	h.app.onVoiceEvent(voice.UIEvent{Kind: "saying", Text: "Ten"})
+	h.app.onVoiceEvent(voice.UIEvent{Kind: "transcript", Role: "assistant", Text: "Ten past three."})
+	h.app.onVoiceEvent(voice.UIEvent{Kind: "saying", Text: "And"})
+	h.app.onVoiceEvent(voice.UIEvent{Kind: "transcript", Role: "assistant", Text: " "})
+	expect("Pixie's", "live pixie//Ten", "live pixie//", "entry Ten past three.", "live pixie//And", "live pixie//")
+
+	// The mic going off clears what was cut off.
+	h.app.onVoiceEvent(voice.UIEvent{Kind: "heard", Text: "never mind"})
+	h.app.onVoiceEvent(voice.UIEvent{Kind: "saying", Text: "Sure"})
+	h.app.onVoiceEvent(voice.UIEvent{Kind: "mic", Text: "stop"})
+	expect("mic off", "live you//never mind", "live pixie//Sure", "live you//", "live pixie//")
+
+	// The coordinator's step, by job, cleared by the job's answer (the feed clears first).
+	f.hooks.ThreadLive("j1", "Reading the logs.")
+	f.hooks.ThreadLive("j2", "Looking.")
+	f.hooks.ThreadLive("j1", "")
+	f.hooks.ThreadAnswer(chat.Entry{ID: "jobj1.1", Who: chat.Who{Kind: "coordinator"}, Text: "Found it."})
+	expect("coordinator", "live coordinator/j1/Reading the logs.", "live coordinator/j2/Looking.",
+		"live coordinator/j1/", "entry Found it.")
+
+	// A reset clears every line still live.
+	h.app.onVoiceEvent(voice.UIEvent{Kind: "heard", Text: "hey"})
+	h.take()
+	h.call("chat.clear", nil)
+	evs := h.take()
+	if r := h.kinds(evs, "chat.reset"); len(r) != 1 {
+		t.Fatal("no reset")
+	}
+	if got := order(evs); !slices.Equal(got, []string{"live coordinator/j2/", "live you//"}) {
+		t.Fatalf("reset: %q", got)
+	}
+	h.app.onVoiceEvent(voice.UIEvent{Kind: "heard", Text: "again"}) // live again after a reset
+	if got := order(h.take()); !slices.Equal(got, []string{"live you//again"}) {
+		t.Fatalf("after reset: %q", got)
+	}
+
+	// Nothing live is stored: only the finished words are entries, and live events alone
+	// don't touch the badge.
+	h.app.onVoiceEvent(voice.UIEvent{Kind: "saying", Text: "Hmm"})
+	if n := len(h.kinds(h.take(), "chat.badge")); n != 0 {
+		t.Fatalf("a live line sent %d badges", n)
+	}
+	if n := len(h.entries(nil)); n != 0 {
+		t.Fatalf("entries after clear = %d", n)
+	}
+	f.hooks.ThreadAnswer(chat.Entry{ID: "jobj2.1", Who: chat.Who{Kind: "coordinator"}, Text: "Done."})
+	for _, e := range h.entries(nil) {
+		if e.Text != "Done." {
+			t.Fatalf("a live line was stored: %+v", e)
+		}
+	}
+	b, err := os.ReadFile(filepath.Join(h.dir, "chat", "thread.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(b, []byte("Done.")) || (bytes.Contains(b, []byte("Hmm")) || bytes.Contains(b, []byte("again")) || bytes.Contains(b, []byte("Looking."))) {
+		t.Fatalf("a live line is in thread.jsonl: %s", b)
+	}
+}

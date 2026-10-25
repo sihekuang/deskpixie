@@ -4,7 +4,7 @@ import os
 
 /// The chat window's thread (#302): the entries shown oldest first, the requests waiting on
 /// you, and the box's reply target. The controller feeds it the core's `chat.entry`,
-/// `chat.needs`, `chat.badge` and `chat.reset` events; the views only read it and call its
+/// `chat.needs`, `chat.badge`, `chat.reset` and `chat.live` events; the views only read it and call its
 /// methods. Calls run off the main actor.
 @MainActor
 @Observable
@@ -29,6 +29,9 @@ public final class ChatThreadModel {
     public private(set) var sending = false
     /// A typed message is being worked on; the coordinator's or Pixie's answer clears it.
     public private(set) var thinking = false
+    /// Words still coming, never stored: yours and Pixie's while you talk, and each typed job's
+    /// step while the coordinator works on it. The last one changed is last.
+    public private(set) var live: [ChatLive] = []
     /// Older entries remain to load.
     public private(set) var hasOlder = false
     /// Why the last call failed; cleared by the next one that works.
@@ -113,12 +116,47 @@ public final class ChatThreadModel {
             if e.request?.outcome.isEmpty == false { needs.remove(at: i) } else { needs[i] = e }
         }
         if let i = entries.firstIndex(where: { $0.id == e.id }) {
+            if entries[i].text != e.text { clearLive(for: e) }
             entries[i] = e
             return
         }
+        clearLive(for: e)
         if let first = entries.first, e.at < first.at, hasOlder { return }
         entries.insert(e, at: entries.firstIndex { $0.at > e.at } ?? entries.count)
         if e.who.kind == "pixie" || e.who.kind == "coordinator" { thinking = false }
+    }
+
+    /// `chat.live`: who's line (the job's, for the coordinator) is now this text; empty clears it.
+    public func applyLive(_ l: ChatLive) {
+        live.removeAll { $0.id == l.id }
+        if !l.text.isEmpty { live.append(l) }
+    }
+
+    /// An entry's words are final: the live line they were goes, in case its clear crossed with
+    /// them. Yours or Pixie's by who; the coordinator's every job (an entry's ID is opaque, so
+    /// it can't be matched to one; a job still working sends its next step again).
+    private func clearLive(for e: ChatEntry) {
+        switch e.who.kind {
+        case "you", "pixie", "coordinator": live.removeAll { $0.who == e.who.kind }
+        default: break
+        }
+    }
+
+    /// Your words or Pixie's still coming ("you" or "pixie"), nil when none.
+    public func liveText(_ who: String) -> String? {
+        live.last { $0.who == who }?.text
+    }
+
+    /// The coordinator's latest step, nil when it has none.
+    public var coordinatorStep: String? { liveText("coordinator") }
+
+    /// "Thinking…" shows while a typed message works, or while the coordinator has a step.
+    public var showsThinking: Bool { thinking || coordinatorStep != nil }
+
+    /// "Thinking…", or "Thinking… · <step>".
+    public var thinkingLabel: String {
+        guard let step = coordinatorStep else { return "Thinking…" }
+        return "Thinking… · \(step)"
     }
 
     /// `chat.needs`: the open requests now.
@@ -136,6 +174,7 @@ public final class ChatThreadModel {
     public func reset() async {
         entries = []
         needs = []
+        live = []
         hasOlder = false
         await load()
     }

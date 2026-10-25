@@ -530,4 +530,72 @@ final class ChatThreadModelTests: XCTestCase {
         XCTAssertEqual(model.who(forSession: "h:1").label, "api")
         XCTAssertEqual(model.who(forSession: "h:9").label, "h:9")
     }
+
+    // MARK: Live text (Task 8b)
+
+    func testLiveReplacesByWho() {
+        let model = ChatThreadModel(client: FakeChatClient())
+        model.applyLive(ChatLive(who: "you", text: "what"))
+        model.applyLive(ChatLive(who: "you", text: "what time"))
+        model.applyLive(ChatLive(who: "pixie", text: "Ten"))
+        model.applyLive(ChatLive(who: "coordinator", text: "Reading the logs.", job: "j1"))
+        model.applyLive(ChatLive(who: "coordinator", text: "Looking.", job: "j2"))
+        XCTAssertEqual(model.liveText("you"), "what time")
+        XCTAssertEqual(model.liveText("pixie"), "Ten")
+        XCTAssertEqual(model.live.count, 4, "one line per who, and per job for the coordinator")
+        XCTAssertEqual(model.coordinatorStep, "Looking.")
+        model.applyLive(ChatLive(who: "coordinator", text: "Running the tests.", job: "j1"))
+        XCTAssertEqual(model.coordinatorStep, "Running the tests.", "the latest step shows")
+        XCTAssertEqual(model.live.count, 4)
+        model.applyLive(ChatLive(who: "you", text: ""))
+        XCTAssertNil(model.liveText("you"), "an empty text clears")
+        XCTAssertEqual(model.liveText("pixie"), "Ten")
+        model.applyLive(ChatLive(who: "coordinator", text: "", job: "j1"))
+        XCTAssertEqual(model.coordinatorStep, "Looking.", "clearing one job leaves the other")
+    }
+
+    func testThinkingShowsTheCoordinatorsStep() async {
+        let model = ChatThreadModel(client: FakeChatClient())
+        XCTAssertFalse(model.showsThinking)
+        await model.send("do it")
+        XCTAssertTrue(model.showsThinking)
+        XCTAssertEqual(model.thinkingLabel, "Thinking…")
+        model.applyLive(ChatLive(who: "coordinator", text: "Reading the logs.", job: "j1"))
+        XCTAssertEqual(model.thinkingLabel, "Thinking… · Reading the logs.")
+        await model.stop()
+        XCTAssertFalse(model.thinking)
+        XCTAssertTrue(model.showsThinking, "a step shows Thinking… even when not waiting on a send")
+        model.applyLive(ChatLive(who: "coordinator", text: "", job: "j1"))
+        XCTAssertFalse(model.showsThinking)
+    }
+
+    func testAFinalEntryClearsItsLiveLine() async {
+        let model = ChatThreadModel(client: FakeChatClient([entry(1)]))
+        await model.load()
+        model.applyLive(ChatLive(who: "you", text: "what time"))
+        model.applyLive(ChatLive(who: "pixie", text: "Ten"))
+        model.applyLive(ChatLive(who: "coordinator", text: "Looking.", job: "j1"))
+        model.applyLive(ChatLive(who: "coordinator", text: "Reading.", job: "j2"))
+        model.apply(entry(2, kind: "session"))
+        XCTAssertEqual(model.live.count, 4, "a session's entry clears nothing")
+        model.apply(entry(3, kind: "you"))
+        XCTAssertNil(model.liveText("you"))
+        XCTAssertEqual(model.liveText("pixie"), "Ten")
+        model.apply(entry(1)) // the same entry again, unchanged: not Pixie's new words
+        XCTAssertEqual(model.liveText("pixie"), "Ten")
+        var grown = entry(1)
+        grown.text = "Ten past three."
+        model.apply(grown)
+        XCTAssertNil(model.liveText("pixie"), "Pixie's words grown in place are final too")
+        model.apply(entry(4, kind: "coordinator"))
+        XCTAssertNil(model.coordinatorStep, "a coordinator entry clears every job's step")
+        XCTAssertTrue(model.live.isEmpty)
+    }
+
+    func testResetClearsLiveLines() async {
+        let model = ChatThreadModel(client: FakeChatClient())
+        model.applyLive(ChatLive(who: "you", text: "hey"))
+        await model.reset()
+        XCTAssertTrue(model.live.isEmpty)
+    }
 }

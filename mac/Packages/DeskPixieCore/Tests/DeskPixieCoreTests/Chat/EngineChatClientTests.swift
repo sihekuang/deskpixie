@@ -99,4 +99,13 @@ final class EngineChatClientTests: XCTestCase {
         XCTAssertEqual(d(#"{"kind":"chat.reset"}"#), .chatReset)
         XCTAssertNil(d(#"{"kind":"chat.entry"}"#), "an entry event without its entry is dropped")
     }
+
+    func testDecodesChatLive() {
+        XCTAssertEqual(d(#"{"kind":"chat.live","who":"you","text":"what time"}"#), .chatLive(ChatLive(who: "you", text: "what time")))
+        XCTAssertEqual(d(#"{"kind":"chat.live","who":"coordinator","text":"Looking.","job":"j1","extra":1}"#),
+                       .chatLive(ChatLive(who: "coordinator", text: "Looking.", job: "j1")))
+        XCTAssertEqual(d(#"{"kind":"chat.live","who":"pixie","text":""}"#), .chatLive(ChatLive(who: "pixie", text: "")))
+        XCTAssertEqual(d(#"{"kind":"chat.live","who":"pixie"}"#), .chatLive(ChatLive(who: "pixie", text: "")), "no text clears")
+        XCTAssertNil(d(#"{"kind":"chat.live","text":"x"}"#), "a live line without its who is dropped")
+    }
 }

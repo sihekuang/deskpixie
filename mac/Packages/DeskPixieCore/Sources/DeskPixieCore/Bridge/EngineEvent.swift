@@ -129,6 +129,8 @@ public enum EngineEvent: Sendable, Equatable {
     case chatBadge(ChatBadge)
     /// The thread's entries went (cleared, or aged out): load it again (#302).
     case chatReset
+    /// Words still coming in the chat thread, never stored; empty text clears (#302).
+    case chatLive(ChatLive)
 
     private struct Kind: Decodable { var kind: String }
 
@@ -202,6 +204,7 @@ public enum EngineEvent: Sendable, Equatable {
         case "chat.needs": return get(ChatNeedsEvent.self).map { .chatNeeds($0.entries) }
         case "chat.badge": return get(ChatBadge.self).map { .chatBadge($0) }
         case "chat.reset": return .chatReset
+        case "chat.live": return get(ChatLive.self).map { .chatLive($0) }
         default: return nil
         }
     }

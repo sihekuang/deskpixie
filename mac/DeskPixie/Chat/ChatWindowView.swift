@@ -151,13 +151,23 @@ private struct ChatThreadView: View {
                     ForEach(Array(model.entries.enumerated()), id: \.element.id) { i, e in
                         row(e, after: i > 0 ? model.entries[i - 1] : nil)
                     }
-                    if model.thinking {
+                    // Words still coming, after every entry: yours, then Pixie's.
+                    ForEach(["you", "pixie"], id: \.self) { who in
+                        if let text = model.liveText(who) {
+                            ChatLiveView(line: ChatLive(who: who, text: text))
+                        }
+                    }
+                    if model.showsThinking {
                         HStack(spacing: 8) {
                             Circle().fill(Color.secondary).frame(width: 6, height: 6)
-                            Text("Thinking…")
+                            Text(model.thinkingLabel)
+                                .lineLimit(2)
+                                .truncationMode(.tail)
                         }
                         .font(.system(size: 13))
                         .foregroundStyle(ChatColors.label)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier(model.coordinatorStep == nil ? "chat.thinking" : "chat.live.coordinator")
                     }
                 }
                 // Right under the last row, so the padding below doesn't count against the
@@ -191,7 +201,8 @@ private struct ChatThreadView: View {
                     markRead()
                     return
                 }
-                // Rows grow after they are drawn (links found, text wrapped): at the bottom, stay there.
+                // Rows grow after they are drawn (links found, text wrapped), and live lines grow
+                // as the words come: at the bottom, stay there.
                 let follow = ChatThreadModel.keepsBottom(wasAtBottom: atBottom(old), heightChanged: new.height != old.height)
                 if state.opened && follow && !atBottom(new) { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
             }
@@ -220,7 +231,7 @@ private struct ChatThreadView: View {
                 proxy.scrollTo(Self.bottomID, anchor: .bottom)
                 markRead()
             }
-            .onChange(of: model.thinking) {
+            .onChange(of: model.showsThinking) {
                 if state.opened && atBottom { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
             }
             .onChange(of: atBottom) { markRead() }

@@ -121,6 +121,33 @@ public struct ChatEntry: Codable, Equatable, Sendable, Identifiable {
     }
 }
 
+/// Words still coming (`chat.live`): yours or Pixie's while you talk, or a typed job's step
+/// while the coordinator works on it. Never stored; an empty `text` clears the line.
+public struct ChatLive: Codable, Equatable, Sendable, Identifiable {
+    /// you | pixie | coordinator
+    public var who: String
+    public var text: String
+    /// The coordinator's job ("" for you and Pixie).
+    public var job: String
+
+    public var id: String { who + "/" + job }
+
+    public init(who: String, text: String, job: String = "") {
+        self.who = who
+        self.text = text
+        self.job = job
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(who: try c.decode(String.self, forKey: .who),
+                  text: try c.decodeIfPresent(String.self, forKey: .text) ?? "",
+                  job: try c.decodeIfPresent(String.self, forKey: .job) ?? "")
+    }
+
+    private enum CodingKeys: String, CodingKey { case who, text, job }
+}
+
 /// What Pixie's badge shows (`chat.badge`): requests waiting on you and entries unread, plus,
 /// on the event, the newest entry that came.
 public struct ChatBadge: Codable, Equatable, Sendable {
