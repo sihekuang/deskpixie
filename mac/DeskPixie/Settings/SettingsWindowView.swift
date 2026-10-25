@@ -325,7 +325,7 @@ struct SettingsTabView: View {
         .task(id: section) {
             guard section == .about else { return }
             let app = SystemPermissions.appVersion, os = Self.osVersion
-            let pix = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/pix").path
+            let pix = PixInstaller.forThisApp(path: "").bundled.path
             await about.load { AboutArgs(app: app, os: os, pix: pix, path: PixInstaller.loginShellPath()) }
         }
         .alert(CoordinatorRestart.title, isPresented: $confirmRestart) {

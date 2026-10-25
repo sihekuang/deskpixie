@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeMac is a home with some pixes: path → what `pix version` prints after "pix " ("" = it
@@ -140,7 +141,8 @@ func TestAboutWithAPixThatDoesntRun(t *testing.T) {
 	if v := value(a, AboutPixTerminal); v != "doesn't run, at ~/.local/bin/pix" {
 		t.Fatal(v)
 	}
-	if !a.Warning || a.Note != "Your terminal's pix, at ~/.local/bin/pix, doesn't run. Install the pix command again on the Sessions page." {
+	// A plain file, not DeskPixie's link: Install won't replace it.
+	if !a.Warning || a.Note != "Your terminal's pix, at ~/.local/bin/pix, doesn't run. Remove ~/.local/bin/pix, then install the pix command on the Sessions page." {
 		t.Fatal(a.Note)
 	}
 }
@@ -192,5 +194,63 @@ func TestPixVersionRunsPix(t *testing.T) {
 	}
 	if _, err := pixVersion(broken); err == nil {
 		t.Fatal("a pix that fails has a version")
+	}
+}
+
+// Install replaces only DeskPixie's own link (PixInstaller), so a copied pix has to go first.
+func TestAboutSaysToRemoveAPixThatIsntDeskPixiesLink(t *testing.T) {
+	m := fakeMac{pix: map[string]string{appPix: "0.19.0 (abc1234)", linkPix: "0.15.0"}}
+	a := about(m, shell)
+	if !a.Warning || a.Note != "Your terminal's pix is 0.15.0, the app's is 0.19.0 (abc1234). Remove ~/.local/bin/pix, then install the pix command on the Sessions page." {
+		t.Fatal(a.Note)
+	}
+}
+
+// The login shell's PATH leaves out ~/.zshrc: a pix in ~/.local/bin it misses is still shown,
+// with a hint, not "not found".
+func TestAboutFindsAPixTheLoginShellsPathMisses(t *testing.T) {
+	m := fakeMac{pix: map[string]string{appPix: "0.19.0 (abc1234)"}, links: map[string]string{linkPix: appPix}}
+	a := about(m, "/usr/bin:/bin")
+	if v := value(a, AboutPixTerminal); v != "0.19.0 (abc1234), at ~/.local/bin/pix" {
+		t.Fatal(v)
+	}
+	if a.Warning || !strings.Contains(a.Note, "your login shell's PATH doesn't have ~/.local/bin") ||
+		!strings.Contains(a.Note, `export PATH="/Users/me/.local/bin:$PATH"`) {
+		t.Fatal(a.Note)
+	}
+	// An older one there still warns about the version first.
+	old := "/Users/me/Downloads/DeskPixie.app/Contents/Helpers/pix"
+	m = fakeMac{pix: map[string]string{appPix: "0.19.0 (abc1234)", old: "0.17.0"}, links: map[string]string{linkPix: old}}
+	if a := about(m, "/usr/bin"); !a.Warning || !strings.Contains(a.Note, "Install the pix command again") {
+		t.Fatal(a.Note)
+	}
+}
+
+func TestOnlyAnExecutableFileCountsAsPix(t *testing.T) {
+	dir := t.TempDir()
+	run, plain := filepath.Join(dir, "run"), filepath.Join(dir, "plain")
+	if err := os.WriteFile(run, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(plain, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !isExecutable(run) || isExecutable(plain) || isExecutable(dir) || isExecutable(filepath.Join(dir, "missing")) {
+		t.Fatal(isExecutable(run), isExecutable(plain), isExecutable(dir))
+	}
+}
+
+// A pix whose child keeps stdout open still gives up soon after the timeout.
+func TestPixVersionDoesntWaitOnAChildHoldingItsOutput(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "pix")
+	if err := os.WriteFile(p, []byte("#!/bin/sh\nsleep 8 &\nsleep 8\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	if _, err := pixVersion(p); err == nil {
+		t.Fatal("a pix that hangs has a version")
+	}
+	if d := time.Since(start); d > 10*time.Second {
+		t.Fatalf("waited %v", d)
 	}
 }

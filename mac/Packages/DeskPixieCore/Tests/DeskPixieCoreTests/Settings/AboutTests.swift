@@ -61,6 +61,20 @@ final class AboutTests: XCTestCase {
         XCTAssertEqual(model.error, "Couldn't read the versions: the core is gone")
     }
 
+    func testAnOlderLoadThatFinishesLastIsDropped() async {
+        let old = AboutInfo(rows: [.init(label: "pix in your terminal", value: "0.17.0")], text: "old")
+        let new = AboutInfo(rows: [.init(label: "pix in your terminal", value: "0.19.0")], text: "new")
+        let client = SlowFirstClient(first: old, then: new)
+        let model = AboutModel(client: client)
+        let a = args
+        async let first: Void = model.load { a }
+        await client.firstStarted()
+        await model.load { a }          // the newer load finishes while the first still runs
+        client.releaseFirst()
+        await first
+        XCTAssertEqual(model.info, new)
+    }
+
     func testTheAboutPageIsLastWithItsVersionsRow() throws {
         XCTAssertEqual(SettingsLayout.tabs.last?.section, .about)
         XCTAssertEqual(SettingsLayout.tabTitle(.about), "About")
@@ -68,4 +82,34 @@ final class AboutTests: XCTestCase {
         XCTAssertEqual(row.label, "Versions")
         XCTAssertEqual(row.path, "extra:about")
     }
+}
+
+/// Answers the first call only once released, every later one at once.
+private final class SlowFirstClient: AboutClient, @unchecked Sendable {
+    private let first: AboutInfo, then: AboutInfo
+    private let lock = NSLock()
+    private var calls = 0
+    private let started = DispatchSemaphore(value: 0)
+    private let release = DispatchSemaphore(value: 0)
+
+    init(first: AboutInfo, then: AboutInfo) {
+        self.first = first
+        self.then = then
+    }
+
+    func about(_ args: AboutArgs) throws -> AboutInfo {
+        let n = lock.withLock { calls += 1; return calls }
+        guard n == 1 else { return then }
+        started.signal()
+        release.wait()
+        return first
+    }
+
+    func firstStarted() async {
+        await withCheckedContinuation { c in
+            DispatchQueue.global().async { self.started.wait(); c.resume() }
+        }
+    }
+
+    func releaseFirst() { release.signal() }
 }

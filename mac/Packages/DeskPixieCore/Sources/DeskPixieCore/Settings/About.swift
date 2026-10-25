@@ -76,16 +76,23 @@ public final class AboutModel {
     public private(set) var info: AboutInfo?
     public private(set) var error: String?
     @ObservationIgnored private let client: any AboutClient
+    /// Counts loads, so an older one that finishes last doesn't overwrite a newer one.
+    @ObservationIgnored private var loads = 0
 
     public init(client: any AboutClient) { self.client = client }
 
     /// Asks the core again; `args` is built off main too (reading the login shell's PATH runs it).
     public func load(_ args: @escaping @Sendable () -> AboutArgs) async {
         let client = self.client
-        do {
-            info = try await Task.detached { try client.about(args()) }.value
+        loads += 1
+        let load = loads
+        let result = await Task.detached { Result { try client.about(args()) } }.value
+        guard load == loads else { return }
+        switch result {
+        case .success(let info):
+            self.info = info
             error = nil
-        } catch {
+        case .failure(let error):
             self.error = "Couldn't read the versions: \(error.localizedDescription)"
         }
     }

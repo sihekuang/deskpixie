@@ -89,22 +89,29 @@ func BuildAbout(in AboutArgs, env AboutEnv) About {
 	if in.Pix != "" {
 		bundled = version(in.Pix)
 	}
-	var dirs []string
-	if in.Path == "" {
-		dirs = proc.InstallDirs(env.Home)
-	}
 	terminal, note, warning := aboutNotFound, "", false
 	link := filepath.Join(env.Home, ".local/bin/pix")
-	if found, ok := proc.FindProgram("pix", "", in.Path, dirs, env.Exists); !ok {
+	// The login shell's PATH leaves out what ~/.zshrc adds (it isn't interactive), so a pix
+	// it misses is looked for in the usual install dirs too, and named more gently.
+	found, onPath := proc.FindProgram("pix", "", in.Path, nil, env.Exists)
+	if !onPath {
+		found, _ = proc.FindProgram("pix", "", "", proc.InstallDirs(env.Home), env.Exists)
+	}
+	if found == "" {
 		note = "Your terminal doesn't find pix. To start sessions with it, install the pix command on the Sessions page."
 	} else {
 		v := version(found)
 		terminal = v + ", at " + tilde(found, env.Home)
 		same := in.Pix != "" && env.Resolve(found) != "" && env.Resolve(found) == env.Resolve(in.Pix)
 		where := tilde(found, env.Home)
+		// Install replaces only a link to a DeskPixie app's pix (PixInstaller); anything else
+		// at ~/.local/bin/pix has to go first.
 		fix := "Install the pix command again on the Sessions page."
-		if found != link {
+		switch {
+		case found != link:
 			fix = "Remove it, or put ~/.local/bin first on your PATH, and install the pix command on the Sessions page."
+		case !strings.HasSuffix(env.Resolve(found), ".app/Contents/Helpers/pix"):
+			fix = "Remove ~/.local/bin/pix, then install the pix command on the Sessions page."
 		}
 		switch {
 		// Nothing to compare with: a dev build run from outside its bundle.
@@ -118,6 +125,10 @@ func BuildAbout(in AboutArgs, env AboutEnv) About {
 		default:
 			warning = true
 			note = "Your terminal runs another pix, " + v + " at " + where + "; the app's is " + bundled + ". " + fix
+		}
+		if note == "" && !onPath && in.Path != "" {
+			note = "pix is at " + where + ", but your login shell's PATH doesn't have " + tilde(filepath.Dir(found), env.Home) +
+				". If pix doesn't run in your terminal, add to ~/.zshrc: export PATH=\"" + filepath.Dir(found) + ":$PATH\""
 		}
 	}
 	rows := []AboutRow{
@@ -153,7 +164,7 @@ func realAboutEnv() AboutEnv {
 	return AboutEnv{
 		Home:   home,
 		Core:   buildinfo.String(),
-		Exists: isRegularFile,
+		Exists: isExecutable,
 		Resolve: func(p string) string {
 			r, err := filepath.EvalSymlinks(p)
 			if err != nil {
@@ -169,11 +180,20 @@ func realAboutEnv() AboutEnv {
 func pixVersion(path string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, path, "version").Output()
+	cmd := exec.CommandContext(ctx, path, "version")
+	// A child that keeps stdout open must not hold the page past the timeout.
+	cmd.WaitDelay = time.Second
+	out, err := cmd.Output()
 	if err != nil {
 		return "", err
 	}
 	return strings.TrimPrefix(strings.TrimSpace(string(out)), "pix "), nil
+}
+
+// isExecutable: a file the shell would run.
+func isExecutable(p string) bool {
+	info, err := os.Stat(p)
+	return err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0
 }
 
 func (a *App) registerAbout(r Registrar) {
