@@ -34,6 +34,13 @@ func (q *Queue) Drain() []string {
 	return out
 }
 
+// Requeue puts msgs back in front, to go first (#306: a menu kept them from being sent).
+func (q *Queue) Requeue(msgs []string) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.msgs = append(append([]string(nil), msgs...), q.msgs...)
+}
+
 func (q *Queue) Len() int {
 	q.mu.Lock()
 	defer q.mu.Unlock()

@@ -464,17 +464,20 @@ func shows(screen, marker, detail string) bool {
 	return strings.Contains(screen, noSpace(marker)) && strings.Contains(screen, noSpace(detail))
 }
 
-// noteScreen keeps what vt shows and closes the typed answer's done once its prompt is no
-// longer on it (PTY reader goroutine only).
+// noteScreen keeps what vt shows and the menu on it (#306), and closes the typed answer's done
+// once its prompt is no longer on it (PTY reader goroutine only).
 func (s *Session) noteScreen(vt *screen) {
-	text := noSpace(strings.Join(vt.Lines(), ""))
+	lines := vt.Lines()
+	text := noSpace(strings.Join(lines, ""))
+	prompt := promptOf(s.o.tool, lines)
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.screen = text
+	s.screen, s.prompt = text, prompt
 	if l := s.landing; l != nil && !shows(text, l.marker, l.detail) {
 		s.landing = nil
 		close(l.done)
 	}
+	s.mu.Unlock()
+	s.noteMenu(lines, text)
 }
 
 func (s *Session) dropLanding(l *landing) {
@@ -591,6 +594,11 @@ func onlyReports(b []byte) bool { return len(withoutReports(b)) == 0 }
 // then draws it all again). PTY reader goroutine only.
 func (s *Session) screenFor(vt *screen) *screen {
 	if rows, cols := s.runner.Size(); vt == nil || vt.rows != rows || vt.cols != cols {
+		if vt != nil {
+			s.mu.Lock()
+			s.freshAt = s.now() // a menu shown before is drawn again (#306)
+			s.mu.Unlock()
+		}
 		return newScreen(rows, cols)
 	}
 	return vt

@@ -76,22 +76,33 @@ type Session struct {
 	queue  Queue
 	gate   Gate
 
-	mu        sync.Mutex
-	status    string // idle | working | blocked
-	afterStop bool   // the next prompt starts new work (an auto description)
-	sessionID string
-	userDesc  string // --description
-	outdated  bool   // the app says this pix is older than its own (#189)
-	agentDesc string // set_description
-	autoDesc  string // first prompt of the current work
-	flushing  bool
-	flushMu   sync.Mutex // one typing of the queue at a time
-	posted    []string   // Pixie's messages not yet seen as prompts (normalized)
-	q         *question  // the prompt waiting on you that Pixie may answer (#105)
-	landing   *landing   // an answer typed from Pixie, until its prompt leaves the screen (#268)
-	screen    string     // what the agent's screen shows now, without spaces (#268)
-	qseq      int
-	hold      time.Duration // how long a question waits in its hook for Pixie (0: not held, #268)
+	mu          sync.Mutex
+	status      string // idle | working | blocked
+	afterStop   bool   // the next prompt starts new work (an auto description)
+	sessionID   string
+	userDesc    string // --description
+	outdated    bool   // the app says this pix is older than its own (#189)
+	agentDesc   string // set_description
+	autoDesc    string // first prompt of the current work
+	flushing    bool
+	flushMu     sync.Mutex // one typing of the queue at a time
+	posted      []string   // Pixie's messages not yet seen as prompts (normalized)
+	q           *question  // the prompt waiting on you that Pixie may answer (#105)
+	landing     *landing   // an answer typed from Pixie, until its prompt leaves the screen (#268)
+	screen      string     // what the agent's screen shows now, without spaces (#268)
+	prompt      string     // what its prompt holds, the same way (#306)
+	qseq        int
+	hold        time.Duration // how long a question waits in its hook for Pixie (0: not held, #268)
+	menu        string        // the menu on screen in place of the agent's prompt ("": none, #306)
+	menuAt      time.Time     // when a menu last showed, or Codex first drew its prompt
+	settle      time.Duration // how long after menuAt Codex waits (menuSettle)
+	holdLog     time.Duration // how often a long wait is logged (holdLogEvery)
+	promptSeen  bool          // Codex has drawn its prompt
+	freshAt     time.Time     // when the screen was last drawn again from nothing (a resize)
+	unsent      *unsent       // a message a menu kept from being sent (#306)
+	turns       int           // turns started (working), to tell you sent an unsent message
+	startAt     time.Time     // when the agent started
+	hookPrompts bool          // a hook said what prompt the agent took (submitted)
 
 	turnStart     time.Time        // when this turn went working (zero: none seen)
 	turnFromPixie bool             // a prompt of this turn was Pixie's
@@ -144,15 +155,21 @@ func (s *Session) forceIn(msgs []string) error {
 	prompt := strings.Join(msgs, "\n\n")
 	draft, known := s.gate.Draft()
 	empty := known && draft == ""
+	typeIn := func() error { // a menu that stops it keeps the messages (#306)
+		if err := s.typeIn(prompt); err != nil && !s.holdBack(err, msgs, prompt, "") {
+			return err
+		}
+		return nil
+	}
 	switch {
 	case empty:
-		return s.typeIn(prompt)
+		return typeIn()
 	case s.o.tool == "claude":
 		if err := s.runner.WriteToAgent([]byte{0x13}); err != nil { // Ctrl-S: stash
 			return err
 		}
 		time.Sleep(forceSettle)
-		return s.typeIn(prompt)
+		return typeIn()
 	case known:
 		del := []byte(strings.Repeat("\x7f", utf8.RuneCountInString(draft)))
 		if err := s.runner.WriteToAgent(del); err != nil {
@@ -160,6 +177,9 @@ func (s *Session) forceIn(msgs []string) error {
 		}
 		time.Sleep(forceSettle)
 		if err := s.typeIn(prompt); err != nil {
+			if s.holdBack(err, msgs, prompt, draft) { // your draft comes back once it's sent (#306)
+				return nil
+			}
 			return err
 		}
 		time.Sleep(forceSettle)
@@ -167,7 +187,7 @@ func (s *Session) forceIn(msgs []string) error {
 		return s.runner.WriteToAgent([]byte("\x1b[200~" + draft + "\x1b[201~"))
 	}
 	s.gate.Sent() // what it couldn't follow went in with the message
-	return s.typeIn(prompt)
+	return typeIn()
 }
 
 // forceSettle lets the agent take one write before the next when pix sets your draft aside.
@@ -178,12 +198,23 @@ var forceSettle = 300 * time.Millisecond
 // arrives with the paste, leaving the message unsent. Its redraw ([Image #1]) comes in about
 // 25 ms; pasteQuiet without output after it means it's done. An agent that shows nothing, or
 // never settles, still gets its Enter after pasteLimit: the message isn't lost, only logged.
-// Keys you type meanwhile go in after the Enter, not inside the message.
+// Keys you type meanwhile go in after the Enter, not inside the message. A menu that showed
+// meanwhile gets no Enter (#306): the message stays typed in the prompt behind it, a menuUp.
 func (s *Session) typeIn(text string) error {
-	unsettled, err := s.runner.PasteAndEnter(Paste(text), pasteQuiet, pasteLimit)
-	if unsettled != nil {
+	var menu string
+	unsettled, pasted, entered, err := s.runner.PasteAndEnter(Paste(text), pasteQuiet, pasteLimit, func() bool {
+		menu = s.menuShown()
+		return menu == ""
+	})
+	if unsettled != nil && entered {
 		s.o.log.Printf("pressing Enter after a paste anyway: %v", unsettled)
 		s.keylog("paste not seen: %v", unsettled)
+	}
+	if err == nil && !entered {
+		if pasted {
+			s.o.log.Printf("menu %s showed before Enter: the message waits typed for it to go", menu)
+		}
+		return menuUp{menu: menu, pasted: pasted}
 	}
 	return err
 }
@@ -211,7 +242,7 @@ func (s *Session) keylog(format string, args ...any) {
 }
 
 func newSession(o sessionOpts) *Session {
-	s := &Session{o: o, status: "idle", afterStop: true, userDesc: o.description, now: time.Now}
+	s := &Session{o: o, status: "idle", afterStop: true, userDesc: o.description, now: time.Now, settle: menuSettle, holdLog: holdLogEvery}
 	s.runner = &Runner{Launch: o.agent, Stdin: o.stdin, Stdout: o.stdout,
 		OnInput: func(b []byte) {
 			s.gate.Keys(b, time.Now())
@@ -322,6 +353,7 @@ func (s *Session) Hook(event string, p map[string]any) string {
 		s.mu.Unlock()
 		s.setStatus("working")
 		prompt, _ := p["prompt"].(string)
+		s.submitted(prompt) // a message a menu stopped, sent from the terminal (#306)
 		pixie := s.fromPixie(prompt)
 		if !pixie {
 			s.gate.Sent() // your prompt went in (#185)
@@ -344,7 +376,14 @@ func (s *Session) Hook(event string, p map[string]any) string {
 		s.clearQuestion()
 		pixie := false
 		if s.o.tool == "codex" { // its notify carries the turn's prompts; there is no prompt hook
-			if in, _ := p["input-messages"].([]any); len(in) > 0 {
+			s.promptDrawn() // a turn ran, so its prompt is up (#306)
+			in, _ := p["input-messages"].([]any)
+			for _, m := range in {
+				if text, _ := m.(string); text != "" {
+					s.submitted(text)
+				}
+			}
+			if len(in) > 0 {
 				if first, _ := in[0].(string); first != "" {
 					if s.fromPixie(first) {
 						pixie = true
@@ -440,7 +479,7 @@ func (s *Session) runCommand(m wire.Msg) wire.Msg {
 			return wire.Msg{Err: err.Error()}
 		}
 		s.title()
-		// Typed at once, or waiting and why (#183).
+		// Typed at once, or waiting and why (#183, #306).
 		if s.flushNow() {
 			s.keylog("prompt typed")
 			return wire.Msg{Status: "typed"}
@@ -451,8 +490,15 @@ func (s *Session) runCommand(m wire.Msg) wire.Msg {
 	case "flush":
 		// "Send it anyway" (#187): type what waits even if the gate thinks you're typing. A
 		// working agent gets it with its next tool; a question on screen is never typed into.
+		if s.hasUnsent() { // a menu stopped one: it goes once that's answered (#306)
+			s.flushSoon()
+			return wire.Msg{Status: "waiting", Reason: s.waitReason()}
+		}
 		if st := s.currentStatus(); st != "idle" && s.queue.Len() > 0 {
 			return wire.Msg{Status: "waiting", Reason: st}
+		}
+		if m := s.menuHold(); m != "" && s.queue.Len() > 0 { // nor a menu only you should answer (#306)
+			return wire.Msg{Status: "waiting", Reason: m}
 		}
 		s.flushMu.Lock()
 		msgs := s.queue.Drain()
@@ -461,6 +507,10 @@ func (s *Session) runCommand(m wire.Msg) wire.Msg {
 			return wire.Msg{Err: err.Error()}
 		}
 		s.flushMu.Unlock()
+		if s.hasUnsent() || s.queue.Len() > 0 { // a menu showed meanwhile
+			s.flushSoon()
+			return wire.Msg{Status: "waiting", Reason: s.waitReason()}
+		}
 		s.title()
 		s.keylog("flush: typed %d", len(msgs))
 		if len(msgs) > 0 {
@@ -468,6 +518,9 @@ func (s *Session) runCommand(m wire.Msg) wire.Msg {
 		}
 		return wire.Msg{Status: "typed"}
 	case "keys":
+		if menu := s.menuShown(); menu != "" { // only you answer it (#306)
+			return wire.Msg{Err: menuWaits(s.o.tool, menu)}
+		}
 		s.clearQuestion() // an Escape from Pixie dismisses the prompt
 		for _, k := range m.Keys {
 			var b []byte
@@ -493,28 +546,39 @@ func (s *Session) runCommand(m wire.Msg) wire.Msg {
 	return wire.Msg{Err: "unknown command " + m.Command}
 }
 
-// flushNow types the queued messages if the agent is idle and you aren't typing; true if it did.
+// flushNow types the queued messages if the agent is idle at its prompt (no menu on screen,
+// #306) and you aren't typing; true if it did.
 func (s *Session) flushNow() bool {
 	s.flushMu.Lock()
 	defer s.flushMu.Unlock()
-	if s.queue.Len() == 0 || s.currentStatus() != "idle" || !s.gate.Clear(time.Now()) {
+	if s.queue.Len() == 0 || s.currentStatus() != "idle" || s.hasUnsent() || s.menuHold() != "" || !s.gate.Clear(time.Now()) {
 		return false
 	}
 	// One prompt, one wait for the agent to take it (#305): a wait per message could outlast the
 	// command's time limit.
-	if s.typeIn(strings.Join(s.queue.Drain(), "\n\n")) != nil {
+	msgs := s.queue.Drain()
+	prompt := strings.Join(msgs, "\n\n")
+	if err := s.typeIn(prompt); err != nil {
+		s.holdBack(err, msgs, prompt, "") // a menu showed: they wait for it (#306)
 		return false
 	}
 	s.title()
 	return true
 }
 
-// waitReason is why a message isn't typed now: the agent is "working" (it gets it with its
-// next tool, or when it stops), "blocked" on a question, or you're "typing" in it.
+// waitReason is why a message isn't typed now: a menu on screen only you should answer
+// ("update", "trust", "hooks", "agents", "menu", #306), the agent is "working" (it gets it with its next
+// tool, or when it stops) or "blocked" on a question, it is "starting" (a menu may still show),
+// or you're "typing" in it.
 func (s *Session) waitReason() string {
-	switch st := s.currentStatus(); st {
-	case "working", "blocked":
+	m := s.menuHold()
+	switch st := s.currentStatus(); {
+	case m != "" && m != "starting":
+		return m
+	case st == "working" || st == "blocked":
 		return st
+	case m != "":
+		return m
 	}
 	return "typing"
 }
@@ -536,10 +600,22 @@ func (s *Session) flushSoon() {
 	s.mu.Unlock()
 	go func() {
 		defer func() { s.mu.Lock(); s.flushing = false; s.mu.Unlock() }()
-		for s.queue.Len() > 0 {
-			if s.flushNow() {
+		since, logAt := time.Now(), time.Now().Add(s.holdLog)
+		for s.queue.Len() > 0 || s.hasUnsent() {
+			if s.hasUnsent() { // a menu stopped it (#306)
+				s.flushMu.Lock()
+				sent := s.finishUnsent()
+				s.flushMu.Unlock()
+				if sent && s.queue.Len() == 0 && !s.hasUnsent() { // all of them in
+					s.delivered()
+				}
+			} else if s.flushNow() {
 				s.delivered()
 				return
+			}
+			if now := time.Now(); now.After(logAt) { // a misread menu would hold them for good
+				s.o.log.Printf("messages waiting %s: %s", now.Sub(since).Round(time.Second), s.waitReason())
+				logAt = now.Add(s.holdLog)
 			}
 			time.Sleep(500 * time.Millisecond)
 		}
@@ -603,6 +679,9 @@ func (s *Session) setStatus(st string) {
 		s.turnStart = s.now()
 	}
 	changed := s.status != st
+	if changed && st == "working" {
+		s.turns++
+	}
 	s.status = st
 	s.mu.Unlock()
 	if changed {
@@ -722,6 +801,10 @@ func (s *Session) start(ctx context.Context) error {
 		},
 	}
 	s.o.log.Printf("start in %s (%s)", cwd, strings.TrimSpace(s.o.where+" "+s.o.app))
+	s.mu.Lock()
+	s.menuAt = s.now() // a startup menu may show in a moment (#306)
+	s.startAt = s.menuAt
+	s.mu.Unlock()
 	if err := s.runner.Start(); err != nil {
 		s.o.log.Printf("couldn't start the agent: %v", err)
 		return err

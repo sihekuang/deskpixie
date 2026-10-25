@@ -325,7 +325,7 @@ func SessionSentInput(name, description string) Input {
 }
 
 // SessionWaitingInput: the message reached pix but waits (#183), for reason "working",
-// "blocked" or "typing".
+// "blocked" or "typing", or a menu on its screen (#306, WaitingWhy).
 // LateSessionSentInput: a message_session (or close_session) the person confirmed after the
 // coordinator's call was answered (#246) was done: typed, waiting (why), or failed (errText).
 // job is the request in flight when it was asked ("" = none).
@@ -1740,15 +1740,28 @@ func sessionSentText(description, waiting string) (text, brief, title string) {
 			"working": "it's busy, and gets it with its next step or when it stops",
 			"blocked": "it's waiting on a question, and gets it once that's answered",
 			"typing":  "you're typing there, and it gets it once you send or clear that",
+			// #306: a menu only you should answer.
+			"update":   "it's waiting for you to answer its update question, and gets it once you have",
+			"trust":    "it's waiting for you to say whether to trust its folder, and gets it once you have",
+			"hooks":    "it's waiting for you to say whether to trust its hooks, and gets it once you have",
+			"agents":   "it's showing its list of agents, and gets it once you're back at its prompt",
+			"menu":     "it's showing a menu, and gets it once you close it",
+			"starting": "it's still starting, and gets it in a moment",
 		}[waiting]
 		if why == "" {
 			why = "it gets it as soon as it can"
 		}
 		text = strings.ToUpper(session[:1]) + session[1:] + " hasn't got your message yet: " + why + "."
 		brief = map[string]string{
-			"working": "Message held: it's busy.",
-			"blocked": "Message held: it's waiting on a question.",
-			"typing":  "Message held: you're typing there.",
+			"working":  "Message held: it's busy.",
+			"blocked":  "Message held: it's waiting on a question.",
+			"typing":   "Message held: you're typing there.",
+			"update":   "Message held: it's asking you about an update.",
+			"trust":    "Message held: it's asking you to trust its folder.",
+			"hooks":    "Message held: it's asking you to trust its hooks.",
+			"agents":   "Message held: it's showing its list of agents.",
+			"menu":     "Message held: it's showing a menu.",
+			"starting": "Message held: it's starting.",
 		}[waiting]
 		if brief == "" {
 			brief = "Message held for now."
