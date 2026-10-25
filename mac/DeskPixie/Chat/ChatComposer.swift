@@ -21,7 +21,7 @@ struct ChatComposer: View {
         return VStack(alignment: .leading, spacing: 8) {
             if let mention {
                 MentionList(query: mention, candidates: mention.candidates(model.recipients),
-                            selected: state.mentionRow) { pick($0, mention) }
+                            selected: state.mentionRow ?? 0) { pick($0, mention) }
             }
             if let who = model.replyTo {
                 replyChip(who)
@@ -139,7 +139,7 @@ struct ChatComposer: View {
         .onAppear { focused = true }
         .onChange(of: state.focusRequests) { focused = true }
         .onChange(of: state.draft) { _, new in
-            state.mentionRow = 0
+            state.mentionRow = nil
             if let closed = state.mentionClosedAt, MentionQuery.active(in: new, caret: new.count)?.start != closed {
                 state.mentionClosedAt = nil // another @: its list opens
             }
@@ -164,7 +164,7 @@ struct ChatComposer: View {
         guard let m = mention else { return .ignored }
         let n = m.candidates(model.recipients).count
         guard n > 0 else { return .handled }
-        state.mentionRow = (state.mentionRow + by + n) % n
+        state.mentionRow = ((state.mentionRow ?? 0) + by + n) % n
         return .handled
     }
 

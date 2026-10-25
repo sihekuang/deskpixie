@@ -66,6 +66,15 @@ final class ChatMentionsTests: XCTestCase {
         XCTAssertEqual(MentionQuery(start: 0, query: "api-codex.").selected(row: 0, Self.all), .recipient(Self.api))
     }
 
+    func testABareAtPicksNothingUntilARowIsChosen() {
+        let q = MentionQuery.active(in: "ship it @", caret: 9)!
+        XCTAssertNil(q.selected(row: nil, Self.all), "Return on a bare @ keeps the target")
+        XCTAssertEqual(q.selected(row: 0, Self.all), .pixie, "↑/↓ to Pixie, then Return, picks her")
+        XCTAssertEqual(q.selected(row: 2, Self.all), .recipient(Self.api))
+        XCTAssertEqual(MentionQuery(start: 0, query: "a").selected(row: nil, Self.all), .recipient(Self.api),
+                       "with letters typed, the first row")
+    }
+
     func testReturnPicksTheRowElseNothing() {
         let q = MentionQuery(start: 0, query: "")
         XCTAssertEqual(q.selected(row: 1, Self.all), .recipient(Self.docs))

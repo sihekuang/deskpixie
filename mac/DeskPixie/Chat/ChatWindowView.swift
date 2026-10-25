@@ -10,9 +10,10 @@ final class ChatWindowState {
     /// The draft put back after a send the core refused: its change isn't an edit, so the
     /// refusal stays under the box.
     var keptDraft: String?
-    /// The @ list: where the @ whose list Esc closed is, and the row picked by ↑/↓.
+    /// The @ list: where the @ whose list Esc closed is, and the row picked by ↑/↓ (nil: none
+    /// yet, the first row shows as picked).
     var mentionClosedAt: Int?
-    var mentionRow = 0
+    var mentionRow: Int?
     /// Bumped to put the cursor in the box.
     var focusRequests = 0
     /// The entry to scroll to, bumped by `scrollRequests` (opening at a message, a pill).

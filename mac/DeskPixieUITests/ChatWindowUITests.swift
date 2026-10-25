@@ -225,6 +225,18 @@ final class ChatWindowUITests: XCTestCase {
         XCTAssertTrue(list.waitForGone(timeout: 5))
         XCTAssertEqual(draft(composer), "hi @zz")
         XCTAssertTrue(chip.exists, "Esc closed the list, not the reply")
+
+        // A bare @ picks no one with Tab (or Return): beta stays. ↑/↓ to Pixie, then Return, clears it.
+        composer.typeText(" @")
+        XCTAssertTrue(list.waitForText("Message Pixie", timeout: 5))
+        composer.typeKey(.tab, modifierFlags: [])
+        XCTAssertTrue(chip.waitForText("Replying to beta", timeout: 2), "a bare @ kept the target")
+        composer.click()
+        XCTAssertTrue(list.waitForExistence(timeout: 5))
+        composer.typeKey(.downArrow, modifierFlags: [])
+        composer.typeKey(.upArrow, modifierFlags: [])
+        composer.typeKey(.return, modifierFlags: [])
+        XCTAssertTrue(chip.waitForGone(timeout: 5), "Pixie, chosen, clears the target")
     }
 
     /// The maintainer's validation: a hand-typed @name of someone else beside the target turns

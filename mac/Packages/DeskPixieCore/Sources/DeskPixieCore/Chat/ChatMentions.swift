@@ -180,11 +180,13 @@ public struct MentionQuery: Equatable, Sendable {
         return prefix + contains
     }
 
-    /// The row Return or Tab picks (`row`, clamped), nil when nothing fits: then Return sends
-    /// the text as it is, @word and all.
-    public func selected(row: Int, _ recipients: [ChatRecipient]) -> MentionCandidate? {
+    /// The row Return or Tab picks (`row`, clamped; nil: none chosen with ↑/↓, the first),
+    /// nil when nothing fits: then Return sends the text as it is, @word and all. A bare @ with
+    /// no row chosen picks nothing either, so Return doesn't drop the target for Pixie.
+    public func selected(row: Int?, _ recipients: [ChatRecipient]) -> MentionCandidate? {
+        if row == nil, query.isEmpty { return nil }
         let rows = candidates(recipients)
-        return rows.isEmpty ? nil : rows[max(0, min(row, rows.count - 1))]
+        return rows.isEmpty ? nil : rows[max(0, min(row ?? 0, rows.count - 1))]
     }
 
     /// "No one called <query>" when nothing fits.
