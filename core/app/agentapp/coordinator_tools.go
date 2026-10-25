@@ -21,9 +21,6 @@ var coordinatorDescriptions = map[string]string{
 		"date command or web search.",
 	"calculate": "Exact arithmetic and unit conversion. Pass either `expression`, or `value` with `from` and " +
 		"`to` units. Use it instead of working math out yourself or running a shell command.",
-	"open_settings": "Open DeskPixie's Settings window on the person's Mac, at the setting they ask about " +
-		"(\"where do I change the microphone\"), pointed out; leave out query to just open Settings. It changes " +
-		"nothing. Answers with the setting's name and page: tell the person which page it is on.",
 }
 
 // coordinatorTool is a local tool with the coordinator's description.

@@ -21,8 +21,7 @@ func (f LocalFacts) Facts() string {
 	}
 	out += "\n- For the current time call get_time, for the weather call get_weather, and for any arithmetic " +
 		"or unit conversion call calculate, for timers and \"remind me in…\" call timer, and to pause, skip " +
-		"or change the volume of music call media (when you have it), and to show where a DeskPixie setting " +
-		"is or open Settings call open_settings (when you have it). They answer at once: never delegate " +
+		"or change the volume of music call media (when you have it). They answer at once: never delegate " +
 		"these.\n- A line starting \"Timer done:\" means one of the user's timers just ended: tell them " +
 		"in one short sentence."
 	return out

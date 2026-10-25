@@ -47,7 +47,7 @@ func (Delegate) Description() string {
 		"(news, prices, scores), the user's projects, files, code, repositories, apps and settings, writing, " +
 		"explanations, advice, summaries, charts, diagrams or pages. When unsure, call it; don't try it " +
 		"yourself first or ask whether to. Not for the time, the weather, arithmetic, timers or music " +
-		"controls, or for showing a DeskPixie setting: get_time, get_weather, calculate, timer, media and open_settings answer those at once. The coordinator does " +
+		"controls: get_time, get_weather, calculate, timer and media answer those at once. The coordinator does " +
 		"not hear the conversation, so the task and context must stand on their own. Call this BEFORE " +
 		"saying you will hand something off. Returns at once with a job id; then say one short " +
 		"acknowledgement; the result arrives later as an \"Coordinator reply:\" line."

@@ -228,14 +228,10 @@ func New(d Deps) (*App, error) {
 	}
 	// Before the agent and the voice loop, which both hold these instances. The alarm reaches
 	// the voice loop lazily (a.voiceLink), so it works with no voice loop at all.
-	localDeps := d.LocalTools
-	if localDeps.Settings == nil {
-		localDeps.Settings = settingsWindow{a}
-	}
-	a.localTools = NewLocalTools(homeCity(cfg), &TimerAlarm{Voice: a.voiceLink, Notify: a.notify}, localDeps)
+	a.localTools = NewLocalTools(homeCity(cfg), &TimerAlarm{Voice: a.voiceLink, Notify: a.notify}, d.LocalTools)
 	if d.Agent != nil {
 		a.agent = d.Agent(cfg, p.AppSupport, AgentHooks{
-			LocalTools:  a.localTools,
+			LocalTools:  a.coordinatorTools(),
 			Celebrate:   a.Celebrate,
 			FlashError:  a.FlashError,
 			RefreshTray: a.pushTray,

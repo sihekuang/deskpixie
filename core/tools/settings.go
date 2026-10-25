@@ -24,18 +24,16 @@ type SettingsWindow interface {
 // MaxOtherSettings is the most other matches open_settings names besides the one it shows.
 const MaxOtherSettings = 3
 
-// OpenSettings opens DeskPixie's Settings window, at the setting the user asked about (#288).
+// OpenSettings opens DeskPixie's Settings window, at the setting the person asked about (#288).
+// The coordinator's alone: Pixie hands settings questions to the coordinator.
 type OpenSettings struct{ Window SettingsWindow }
 
 func (OpenSettings) Name() string { return "open_settings" }
 
 func (OpenSettings) Description() string {
-	return "Open DeskPixie's Settings window, at the setting the user asks about (\"where do I change the " +
-		"microphone\", \"show me the noise filter setting\", \"open settings\"). Pass the setting in a few " +
-		"words as query, or leave it out to just open Settings. It only shows the setting and points it out: " +
-		"it changes nothing, so when the user asks to change a setting (turn something on or off, set it, " +
-		"make it louder), hand that off with delegate instead. Then tell the user which page it is on in one " +
-		"short sentence."
+	return "Open DeskPixie's Settings window on the person's Mac, at the setting they ask about " +
+		"(\"where do I change the microphone\"), pointed out; leave out query to just open Settings. It changes " +
+		"nothing. Answers with the setting's name and page: tell the person which page it is on."
 }
 
 func (OpenSettings) Parameters() json.RawMessage {

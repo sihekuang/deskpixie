@@ -5,6 +5,12 @@ import (
 	"github.com/sihekuang/deskpixie/core/tools"
 )
 
+// coordinatorTools are the local tools the coordinator gets: Pixie's (the same instances), and
+// open_settings, which is the coordinator's alone (#288): Pixie hands settings questions to it.
+func (a *App) coordinatorTools() []tools.Tool {
+	return append(append([]tools.Tool{}, a.localTools...), tools.OpenSettings{Window: settingsWindow{a}})
+}
+
 // settingsWindow is open_settings' window (#288): the settings search, and the settings.open
 // event that has Swift show the window at a setting.
 type settingsWindow struct{ a *App }

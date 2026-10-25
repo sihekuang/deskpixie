@@ -136,12 +136,9 @@ type LocalToolDeps struct {
 	Places     tools.Geocoder
 	Sky        tools.WeatherSource
 	Player     tools.MediaPlayer
-	// Settings is the Settings window for open_settings; nil leaves the tool out.
-	Settings tools.SettingsWindow
 }
 
-// NewLocalTools are Pixie's local tools (timer, get_weather, media, get_time, calculate, and
-// open_settings when there is a Settings window). The
+// NewLocalTools are Pixie's local tools (timer, get_weather, media, get_time, calculate). The
 // app builds them once and hands the same instances to the voice loop and to the coordinator's
 // MCP server, so a timer set by either rings through alarm. homeCity is voice.homeCity: the
 // weather's default place, whatever the voice provider (or none).
@@ -163,17 +160,13 @@ func NewLocalTools(homeCity string, alarm tools.Alarm, d LocalToolDeps) []tools.
 	if d.TimerClock != nil {
 		timers = tools.NewTimersWithClock(alarm, d.TimerClock)
 	}
-	out := []tools.Tool{
+	return []tools.Tool{
 		tools.TimerTool{Timers: timers},
 		tools.GetWeather{Places: d.Places, Sky: d.Sky, Home: homeCity},
 		tools.Media{Player: d.Player},
 		tools.GetTime{Clock: d.Clock, Places: d.Places},
 		tools.Calculate{},
 	}
-	if d.Settings != nil {
-		out = append(out, tools.OpenSettings{Window: d.Settings})
-	}
-	return out
 }
 
 // VoiceTools are the tools every conversation has: end_conversation plus local, which answer

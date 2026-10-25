@@ -41,10 +41,7 @@ func TestTheDelegationPersonaDelegatesByDefault(t *testing.T) {
 		"Never ask permission to hand something off.",
 		"does not hand it off",
 		"never answer a new request from it instead of delegating",
-		"get_time, get_weather, calculate, timer, media and open_settings",
-		// #288: showing a setting is Pixie's own; changing one is still delegated.
-		"is open_settings: keep that",
-		"\"where do I change the microphone\"",
+		"get_time, get_weather, calculate, timer and media",
 	} {
 		if !strings.Contains(DelegationPersona, phrase) {
 			t.Fatal(phrase)
@@ -75,7 +72,7 @@ func TestTheDelegateToolSaysItIsTheDefault(t *testing.T) {
 		"This is the default for every request",
 		"When unsure, call it",
 		"don't try it yourself first or ask whether to",
-		"get_time, get_weather, calculate, timer, media and open_settings",
+		"get_time, get_weather, calculate, timer and media",
 		"one short acknowledgement",
 	} {
 		if !strings.Contains(d, phrase) {
