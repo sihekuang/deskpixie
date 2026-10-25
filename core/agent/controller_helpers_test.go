@@ -19,7 +19,7 @@ func visible(fx []Effect) []Effect {
 	var out []Effect
 	for _, e := range fx {
 		switch e.Kind {
-		case EfAppend, EfRewrite, EfLog, EfLabel, EfUpdates, EfReply:
+		case EfAppend, EfRewrite, EfLog, EfLabel, EfUpdates, EfReply, EfLine, EfDelivered:
 		default:
 			out = append(out, e)
 		}

@@ -3,12 +3,13 @@ package app
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/sihekuang/deskpixie/core/settings"
 )
 
-// The text box under Pixie (#221): chat.send, chat.stop and chat.mode; the agent's lines come
-// back as `chat.line` events, the mode as `replyMode`, a hotkey press in text mode as
+// The text box under Pixie (#221): chat.send, chat.stop and chat.mode; what you send joins the
+// chat thread (thread.go, #302); the agent's lines come back as `chat.line` events, the mode as `replyMode`, a hotkey press in text mode as
 // `chat.focus`.
 
 // errNoCoordinator: chat.send with the agent off.
@@ -17,7 +18,11 @@ var errNoCoordinator = errors.New("The coordinator is off.")
 func (a *App) registerChat(r Registrar) {
 	r.Register("chat.send", func(args json.RawMessage) (any, error) {
 		var in struct {
-			Text string `json:"text"`
+			Text        string   `json:"text"`
+			Attachments []string `json:"attachments"`
+			// Session is the address of the session you're replying to (#302): the coordinator
+			// is asked to tell it.
+			Session string `json:"session"`
 		}
 		if err := decodeArgs("chat.send", args, &in); err != nil {
 			return nil, err
@@ -25,11 +30,24 @@ func (a *App) registerChat(r Registrar) {
 		if a.agent == nil {
 			return nil, errNoCoordinator
 		}
-		job, err := a.agent.ChatSend(in.Text)
+		if in.Session != "" {
+			// Always a new job: never taken for the answer to a question waiting in the box.
+			job, err := a.agent.ChatDelegate("Tell the " + a.sessionLabel(in.Session) + " session: " + in.Text)
+			if err != nil {
+				return nil, err
+			}
+			a.threadSent(job, in.Text, in.Attachments, in.Session)
+			return map[string]any{"job": job}, nil
+		}
+		sent, err := a.agent.ChatSend(in.Text)
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"job": job}, nil
+		a.threadSent(sent.Job, in.Text, in.Attachments, "")
+		if sent.Answered {
+			a.threadSentAnswer(sent.Job, sent.Session, strings.TrimSpace(in.Text))
+		}
+		return map[string]any{"job": sent.Job}, nil
 	})
 	r.Register("chat.stop", func(json.RawMessage) (any, error) {
 		if a.agent != nil {

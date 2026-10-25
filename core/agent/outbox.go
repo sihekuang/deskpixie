@@ -103,6 +103,28 @@ func (o *Outbox) PushHeard(line Line, now Millis) string {
 	return o.lines[len(o.lines)-1].record()
 }
 
+// undelivered: the ids of the lines not delivered yet.
+func (o *Outbox) undelivered() map[uint64]bool {
+	ids := map[uint64]bool{}
+	for _, l := range o.lines {
+		if !l.Delivered {
+			ids[l.ID] = true
+		}
+	}
+	return ids
+}
+
+// deliveredOf: the lines of before (undelivered then) delivered now, in order.
+func (o *Outbox) deliveredOf(before map[uint64]bool) []uint64 {
+	var ids []uint64
+	for _, l := range o.lines {
+		if l.Delivered && before[l.ID] {
+			ids = append(ids, l.ID)
+		}
+	}
+	return ids
+}
+
 func (o *Outbox) Undelivered() []OutboxLine {
 	var out []OutboxLine
 	for _, l := range o.lines {
@@ -193,13 +215,31 @@ func (o *Outbox) Lines() []string {
 	return out
 }
 
+// lastIDRecord is the record Records ends with: the last id given out (#302).
+type lastIDRecord struct {
+	LastID *uint64 `json:"lastId"`
+}
+
+// Records is the compacted file: every line, then the last id given out, so the id of a line
+// dropped from the file is never given out again (the chat thread keys requests by it, #302).
+func (o *Outbox) Records() []string {
+	b, _ := json.Marshal(lastIDRecord{LastID: &o.nextID})
+	return append(o.Lines(), string(b))
+}
+
 // RestoreOutbox rebuilds from outbox.jsonl: the last record per id wins; delivered lines older
 // than 14 days are dropped; permission questions from a previous run are dropped (their
-// requests died with that run).
+// requests died with that run). Ids go on from the last one given out, dropped lines included.
 func RestoreOutbox(records []string, now Millis) *Outbox {
 	var order []uint64
+	var lastID uint64
 	latest := map[uint64]OutboxLine{}
 	for _, r := range records {
+		var mark lastIDRecord
+		if json.Unmarshal([]byte(r), &mark) == nil && mark.LastID != nil {
+			lastID = max(lastID, *mark.LastID)
+			continue
+		}
 		var l OutboxLine
 		if err := json.Unmarshal([]byte(r), &l); err != nil {
 			continue
@@ -210,6 +250,7 @@ func RestoreOutbox(records []string, now Millis) *Outbox {
 		latest[l.ID] = l
 	}
 	out := NewOutbox()
+	out.nextID = lastID
 	for _, id := range order {
 		l := latest[id]
 		out.nextID = max(out.nextID, l.ID)

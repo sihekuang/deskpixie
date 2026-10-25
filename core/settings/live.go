@@ -31,6 +31,8 @@ const (
 	RouteReplyMode
 	// RouteCaptions: the shell keeps captions up or shows them on hover (#224).
 	RouteCaptions
+	// RouteChat: the chat window keeps history this many days (#302).
+	RouteChat
 )
 
 // RouteFor is the route for a Live field (or "position" for Reset position); ok is false for
@@ -60,6 +62,8 @@ func RouteFor(path string) (Route, bool) {
 		return RouteReplyMode, true
 	case "alwaysShowCaption", "captionDismissSecs", "captionFadeSecs", "replyHistoryMins":
 		return RouteCaptions, true
+	case "chatKeepDays":
+		return RouteChat, true
 	case "position":
 		return RouteResetPosition, true
 	}

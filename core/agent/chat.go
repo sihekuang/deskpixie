@@ -18,6 +18,13 @@ type ChatLine struct {
 	Text   string `json:"text"`
 	// Sessions: the sessions the line is about, for the card's buttons that go to them (#261).
 	Sessions []string `json:"sessions,omitempty"`
+	// Asking: the line is the question itself (a job's question or a permission request, or a
+	// session asking in the box), which waits on the badge as a request too (#302). A status of
+	// question alone only says the job is waiting.
+	Asking bool `json:"asking,omitempty"`
+	// Session: the line is that session's own turn, the answer to a message typed to it (#241),
+	// not the coordinator's ("" = the coordinator's).
+	Session string `json:"session,omitempty"`
 }
 
 // ChatSink is the text box: it gets each line for a typed job.
@@ -48,7 +55,7 @@ func (c *AgentController) chatLine(line Line) ChatLine {
 		// A permission request: allowed from the bubble or the notification, not by a spoken word.
 		text = strings.TrimSpace(strings.TrimSuffix(text, fmt.Sprintf("Say confirm %s.", *line.Token))) + " " + permissionHint
 	}
-	return ChatLine{Job: line.Job, Status: status, Text: text, Sessions: c.lineSessions(line)}
+	return ChatLine{Job: line.Job, Status: status, Text: text, Sessions: c.lineSessions(line), Asking: line.Kind == LineQuestion}
 }
 
 // permissionHint ends a permission request in the text box.
@@ -60,9 +67,58 @@ const typedNote = "The user typed this in DeskPixie's text box."
 // errEmptyChat: nothing to send.
 var errEmptyChat = errors.New("Type a message first.")
 
+// ChatSent is where a message typed in the text box went (#302): its job, and whether it
+// answered a question waiting for one: the job's own, or (Session set) that session's.
+type ChatSent struct {
+	Job      JobID
+	Answered bool
+	Session  string
+}
+
 // ChatSend is a message typed in the text box: the answer to the last typed job's question
 // while it waits for one, else a new typed job (a delegation, with the same reasons to refuse).
 func (h *AgentHandle) ChatSend(text string) (JobID, error) {
+	s, err := h.ChatMessage(text)
+	return s.Job, err
+}
+
+// ChatMessage is ChatSend that also says what the message answered.
+func (h *AgentHandle) ChatMessage(text string) (ChatSent, error) {
+	text, err := h.chatText(text)
+	if err != nil {
+		return ChatSent{}, err
+	}
+	h.ctlMu.Lock()
+	if session, job := h.ctl.takeBoxAnswer(); session != "" {
+		// #241: the box shows that session's question: the words are its answer.
+		h.ctlMu.Unlock()
+		_, where, err := h.AnswerAsked("", text)
+		return ChatSent{Job: job, Answered: err == nil && where != toNewRequest, Session: session}, err
+	}
+	last := h.ctl.LastTyped()
+	j, ok := h.ctl.jobs.Get(last)
+	waiting := last != "" && ok && j.Status == JobQuestion && h.ctl.jobs.IsOpen(last)
+	h.ctlMu.Unlock()
+	if waiting {
+		id, where, err := h.AnswerAsked(string(last), text)
+		return ChatSent{Job: id, Answered: err == nil && where != toNewRequest}, err
+	}
+	id, err := h.delegate(text, typedNote, true)
+	return ChatSent{Job: id}, err
+}
+
+// ChatDelegate is a message typed in the text box that is always a new typed job, never an
+// answer to a waiting question: a reply to one session, told through the coordinator (#302).
+func (h *AgentHandle) ChatDelegate(text string) (JobID, error) {
+	text, err := h.chatText(text)
+	if err != nil {
+		return "", err
+	}
+	return h.delegate(text, typedNote, true)
+}
+
+// chatText is a typed message trimmed, or what stands for it when only attachments go.
+func (h *AgentHandle) chatText(text string) (string, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		if !h.hasAttachments() {
@@ -70,22 +126,7 @@ func (h *AgentHandle) ChatSend(text string) (JobID, error) {
 		}
 		text = attachedOnly
 	}
-	h.ctlMu.Lock()
-	if session, job := h.ctl.takeBoxAnswer(); session != "" {
-		// #241: the box shows that session's question: the words are its answer.
-		h.ctlMu.Unlock()
-		_, _, err := h.AnswerAsked("", text)
-		return job, err
-	}
-	last := h.ctl.LastTyped()
-	j, ok := h.ctl.jobs.Get(last)
-	waiting := last != "" && ok && j.Status == JobQuestion && h.ctl.jobs.IsOpen(last)
-	h.ctlMu.Unlock()
-	if waiting {
-		id, _, err := h.AnswerAsked(string(last), text)
-		return id, err
-	}
-	return h.delegate(text, typedNote, true)
+	return text, nil
 }
 
 // ChatStop is Stop in the text box: cancel the last typed job if it is still open.

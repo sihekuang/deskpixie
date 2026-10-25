@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -12,14 +13,35 @@ import (
 
 // #221: the text box's calls, events and the text-mode hotkey.
 
-func (f *fakeAgent) ChatSend(text string) (string, error) {
+// ChatSend answers the question waiting (asking: its job; askingSession: the session whose
+// question the box shows), as the real one does, else starts a new numbered job.
+func (f *fakeAgent) ChatSend(text string) (ChatSent, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.chatErr != nil {
+		return ChatSent{}, f.chatErr
+	}
+	f.sent = append(f.sent, text)
+	if f.asking != "" {
+		s := ChatSent{Job: f.asking, Answered: true, Session: f.askingSession}
+		f.asking, f.askingSession = "", ""
+		return s, nil
+	}
+	f.jobs++
+	return ChatSent{Job: fmt.Sprintf("job_%012d", f.jobs)}, nil
+}
+
+// ChatDelegate always starts a new job.
+func (f *fakeAgent) ChatDelegate(text string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.chatErr != nil {
 		return "", f.chatErr
 	}
 	f.sent = append(f.sent, text)
-	return "job_000000000001", nil
+	f.delegated++
+	f.jobs++
+	return fmt.Sprintf("job_%012d", f.jobs), nil
 }
 func (f *fakeAgent) ChatStop() { f.mu.Lock(); f.stops++; f.mu.Unlock() }
 func (f *fakeAgent) SetTextMode(on bool) {

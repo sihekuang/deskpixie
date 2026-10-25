@@ -2,6 +2,7 @@ package app
 
 import (
 	"github.com/sihekuang/deskpixie/core/attach"
+	"github.com/sihekuang/deskpixie/core/chat"
 	"github.com/sihekuang/deskpixie/core/settings"
 	"github.com/sihekuang/deskpixie/core/tools"
 	"github.com/sihekuang/deskpixie/core/voice"
@@ -38,6 +39,17 @@ type AgentHooks struct {
 	// Reply is a reply card for the reply deck (the `reply.card` event's ReplyCard); a card that
 	// gains a row comes again whole with the same id.
 	Reply func(card any)
+	// ThreadLine is a session update or coordinator line for the chat thread, ready to Add (#302).
+	ThreadLine func(chat.Entry)
+	// ThreadRequests is every open request now (from the updates list), whole each time, empty
+	// when all are answered.
+	ThreadRequests func([]chat.Entry)
+	// ThreadAnswer is a typed job's answer (a done or failed ChatLine), one entry per turn; an
+	// answer that grows comes again with the same id.
+	ThreadAnswer func(chat.Entry)
+	// ThreadDelivered: these outbox lines were heard (replayed in a conversation) or seen (in the
+	// bubble), so the entries holding them are read.
+	ThreadDelivered func([]uint64)
 	// Roster is the roster beside Pixie (the `agents` event's roster), on every change (#91).
 	Roster func(view any)
 	// ShowPane asks the shell to bring up an agent's pane (the `showPane` event, #110).
@@ -105,8 +117,11 @@ type Agent interface {
 	// ReportFocusOutcome: the shell finished executing a FocusPlan (#116). Failure becomes the
 	// tray status line, as for OpenTerminal.
 	ReportFocusOutcome(success bool, detail string)
-	// ChatSend is a message typed in the text box (#221): its job id, or why it can't go.
-	ChatSend(text string) (string, error)
+	// ChatSend is a message typed in the text box (#221): where it went, or why it can't go.
+	ChatSend(text string) (ChatSent, error)
+	// ChatDelegate is a message typed in the text box that is always a new job, never the
+	// answer to a waiting question: a reply to a session, told through the coordinator (#302).
+	ChatDelegate(text string) (string, error)
 	// ChatStop is Stop in the text box: cancel the typed job still running.
 	ChatStop()
 	// SetTextMode: replyMode is text (no conversation is opened for updates).
@@ -116,6 +131,14 @@ type Agent interface {
 	// Shutdown is the app's quit: deny pending permissions, stop the panes, clear the MCP
 	// configs, stop the session host and the hook server. Idempotent; blocks ~3 s at most.
 	Shutdown()
+}
+
+// ChatSent is where a message typed in the text box went (#302): its job, and whether it
+// answered a waiting question: the job's own, or (Session set) the session's at that address.
+type ChatSent struct {
+	Job      string
+	Answered bool
+	Session  string
 }
 
 // SessionPlace is where one of your sessions runs (#277): its folder and its terminal app's

@@ -84,6 +84,19 @@ func TestATypedJobsProgressAndQuestionGoToTheCard(t *testing.T) {
 	fx = stop(c, `<spoken ref="job_000000000001" status="question">Which repo?</spoken>`, T0+30)
 	wantChat(t, fx, ChatLine{Job: job(1), Status: "question", Text: "Which repo?"})
 	notSaid(t, fx) // kept as heard, so it waits on the badge too (#286 call 7)
+	if !chats(fx)[0].Asking {
+		t.Fatal("the question itself is asking") // #302
+	}
+}
+
+// #302: a line on a job waiting on its question has the job's status, but isn't the question.
+func TestAnInfoLineOnAWaitingTypedJobIsNotAsking(t *testing.T) {
+	c := typedOnJob1()
+	stop(c, `<spoken ref="job_000000000001" status="question">Which repo?</spoken>`, T0+30)
+	l := c.chatLine(NewJobLine(LineInfo, "Waiting at a prompt in its terminal.", job(1)))
+	if l.Status != "question" || l.Asking {
+		t.Fatalf("%+v", l)
+	}
 }
 
 func TestATypedJobThatFailsOrStopsSaysSoInTheCard(t *testing.T) {
@@ -231,6 +244,9 @@ func TestASessionsReplyToATypedMessageGoesToTheBox(t *testing.T) {
 	fx := sessionTurn(c, pixieTurn("The redirect loop is fixed and all 412 tests pass."), T0+20)
 	wantChat(t, fx, ChatLine{Job: job(1), Status: "done", Text: "The redirect loop is fixed and all 412 tests pass."})
 	noUsualRoute(t, fx)
+	if got := chats(fx)[0].Session; got != "api-claude" {
+		t.Fatalf("the session's own turn, not the coordinator's: Session = %q", got) // #302
+	}
 	// Its later turns too (a background task it waited on), even ones Pixie didn't prompt.
 	later := pixieTurn("Also pushed the branch.")
 	later.FromPixie = false
