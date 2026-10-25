@@ -113,8 +113,8 @@ private struct NeedsStrip: View {
     }
 }
 
-/// The thread's content in the scroll view's coordinates: where its last row ends and how tall
-/// it is. Measured outside the lazy stack, so it is always laid out. Set straight from the
+/// The thread's content in the scroll view's coordinates: where it ends (after its bottom
+/// padding) and how tall it is. Measured outside the lazy stack, so it is always laid out. Set straight from the
 /// content's own GeometryReader: a preference set inside a macOS ScrollView's content never
 /// reaches `onPreferenceChange` outside it.
 private struct ThreadGeometry: Equatable {
@@ -140,9 +140,11 @@ private struct ChatThreadView: View {
     /// Which scroll `awaitingLayout` waits on, so a late give-up can't end a newer wait.
     @State private var layoutWaits = 0
 
-    private var atBottom: Bool { atBottom(geometry) }
+    /// Kept from report to report, so the content's height flickering while the lazy stack
+    /// measures can't take it off the bottom (`atBottomAfterLayout`).
+    @State private var atBottom = false
 
-    private func atBottom(_ g: ThreadGeometry) -> Bool {
+    private func isAtBottom(_ g: ThreadGeometry) -> Bool {
         ChatThreadModel.isAtBottom(sentinelMaxY: Double(g.bottom), viewportHeight: Double(viewport))
     }
 
@@ -179,8 +181,14 @@ private struct ChatThreadView: View {
                         .accessibilityIdentifier(model.coordinatorStep == nil ? "chat.thinking" : "chat.live.coordinator")
                     }
                 }
-                // Right under the last row, so the padding below doesn't count against the
-                // bottom; the opening scroll and ↓ Latest both go here.
+                .frame(maxWidth: ChatWindowView.column)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 20)
+                .frame(maxWidth: .infinity)
+                // The content's very end, after the padding: the opening scroll and ↓ Latest
+                // go here, so a scroll to the bottom shows the padding too and ends with the
+                // end at the viewport's edge. (Under the last row, a scroll lined up the row and
+                // left the padding below on macOS 14/15, past at-bottom's tolerance: #316.)
                 Color.clear
                     .frame(height: 1)
                     .id(Self.bottomID)
@@ -192,36 +200,37 @@ private struct ChatThreadView: View {
                         .onAppear { geometry = now }
                         .onChange(of: now) { _, n in geometry = n }
                 })
-                .frame(maxWidth: ChatWindowView.column)
-                .padding(.horizontal, 24)
-                .padding(.vertical, 20)
-                .frame(maxWidth: .infinity)
             }
             .coordinateSpace(name: Self.space)
             .background(GeometryReader { g in
                 Color.clear
                     .onAppear { viewport = g.size.height }
-                    .onChange(of: g.size.height) { old, new in
-                        viewport = new
-                        // The box under the thread grew (a chip, the @ list, more lines): at
-                        // the bottom before, stay there instead of showing ↓ Latest.
-                        if state.opened, ChatThreadModel.staysAtBottom(sentinelMaxY: Double(geometry.bottom),
-                                                                       oldViewport: Double(old), newViewport: Double(new)) {
-                            proxy.scrollTo(Self.bottomID, anchor: .bottom)
-                        }
-                    }
+                    .onChange(of: g.size.height) { _, new in viewport = new }
             })
+            .onChange(of: viewport) { old, new in
+                // The box under the thread grew (a chip, the @ list, more lines): at the bottom
+                // before, stay there instead of showing ↓ Latest.
+                let stays = state.opened && ChatThreadModel.staysAtBottom(wasAtBottom: atBottom,
+                                                                           oldViewport: Double(old), newViewport: Double(new))
+                atBottom = stays || isAtBottom(geometry)
+                if stays { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
+            }
             .onChange(of: geometry) { old, new in
-                // The layout after the opening scroll: only now does at-bottom hold.
+                // The layout after the opening scroll: only now does at-bottom hold, from where
+                // the end is.
                 if awaitingLayout {
                     awaitingLayout = false
+                    atBottom = isAtBottom(new)
                     markRead()
                     return
                 }
                 // Rows grow after they are drawn (links found, text wrapped), and live lines grow
                 // as the words come: at the bottom, stay there.
-                let follow = ChatThreadModel.keepsBottom(wasAtBottom: atBottom(old), heightChanged: new.height != old.height)
-                if state.opened && follow && !atBottom(new) { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
+                let heightChanged = new.height != old.height
+                let follow = state.opened && ChatThreadModel.keepsBottom(wasAtBottom: atBottom, heightChanged: heightChanged)
+                atBottom = ChatThreadModel.atBottomAfterLayout(wasAtBottom: state.opened && atBottom, heightChanged: heightChanged,
+                                                               sentinelMaxY: Double(new.bottom), viewportHeight: Double(viewport))
+                if follow && !isAtBottom(new) { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
             }
             .accessibilityIdentifier("chat.thread")
             .overlay(alignment: .bottom) {
@@ -309,7 +318,7 @@ private struct ChatThreadView: View {
             // The geometry known now is from before the scroll: the next report decides. Content
             // that fits doesn't move, so what is known holds.
             if !state.opened {
-                awaitingLayout = ChatThreadModel.scrollMoves(contentHeight: Double(geometry.height) + 40,
+                awaitingLayout = ChatThreadModel.scrollMoves(contentHeight: Double(geometry.height),
                                                              viewportHeight: Double(viewport))
                 if awaitingLayout { giveUpWaiting() }
             }

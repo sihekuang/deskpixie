@@ -508,14 +508,36 @@ final class ChatThreadModelTests: XCTestCase {
     /// Found by hand: Attach on the hint row put a chip above the box, the thread got shorter,
     /// and "↓ Latest" showed. At the bottom before, it stays at the bottom.
     func testTheBoxGrowingKeepsTheBottom() {
-        // The end was at 600 in a 600 pt viewport; a chip takes 40 pt.
-        XCTAssertTrue(ChatThreadModel.staysAtBottom(sentinelMaxY: 600, oldViewport: 600, newViewport: 560))
-        XCTAssertTrue(ChatThreadModel.staysAtBottom(sentinelMaxY: 604, oldViewport: 600, newViewport: 640), "and shrinking")
-        XCTAssertFalse(ChatThreadModel.staysAtBottom(sentinelMaxY: 900, oldViewport: 600, newViewport: 560),
+        XCTAssertTrue(ChatThreadModel.staysAtBottom(wasAtBottom: true, oldViewport: 600, newViewport: 560))
+        XCTAssertTrue(ChatThreadModel.staysAtBottom(wasAtBottom: true, oldViewport: 600, newViewport: 640), "and shrinking")
+        XCTAssertFalse(ChatThreadModel.staysAtBottom(wasAtBottom: false, oldViewport: 600, newViewport: 560),
                        "scrolled up: left where you were")
-        XCTAssertFalse(ChatThreadModel.staysAtBottom(sentinelMaxY: 600, oldViewport: 600, newViewport: 600), "no change")
-        XCTAssertFalse(ChatThreadModel.staysAtBottom(sentinelMaxY: .infinity, oldViewport: 600, newViewport: 560),
-                       "not laid out yet")
+        XCTAssertFalse(ChatThreadModel.staysAtBottom(wasAtBottom: true, oldViewport: 600, newViewport: 600), "no change")
+    }
+
+    /// Found in CI on macOS 15 (#316): after a chip shrank the viewport to 514, the lazy stack's
+    /// height flickered between 2143 and 2264 and the end between 403 and 544, so at-bottom
+    /// flipped with each estimate and "↓ Latest" stayed up.
+    func testTheContentsFlickeringHeightKeepsTheBottom() {
+        var atBottom = true
+        for (bottom, height) in [(423.0, 2143.0), (544, 2264), (403, 2143), (524, 2264)] {
+            atBottom = ChatThreadModel.atBottomAfterLayout(wasAtBottom: atBottom, heightChanged: true,
+                                                           sentinelMaxY: bottom, viewportHeight: 514)
+            XCTAssertTrue(atBottom, "end at \(bottom), \(height) tall")
+        }
+        XCTAssertTrue(ChatThreadModel.atBottomAfterLayout(wasAtBottom: true, heightChanged: false,
+                                                          sentinelMaxY: 514, viewportHeight: 514), "still at the end")
+        XCTAssertFalse(ChatThreadModel.atBottomAfterLayout(wasAtBottom: true, heightChanged: false,
+                                                           sentinelMaxY: 640, viewportHeight: 514), "you scrolled up")
+        XCTAssertFalse(ChatThreadModel.atBottomAfterLayout(wasAtBottom: false, heightChanged: true,
+                                                           sentinelMaxY: 900, viewportHeight: 514),
+                       "reading further up while rows measure")
+        XCTAssertTrue(ChatThreadModel.atBottomAfterLayout(wasAtBottom: false, heightChanged: false,
+                                                          sentinelMaxY: 514, viewportHeight: 514), "scrolled down to the end")
+        XCTAssertTrue(ChatThreadModel.atBottomAfterLayout(wasAtBottom: false, heightChanged: true,
+                                                          sentinelMaxY: 300, viewportHeight: 514), "the content shrank to fit")
+        XCTAssertFalse(ChatThreadModel.atBottomAfterLayout(wasAtBottom: false, heightChanged: true,
+                                                           sentinelMaxY: .infinity, viewportHeight: 514), "not laid out")
     }
 
     func testTheBottomIsSeenOnlyOnceOpenedOnScreenAndInView() {
