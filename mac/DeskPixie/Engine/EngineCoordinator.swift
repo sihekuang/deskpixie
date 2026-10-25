@@ -214,7 +214,7 @@ final class EngineCoordinator {
     private func pushKeychainKeys() {
         let client = EngineSettingsClient(engine: engine)
         worker.async {
-            let values = KeychainSecrets().values(for: SettingsSecretID.allCases.map(\.variable))
+            let values = KeychainSecrets.forApp(bundleID: Bundle.main.bundleIdentifier).values(for: SettingsSecretID.allCases.map(\.variable))
             do {
                 try client.setKeychain(values)
             } catch {

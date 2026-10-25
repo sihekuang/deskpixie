@@ -1,13 +1,18 @@
 import AppKit
 import XCTest
 
-/// One DeskPixie for a UI test, isolated from the user's own (AGENTS.md): its data folder
-/// (`DESKPIXIE_SUPPORT_DIR`) is a fresh folder with its own settings.json, its own
-/// `agent.session` and a free `agent.port`, and offline runs get a throwaway home too. Nothing in
-/// the app knows it is under test: the folder is set up the way the app itself would leave it.
+/// One DeskPixie for a UI test, isolated from the user's own (AGENTS.md). It is the UITest
+/// build, under its own bundle ID, so its preferences, window frames and Keychain items are its
+/// own and the user's DeskPixie can stay open. Its data folder (`DESKPIXIE_SUPPORT_DIR`) is a
+/// fresh folder with its own settings.json, its own `agent.session` and a free `agent.port`, and
+/// offline runs get a throwaway home too. Nothing in the app knows it is under test: the folder
+/// is set up the way the app itself would leave it.
 @MainActor
 final class UITestApp {
-    static let bundleID = "com.sihekuang.deskpixie"
+    /// The UITest configuration's PRODUCT_BUNDLE_IDENTIFIER (mac/project.yml).
+    static let bundleID = "com.sihekuang.deskpixie.uitest"
+    /// The user's own app: its preferences must not change while the tests run.
+    static let userBundleID = "com.sihekuang.deskpixie"
     /// `DESKPIXIE_UITEST_LIVE=1` (passed as `TEST_RUNNER_DESKPIXIE_UITEST_LIVE` by `make uitest`):
     /// the tests that need herdr, the coordinator and a model run too.
     static var live: Bool { ProcessInfo.processInfo.environment["DESKPIXIE_UITEST_LIVE"] == "1" }
@@ -23,12 +28,14 @@ final class UITestApp {
     let live: Bool
     let app = XCUIApplication()
     private var launched = false
+    /// The user's preferences file as it was before this test (nil: not there).
+    private let userPreferencesDate = UITestApp.userPreferencesModified()
 
-    /// Skips the test while a DeskPixie it didn't launch is running: launching the app here
-    /// would end that one, and the tests must never touch it.
+    /// Skips the test while a copy of the UITest build it didn't launch is running (launching
+    /// here would end it). The user's own DeskPixie, under its real bundle ID, doesn't count.
     init(live: Bool = false) throws {
         if !NSRunningApplication.runningApplications(withBundleIdentifier: Self.bundleID).isEmpty {
-            throw XCTSkip("Quit DeskPixie to run the UI tests")
+            throw XCTSkip("Quit DeskPixie UITest to run the UI tests")
         }
         let tag = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(12)
         self.live = live
@@ -52,6 +59,9 @@ final class UITestApp {
     private func writeSettings() throws {
         let settings: [String: Any] = [
             "chatKeepDays": 7,
+            // Not the default ctrl+alt+Space, which the user's DeskPixie holds; one that can't be
+            // bound only shows a line in the menu.
+            "hotkey": "ctrl+alt+shift+cmd+F19",
             "canvas": ["autoOpen": false, "keep": 50],
             "agent": [
                 // Offline, no coordinator: no herdr session, no hook server, no model.
@@ -107,14 +117,27 @@ final class UITestApp {
         launched = false
     }
 
-    /// Ends the app, the herdr session it may have made, and the folder.
-    func cleanUp() {
+    /// Ends the app, the herdr session it may have made, and the folder. False when the user's
+    /// own preferences file changed meanwhile.
+    @discardableResult
+    func cleanUp() -> Bool {
         terminate()
         if let herdr = Self.herdr {
             _ = Self.run(herdr, ["session", "stop", session])
             _ = Self.run(herdr, ["session", "delete", session])
         }
         try? FileManager.default.removeItem(at: root)
+        return Self.userPreferencesModified() == userPreferencesDate
+    }
+
+    /// ~/Library/Preferences/com.sihekuang.deskpixie.plist in the real home (the account's, not
+    /// $HOME): its modification date, nil when it isn't there.
+    private static func userPreferencesModified() -> Date? {
+        guard let pw = getpwuid(getuid()), let dir = pw.pointee.pw_dir else { return nil }
+        let file = URL(fileURLWithPath: String(cString: dir))
+            .appendingPathComponent("Library/Preferences/\(userBundleID).plist")
+        let attributes = try? FileManager.default.attributesOfItem(atPath: file.path)
+        return attributes?[.modificationDate] as? Date
     }
 
     /// The menu bar's Chat…, then the window. Chat… waits for the core to start, so the menu is

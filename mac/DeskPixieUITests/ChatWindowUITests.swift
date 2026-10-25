@@ -3,8 +3,9 @@ import XCTest
 
 /// The chat window (#302), driven from the menu bar like a person would. Each test runs its own
 /// DeskPixie on a fresh data folder (`UITestApp`); a thread is seeded through the store's own
-/// file. Run with `make -C mac uitest` (quit your own DeskPixie first: the tests skip while it
-/// runs); `DESKPIXIE_UITEST_LIVE=1` adds the tests that need herdr, claude and the coordinator.
+/// file. Run with `make -C mac uitest` (the UITest build, under its own bundle ID: your own
+/// DeskPixie can stay open); `DESKPIXIE_UITEST_LIVE=1` adds the tests that need herdr, claude and
+/// the coordinator.
 @MainActor
 final class ChatWindowUITests: XCTestCase {
     private var harness: UITestApp?
@@ -16,7 +17,10 @@ final class ChatWindowUITests: XCTestCase {
     }
 
     override func tearDown() async throws {
-        harness?.cleanUp()
+        if let harness {
+            XCTAssertTrue(harness.cleanUp(),
+                          "~/Library/Preferences/\(UITestApp.userBundleID).plist changed during the test")
+        }
         harness = nil
         // After the app is gone, so it never sees the user's clipboard come back as a new copy.
         pasteboard?.restore()
