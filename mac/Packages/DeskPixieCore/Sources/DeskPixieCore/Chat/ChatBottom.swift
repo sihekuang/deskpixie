@@ -42,26 +42,24 @@ public struct ChatBottom: Equatable, Sendable {
 
     // MARK: Landing
 
-    /// How many times an opening scroll to the end is tried again, and for how long after it.
+    /// How many times an opening scroll to the end is tried again.
     public static let landingTries = 3
-    public static let landingTime: TimeInterval = 1
     private var triesLeft = 0
-    private var landingUntil = Date.distantPast
 
-    /// The opening scroll went to the end (true) or to a message (false). On macOS 15, opened
-    /// from Pixie's button with DeskPixie in the background, it can run without moving anything,
-    /// and the window came up at the top under "↓ Latest".
-    public mutating func aimed(atBottom: Bool, at now: Date = Date()) {
-        triesLeft = atBottom ? Self.landingTries : 0
-        landingUntil = now.addingTimeInterval(Self.landingTime)
+    /// The opening scroll went to the end (true) or to a message (false), from where the end is
+    /// now. On macOS 15, opened from Pixie's button with DeskPixie in the background, it can run
+    /// without moving anything, and the window came up at the top under "↓ Latest". Already at
+    /// the end (shown again after a hide), there is nothing to land: no report may come to end
+    /// it, and a scroll up later is yours.
+    public mutating func aimed(atBottom: Bool, sentinelMaxY: Double, viewportHeight: Double) {
+        let there = ChatThreadModel.isAtBottom(sentinelMaxY: sentinelMaxY, viewportHeight: viewportHeight)
+        triesLeft = atBottom && !there ? Self.landingTries : 0
     }
 
-    /// A layout report just after an opening scroll to the end that isn't there yet. True: scroll
-    /// to the end again. A report before the viewport has its height decides nothing; one after
-    /// the moment is over is a scroll of yours (shown again already at the bottom, no report
-    /// comes to end it).
-    public mutating func landed(sentinelMaxY: Double, viewportHeight: Double, at now: Date = Date()) -> Bool {
-        guard triesLeft > 0, now <= landingUntil, viewportHeight > 0 else { return false }
+    /// A layout report while an opening scroll to the end lands. True: it isn't there, scroll
+    /// again. A report before the viewport has its height decides nothing.
+    public mutating func landed(sentinelMaxY: Double, viewportHeight: Double) -> Bool {
+        guard triesLeft > 0, viewportHeight > 0 else { return false }
         if ChatThreadModel.isAtBottom(sentinelMaxY: sentinelMaxY, viewportHeight: viewportHeight) {
             triesLeft = 0
             return false

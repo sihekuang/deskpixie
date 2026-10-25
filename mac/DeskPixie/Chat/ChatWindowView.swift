@@ -327,7 +327,10 @@ private struct ChatThreadView: View {
             } else {
                 proxy.scrollTo(Self.bottomID, anchor: .bottom)
             }
-            if !state.opened { bottom.aimed(atBottom: !toMessage) }
+            if !state.opened {
+                bottom.aimed(atBottom: !toMessage, sentinelMaxY: Double(geometry.bottom),
+                             viewportHeight: Double(viewport))
+            }
             // The geometry known now is from before the scroll: the next report decides. Content
             // that fits doesn't move, so what is known holds.
             if !state.opened {
