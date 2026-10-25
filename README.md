@@ -27,6 +27,10 @@ macOS app (`mac/`).
   your projects. Results, questions and permission requests come back by voice.
 - **Or type instead.** Flip the 🔊/💬 toggle under Pixie to text mode: type a quick message
   straight to the coordinator and read its short answer, without a sound. Stop it any time.
+- **Keep the whole conversation.** The chat window (the round button above Pixie, or ⌘⇧C)
+  holds everything said, by voice or typed, with the coordinator, Pixie's agents and your own
+  sessions. Answer their questions there, type `@` to message one session, attach screenshots,
+  and jump to a session's terminal from its name.
 - **Watch the agents you start yourself.** Run `pix claude` or `pix codex` in any terminal, and
   Pixie can see, message and interrupt those sessions, pass on their questions, and bring one to
   the front ("show me the deskpixie session").
