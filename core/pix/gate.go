@@ -160,5 +160,5 @@ func Sanitize(s string) string {
 	}, s)
 }
 
-// Paste is s as a bracketed paste, then Enter.
-func Paste(s string) []byte { return []byte("\x1b[200~" + s + "\x1b[201~\r") }
+// Paste is s as a bracketed paste. Enter goes on its own once the agent has taken it (typeIn).
+func Paste(s string) []byte { return []byte("\x1b[200~" + s + "\x1b[201~") }

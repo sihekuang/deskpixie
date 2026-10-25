@@ -2,6 +2,7 @@ package pix
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -33,6 +34,11 @@ type Runner struct {
 	done    chan struct{}
 	code    int
 	restore func()
+
+	outMu sync.Mutex
+	outN  uint64        // reads of the agent's output so far
+	outAt time.Time     // the last one
+	outCh chan struct{} // closed and replaced on each read
 }
 
 // Start starts the agent. Raw mode and resize forwarding only when Stdin is a terminal.
@@ -106,6 +112,10 @@ func (r *Runner) copyOut() {
 	for {
 		n, err := r.ptmx.Read(buf)
 		if n > 0 {
+			// Counted before anyone sees it, so output pix has already passed on can't count as the
+			// answer to a later write. Output the agent made just before reading that write still can:
+			// Settle's quiet must be longer than the agent's redraw for it.
+			r.sawOutput(time.Now())
 			r.Stdout.Write(buf[:n])
 			if r.OnOutput != nil {
 				r.OnOutput(buf[:n])
@@ -121,11 +131,97 @@ func (r *Runner) copyOut() {
 func (r *Runner) WriteToAgent(b []byte) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.write(b)
+}
+
+func (r *Runner) write(b []byte) error {
 	if r.Tap != nil {
 		r.Tap(b)
 	}
 	_, err := r.ptmx.Write(b)
 	return err
+}
+
+// PasteAndEnter writes paste, waits for the agent to take it (Settle), then presses Enter, as one
+// write to the agent: your keys and other writes wait until the Enter is in, so none land inside
+// the message. unsettled is why it pressed Enter without seeing the agent take the paste. ok
+// says whether to type at all, before the paste and again before the Enter (#306: not into a
+// menu); pasted and entered say what went in.
+func (r *Runner) PasteAndEnter(paste []byte, quiet, limit time.Duration, ok func() bool) (unsettled error, pasted, entered bool, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !ok() {
+		return nil, false, false, nil
+	}
+	mark := r.Outputs()
+	if err := r.write(paste); err != nil {
+		return nil, false, false, err
+	}
+	unsettled = r.Settle(mark, quiet, limit)
+	if !ok() {
+		return unsettled, true, false, nil
+	}
+	return unsettled, true, true, r.write([]byte{'\r'})
+}
+
+// EnterIf presses Enter if ok says so then, with the writer held as PasteAndEnter holds it.
+func (r *Runner) EnterIf(ok func() bool) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !ok() {
+		return false, nil
+	}
+	return true, r.write([]byte{'\r'})
+}
+
+func (r *Runner) sawOutput(now time.Time) {
+	r.outMu.Lock()
+	defer r.outMu.Unlock()
+	r.outN++
+	r.outAt = now
+	if r.outCh != nil {
+		close(r.outCh)
+	}
+	r.outCh = make(chan struct{})
+}
+
+// Outputs counts the agent's output so far, to wait for what it shows after a write (Settle).
+func (r *Runner) Outputs() uint64 {
+	r.outMu.Lock()
+	defer r.outMu.Unlock()
+	return r.outN
+}
+
+// Settle waits until the agent has shown something since Outputs was mark and then shown
+// nothing for quiet: it has taken what was written and redrawn. An error after limit when it
+// showed nothing, or never stopped.
+func (r *Runner) Settle(mark uint64, quiet, limit time.Duration) error {
+	deadline := time.After(limit)
+	for {
+		r.outMu.Lock()
+		if r.outCh == nil {
+			r.outCh = make(chan struct{})
+		}
+		n, at, changed := r.outN, r.outAt, r.outCh
+		r.outMu.Unlock()
+		var settled <-chan time.Time
+		if n > mark {
+			left := quiet - time.Since(at)
+			if left <= 0 {
+				return nil
+			}
+			settled = time.After(left)
+		}
+		select {
+		case <-changed:
+		case <-settled:
+		case <-deadline:
+			if n == mark {
+				return fmt.Errorf("the agent showed nothing in %v", limit)
+			}
+			return fmt.Errorf("the agent's screen didn't settle in %v", limit)
+		}
+	}
 }
 
 // Pid is the agent's process id.

@@ -99,3 +99,64 @@ jobs:
           path: ${{ steps.pack.outputs.zip }}
           if-no-files-found: error
           retention-days: 14
+
+  uitest:
+    name: UI tests
+    # The chat window's XCUITests (mac/DeskPixieUITests): the offline set plus the stand-in
+    # sessions tier (DESKPIXIE_UITEST_SESSIONS=1). The live tier (herdr, claude, a coordinator)
+    # stays local. Its own job, so the build above isn't held up by it.
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Select Xcode
+        run: |
+          set -euo pipefail
+          XCODE=$(printf '%s\n' /Applications/Xcode_*.app | grep -viE 'beta|release_candidate|_rc' | sort -V | tail -1)
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: core/go.mod
+          cache: true
+          cache-dependency-path: core/go.sum
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      # XCUITest drives the screen through automation mode, which asks for a password the
+      # first time. The runner has no one to type it: turn it on without asking (passwordless
+      # sudo on GitHub's images). Accessibility for the runner is already granted there.
+      - name: Enable UI automation
+        run: |
+          sudo automationmodetool enable-automationmode-without-authentication
+          automationmodetool
+
+      # Signing: no secrets here, so everything (the app, its dylibs and pix, the runner) is
+      # ad-hoc signed, as the Release build above is. The hardened runtime is off: with it,
+      # library validation refuses ad-hoc code that has no Team ID (the runner loading the test
+      # bundle, the app loading libdeskpixie). The runner keeps its own entitlements (no App
+      # Sandbox). BUILD_SIGN_FLAGS replaces the Makefile's Developer ID flags.
+      - name: UI tests
+        run: |
+          set -euo pipefail
+          make -C mac uitest DESKPIXIE_UITEST_SESSIONS=1 \
+            BUILD_SIGN_FLAGS="CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= ENABLE_HARDENED_RUNTIME=NO" \
+            2>&1 | tee uitest.log
+          # Guard against a run that "passes" by running nothing (every test skipped).
+          line=$(grep -E 'Executed [0-9]+ tests?, with [0-9]+ tests? skipped' uitest.log | tail -1)
+          echo "$line"
+          ran=$(sed -E 's/.*Executed ([0-9]+) tests?, with ([0-9]+) tests? skipped.*/\1 \2/' <<<"$line")
+          read -r executed skipped <<<"$ran"
+          test $((executed - skipped)) -gt 0 || { echo "error: no UI test ran" >&2; exit 1; }
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: UITests-${{ github.run_number }}-xcresult
+          path: mac/build/Logs/Test/*.xcresult
+          if-no-files-found: warn
+          retention-days: 14

@@ -113,10 +113,10 @@ private struct NeedsStrip: View {
     }
 }
 
-/// The thread's content in the scroll view's coordinates: where its last row ends and how tall
-/// it is. Measured outside the lazy stack, so it is always laid out. Set straight from the
-/// content's own GeometryReader: a preference set inside a macOS ScrollView's content never
-/// reaches `onPreferenceChange` outside it.
+/// The thread's content in the scroll view's coordinates: where it ends (after its bottom
+/// padding) and how tall it is. Measured outside the lazy stack, so it is always laid out. Set
+/// straight from the content's own GeometryReader: a preference set inside a macOS ScrollView's
+/// content never reaches `onPreferenceChange` outside it.
 private struct ThreadGeometry: Equatable {
     var bottom = CGFloat.infinity
     var height: CGFloat = 0
@@ -140,10 +140,12 @@ private struct ChatThreadView: View {
     /// Which scroll `awaitingLayout` waits on, so a late give-up can't end a newer wait.
     @State private var layoutWaits = 0
 
-    private var atBottom: Bool { atBottom(geometry) }
+    /// Held at the bottom through the content's height flickering (`ChatBottom`).
+    @State private var bottom = ChatBottom()
 
-    private func atBottom(_ g: ThreadGeometry) -> Bool {
-        ChatThreadModel.isAtBottom(sentinelMaxY: Double(g.bottom), viewportHeight: Double(viewport))
+    /// From the layout as it stands, so it holds from the first layout, reported or not.
+    private var atBottom: Bool {
+        bottom.atBottom(sentinelMaxY: Double(geometry.bottom), viewportHeight: Double(viewport))
     }
 
     var body: some View {
@@ -179,8 +181,14 @@ private struct ChatThreadView: View {
                         .accessibilityIdentifier(model.coordinatorStep == nil ? "chat.thinking" : "chat.live.coordinator")
                     }
                 }
-                // Right under the last row, so the padding below doesn't count against the
-                // bottom; the opening scroll and ↓ Latest both go here.
+                .frame(maxWidth: ChatWindowView.column)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 20)
+                .frame(maxWidth: .infinity)
+                // The content's very end, after the padding: the opening scroll and ↓ Latest
+                // go here, so a scroll to the bottom shows the padding too and ends with the
+                // end at the viewport's edge. (Under the last row, a scroll lined up the row and
+                // left the padding below on macOS 14/15, past at-bottom's tolerance: #316.)
                 Color.clear
                     .frame(height: 1)
                     .id(Self.bottomID)
@@ -192,36 +200,48 @@ private struct ChatThreadView: View {
                         .onAppear { geometry = now }
                         .onChange(of: now) { _, n in geometry = n }
                 })
-                .frame(maxWidth: ChatWindowView.column)
-                .padding(.horizontal, 24)
-                .padding(.vertical, 20)
-                .frame(maxWidth: .infinity)
             }
             .coordinateSpace(name: Self.space)
             .background(GeometryReader { g in
                 Color.clear
                     .onAppear { viewport = g.size.height }
-                    .onChange(of: g.size.height) { old, new in
-                        viewport = new
-                        // The box under the thread grew (a chip, the @ list, more lines): at
-                        // the bottom before, stay there instead of showing ↓ Latest.
-                        if state.opened, ChatThreadModel.staysAtBottom(sentinelMaxY: Double(geometry.bottom),
-                                                                       oldViewport: Double(old), newViewport: Double(new)) {
-                            proxy.scrollTo(Self.bottomID, anchor: .bottom)
-                        }
-                    }
+                    .onChange(of: g.size.height) { _, new in viewport = new }
             })
+            .onChange(of: viewport) { old, new in
+                // The opening scroll went to the end and didn't get there: again.
+                if bottom.landed(sentinelMaxY: Double(geometry.bottom), viewportHeight: Double(new)) {
+                    return proxy.scrollTo(Self.bottomID, anchor: .bottom)
+                }
+                // The box under the thread grew (a chip, the @ list, more lines): at the bottom
+                // before, stay there instead of showing ↓ Latest.
+                if bottom.resized(sentinelMaxY: Double(geometry.bottom), oldViewport: Double(old),
+                                  newViewport: Double(new), following: state.opened && !awaitingLayout) {
+                    proxy.scrollTo(Self.bottomID, anchor: .bottom)
+                }
+            }
             .onChange(of: geometry) { old, new in
-                // The layout after the opening scroll: only now does at-bottom hold.
+                // The opening scroll went to the end and didn't get there (macOS 15, opened from
+                // Pixie's button): again, still waiting for the layout after it.
+                if bottom.landed(sentinelMaxY: Double(new.bottom), viewportHeight: Double(viewport)) {
+                    proxy.scrollTo(Self.bottomID, anchor: .bottom)
+                    if awaitingLayout { giveUpWaiting() }
+                    return
+                }
+                // The layout after the opening scroll: only now does at-bottom hold, from where
+                // the end is.
                 if awaitingLayout {
                     awaitingLayout = false
+                    bottom.settled()
                     markRead()
                     return
                 }
                 // Rows grow after they are drawn (links found, text wrapped), and live lines grow
                 // as the words come: at the bottom, stay there.
-                let follow = ChatThreadModel.keepsBottom(wasAtBottom: atBottom(old), heightChanged: new.height != old.height)
-                if state.opened && follow && !atBottom(new) { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
+                if bottom.laidOut(oldMaxY: Double(old.bottom), oldHeight: Double(old.height),
+                                  newMaxY: Double(new.bottom), newHeight: Double(new.height),
+                                  viewportHeight: Double(viewport), following: state.opened) {
+                    proxy.scrollTo(Self.bottomID, anchor: .bottom)
+                }
             }
             .accessibilityIdentifier("chat.thread")
             .overlay(alignment: .bottom) {
@@ -300,16 +320,21 @@ private struct ChatThreadView: View {
     private func scroll(_ proxy: ScrollViewProxy, to id: String?) {
         let target = id ?? model.openTarget
         DispatchQueue.main.async {
-            if let target, target != model.entries.last?.id, model.entries.contains(where: { $0.id == target }) {
+            let toMessage = target.map { t in t != model.entries.last?.id && model.entries.contains { $0.id == t } } ?? false
+            if toMessage, let target {
                 // The oldest unread (or the message asked for) at the top, what came after below.
                 proxy.scrollTo(target, anchor: .top)
             } else {
                 proxy.scrollTo(Self.bottomID, anchor: .bottom)
             }
+            if !state.opened {
+                bottom.aimed(atBottom: !toMessage, sentinelMaxY: Double(geometry.bottom),
+                             viewportHeight: Double(viewport))
+            }
             // The geometry known now is from before the scroll: the next report decides. Content
             // that fits doesn't move, so what is known holds.
             if !state.opened {
-                awaitingLayout = ChatThreadModel.scrollMoves(contentHeight: Double(geometry.height) + 40,
+                awaitingLayout = ChatThreadModel.scrollMoves(contentHeight: Double(geometry.height),
                                                              viewportHeight: Double(viewport))
                 if awaitingLayout { giveUpWaiting() }
             }

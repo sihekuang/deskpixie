@@ -348,7 +348,8 @@ func TestMessageSessionSaysWhenTheMessageWaits(t *testing.T) {
 	if got := send(); got["status"] != "sent" || got["why"] != nil {
 		t.Fatalf("typed: %v", got)
 	}
-	for reason, words := range map[string]string{"working": "busy", "blocked": "question", "typing": "typing"} {
+	for reason, words := range map[string]string{"working": "busy", "blocked": "question", "typing": "typing",
+		"update": "update question", "trust": "trust its folder", "hooks": "trust its hooks", "agents": "list of agents", "menu": "menu", "starting": "starting"} {
 		d.delivery = agent.Delivery{Status: "waiting", Reason: reason}
 		got := send()
 		if why, _ := got["why"].(string); got["status"] != "waiting" || got["reason"] != reason || !strings.Contains(why, words) {
