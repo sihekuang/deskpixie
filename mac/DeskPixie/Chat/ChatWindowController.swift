@@ -84,6 +84,7 @@ final class ChatWindowController: NSObject, NSToolbarDelegate {
     private func makeWindow() -> NSWindow {
         let actions = ChatActions(
             focusSession: { [weak self] in self?.focusSession($0) },
+            focus: { [weak self] in self?.focus($0) },
             decide: { [model] token, allow in Task { await model.decide(token: token, allow: allow) } },
             choose: { [model] token, option in Task { await model.choose(token: token, option: option) } },
             reply: { [weak self] entry in
@@ -194,6 +195,25 @@ final class ChatWindowController: NSObject, NSToolbarDelegate {
                 _ = try engine.call("agent.focusSession", Args(name: name))
             } catch {
                 Self.log.error("agent.focusSession: \(String(describing: error), privacy: .public)")
+            }
+        }
+    }
+
+    /// The terminal button by a name: the call the package picked (`terminalTarget(for:)`).
+    private func focus(_ target: ChatTerminalTarget) {
+        struct Name: Encodable, Sendable { let name: String }
+        struct Job: Encodable, Sendable { let job: String; let worker: String }
+        let engine = engine
+        worker.async {
+            do {
+                switch target.call {
+                case .focusSession, .focusAgent:
+                    _ = try engine.call(target.call.rawValue, Name(name: target.name))
+                case .focusJob:
+                    _ = try engine.call(target.call.rawValue, Job(job: target.job, worker: target.name))
+                }
+            } catch {
+                Self.log.error("\(target.call.rawValue, privacy: .public): \(String(describing: error), privacy: .public)")
             }
         }
     }

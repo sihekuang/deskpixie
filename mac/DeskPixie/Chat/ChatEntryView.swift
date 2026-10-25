@@ -42,8 +42,10 @@ enum ChatColors {
 
 /// What a row can ask of the window.
 struct ChatActions {
-    /// `agent.focusSession` for a session's address.
+    /// `agent.focusSession` for a session's address (a chip under Pixie's reply).
     let focusSession: (String) -> Void
+    /// The terminal button beside a responder's name.
+    let focus: (ChatTerminalTarget) -> Void
     let decide: (String, Bool) -> Void
     /// The option counts from 1.
     let choose: (String, Int) -> Void
@@ -110,12 +112,18 @@ struct ChatEntryView: View {
         .padding(.leading, 120)
     }
 
-    /// "Pixie" or "Coordinator" over the words; under a reply, the sessions it mentions.
+    /// "Pixie" or "Coordinator" over the words (the coordinator with its terminal button);
+    /// under a reply, the sessions it mentions.
     private var spoken: some View {
         VStack(alignment: .leading, spacing: entry.sessions.isEmpty ? 4 : 6) {
-            Text(ChatThreadModel.header(entry.who))
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(ChatColors.label)
+            HStack(spacing: 4) {
+                Text(ChatThreadModel.header(entry.who))
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(ChatColors.label)
+                if let target = ChatThreadModel.terminalTarget(for: entry) {
+                    TerminalButton(target: target) { actions.focus(target) }
+                }
+            }
             RichMessage(text: entry.text, sessions: entry.sessions, font: Self.font, selectable: true)
             if !entry.sessions.isEmpty {
                 FlowLayout(spacing: 8) {
@@ -127,22 +135,19 @@ struct ChatEntryView: View {
         }
     }
 
-    /// A session's update: its header, its words, Open in terminal, and Reply…, which points
-    /// the box at the session.
+    /// A session's update: its header (with the terminal button), its words, and Reply…,
+    /// which points the box at the session.
     private var session: some View {
         VStack(alignment: .leading, spacing: 4) {
-            ChatWhoHeader(who: entry.who)
+            ChatWhoHeader(who: entry.who, terminal: ChatThreadModel.terminalTarget(for: entry), onTerminal: actions.focus)
             RichMessage(text: entry.text, sessions: entry.sessions, font: Self.font, selectable: true)
             if ChatThreadModel.offersSessionReply(entry) {
-                HStack(spacing: 16) {
-                    OpenInTerminal { actions.focusSession(entry.who.name) }
-                    Button("Reply…") { actions.reply(entry) }
-                        .buttonStyle(.plain)
-                        .font(.system(size: 13))
-                        .foregroundStyle(ChatColors.link)
-                        .help("Message this session")
-                        .accessibilityIdentifier("chat.entry.reply")
-                }
+                Button("Reply…") { actions.reply(entry) }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 13))
+                    .foregroundStyle(ChatColors.link)
+                    .help("Message this session")
+                    .accessibilityIdentifier("chat.entry.reply")
             }
         }
     }
@@ -197,22 +202,52 @@ struct ChatLiveView: View {
     }
 }
 
+/// The dot and the name, then the terminal button when there is one, then the rest.
 struct ChatWhoHeader: View {
     let who: ChatWho
     var size: CGFloat = 12
+    var terminal: ChatTerminalTarget?
+    var onTerminal: (ChatTerminalTarget) -> Void = { _ in }
 
     var body: some View {
         let name = ChatThreadModel.displayName(who)
         let rest = String(ChatThreadModel.header(who).dropFirst(name.count))
-        HStack(spacing: 6) {
-            SessionDot(color: who.color, shown: who.kind == "session")
-            (Text(name).fontWeight(.semibold).foregroundColor(.primary) + Text(rest))
+        HStack(spacing: 4) {
+            HStack(spacing: 6) {
+                SessionDot(color: who.color, shown: who.kind == "session")
+                Text(name).fontWeight(.semibold).foregroundColor(.primary)
+                    .lineLimit(1)
+            }
+            if let terminal {
+                TerminalButton(target: terminal) { onTerminal(terminal) }
+            }
+            Text(rest.trimmingCharacters(in: .whitespaces))
                 .lineLimit(1)
                 .truncationMode(.tail)
         }
         .font(.system(size: size))
         .foregroundStyle(ChatColors.label)
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
+    }
+}
+
+/// The small terminal button right after a responder's name: brings its tab or pane forward.
+struct TerminalButton: View {
+    let target: ChatTerminalTarget
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "terminal")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(ChatColors.link)
+                .frame(width: 18, height: 16)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .help(target.label)
+        .accessibilityLabel(target.label)
+        .accessibilityIdentifier("chat.entry.terminal")
     }
 }
 
@@ -228,19 +263,6 @@ struct SessionDot: View {
                 .frame(width: size, height: size)
                 .accessibilityHidden(true)
         }
-    }
-}
-
-/// "Open in terminal ›" (`agent.focusSession`).
-struct OpenInTerminal: View {
-    let action: () -> Void
-
-    var body: some View {
-        Button("Open in terminal ›", action: action)
-            .buttonStyle(.plain)
-            .font(.system(size: 13))
-            .foregroundStyle(ChatColors.link)
-            .help("Show its terminal")
     }
 }
 

@@ -129,6 +129,32 @@ final class ChatWindowUITests: XCTestCase {
         XCTAssertTrue(chip.waitForGone(timeout: 5), "× goes back to messaging Pixie")
     }
 
+    /// Task 8d: a session's header has the terminal button right after its name, and so does
+    /// the coordinator's; Pixie's has none, and "Open in terminal ›" is gone.
+    func testTheTerminalButtonSitsByTheName() throws {
+        let h = try start(Self.thread)
+        let window = h.openChat()
+        let session = entry("s1", in: window)
+        XCTAssertTrue(session.waitForExistence(timeout: 10))
+
+        let button = session.element("chat.entry.terminal")
+        XCTAssertTrue(button.waitForExistence(timeout: 5), "no terminal button by the session's name")
+        XCTAssertEqual(button.label, "Open api-server's terminal")
+        let name = session.text("api-server")
+        XCTAssertLessThan(abs(button.frame.midY - name.frame.midY), 8, "on the name's line")
+        XCTAssertGreaterThan(button.frame.minX, name.frame.minX, "after the name")
+        XCTAssertFalse(session.buttons["Open in terminal ›"].exists, "one control per action")
+        XCTAssertTrue(session.element("chat.entry.reply").exists, "Reply… stays")
+
+        let coordinator = entry("c1", in: window)
+        XCTAssertTrue(coordinator.element("chat.entry.terminal").waitForExistence(timeout: 5))
+        XCTAssertEqual(coordinator.element("chat.entry.terminal").label, "Open Coordinator's terminal")
+
+        let pixie = entry("p1", in: window)
+        XCTAssertTrue(pixie.waitForText("Pixie", timeout: 5))
+        XCTAssertFalse(pixie.element("chat.entry.terminal").exists, "Pixie herself has none")
+    }
+
     func testClearHistoryAsksFirstAndEmptiesTheThread() throws {
         let h = try start(Self.thread)
         let window = h.openChat()

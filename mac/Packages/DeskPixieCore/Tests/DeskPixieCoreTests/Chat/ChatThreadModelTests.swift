@@ -324,6 +324,47 @@ final class ChatThreadModelTests: XCTestCase {
         return e
     }
 
+    // MARK: The terminal button (Task 8d)
+
+    func testASessionOfYoursOpensItsOwnTab() {
+        var e = entry(1, kind: "session", name: "pix:api-server", label: "api-server")
+        e.who.yours = true
+        XCTAssertEqual(ChatThreadModel.terminalTarget(for: e),
+                       ChatTerminalTarget(call: .focusSession, name: "pix:api-server", label: "Open api-server's terminal"))
+        XCTAssertEqual(ChatThreadModel.terminalTarget(for: ask(2, kind: "question", who: "pix:docs"))?.call, .focusAgent,
+                       "not yours: Pixie's pane")
+    }
+
+    func testAWorkerWithAJobOpensThroughItsJob() {
+        var e = ask(1, kind: "permission", who: "w-fix-login", label: "fix-login")
+        e.request?.job = "j7"
+        XCTAssertEqual(ChatThreadModel.terminalTarget(for: e),
+                       ChatTerminalTarget(call: .focusJob, name: "w-fix-login", job: "j7", label: "Open fix-login's terminal"))
+    }
+
+    func testAWorkerWithNoJobOpensItsPane() {
+        let e = entry(1, kind: "session", name: "w-fix-login", label: "fix-login")
+        XCTAssertEqual(ChatThreadModel.terminalTarget(for: e),
+                       ChatTerminalTarget(call: .focusAgent, name: "w-fix-login", label: "Open fix-login's terminal"))
+    }
+
+    func testTheCoordinatorOpensItsPane() {
+        XCTAssertEqual(ChatThreadModel.terminalTarget(for: entry(1, kind: "coordinator")),
+                       ChatTerminalTarget(call: .focusAgent, name: "coordinator", label: "Open Coordinator's terminal"))
+    }
+
+    func testPixieAndYouHaveNoTerminal() {
+        XCTAssertNil(ChatThreadModel.terminalTarget(for: entry(1, kind: "pixie")))
+        XCTAssertNil(ChatThreadModel.terminalTarget(for: entry(2, kind: "you")))
+    }
+
+    func testAnEntryWithNoAddressOrJobHasNoTerminal() {
+        XCTAssertNil(ChatThreadModel.terminalTarget(for: entry(1, kind: "session", label: "somebody")))
+        var e = ask(2, kind: "question", who: "")
+        e.request?.job = ""
+        XCTAssertNil(ChatThreadModel.terminalTarget(for: e))
+    }
+
     func testWhatACardOffers() {
         let allow = ask(1, kind: "permission")
         XCTAssertTrue(ChatThreadModel.offersDecision(allow))

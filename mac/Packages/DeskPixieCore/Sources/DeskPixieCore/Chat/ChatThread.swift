@@ -183,6 +183,34 @@ public struct ChatBadge: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey { case needs, unread, preview }
 }
 
+/// The terminal button beside a responder's name (#302): the call that brings its pane or tab
+/// forward, as the roster's rows do.
+public struct ChatTerminalTarget: Equatable, Sendable {
+    public enum Call: String, Equatable, Sendable {
+        /// `{name}`: a session of yours, in the terminal tab it runs in.
+        case focusSession = "agent.focusSession"
+        /// `{name}`: one of Pixie's panes (a worker, the coordinator), then its terminal.
+        case focusAgent = "agent.focusAgent"
+        /// `{job, worker}`: the job's worker if it is still up, else the coordinator.
+        case focusJob = "agent.focusJob"
+    }
+
+    public var call: Call
+    /// The session's or pane's address (`focusJob`: the worker).
+    public var name: String
+    /// The job (`focusJob` only).
+    public var job: String
+    /// "Open api-server's terminal": the tooltip and VoiceOver name.
+    public var label: String
+
+    public init(call: Call, name: String, job: String = "", label: String) {
+        self.call = call
+        self.name = name
+        self.job = job
+        self.label = label
+    }
+}
+
 /// The `chat.*` dp_calls the chat window uses (Go `core/app/thread.go`). Blocking: callers run
 /// them off the main thread.
 public protocol ChatClient: Sendable {

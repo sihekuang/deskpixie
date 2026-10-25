@@ -11,7 +11,7 @@ struct ChatRequestCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            ChatWhoHeader(who: entry.who)
+            ChatWhoHeader(who: entry.who, terminal: ChatThreadModel.terminalTarget(for: entry), onTerminal: actions.focus)
             if entry.request?.kind == "permission" {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Image(systemName: "lock")
@@ -35,32 +35,26 @@ struct ChatRequestCard: View {
     private var token: String { entry.request?.token ?? "" }
 
     private var buttons: some View {
-        HStack(spacing: 8) {
-            FlowLayout(spacing: 8) {
-                if ChatThreadModel.offersDecision(entry) {
-                    Button("Allow") { actions.decide(token, true) }
-                        .buttonStyle(CardButtonStyle(prominent: true))
-                        .accessibilityIdentifier("chat.request.allow")
-                    Button("Deny") { actions.decide(token, false) }
+        FlowLayout(spacing: 8) {
+            if ChatThreadModel.offersDecision(entry) {
+                Button("Allow") { actions.decide(token, true) }
+                    .buttonStyle(CardButtonStyle(prominent: true))
+                    .accessibilityIdentifier("chat.request.allow")
+                Button("Deny") { actions.decide(token, false) }
+                    .buttonStyle(CardButtonStyle())
+                    .accessibilityIdentifier("chat.request.deny")
+            }
+            if ChatThreadModel.offersOptions(entry) {
+                ForEach(Array((entry.request?.options ?? []).enumerated()), id: \.offset) { i, option in
+                    Button(option) { actions.choose(token, i + 1) }
                         .buttonStyle(CardButtonStyle())
-                        .accessibilityIdentifier("chat.request.deny")
-                }
-                if ChatThreadModel.offersOptions(entry) {
-                    ForEach(Array((entry.request?.options ?? []).enumerated()), id: \.offset) { i, option in
-                        Button(option) { actions.choose(token, i + 1) }
-                            .buttonStyle(CardButtonStyle())
-                    }
-                }
-                if ChatThreadModel.offersReply(entry) {
-                    Button("Reply…") { actions.reply(entry) }
-                        .buttonStyle(CardButtonStyle(tint: ChatColors.link))
-                        .accessibilityIdentifier("chat.request.reply")
-                        .help("Answer in the message box")
                 }
             }
-            if entry.who.kind == "session", !entry.who.name.isEmpty {
-                Spacer(minLength: 8)
-                OpenInTerminal { actions.focusSession(entry.who.name) }
+            if ChatThreadModel.offersReply(entry) {
+                Button("Reply…") { actions.reply(entry) }
+                    .buttonStyle(CardButtonStyle(tint: ChatColors.link))
+                    .accessibilityIdentifier("chat.request.reply")
+                    .help("Answer in the message box")
             }
         }
     }

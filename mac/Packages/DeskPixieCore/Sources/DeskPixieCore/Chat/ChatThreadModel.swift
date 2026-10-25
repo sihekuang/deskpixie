@@ -338,6 +338,27 @@ public final class ChatThreadModel {
         return e.who.kind == "session" && !e.who.name.isEmpty
     }
 
+    /// The terminal button by who said it: a session of yours opens its own tab; one of Pixie's
+    /// (a worker) its pane, through its job when the entry has one, so a worker that ended
+    /// falls back to the coordinator; the coordinator its pane. Pixie and you have none, nor
+    /// does an entry with no address to go to.
+    public static func terminalTarget(for e: ChatEntry) -> ChatTerminalTarget? {
+        let label = "Open \(name(of: e.who))'s terminal"
+        switch e.who.kind {
+        case "coordinator":
+            return ChatTerminalTarget(call: .focusAgent, name: "coordinator", label: label)
+        case "session":
+            guard !e.who.name.isEmpty else { return nil }
+            if e.who.yours { return ChatTerminalTarget(call: .focusSession, name: e.who.name, label: label) }
+            if let job = e.request?.job, !job.isEmpty {
+                return ChatTerminalTarget(call: .focusJob, name: e.who.name, job: job, label: label)
+            }
+            return ChatTerminalTarget(call: .focusAgent, name: e.who.name, label: label)
+        default:
+            return nil
+        }
+    }
+
     /// A pill in the needs strip.
     /// "api-server wants to run git push origin fix-login" (the view cuts it with "…"); a
     /// permission with no text "wants permission".
@@ -351,8 +372,7 @@ public final class ChatThreadModel {
         return "\(who) wants to run \(text)"
     }
 
-    /// Reply… beside Open in terminal on a session's own message (not a card): the box then
-    /// messages that session.
+    /// Reply… under a session's own message (not a card): the box then messages that session.
     public static func offersSessionReply(_ e: ChatEntry) -> Bool {
         e.request == nil && e.who.kind == "session" && !e.who.name.isEmpty
     }
