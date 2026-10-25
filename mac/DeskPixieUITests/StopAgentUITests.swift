@@ -90,7 +90,9 @@ final class StopAgentUITests: XCTestCase {
 
         let notice = h.app.descendants(matching: .any)["roster.notice"]
         XCTAssertTrue(notice.waitForExistence(timeout: 15), "no failure line")
-        XCTAssertEqual(notice.label, "Couldn't stop alpha: it didn't answer in time.")
+        // A text's words are its label on newer macOS and its value on macOS 15.
+        let words = notice.label.isEmpty ? notice.value as? String ?? "" : notice.label
+        XCTAssertEqual(words, "Couldn't stop alpha: it didn't answer in time.")
         // Before it thaws: then pix types the Esc it was sent late (the core holds the next).
         XCTAssertFalse(h.escaped("alpha"), "nothing reached it")
     }
