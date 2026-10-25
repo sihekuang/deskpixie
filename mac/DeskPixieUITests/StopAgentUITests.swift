@@ -1,16 +1,18 @@
 import AppKit
 import XCTest
 
-/// The stop button by a working agent (#309), offline: a stand-in session of yours ("alpha",
-/// `UITestApp.startSession`) is put to work, and its stop button in the session list under
-/// Pixie and in the chat window interrupts it. The stand-in takes the Esc as claude does, so
-/// pix ends the turn and the button goes, from the core's own status events.
+/// The stop button by a working agent in the session list under Pixie (#309): a stand-in
+/// session of yours ("alpha", `UITestApp.startSession`) is put to work, and its stop button
+/// interrupts it. The stand-in takes the Esc as claude does, so pix ends the turn and the button
+/// goes, from the core's own status events. The chat window's stop button is in
+/// `ChatSessionsUITests`. Run with `make -C mac uitest DESKPIXIE_UITEST_SESSIONS=1`.
 @MainActor
 final class StopAgentUITests: XCTestCase {
     private var harness: UITestApp?
 
     override func setUp() async throws {
         continueAfterFailure = false
+        try XCTSkipUnless(UITestApp.withSessions, "set DESKPIXIE_UITEST_SESSIONS=1 to run the connected-sessions tests")
     }
 
     override func tearDown() async throws {
@@ -67,29 +69,5 @@ final class StopAgentUITests: XCTestCase {
         XCTAssertTrue(h.escaped("alpha"), "alpha was never sent an Esc")
         XCTAssertTrue(stop.waitForGone(timeout: 20), "the row still offers stop once alpha is idle")
         XCTAssertFalse(h.app.descendants(matching: .any)["roster.notice"].exists, "no failure line")
-    }
-
-    func testAWorkingSessionStopsFromTheChat() throws {
-        let h = try start()
-        let words = "First pass done, starting on the docs."
-        try h.endTurn("alpha", reply: words)
-        let window = h.openChat()
-        XCTAssertTrue(window.waitForText(words, timeout: 30), "alpha's turn never came to the thread")
-        let stop = stopButtons(in: window, "chat.entry.stop")
-        XCTAssertEqual(stop.count, 0, "idle: no stop button")
-
-        try h.startTurn("alpha", prompt: "Now the docs")
-        XCTAssertTrue(stop.firstMatch.waitForExistence(timeout: 20), "no stop button by alpha's name")
-        XCTAssertEqual(stop.count, 1, "only on alpha's newest entry")
-        XCTAssertEqual(stop.firstMatch.label, "Stop alpha")
-        let terminal = window.element("chat.entry.terminal")
-        XCTAssertGreaterThan(stop.firstMatch.frame.minX, terminal.frame.minX, "right after the terminal button")
-        XCTAssertLessThan(abs(stop.firstMatch.frame.midY - terminal.frame.midY), 8, "on the name's line")
-        stop.firstMatch.click()
-
-        let deadline = Date().addingTimeInterval(10)
-        while !h.escaped("alpha") && Date() < deadline { Thread.sleep(forTimeInterval: 0.2) }
-        XCTAssertTrue(h.escaped("alpha"), "alpha was never sent an Esc")
-        XCTAssertTrue(stop.firstMatch.waitForGone(timeout: 20), "the header still offers stop once alpha is idle")
     }
 }

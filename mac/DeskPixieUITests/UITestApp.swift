@@ -17,7 +17,8 @@ final class UITestApp {
     /// the tests that need herdr, the coordinator and a model run too.
     static var live: Bool { ProcessInfo.processInfo.environment["DESKPIXIE_UITEST_LIVE"] == "1" }
     /// `DESKPIXIE_UITEST_SESSIONS=1` (`TEST_RUNNER_DESKPIXIE_UITEST_SESSIONS`): the tests with
-    /// sessions of yours connected to the app, stand-ins for claude (`ChatSessionsUITests`).
+    /// sessions of yours connected to the app, stand-ins for claude (`ChatSessionsUITests`,
+    /// `StopAgentUITests`).
     static var withSessions: Bool { ProcessInfo.processInfo.environment["DESKPIXIE_UITEST_SESSIONS"] == "1" }
 
     /// A short path under /tmp: the core keeps its pix socket under the data folder, and a long

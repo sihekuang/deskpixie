@@ -161,6 +161,38 @@ final class ChatSessionsUITests: XCTestCase {
         XCTAssertFalse(lines.contains { $0.contains("no session of yours named") }, "\(lines)")
     }
 
+    // MARK: The stop button (#309)
+
+    /// alpha at work has a stop button right after its terminal button, on its newest entry only
+    /// (idle beta has none); a click sends alpha an Esc, which the stand-in takes as claude does,
+    /// so pix ends the turn and the button goes.
+    func testAWorkingSessionStopsFromTheChat() throws {
+        let (h, window, _) = try start()
+        let words = "First pass done, starting on the docs."
+        try h.endTurn("alpha", reply: words)
+        try h.endTurn("beta", reply: "Nothing to do.")
+        XCTAssertTrue(window.waitForText(words, timeout: 30), "alpha's turn never came to the thread")
+        XCTAssertTrue(window.waitForText("Nothing to do.", timeout: 30), "beta's turn never came to the thread")
+        let stop = window.descendants(matching: .any).matching(identifier: "chat.entry.stop")
+        XCTAssertEqual(stop.count, 0, "idle: no stop button")
+
+        try h.startTurn("alpha", prompt: "Now the docs")
+        XCTAssertTrue(stop.firstMatch.waitForExistence(timeout: 20), "no stop button by alpha's name")
+        XCTAssertEqual(stop.count, 1, "only on alpha's newest entry")
+        XCTAssertEqual(stop.firstMatch.label, "Stop alpha")
+        let terminal = window.buttons.matching(identifier: "chat.entry.terminal")
+            .matching(NSPredicate(format: "label == %@", "Open alpha's terminal")).firstMatch
+        XCTAssertGreaterThan(stop.firstMatch.frame.minX, terminal.frame.minX, "right after the terminal button")
+        XCTAssertLessThan(abs(stop.firstMatch.frame.midY - terminal.frame.midY), 8, "on the name's line")
+        stop.firstMatch.click()
+
+        let deadline = Date().addingTimeInterval(10)
+        while !h.escaped("alpha") && Date() < deadline { Thread.sleep(forTimeInterval: 0.2) }
+        XCTAssertTrue(h.escaped("alpha"), "alpha was never sent an Esc")
+        XCTAssertFalse(h.escaped("beta"), "beta was sent an Esc")
+        XCTAssertTrue(stop.firstMatch.waitForGone(timeout: 20), "the header still offers stop once alpha is idle")
+    }
+
     /// The menu bar menu's status lines.
     private func statusLines(_ h: UITestApp) -> [String] {
         h.app.statusItems.firstMatch.click()
