@@ -137,10 +137,14 @@ private struct HotkeyRecorderButton: View {
     private var recording: Bool { model.recordingPath == path }
 
     var body: some View {
-        Button(recording ? SettingsLayout.recording : (title.isEmpty ? "None" : title)) {
+        Button {
             if recording { stop() } else { start() }
+        } label: {
+            // The width is the button's own, so it starts where the other controls do (#297);
+            // a frame around the button centred it in the column instead.
+            Text(recording ? SettingsLayout.recording : (title.isEmpty ? "None" : title))
+                .frame(minWidth: 124)
         }
-        .frame(minWidth: 140)
         .help("Click, then type a shortcut. Esc cancels.")
         .onDisappear { stop() }
     }
