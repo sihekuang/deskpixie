@@ -33,8 +33,6 @@ type RosterView struct {
 // EmptyRoster has empty lists (never null in JSON).
 func EmptyRoster() RosterView { return RosterView{Agents: []RosterRow{}, Yours: []RosterRow{}} }
 
-// BuildRoster turns the combined host list into the roster; workers (the jobs' worker rows)
-// tell workers from other panes; hostName ("herdr", "tmux") is the detail of those other panes.
 // Label is how the session list names your session: its description, else "<tool> in <repo>",
 // else its tool.
 func (u *UserSession) Label() string {
@@ -47,6 +45,8 @@ func (u *UserSession) Label() string {
 	return u.Tool
 }
 
+// BuildRoster turns the combined host list into the roster; workers (the jobs' worker rows)
+// tell workers from other panes; hostName ("herdr", "tmux") is the detail of those other panes.
 func BuildRoster(list []AgentInfo, workers []WorkerRow, hostName string) RosterView {
 	v := EmptyRoster()
 	repos := map[string]string{}

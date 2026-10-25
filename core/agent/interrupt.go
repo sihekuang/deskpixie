@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -32,11 +33,12 @@ func (h *AgentHandle) Interrupt(ctx context.Context, name string) (bool, error) 
 	}
 	a, err := h.findAgent(ctx, name)
 	if err != nil {
-		return false, stopFailed(name, err)
+		// Gone from the list: named as the list last had it.
+		return false, stopFailed(cmp.Or(h.stops.label(name), name), err)
 	}
 	who := name // in its failures, named as the session list names it
 	if a.User != nil {
-		who = a.User.Label()
+		who = cmp.Or(a.User.Label(), name)
 	}
 	if a.Status != PaneWorking {
 		h.stops.changed(name)
@@ -100,8 +102,9 @@ const StopRepeatMs Millis = 5_000
 
 // stopGuard remembers each agent's last stop, until its status is seen to change.
 type stopGuard struct {
-	mu   sync.Mutex
-	last map[string]stopMark
+	mu     sync.Mutex
+	last   map[string]stopMark
+	labels map[string]string // your sessions as the list last named them
 }
 
 type stopMark struct {
@@ -173,7 +176,24 @@ func (g *stopGuard) seen(list []AgentInfo) {
 		if a.Status != PaneWorking {
 			g.changed(a.Name)
 		}
+		if a.User != nil {
+			if l := a.User.Label(); l != "" {
+				g.mu.Lock()
+				if g.labels == nil {
+					g.labels = map[string]string{}
+				}
+				g.labels[a.Name] = l
+				g.mu.Unlock()
+			}
+		}
 	}
+}
+
+// label is how the list last named your session name, or "".
+func (g *stopGuard) label(name string) string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.labels[name]
 }
 
 // ErrStopNoName: a stop with no agent named (the app never sends one).

@@ -159,9 +159,13 @@ func TestStoppingYourIdleSessionSendsNothing(t *testing.T) {
 
 func TestStoppingYourSessionThatEndedSaysSo(t *testing.T) {
 	r, user := pixRig(t)
+	r.h.Interrupt(context.Background(), "focus-claude") // idle: listed, nothing sent
 	user.Kill("focus-claude")
 	sent, err := r.h.Interrupt(context.Background(), "focus-claude")
-	wantStopErr(t, sent, err, "Couldn't stop focus-claude: it isn't running anymore.")
+	wantStopErr(t, sent, err, "Couldn't stop login bug: it isn't running anymore.") // as the list last had it
+	// One the list never named: by the name asked for.
+	sent, err = r.h.Interrupt(context.Background(), "docs-claude")
+	wantStopErr(t, sent, err, "Couldn't stop docs-claude: it isn't running anymore.")
 }
 
 func TestStoppingYourSessionPixCantReachSaysSo(t *testing.T) {
@@ -188,6 +192,10 @@ func TestAStopsFailureNamesYourSessionAsTheListDoes(t *testing.T) {
 	sent, err := r.h.Interrupt(context.Background(), "focus-claude")
 	wantStopErr(t, sent, err, "Couldn't stop login bug: Codex is waiting for you.")
 	if got := (&UserSession{Tool: "claude", Repo: "focus"}).Label(); got != "claude in focus" {
+		t.Fatal(got)
+	}
+	// Nothing to name it by: "", so a failure falls back to pix's name.
+	if got := (&UserSession{}).Label(); got != "" {
 		t.Fatal(got)
 	}
 }
