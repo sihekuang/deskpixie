@@ -39,10 +39,22 @@ func (a *App) registerChat(r Registrar) {
 		if a.agent == nil {
 			return nil, errNoCoordinator
 		}
-		rs := a.recipients()
-		label := ""
+		agents, yours := rosterOf(a.agent.Roster())
+		rs := chat.Recipients(agents, yours)
+		// The session is named as the roster names it (in the prompt and in a refusal), else,
+		// once the roster has let it go, as the thread last named it.
+		label, kind := "", "session"
 		if in.Session != nil && *in.Session != "" {
 			label = a.sessionLabel(*in.Session)
+			for _, r := range append(yours, agents...) {
+				if r.Name == *in.Session && r.Label != "" {
+					label = r.Label
+					if r.Kind == "worker" {
+						kind = "worker"
+					}
+					break
+				}
+			}
 		}
 		if in.From == fromWindow {
 			// One recipient per message: refused here, so every shell's window gets the same rule.
@@ -54,18 +66,6 @@ func (a *App) registerChat(r Registrar) {
 		}
 		if in.Session != nil {
 			to := *in.Session
-			kind := "session"
-			for _, r := range rs {
-				if r.Name != to {
-					continue
-				}
-				if r.Kind == "worker" {
-					kind = "worker"
-				}
-				if label == to { // nothing from it in the thread yet: the roster names it
-					label = r.Label
-				}
-			}
 			// Always a new job: never taken for the answer to a question waiting in the box.
 			job, err := a.agent.ChatDelegate("Tell the " + label + " " + kind + ": " + in.Text)
 			if err != nil {
@@ -137,6 +137,11 @@ func (a *App) recipients() []chat.Recipient {
 // recipientsOf reads the roster (agent.RosterView, which this package doesn't import) by its
 // JSON: the rows that can be told something.
 func recipientsOf(view any) []chat.Recipient {
+	return chat.Recipients(rosterOf(view))
+}
+
+// rosterOf is the roster's rows: Pixie's agents, and your sessions, reachable or not.
+func rosterOf(view any) (agents, yours []chat.RosterRow) {
 	var v struct {
 		Agents []chat.RosterRow `json:"agents"`
 		Yours  []chat.RosterRow `json:"yours"`
@@ -144,5 +149,5 @@ func recipientsOf(view any) []chat.Recipient {
 	if b, err := json.Marshal(view); err == nil {
 		_ = json.Unmarshal(b, &v)
 	}
-	return chat.Recipients(v.Agents, v.Yours)
+	return v.Agents, v.Yours
 }

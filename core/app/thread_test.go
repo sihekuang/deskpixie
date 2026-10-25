@@ -122,11 +122,12 @@ func TestSendingToASessionAsksTheCoordinatorToTellIt(t *testing.T) {
 	h := newHarness(t, withAgent(f))
 	now := time.Now().UnixMilli()
 	f.hooks.ThreadLine(sessionLine(1, "w1", "docs (old)", "started", now-2*(chat.JoinMs+1)))
-	f.hooks.ThreadLine(sessionLine(2, "w1", "docs", "done", now-(chat.JoinMs+1)))
+	f.hooks.ThreadLine(sessionLine(2, "w1", "docs (renamed)", "done", now-(chat.JoinMs+1)))
 	f.hooks.ThreadLine(sessionLine(3, "w2", "api", "busy", now))
 	h.call("chat.send", map[string]any{"text": "ship it", "session": "w1"})
 	h.call("chat.send", map[string]any{"text": "hi", "session": "w2"}) // a worker
-	if !slices.Equal(f.sent, []string{"Tell the docs session: ship it", "Tell the api worker: hi"}) {
+	// Named as the roster names them now (#302 review M5), not as the thread last did.
+	if !slices.Equal(f.sent, []string{"Tell the docs session: ship it", "Tell the w2 worker: hi"}) {
 		t.Fatal(f.sent)
 	}
 	got := h.entries(nil)
@@ -140,6 +141,10 @@ func TestSendingToASessionAsksTheCoordinatorToTellIt(t *testing.T) {
 	if old := got[4]; old.Text != "started" || old.Who.Label != "docs (old)" {
 		t.Fatalf("relabelled: %+v", old)
 	}
+	h.call("chat.send", map[string]any{"text": "and you", "session": "w4"}) // in neither: its address
+	if last := f.sent[len(f.sent)-1]; last != "Tell the w4 session: and you" {
+		t.Fatal(last)
+	}
 }
 
 // #302 (one recipient per message): chat.send refuses, adds nothing and tells no one.
@@ -147,6 +152,8 @@ func TestChatSendRefusesMoreThanOneRecipient(t *testing.T) {
 	f := &fakeAgent{tray: AgentTray{Enabled: true}, roster: rosterWith()}
 	h := newHarness(t, withAgent(f))
 	f.hooks.ThreadLine(sessionLine(1, "w3", "docs (gone)", "done", 0))
+	f.hooks.ThreadLine(sessionLine(2, "w5", "old docs", "done", 0))
+	f.hooks.ThreadLine(sessionLine(3, "w1", "docs (renamed)", "done", 0))
 	cases := []struct {
 		args map[string]any
 		want string
@@ -154,7 +161,11 @@ func TestChatSendRefusesMoreThanOneRecipient(t *testing.T) {
 		{map[string]any{"text": "ship it, @w2", "session": "w1"}, "This goes to docs only. Remove @w2, or pick them instead."},
 		{map[string]any{"text": "@w1 and @W2"}, "Send to one at a time: pick @w1 or @W2."},
 		{map[string]any{"text": "@w1 ship it"}, "Pick @w1 from the list to send it to them."},
-		{map[string]any{"text": "hi", "session": "w3"}, "docs (gone) isn't running anymore."},
+		{map[string]any{"text": "ship it, @w2", "session": "w1"}, "This goes to docs only. Remove @w2, or pick them instead."},
+		// w3 is still listed, not reachable: its roster label, not the thread's.
+		{map[string]any{"text": "hi", "session": "w3"}, "gone isn't running anymore."},
+		// w5 isn't listed at all: the thread's label.
+		{map[string]any{"text": "hi", "session": "w5"}, "old docs isn't running anymore."},
 		{map[string]any{"text": "hi", "session": "w9"}, "w9 isn't running anymore."},
 		{map[string]any{"text": "hi", "session": ""}, "That session isn't running anymore."},
 	}
