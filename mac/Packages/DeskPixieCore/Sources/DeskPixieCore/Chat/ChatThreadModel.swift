@@ -223,10 +223,13 @@ public final class ChatThreadModel {
         replyToken = nil
     }
 
-    /// Reply… on a card: a question that takes a typed answer gets it; any other goes to its
-    /// session as a message.
+    /// Reply… on a card or a session's message: a question that takes a typed answer gets it;
+    /// any other goes to its session as a message. The label is the session's newest, else the
+    /// entry's own.
     public func reply(to entry: ChatEntry) {
-        reply(toSession: entry.who.name)
+        let shown = (entries + needs).contains { $0.who.name == entry.who.name && !$0.who.label.isEmpty }
+        replyTo = shown || entry.who.label.isEmpty ? who(forSession: entry.who.name) : entry.who
+        replyToken = nil
         if let r = entry.request, Self.isOpen(entry), r.typed, !r.token.isEmpty { replyToken = r.token }
     }
 
@@ -276,9 +279,31 @@ public final class ChatThreadModel {
     }
 
     /// A pill in the needs strip.
+    /// "api-server wants to run git push origin fix-login" (the view cuts it with "…"); a
+    /// permission with no text "wants permission".
     public static func pillLabel(_ e: ChatEntry) -> String {
         let who = name(of: e.who)
-        return e.request?.kind == "permission" ? "\(who) wants permission" : "\(who) asks a question"
+        guard e.request?.kind == "permission" else { return "\(who) asks a question" }
+        let text = e.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? "\(who) wants permission" : "\(who) wants to run \(text)"
+    }
+
+    /// Reply… beside Open in terminal on a session's own message (not a card): the box then
+    /// messages that session.
+    public static func offersSessionReply(_ e: ChatEntry) -> Bool {
+        e.request == nil && e.who.kind == "session" && !e.who.name.isEmpty
+    }
+
+    /// The thread's end is in view: the bottom marker's lower edge, in the scroll view's own
+    /// coordinates, is within a few points of the viewport's height (infinite = not laid out).
+    public static func isAtBottom(sentinelMaxY: Double, viewportHeight: Double, tolerance: Double = 8) -> Bool {
+        viewportHeight > 0 && sentinelMaxY.isFinite && sentinelMaxY <= viewportHeight + tolerance
+    }
+
+    /// The newest entry counts as seen (`sawBottom`) only after the opening scroll, with the
+    /// window on screen, and the end in view.
+    public static func marksRead(opened: Bool, visible: Bool, atBottom: Bool) -> Bool {
+        opened && visible && atBottom
     }
 
     /// Messages more than 5 minutes apart get a time divider; the first one always does.

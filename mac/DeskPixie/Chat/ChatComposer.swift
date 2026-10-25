@@ -8,13 +8,17 @@ struct ChatComposer: View {
     let model: ChatThreadModel
     @Bindable var state: ChatWindowState
     /// The attachments waiting for the next request, shared with the box under Pixie; nil
-    /// before Pixie is up.
-    let attachments: AttachmentsController?
+    /// before Pixie is up. Read on each draw (each open bumps `focusRequests`), so Pixie
+    /// coming up after the window opened is picked up.
+    let attachmentsNow: () -> AttachmentsController?
 
     @FocusState private var focused: Bool
 
+    private var attachments: AttachmentsController? { attachmentsNow() }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let attachments = attachments
+        return VStack(alignment: .leading, spacing: 8) {
             if let who = model.replyTo {
                 replyChip(who)
             }
@@ -48,12 +52,12 @@ struct ChatComposer: View {
                     .focused($focused)
                     .accessibilityLabel("Message")
                     .accessibilityIdentifier("chat.composer")
+                    // Return sends (after an input method has taken its own Return);
+                    // Shift-Return adds a line where the cursor is.
+                    .onSubmit(send)
                     .onKeyPress(.return, phases: .down) { press in
-                        if press.modifiers.contains(.shift) {
-                            state.draft += "\n"
-                        } else {
-                            send()
-                        }
+                        guard press.modifiers.contains(.shift) else { return .ignored }
+                        NSApp.sendAction(#selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)), to: nil, from: nil)
                         return .handled
                     }
                     // With text in the field, Esc is the field editor's "complete": take it first.
@@ -136,16 +140,20 @@ struct ChatComposer: View {
     }
 
     /// The text and the attachments' paths go through `chat.send` (or the typed answer); a
-    /// failed send puts the words back.
+    /// failed send puts the words back and keeps the copy on offer.
     private func send() {
         let text = state.draft.trimmingCharacters(in: .whitespacesAndNewlines)
         let paths = paths
+        let attachments = attachments
         guard canSend else { return }
         state.draft = ""
-        attachments?.sent()
         Task {
             await model.send(text, attachments: paths)
-            if model.error != nil && state.draft.isEmpty { state.draft = text }
+            if model.error == nil {
+                attachments?.sent()
+            } else if state.draft.isEmpty {
+                state.draft = text
+            }
         }
     }
 }

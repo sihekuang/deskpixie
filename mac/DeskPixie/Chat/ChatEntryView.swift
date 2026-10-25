@@ -125,13 +125,22 @@ struct ChatEntryView: View {
         }
     }
 
-    /// A session's update: its header, its words, and Open in terminal.
+    /// A session's update: its header, its words, Open in terminal, and Reply…, which points
+    /// the box at the session.
     private var session: some View {
         VStack(alignment: .leading, spacing: 4) {
             ChatWhoHeader(who: entry.who)
             RichMessage(text: entry.text, sessions: entry.sessions, font: Self.font, selectable: true)
-            if !entry.who.name.isEmpty {
-                OpenInTerminal { actions.focusSession(entry.who.name) }
+            if ChatThreadModel.offersSessionReply(entry) {
+                HStack(spacing: 16) {
+                    OpenInTerminal { actions.focusSession(entry.who.name) }
+                    Button("Reply…") { actions.reply(entry) }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 13))
+                        .foregroundStyle(ChatColors.link)
+                        .help("Message this session")
+                        .accessibilityIdentifier("chat.entry.reply")
+                }
             }
         }
     }

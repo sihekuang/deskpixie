@@ -351,9 +351,39 @@ final class ChatThreadModelTests: XCTestCase {
     }
 
     func testPillCopy() {
-        XCTAssertEqual(ChatThreadModel.pillLabel(ask(1, kind: "permission", label: "api-server")),
-                       "api-server wants permission")
+        var push = ask(1, kind: "permission", label: "api-server")
+        push.text = " git push origin fix-login\n"
+        XCTAssertEqual(ChatThreadModel.pillLabel(push), "api-server wants to run git push origin fix-login")
+        push.text = "  "
+        XCTAssertEqual(ChatThreadModel.pillLabel(push), "api-server wants permission", "no text: the generic words")
         XCTAssertEqual(ChatThreadModel.pillLabel(ask(2, kind: "question")), "docs asks a question")
+    }
+
+    func testAPlainSessionMessageOffersReply() async {
+        let client = FakeChatClient()
+        let model = ChatThreadModel(client: client)
+        let update = entry(1, kind: "session", name: "herdr:1.2", label: "api")
+        XCTAssertTrue(ChatThreadModel.offersSessionReply(update))
+        XCTAssertFalse(ChatThreadModel.offersSessionReply(entry(2, kind: "session")), "no address to send to")
+        XCTAssertFalse(ChatThreadModel.offersSessionReply(entry(3, kind: "coordinator", name: "x")))
+        XCTAssertFalse(ChatThreadModel.offersSessionReply(ask(4, kind: "question")), "a card has its own Reply…")
+        model.reply(to: update)
+        XCTAssertEqual(model.placeholder, "Reply to api…")
+        await model.send("rebase it")
+        XCTAssertEqual(client.sent, [.init(text: "rebase it", attachments: [], session: "herdr:1.2")])
+        XCTAssertTrue(client.typed.isEmpty)
+    }
+
+    func testTheBottomIsSeenOnlyOnceOpenedOnScreenAndInView() {
+        XCTAssertTrue(ChatThreadModel.isAtBottom(sentinelMaxY: 600, viewportHeight: 600))
+        XCTAssertTrue(ChatThreadModel.isAtBottom(sentinelMaxY: 606, viewportHeight: 600), "within the tolerance")
+        XCTAssertFalse(ChatThreadModel.isAtBottom(sentinelMaxY: 640, viewportHeight: 600))
+        XCTAssertFalse(ChatThreadModel.isAtBottom(sentinelMaxY: .infinity, viewportHeight: 600), "not laid out")
+        XCTAssertFalse(ChatThreadModel.isAtBottom(sentinelMaxY: 10, viewportHeight: 0), "no viewport yet")
+        XCTAssertTrue(ChatThreadModel.marksRead(opened: true, visible: true, atBottom: true))
+        XCTAssertFalse(ChatThreadModel.marksRead(opened: false, visible: true, atBottom: true), "before the opening scroll")
+        XCTAssertFalse(ChatThreadModel.marksRead(opened: true, visible: false, atBottom: true), "hidden or minimized")
+        XCTAssertFalse(ChatThreadModel.marksRead(opened: true, visible: true, atBottom: false))
     }
 
     func testReplyToATypedQuestionSendsATypedAnswer() async {

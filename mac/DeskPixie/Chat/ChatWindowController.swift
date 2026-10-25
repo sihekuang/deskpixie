@@ -38,8 +38,11 @@ final class ChatWindowController: NSObject, NSToolbarDelegate {
     /// Opens the window (or brings it forward), at this entry or, with none, at the oldest
     /// unread, else the newest. The thread is loaded again each time it opens.
     func show(at entryID: String? = nil) {
+        let opening = self.window == nil
         let window = self.window ?? makeWindow()
+        if opening { state.opening() }
         WindowFocus.bringForward(window, app: NSApp, showInDock: true)
+        updateVisible()
         state.focusRequests += 1
         let model = model, state = state
         Task { @MainActor in
@@ -60,7 +63,7 @@ final class ChatWindowController: NSObject, NSToolbarDelegate {
                 self?.model.reply(to: entry)
                 self?.state.focusRequests += 1
             })
-        let view = ChatWindowView(model: model, state: state, attachments: attachments(), actions: actions)
+        let view = ChatWindowView(model: model, state: state, attachments: attachments, actions: actions)
             .environmentObject(richText)
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: Self.defaultSize),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -89,15 +92,27 @@ final class ChatWindowController: NSObject, NSToolbarDelegate {
             center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.state.focusRequests += 1 }
             },
-        ]
+        ] + [NSWindow.didChangeOcclusionStateNotification, NSWindow.didMiniaturizeNotification,
+             NSWindow.didDeminiaturizeNotification].map { name in
+            // On screen or not: what the thread shows counts as read only while it is.
+            center.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.updateVisible() }
+            }
+        }
         self.window = window
         return window
+    }
+
+    private func updateVisible() {
+        guard let window else { return state.visible = false }
+        state.visible = window.isVisible && window.occlusionState.contains(.visible) && !window.isMiniaturized
     }
 
     private func closed() {
         tokens.forEach(NotificationCenter.default.removeObserver)
         tokens = []
         window = nil
+        state.visible = false
         model.cancelReply()
         AppDock.windowClosed(Self.windowID)
     }
