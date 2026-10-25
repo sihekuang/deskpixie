@@ -476,6 +476,47 @@ The maintainer picked the recommended design (artifact "Chat Window Button", 202
 - [ ] Write the failing tests. Implement. Run `swift test`, the signed build and the UI tests.
 - [ ] Commit: "mac: a button above Pixie shows and hides the chat window (#302)".
 
+### Task 8d: a terminal button next to each responder's name
+
+The maintainer (2026-10-25): "openup the corresponding terminal when click on different responding
+agents ... a button right next to the responder".
+
+- In the header of a session's message and of a request card, right after the name: a small
+  borderless terminal button (SF Symbol `terminal`), tooltip and VoiceOver name "Open <name>'s
+  terminal". It calls `agent.focusSession` (as "Open in terminal ›" does today).
+- Pixie's own agents/workers and the Coordinator get it too when the core can focus their pane
+  (check `agent.focusJob` / `agent.focusAgent`; if an entry carries no job or pane, no button).
+  Pixie herself never has one.
+- "Open in terminal ›" under the message is removed (one control per action); Reply… stays.
+- Package: `ChatThreadModel.terminalTarget(for:)` → which call and name, or nil. Tests for a
+  session, a worker with a job, the Coordinator, Pixie (nil), an entry with no job (nil).
+- UI test: `testTheTerminalButtonSitsByTheName` (exists for a session, absent for Pixie). Identifier
+  `chat.entry.terminal`.
+- [ ] Commit: "mac: a terminal button beside each responder's name in the chat (#302)".
+
+### Task 8e: @ picks who your message goes to
+
+The maintainer (2026-10-25): "can i see which one to reply directly when doing @____, we should also
+have a selection when @ is put in. and only one responder at a time". Decision logged in
+docs/decisions.md (mention pickers: Slack, Discord, GitHub, Teams agree).
+
+- Typing `@` at the start of the box or after a space opens a list above the box: Pixie (the
+  default, "Message Pixie") then every live session and Pixie's running agents, each with its dot
+  and name, filtered by what's typed after `@` (prefix first, then contains, case-insensitive).
+- ↑/↓ move, Return or Tab picks, Esc closes the list and leaves the text; a click picks.
+- Picking removes the `@query` text and sets the one target: the existing "Replying to <name> ×"
+  chip. There's only ever one target: picking another replaces it, picking Pixie clears it.
+- No match: "No one called <query>"; the list stays until Esc or a space.
+- The list's names come from the core (the same source the roster uses), not typed text; a target
+  that ends while chosen keeps today's behaviour for a gone session.
+- Package: `MentionQuery` (find the active `@` token at the caret, filter and order candidates,
+  apply a pick → new draft + target). Tests: start of text, after a space, not inside a word
+  (`a@b`), filter order, Esc, pick replaces an earlier target, Pixie clears it, no match.
+- UI test: `testAtOpensThePickerAndSetsOneTarget`: type `@`, list shows, type letters, Return →
+  chip shows that session and the text has no `@…`; `@` again and pick another → only the new chip.
+  Identifiers `chat.mention.list`, `chat.mention.row`.
+- [ ] Commit: "mac: @ in the chat box picks who the message goes to (#302)".
+
 ### Task 8a: UI tests for the window (XCUITest)
 
 The app has no UI test target yet; this adds one and covers the window.
