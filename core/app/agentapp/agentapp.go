@@ -741,18 +741,30 @@ func (a *Agent) FocusSession(name string) {
 	})
 }
 
-// interruptLimit: a stop that takes longer says so (the app waits on it).
+// interruptLimit: a stop that takes longer says so.
 const interruptLimit = 5 * time.Second
 
-// Interrupt is the stop button by a working agent (#309): the core decides what it calls.
-func (a *Agent) Interrupt(name string) (bool, error) {
-	ctx, cancel := context.WithTimeout(a.ctx, interruptLimit)
-	defer cancel()
-	sent, err := a.handle.Interrupt(ctx, name)
-	if err != nil {
-		log.Printf("agent: stop %s: %v", name, err)
+// Interrupt is the stop button by a working agent (#309), async like FocusAgent: the core
+// decides what it calls, and a failure comes back as the StopFailed hook. An error now: no
+// agent was named.
+func (a *Agent) Interrupt(name string) error {
+	if name == "" {
+		return agent.ErrStopNoName
 	}
-	return sent, err
+	if a.ctx.Err() != nil {
+		return nil // quitting
+	}
+	a.wg.Go(func() {
+		ctx, cancel := context.WithTimeout(a.ctx, interruptLimit)
+		defer cancel()
+		if _, err := a.handle.Interrupt(ctx, name); err != nil {
+			log.Printf("agent: stop %s: %v", name, err)
+			if a.ctx.Err() == nil && a.hooks.StopFailed != nil {
+				a.hooks.StopFailed(name, err.Error())
+			}
+		}
+	})
+	return nil
 }
 
 // SessionPlaces: where your sessions named run, for the paths in their replies (#277).

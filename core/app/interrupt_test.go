@@ -1,40 +1,56 @@
 package app
 
 import (
+	"encoding/json"
 	"errors"
 	"slices"
-	"strings"
 	"testing"
+	"time"
+
+	"github.com/sihekuang/deskpixie/core/chat"
 )
 
 // #309: agent.interrupt, the stop button by a working agent.
 
-func TestInterruptCallsTheAgentWithTheRowsName(t *testing.T) {
+func TestInterruptSendsTheRowsNameAndAnswersAtOnce(t *testing.T) {
 	f := &fakeAgent{tray: AgentTray{Enabled: true}}
 	h := newHarness(t, withAgent(f))
-	if out := h.call("agent.interrupt", map[string]string{"name": "docs-writer"}); !strings.Contains(string(out), `"interrupted":true`) {
+	if out := h.call("agent.interrupt", map[string]string{"name": "docs-writer"}); string(out) != `{"sent":true}` {
 		t.Fatal(string(out))
 	}
-	f.interruptIdle = true
-	if out := h.call("agent.interrupt", map[string]string{"name": "coordinator"}); !strings.Contains(string(out), `"interrupted":false`) {
-		t.Fatal("not working: nothing sent, no error", string(out))
-	}
-	if !slices.Equal(f.interrupted, []string{"docs-writer", "coordinator"}) {
+	if !slices.Equal(f.interrupted, []string{"docs-writer"}) {
 		t.Fatal(f.interrupted)
 	}
 }
 
-func TestInterruptPassesTheAgentsReasonOn(t *testing.T) {
-	f := &fakeAgent{tray: AgentTray{Enabled: true}, interruptErr: errors.New("Couldn't stop docs-writer: it isn't running anymore.")}
-	h := newHarness(t, withAgent(f))
-	if _, err := h.callErr("agent.interrupt", map[string]string{"name": "docs-writer"}); err == nil || err.Error() != "Couldn't stop docs-writer: it isn't running anymore." {
-		t.Fatal(err)
+// wantRefusal: err is the core's own sentence, marked "refused" for the shell to show as it is.
+func wantRefusal(t *testing.T, err error, want string) {
+	t.Helper()
+	var r *chat.Refusal
+	if !errors.As(err, &r) || r.Code() != "refused" || err.Error() != want {
+		t.Fatalf("%#v", err)
 	}
+}
+
+func TestInterruptRefusesInItsOwnWords(t *testing.T) {
+	f := &fakeAgent{tray: AgentTray{Enabled: true}, interruptErr: errors.New("Couldn't stop it.")}
+	h := newHarness(t, withAgent(f))
+	_, err := h.callErr("agent.interrupt", map[string]string{"name": ""})
+	wantRefusal(t, err, "Couldn't stop it.")
 }
 
 func TestInterruptWithoutAnAgentSaysTheCoordinatorIsOff(t *testing.T) {
 	h := newHarness(t)
-	if _, err := h.callErr("agent.interrupt", map[string]string{"name": "docs-writer"}); err == nil || err.Error() != "The coordinator is off." {
-		t.Fatal(err)
+	_, err := h.callErr("agent.interrupt", map[string]string{"name": "docs-writer"})
+	wantRefusal(t, err, "The coordinator is off.")
+}
+
+func TestAFailedStopIsAnEvent(t *testing.T) {
+	f := &fakeAgent{}
+	h := newHarness(t, withAgent(f))
+	f.hooks.StopFailed("docs-writer", "Couldn't stop docs-writer: it isn't running anymore.")
+	e := h.waitFor("agent.stopFailed", nil, time.Second)
+	if b, _ := json.Marshal(e); string(b) != `{"kind":"agent.stopFailed","name":"docs-writer","text":"Couldn't stop docs-writer: it isn't running anymore."}` {
+		t.Fatal(string(b))
 	}
 }

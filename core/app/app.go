@@ -259,6 +259,9 @@ func New(d Deps) (*App, error) {
 				a.emit("agents", map[string]any{"roster": view})
 				a.emit("chat.recipients", map[string]any{"recipients": recipientsOf(view)})
 			},
+			StopFailed: func(name, text string) {
+				a.emit("agent.stopFailed", map[string]any{"name": name, "text": text})
+			},
 			ShowPane:        func(job, worker string) { a.emit("showPane", map[string]any{"job": job, "worker": worker}) },
 			Focus:           func(plan any) { a.emit("focusPlan", map[string]any{"plan": plan}) },
 			Chat:            func(line any) { a.emit("chat.line", fieldsOf(line)) },
@@ -1448,13 +1451,12 @@ func (a *App) Register(r Registrar) {
 			return nil, err
 		}
 		if a.agent == nil {
-			return nil, errNoCoordinator
+			return nil, &chat.Refusal{Text: errNoCoordinator.Error()}
 		}
-		sent, err := a.agent.Interrupt(in.Name)
-		if err != nil {
-			return nil, err
+		if err := a.agent.Interrupt(in.Name); err != nil {
+			return nil, &chat.Refusal{Text: err.Error()}
 		}
-		return map[string]any{"interrupted": sent}, nil
+		return map[string]any{"sent": true}, nil
 	})
 	r.Register("agent.reportFocusOutcome", func(args json.RawMessage) (any, error) {
 		var in struct {

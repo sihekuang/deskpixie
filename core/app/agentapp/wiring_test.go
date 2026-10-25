@@ -42,6 +42,7 @@ type recorder struct {
 	refreshed           int
 	notes               [][2]string
 	chats               []any
+	stopFailed          [][2]string
 }
 
 func (r *recorder) hooks() app.AgentHooks {
@@ -55,6 +56,11 @@ func (r *recorder) hooks() app.AgentHooks {
 			r.mu.Unlock()
 		},
 		Chat: func(line any) { r.mu.Lock(); r.chats = append(r.chats, line); r.mu.Unlock() },
+		StopFailed: func(name, text string) {
+			r.mu.Lock()
+			r.stopFailed = append(r.stopFailed, [2]string{name, text})
+			r.mu.Unlock()
+		},
 	}
 }
 
