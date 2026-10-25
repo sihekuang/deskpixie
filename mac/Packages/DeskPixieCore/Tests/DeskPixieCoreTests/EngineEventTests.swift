@@ -145,8 +145,10 @@ final class EngineEventTests: XCTestCase {
     }
 
     func testDecodesAFailedStop() {
-        XCTAssertEqual(d(#"{"kind":"agent.stopFailed","name":"docs","text":"Couldn't stop docs: it isn't running anymore."}"#),
-                       .stopFailed(name: "docs", text: "Couldn't stop docs: it isn't running anymore."))
+        XCTAssertEqual(d(#"{"kind":"agent.stopFailed","name":"docs","surface":"roster","text":"Couldn't stop docs: it isn't running anymore."}"#),
+                       .stopFailed(name: "docs", surface: .roster, text: "Couldn't stop docs: it isn't running anymore."))
+        XCTAssertEqual(d(#"{"kind":"agent.stopFailed","name":"docs","text":"x"}"#), .stopFailed(name: "docs", surface: nil, text: "x"))
+        XCTAssertEqual(d(#"{"kind":"agent.stopFailed","name":"docs","surface":"bubble","text":"x"}"#), .stopFailed(name: "docs", surface: nil, text: "x"))
         XCTAssertNil(d(#"{"kind":"agent.stopFailed","name":"docs"}"#), "text is required")
     }
 

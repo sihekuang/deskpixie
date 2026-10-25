@@ -56,8 +56,9 @@ type AgentHooks struct {
 	// Roster is the roster beside Pixie (the `agents` event's roster), on every change (#91).
 	Roster func(view any)
 	// StopFailed: a stop button's stop didn't work (the `agent.stopFailed` event, #309): the
-	// agent's roster name and why, a sentence for the user.
-	StopFailed func(name, text string)
+	// agent's roster name, the surface its button was on ("roster" or "chat"), and why, a
+	// sentence for the user.
+	StopFailed func(name, surface, text string)
 	// ShowPane asks the shell to bring up an agent's pane (the `showPane` event, #110).
 	ShowPane func(job, worker string)
 	// Focus asks the shell to show a terminal by walking a FocusPlan (the `focusPlan` event,
@@ -118,9 +119,10 @@ type Agent interface {
 	// FocusSession is a click on one of your own sessions in the roster: the tab it runs in (async).
 	FocusSession(name string)
 	// Interrupt is the stop button by a working agent (#309), by its roster name: its turn is
-	// interrupted as Esc in its terminal would (async). A failure comes back as the StopFailed
-	// hook; an error now (no name) is a sentence for the user.
-	Interrupt(name string) error
+	// interrupted as Esc in its terminal would (async). surface is where its button was
+	// ("roster" or "chat"): a failure comes back there, as the StopFailed hook. An error now
+	// (no name) is a sentence for the user.
+	Interrupt(name, surface string) error
 	// SessionPlaces are where your sessions named run (#277), in order, from one listing: their
 	// folders and terminal apps, for the paths in their replies. Names not yours are left out.
 	SessionPlaces(names []string) []SessionPlace

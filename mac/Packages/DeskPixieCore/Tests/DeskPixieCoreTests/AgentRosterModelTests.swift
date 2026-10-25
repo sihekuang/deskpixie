@@ -140,6 +140,15 @@ final class AgentRosterModelTests: XCTestCase {
         XCTAssertTrue(m.beginStop("docs-writer"))
     }
 
+    func testAFailedStopShowsOnlyWhereItsClickCameFrom() throws {
+        XCTAssertTrue(StopSurface.roster.shows(.roster))
+        XCTAssertFalse(StopSurface.chat.shows(.roster), "a roster stop leaves the chat alone")
+        XCTAssertFalse(StopSurface.roster.shows(.chat))
+        XCTAssertTrue(StopSurface.chat.shows(nil), "an older core that doesn't say: both")
+        let args = try JSONSerialization.jsonObject(with: JSONEncoder().encode(InterruptArgs(name: "a", surface: .chat))) as? [String: String]
+        XCTAssertEqual(args, ["name": "a", "surface": "chat"])
+    }
+
     func testAFailedStopCallReadsInTheCoresWordsOrTryAgain() {
         var m = AgentRosterModel()
         m.open = true

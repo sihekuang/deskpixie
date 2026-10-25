@@ -747,7 +747,7 @@ const interruptLimit = 5 * time.Second
 // Interrupt is the stop button by a working agent (#309), async like FocusAgent: the core
 // decides what it calls, and a failure comes back as the StopFailed hook. An error now: no
 // agent was named.
-func (a *Agent) Interrupt(name string) error {
+func (a *Agent) Interrupt(name, surface string) error {
 	if name == "" {
 		return agent.ErrStopNoName
 	}
@@ -760,7 +760,7 @@ func (a *Agent) Interrupt(name string) error {
 		if _, err := a.handle.Interrupt(ctx, name); err != nil {
 			log.Printf("agent: stop %s: %v", name, err)
 			if a.ctx.Err() == nil && a.hooks.StopFailed != nil {
-				a.hooks.StopFailed(name, err.Error())
+				a.hooks.StopFailed(name, surface, err.Error())
 			}
 		}
 	})

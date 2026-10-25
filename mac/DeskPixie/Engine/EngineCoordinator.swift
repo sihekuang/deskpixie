@@ -585,9 +585,10 @@ final class EngineCoordinator {
         case .agents(let view):
             roster?.apply(view: view)
             ChatHub.shared?.applyRoster(view)
-        case .stopFailed(_, let text):
-            roster?.stopFailed(text)
-            ChatHub.shared?.stopFailed(text)
+        case .stopFailed(_, let surface, let text):
+            // Only where the click came from: a roster stop leaves the chat's error line alone.
+            if StopSurface.roster.shows(surface) { roster?.stopFailed(text) }
+            if StopSurface.chat.shows(surface) { ChatHub.shared?.stopFailed(text) }
         case .chatLine(let line):
             roster?.apply(chatLine: line)
         case .replyCard(let card):

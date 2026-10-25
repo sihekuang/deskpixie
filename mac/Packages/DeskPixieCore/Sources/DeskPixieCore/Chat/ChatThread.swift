@@ -250,7 +250,8 @@ public protocol ChatClient: Sendable {
     func typedAnswer(token: String, text: String) throws
     /// Stops what Pixie is working on.
     func stop() throws
-    /// `agent.interrupt {name}`: interrupts the turn of the agent with this roster name (#309).
+    /// `agent.interrupt {name, surface: "chat"}`: interrupts the turn of the agent with this
+    /// roster name (#309); a failure comes back to the chat window only.
     func interrupt(name: String) throws
     /// `chat.recipients`: who a message can go to on its own now.
     func recipients() throws -> [ChatRecipient]

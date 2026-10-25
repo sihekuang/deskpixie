@@ -502,7 +502,7 @@ final class AgentRosterController {
         guard model.beginStop(name) else { return }
         render()
         Task { @MainActor [weak self] in
-            let result = await Task.detached { Result { _ = try engine.call("agent.interrupt", FocusAgentArgs(name: name)) } }.value
+            let result = await Task.detached { Result { _ = try engine.call("agent.interrupt", InterruptArgs(name: name, surface: .roster)) } }.value
             if case .failure(let err) = result {
                 Self.log.error("agent.interrupt: \(String(describing: err), privacy: .public)")
             }

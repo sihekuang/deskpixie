@@ -182,10 +182,10 @@ func TestClaudeAutoProbe(t *testing.T) {
 // #309: the stop button's call runs off the caller's thread; a failure comes back as a hook.
 func TestAStopRunsAsyncAndAFailureComesBackAsAHook(t *testing.T) {
 	f := newFixture(t, nil)
-	if err := f.agent.Interrupt(""); err == nil || err.Error() != "Couldn't stop it." {
+	if err := f.agent.Interrupt("", "roster"); err == nil || err.Error() != "Couldn't stop it." {
 		t.Fatal(err)
 	}
-	if err := f.agent.Interrupt("docs-writer"); err != nil {
+	if err := f.agent.Interrupt("docs-writer", "roster"); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, "the failure", func() bool {
@@ -196,7 +196,7 @@ func TestAStopRunsAsyncAndAFailureComesBackAsAHook(t *testing.T) {
 	f.rec.mu.Lock()
 	got := f.rec.stopFailed[0]
 	f.rec.mu.Unlock()
-	if got != [2]string{"docs-writer", "Couldn't stop docs-writer: it isn't running anymore."} {
+	if got != [3]string{"docs-writer", "roster", "Couldn't stop docs-writer: it isn't running anymore."} {
 		t.Fatal(got)
 	}
 }

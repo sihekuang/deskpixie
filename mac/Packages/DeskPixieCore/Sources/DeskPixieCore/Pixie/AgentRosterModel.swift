@@ -41,6 +41,25 @@ public struct RosterRow: Decodable, Sendable, Equatable, Identifiable {
     private enum CodingKeys: String, CodingKey { case name, label, detail, status, kind, reachable, app, stoppable }
 }
 
+/// Where a stop button was (#309): its failure shows there only.
+public enum StopSurface: String, Sendable, Equatable {
+    case roster, chat
+
+    /// An `agent.stopFailed` for `surface` shows here (one the core didn't name shows anywhere).
+    public func shows(_ surface: StopSurface?) -> Bool { surface == nil || surface == self }
+}
+
+/// `agent.interrupt`'s arguments: the roster name, and the surface the click came from.
+public struct InterruptArgs: Encodable, Sendable {
+    public let name: String
+    public let surface: StopSurface.RawValue
+
+    public init(name: String, surface: StopSurface) {
+        self.name = name
+        self.surface = surface.rawValue
+    }
+}
+
 /// The whole roster. `agentCount` never counts the coordinator; `yourCount` only reachable sessions.
 /// `busy`: something is working, as the core decides (#234).
 public struct RosterView: Decodable, Sendable, Equatable {
