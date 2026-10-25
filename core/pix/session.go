@@ -181,12 +181,21 @@ var forceSettle = 300 * time.Millisecond
 // arrives with the paste, leaving the message unsent. Its redraw ([Image #1]) comes in about
 // 25 ms; pasteQuiet without output after it means it's done. An agent that shows nothing, or
 // never settles, still gets its Enter after pasteLimit: the message isn't lost, only logged.
-// Keys you type meanwhile go in after the Enter, not inside the message.
+// Keys you type meanwhile go in after the Enter, not inside the message. A menu that showed
+// meanwhile gets no Enter (#306): the message stays typed in the prompt behind it, a menuUp.
 func (s *Session) typeIn(text string) error {
-	unsettled, err := s.runner.PasteAndEnter(Paste(text), pasteQuiet, pasteLimit)
-	if unsettled != nil {
+	var menu string
+	unsettled, entered, err := s.runner.PasteAndEnter(Paste(text), pasteQuiet, pasteLimit, func() bool {
+		menu = s.menuShown()
+		return menu == ""
+	})
+	if unsettled != nil && entered {
 		s.o.log.Printf("pressing Enter after a paste anyway: %v", unsettled)
 		s.keylog("paste not seen: %v", unsettled)
+	}
+	if err == nil && !entered {
+		s.o.log.Printf("menu %s showed before Enter: the message stays typed, not sent", menu)
+		return menuUp{menu}
 	}
 	return err
 }
@@ -464,6 +473,9 @@ func (s *Session) runCommand(m wire.Msg) wire.Msg {
 		msgs := s.queue.Drain()
 		if err := s.forceIn(msgs); err != nil {
 			s.flushMu.Unlock()
+			if m, ok := err.(menuUp); ok {
+				return wire.Msg{Status: "waiting", Reason: m.menu}
+			}
 			return wire.Msg{Err: err.Error()}
 		}
 		s.flushMu.Unlock()
@@ -474,6 +486,9 @@ func (s *Session) runCommand(m wire.Msg) wire.Msg {
 		}
 		return wire.Msg{Status: "typed"}
 	case "keys":
+		if menu := s.menuShown(); menu != "" { // only you answer it (#306)
+			return wire.Msg{Err: menuWaits(s.o.tool, menu)}
+		}
 		s.clearQuestion() // an Escape from Pixie dismisses the prompt
 		for _, k := range m.Keys {
 			var b []byte

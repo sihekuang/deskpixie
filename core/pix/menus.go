@@ -71,6 +71,31 @@ func (s *Session) menuHold() string {
 	return ""
 }
 
+// menuShown is the menu on screen now ("" for none).
+func (s *Session) menuShown() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.menu
+}
+
+// menuUp: a menu showed between pix's paste and its Enter, so the message wasn't sent.
+type menuUp struct{ menu string }
+
+func (m menuUp) Error() string { return "a menu showed before Enter: " + m.menu }
+
+// menuWaits says, for the coordinator to pass on, which menu tool waits on you for.
+func menuWaits(tool, menu string) string {
+	switch menu {
+	case "update":
+		return tool + " is waiting for you to answer its update question."
+	case "trust":
+		return tool + " is waiting for you to say whether to trust its folder."
+	case "hooks":
+		return tool + " is waiting for you to say whether to trust its hooks."
+	}
+	return tool + " is showing a menu only you should answer."
+}
+
 // noteMenu keeps the menu lines show (PTY reader goroutine only). Keys you pressed while it
 // showed answered it, so once it leaves nothing of yours is left in the prompt.
 func (s *Session) noteMenu(lines []string) {

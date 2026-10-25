@@ -144,16 +144,20 @@ func (r *Runner) write(b []byte) error {
 
 // PasteAndEnter writes paste, waits for the agent to take it (Settle), then presses Enter, as one
 // write to the agent: your keys and other writes wait until the Enter is in, so none land inside
-// the message. unsettled is why it pressed Enter without seeing the agent take the paste.
-func (r *Runner) PasteAndEnter(paste []byte, quiet, limit time.Duration) (unsettled, err error) {
+// the message. unsettled is why it pressed Enter without seeing the agent take the paste. Enter
+// goes only if enter says so then (#306: not into a menu drawn meanwhile); entered says if it did.
+func (r *Runner) PasteAndEnter(paste []byte, quiet, limit time.Duration, enter func() bool) (unsettled error, entered bool, err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	mark := r.Outputs()
 	if err := r.write(paste); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	unsettled = r.Settle(mark, quiet, limit)
-	return unsettled, r.write([]byte{'\r'})
+	if !enter() {
+		return unsettled, false, nil
+	}
+	return unsettled, true, r.write([]byte{'\r'})
 }
 
 func (r *Runner) sawOutput(now time.Time) {

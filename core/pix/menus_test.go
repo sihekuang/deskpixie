@@ -250,3 +250,43 @@ func TestAMessageAsCodexStartsWaitsForItsMenu(t *testing.T) {
 		t.Fatalf("typed into the menu: %q", got)
 	}
 }
+
+// Pixie's own keys don't answer a menu only you should: the coordinator is told which it is.
+func TestPixiesKeysDontAnswerAStartupMenu(t *testing.T) {
+	h := menuHarness(t, "codex-update-menu.raw", "", 0)
+	waitMenu(t, h, "update")
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "keys", Keys: []string{"Enter"}})
+	r := waitEvent(t, h.d.events, "keys result", func(m wire.Msg) bool { return m.Kind == wire.KindResult && m.ID == "1" })
+	if r.Err != "codex is waiting for you to answer its update question." {
+		t.Fatalf("%+v", r)
+	}
+	if got := h.s.typedForTest(); got != "" {
+		t.Fatalf("typed %q", got)
+	}
+
+	h = menuHarness(t, "codex-prompt.raw", "", 0)
+	agentShown(t, h, "Ask Codex")
+	waitMenu(t, h, "")
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "keys", Keys: []string{"Enter"}})
+	if r := waitEvent(t, h.d.events, "keys result", func(m wire.Msg) bool { return m.Kind == wire.KindResult && m.ID == "1" }); r.Err != "" {
+		t.Fatalf("%+v", r)
+	}
+	if got := h.s.typedForTest(); got != "\r" {
+		t.Fatalf("typed %q", got)
+	}
+}
+
+// A menu drawn while pix waits for the agent to take the paste gets no Enter: the message stays
+// typed behind it, and pix says the menu waits.
+func TestAMenuDrawnBeforeEnterGetsNoEnter(t *testing.T) {
+	h := menuHarness(t, "codex-prompt.raw", "codex-update-menu.raw", 0) // the paste brings the menu up
+	agentShown(t, h, "Ask Codex")
+	waitMenu(t, h, "")
+	if r := promptCmd(t, h, "1", "prompt", "hello"); r.Status != "waiting" || r.Reason != "update" {
+		t.Fatalf("%+v", r)
+	}
+	time.Sleep(TypingQuiet + time.Second)
+	if got := h.s.typedForTest(); got != "\x1b[200~hello\x1b[201~" {
+		t.Fatalf("typed %q", got)
+	}
+}
