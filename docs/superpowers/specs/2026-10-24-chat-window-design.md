@@ -213,7 +213,7 @@ kept at all. The chat keeps a real transcript:
   thing on screen: your message, Pixie's words, a coordinator reply (with its rows and
   sessions), a session update, a request and its outcome. Combining and "answered" updates
   rewrite the entry with the same id.
-- **How long:** kept for `chat.keepDays` days (new setting, default 7). Older entries are
+- **How long:** kept for `chatKeepDays` days (new setting, default 7). Older entries are
   dropped at launch. Clear History in the window's menu empties it.
 - **Gone sessions:** a session's messages stay in the thread after it ends. Its header reads
   "ended", and Open in terminal is gone.
@@ -222,17 +222,17 @@ kept at all. The chat keeps a real transcript:
 
 Privacy: this is everything said to and by Pixie, on disk. It stays in the app's data folder.
 It isn't added to Export Logs… unless a separate tick asks for it, and the Settings help for
-`chat.keepDays` says what's kept.
+`chatKeepDays` says what's kept.
 
 ## 7. Settings
 
 | Setting | Change |
 |---|---|
-| `chat.keepDays` (new) | How long the chat keeps history; 1–90, default 7. Live. |
+| `chatKeepDays` (new) | How long the chat keeps history; 1–90, default 7. Live. |
 | `replyMode` | Unchanged: voice or text decides whether Pixie speaks replies. |
 | `alwaysShowCaption`, `captionDismissSecs` | Only governed the card under Pixie: removed. settings.json keeps unknown keys harmlessly. |
 | `captionFadeSecs` | Still the live "earlier" caption's fade. |
-| `replyHistoryMins` | Replaced by `chat.keepDays` for the window. Go keeps using `ReplyHistoryMs` internally only to decide which undelivered lines Pixie may still announce after launch. |
+| `replyHistoryMins` | Replaced by `chatKeepDays` for the window. Go keeps using `ReplyHistoryMs` internally only to decide which undelivered lines Pixie may still announce after launch. |
 | `notifications.bubble.*` | Now governs the badge's one-line preview (pop, lines). |
 
 ## 8. How it splits (Go decides, Swift does)
