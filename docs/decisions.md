@@ -90,3 +90,9 @@ Keychain before .env is a ruling (no source settles it): a key typed into the ap
 - A new Sessions page holds pix and sessions you start yourself.
 **Basis:** Unanimous points from Apple HIG (Settings), Android settings guidelines, Microsoft's app settings guidelines, NN/g (progressive disclosure), UX Movement and macOS System Settings; the rest are Claude's calls as above.
 **Sources:** see #290 (research report).
+
+## 2026-10-25 — @ in the chat box opens a picker (#302)
+**Decision:** Typing `@` (at the start or after a space) opens a list of who can receive the message, filtered as you type; ↑/↓ and Return/Tab pick, Esc closes, a click picks. A pick becomes the composer's single "Replying to <name>" target, replacing any earlier one.
+**Trigger:** The maintainer asked for "a selection when @ is put in", with one responder at a time.
+**Basis:** Unanimous across Slack, Discord, GitHub and Microsoft Teams mention pickers: the list opens on `@`, filters on the following characters, arrow keys plus Enter/Tab select, Esc dismisses. The single target is the maintainer's own requirement.
+**Sources:** https://slack.com/help/articles/205240127 · https://support.discord.com/hc/en-us/articles/210298617 · https://docs.github.com/en/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax#mentioning-people-and-teams · https://support.microsoft.com/en-us/office/use-mentions-to-get-someone-s-attention-in-microsoft-teams-eb4f059d-320e-454e-b111-03361d4d6855

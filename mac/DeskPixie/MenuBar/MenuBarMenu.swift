@@ -74,7 +74,7 @@ private struct RowView: View {
 
     var body: some View {
         if let key = row.shortcut {
-            item.keyboardShortcut(KeyEquivalent(key), modifiers: .command)
+            item.keyboardShortcut(KeyEquivalent(key), modifiers: row.shift ? [.command, .shift] : .command)
         } else {
             item
         }

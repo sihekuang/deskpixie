@@ -1,6 +1,6 @@
-.PHONY: project build test run clean release verify-release
+.PHONY: project build test uitest run clean release verify-release
 
-SWIFT_SOURCES := $(shell find DeskPixie -name '*.swift' -type f 2>/dev/null)
+SWIFT_SOURCES := $(shell find DeskPixie DeskPixieUITests -name '*.swift' -type f 2>/dev/null)
 
 # Regenerate only when project.yml, the xcconfig or the set of app sources changes.
 DeskPixie.xcodeproj/project.pbxproj: project.yml Configs/SharedSettings.xcconfig $(SWIFT_SOURCES)
@@ -18,6 +18,19 @@ build: project
 
 test:
 	cd Packages/DeskPixieCore && swift test
+
+# The chat window's UI tests (XCUITest), against the UITest build (CI runs them too: ci.yml): the app
+# under its own bundle ID (com.sihekuang.deskpixie.uitest), so yours can stay open. Each test
+# runs its own copy on a fresh data folder, herdr session and port.
+#   make uitest SIGNING_IDENTITY="Developer ID Application: ..." DEVELOPMENT_TEAM=... [DESKPIXIE_UITEST_LIVE=1] [DESKPIXIE_UITEST_SESSIONS=1]
+# DESKPIXIE_UITEST_LIVE=1 adds the tests that need herdr, claude and the coordinator.
+# DESKPIXIE_UITEST_SESSIONS=1 adds the tests with two sessions of yours connected to the app:
+# the app's own pix around a stand-in claude, on a temporary home (free, touches nothing).
+uitest: project
+	TEST_RUNNER_DESKPIXIE_UITEST_LIVE="$(DESKPIXIE_UITEST_LIVE)" \
+	TEST_RUNNER_DESKPIXIE_UITEST_SESSIONS="$(DESKPIXIE_UITEST_SESSIONS)" xcodebuild -project DeskPixie.xcodeproj \
+		-scheme DeskPixie -configuration UITest -derivedDataPath build $(BUILD_SIGN_FLAGS) \
+		-only-testing:DeskPixieUITests test
 
 run:
 	open build/Build/Products/Debug/DeskPixie.app

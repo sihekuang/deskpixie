@@ -124,3 +124,27 @@ func TestMarkSeenDeliversTheShownLinesButKeepsWhatKeepSays(t *testing.T) {
 		t.Fatal("idempotent")
 	}
 }
+
+// #302: the chat thread keys requests by line id, so an id is never given out twice, even when
+// a restore drops the newest line and a later restore no longer sees it.
+func TestIdsAreNeverReusedAcrossRestoresThatDropTheNewestLine(t *testing.T) {
+	o := NewOutbox()
+	tok := "hawk"
+	file := []string{o.Push(reply("kept"), 1), o.Push(Line{Text: "q", Kind: LineQuestion, Token: &tok}, 2)}
+	first := RestoreOutbox(file, 3) // the permission question (id 2) is dropped
+	if len(first.Lines()) != 1 {
+		t.Fatal(first.Lines())
+	}
+	second := RestoreOutbox(first.Records(), 4)
+	if record := second.Push(reply("new"), 5); !strings.Contains(record, `"id":3`) {
+		t.Fatal(record)
+	}
+	if len(second.Lines()) != 2 {
+		t.Fatal("the last-id record is not a line:", second.Lines())
+	}
+	// Lines appended after the record count too.
+	third := RestoreOutbox(append(second.Records(), second.Push(reply("later"), 6)), 7)
+	if record := third.Push(reply("next"), 8); !strings.Contains(record, `"id":5`) {
+		t.Fatal(record)
+	}
+}

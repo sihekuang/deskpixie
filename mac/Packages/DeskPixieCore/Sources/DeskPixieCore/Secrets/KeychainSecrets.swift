@@ -40,6 +40,16 @@ public struct KeychainSecrets: APIKeyStore, Sendable {
         self.service = service
     }
 
+    /// The app's own keys. A copy of the app under another bundle ID (the UI tests' build) keeps
+    /// its own, under "DeskPixie (<bundle ID>)": the login Keychain would otherwise ask the
+    /// user to let it read DeskPixie's.
+    public static func forApp(bundleID: String?) -> KeychainSecrets {
+        guard let bundleID, bundleID != appBundleID else { return KeychainSecrets() }
+        return KeychainSecrets(service: "DeskPixie (\(bundleID))")
+    }
+
+    public static let appBundleID = "com.sihekuang.deskpixie"
+
     private func query(_ variable: String) -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword,
          kSecAttrService as String: service,

@@ -11,6 +11,11 @@ struct AttachmentUI {
     let onRemove: (String) -> Void
     let onPick: () -> Void
     let onDrop: ([NSItemProvider]) -> Bool
+    /// Cmd-V: attaches when the clipboard holds only an image or files (true), else the text
+    /// pastes (the chat window's box, #302).
+    var onPaste: () -> Bool = { false }
+    /// The message went: the hint is for a newer copy only.
+    var onSent: () -> Void = {}
 
     @MainActor static let none = AttachmentUI(model: AttachmentModel(), hint: nil, onAttachHint: {}, onRemove: { _ in },
                                    onPick: {}, onDrop: { _ in false })

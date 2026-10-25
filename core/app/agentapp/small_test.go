@@ -125,7 +125,7 @@ func TestAppendLoadAndRewrite(t *testing.T) {
 
 func TestTheUpdatesSinkHandsTheListToTheHook(t *testing.T) {
 	var got any
-	updatesSink{app.AgentHooks{Updates: func(items any) { got = items }}}.Updates([]agent.UpdateItem{{ID: 1, Text: "Done."}})
+	updatesSink{hooks: app.AgentHooks{Updates: func(items any) { got = items }}}.Updates([]agent.UpdateItem{{ID: 1, Text: "Done."}})
 	if items, ok := got.([]agent.UpdateItem); !ok || len(items) != 1 || items[0].Text != "Done." {
 		t.Fatalf("%#v", got)
 	}

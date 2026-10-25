@@ -36,6 +36,7 @@ final class TrayContextMenu: NSObject {
                 row.target = self
                 row.representedObject = r.id
                 row.isEnabled = r.enabled
+                if r.shift { row.keyEquivalentModifierMask = [.command, .shift] }
                 if let checked = r.checked { row.state = checked ? .on : .off }
                 menu.addItem(row)
             case .submenu(let title, let enabled, let children):

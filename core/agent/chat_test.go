@@ -84,6 +84,19 @@ func TestATypedJobsProgressAndQuestionGoToTheCard(t *testing.T) {
 	fx = stop(c, `<spoken ref="job_000000000001" status="question">Which repo?</spoken>`, T0+30)
 	wantChat(t, fx, ChatLine{Job: job(1), Status: "question", Text: "Which repo?"})
 	notSaid(t, fx) // kept as heard, so it waits on the badge too (#286 call 7)
+	if !chats(fx)[0].Asking {
+		t.Fatal("the question itself is asking") // #302
+	}
+}
+
+// #302: a line on a job waiting on its question has the job's status, but isn't the question.
+func TestAnInfoLineOnAWaitingTypedJobIsNotAsking(t *testing.T) {
+	c := typedOnJob1()
+	stop(c, `<spoken ref="job_000000000001" status="question">Which repo?</spoken>`, T0+30)
+	l := c.chatLine(NewJobLine(LineInfo, "Waiting at a prompt in its terminal.", job(1)))
+	if l.Status != "question" || l.Asking {
+		t.Fatalf("%+v", l)
+	}
 }
 
 func TestATypedJobThatFailsOrStopsSaysSoInTheCard(t *testing.T) {
@@ -231,6 +244,9 @@ func TestASessionsReplyToATypedMessageGoesToTheBox(t *testing.T) {
 	fx := sessionTurn(c, pixieTurn("The redirect loop is fixed and all 412 tests pass."), T0+20)
 	wantChat(t, fx, ChatLine{Job: job(1), Status: "done", Text: "The redirect loop is fixed and all 412 tests pass."})
 	noUsualRoute(t, fx)
+	if got := chats(fx)[0].Session; got != "api-claude" {
+		t.Fatalf("the session's own turn, not the coordinator's: Session = %q", got) // #302
+	}
 	// Its later turns too (a background task it waited on), even ones Pixie didn't prompt.
 	later := pixieTurn("Also pushed the branch.")
 	later.FromPixie = false
@@ -372,5 +388,22 @@ func TestATypedMessagesLinesNameItsSessions(t *testing.T) {
 	fx = stop(c, `<spoken ref="job_000000000001" status="done">Two are running.</spoken>`, T0+10)
 	if got := chats(fx); len(got) != 1 || got[0].Sessions != nil {
 		t.Fatalf("no session: %+v", got)
+	}
+}
+
+// #302 Task 8b fix round 1: Stop on a typed job says no line, so it says the job ended (the
+// chat thread's live step for it goes); a job not typed doesn't.
+func TestStoppingATypedJobSaysItEnded(t *testing.T) {
+	c := typedOnJob1()
+	fx := c.Step(CancelInput(job(1)), T0+10)
+	if !slices.ContainsFunc(fx, func(e Effect) bool { return e.Kind == EfChatEnded && e.Job == job(1) }) {
+		t.Fatalf("no EfChatEnded: %s", fmtEffects(fx))
+	}
+	if len(chats(fx)) != 0 {
+		t.Fatalf("Stop says no line: %s", fmtEffects(fx))
+	}
+	c = workingOnJob1()
+	if fx := c.Step(CancelInput(job(1)), T0); anyKind(fx, EfChatEnded) {
+		t.Fatalf("a job not typed: %s", fmtEffects(fx))
 	}
 }
