@@ -1,5 +1,6 @@
 import DeskPixieCore
 import Foundation
+import Observation
 
 /// Owns the one `ChatThreadModel` the chat window shows (#302). `EngineCoordinator` feeds it
 /// the core's `chat.*` events once it exists; the window loads it when it opens.
@@ -15,4 +16,15 @@ enum ChatHub {
         shared = model
         return model
     }
+}
+
+/// What the button above Pixie draws (#302): whether the chat window is shown, which
+/// `ChatWindowController` keeps up to date, and the thread whose unread count puts the dot on it.
+@MainActor
+@Observable
+final class ChatWindowPresence {
+    var shown = false
+    var model: ChatThreadModel?
+
+    var toggle: ChatToggle { ChatToggle(shown: shown, unread: model?.unread ?? 0) }
 }

@@ -60,9 +60,15 @@ final class AgentRosterController {
     private var watch = ClipboardWatch()
     private var offer = CopyOffer()
     private var watchTicks = 0
+    /// The round button after the toggle (#302): the chat window shown or not, and its unread.
+    private let chatWindow: ChatWindowPresence
+    private let onChatWindow: () -> Void
 
-    init(engine: CoreEngine, worker: CoreWorker, pixie: PixieController) {
+    init(engine: CoreEngine, worker: CoreWorker, pixie: PixieController,
+         chatWindow: ChatWindowPresence, onChatWindow: @escaping () -> Void) {
         self.engine = engine
+        self.chatWindow = chatWindow
+        self.onChatWindow = onChatWindow
         self.worker = worker
         self.pixie = pixie
         richText = RichTextStore(engine: engine)
@@ -582,7 +588,8 @@ final class AgentRosterController {
             },
             onScroll: { [weak self] in self?.keeper.scroll(active: $0, now: Self.uptime) },
             onSession: { [weak self] in self?.focusSession($0) },
-            offer: offer.kind, onOffer: { [weak self] in self?.takeOffer() })
+            offer: offer.kind, onOffer: { [weak self] in self?.takeOffer() },
+            chatWindow: chatWindow, onChatWindow: onChatWindow)
             .onPreferenceChange(ChipFrameKey.self) { [weak self] frame in
                 MainActor.assumeIsolated { self?.chipFrame = frame }
             }

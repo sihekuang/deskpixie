@@ -178,6 +178,47 @@ final class ChatWindowUITests: XCTestCase {
         XCTAssertLessThan(first.frame.minY, last.frame.minY, "the file's order is kept")
     }
 
+    // MARK: The button above Pixie
+
+    /// Waits for an element's accessibility label to read `label`.
+    private func waitForLabel(_ element: XCUIElement, _ label: String, timeout: TimeInterval = 10) -> Bool {
+        let reads = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", label), object: element)
+        return XCTWaiter().wait(for: [reads], timeout: timeout) == .completed
+    }
+
+    /// A click shows the window, the next hides it, and so does ⌘⇧C; ⌘W closes it, and every
+    /// way of putting it away turns the button back to "Show chat".
+    func testTheChatButtonShowsAndHidesTheWindow() throws {
+        let h = try start(Self.thread)
+        let button = h.app.buttons["pixie.chatButton"]
+        XCTAssertTrue(button.waitForExistence(timeout: 60), "no chat button above Pixie")
+        XCTAssertTrue(waitForLabel(button, "Show chat"))
+
+        button.click()
+        XCTAssertTrue(h.chatWindow.waitForExistence(timeout: 15), "a click didn't show the window")
+        XCTAssertTrue(entry("s1", in: h.chatWindow).waitForExistence(timeout: 10))
+        XCTAssertTrue(waitForLabel(button, "Hide chat"))
+
+        button.click()
+        XCTAssertTrue(h.chatWindow.waitForGone(timeout: 10), "a second click didn't hide it")
+        XCTAssertTrue(waitForLabel(button, "Show chat"))
+
+        button.click()
+        XCTAssertTrue(h.chatWindow.waitForExistence(timeout: 15), "it didn't show again")
+        XCTAssertTrue(entry("s1", in: h.chatWindow).exists, "the thread is still there")
+        XCTAssertTrue(waitForLabel(button, "Hide chat"))
+
+        h.chatWindow.typeKey("c", modifierFlags: [.command, .shift])
+        XCTAssertTrue(h.chatWindow.waitForGone(timeout: 10), "⌘⇧C didn't hide it")
+        XCTAssertTrue(waitForLabel(button, "Show chat"))
+
+        button.click()
+        XCTAssertTrue(h.chatWindow.waitForExistence(timeout: 15))
+        h.chatWindow.typeKey("w", modifierFlags: .command)
+        XCTAssertTrue(h.chatWindow.waitForGone(timeout: 10), "⌘W didn't close it")
+        XCTAssertTrue(waitForLabel(button, "Show chat"), "closing didn't turn the button back")
+    }
+
     // MARK: The clipboard (drag and drop is left to the hand check: XCUITest can't drive it)
 
     private static func png() -> Data {

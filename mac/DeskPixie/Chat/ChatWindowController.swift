@@ -5,7 +5,9 @@ import SwiftUI
 
 /// The chat window (#302): an ordinary titled window, "Pixie", its size and place remembered,
 /// with a Dock icon while it is open, like Settings. It never opens by itself: `show(at:)` is
-/// the only way in (the menu bar's Chat…). Clear History… sits in its toolbar menu.
+/// the only way in (the menu bar's Chat…, the button above Pixie, ⌘⇧C). The button and ⌘⇧C
+/// also `hide()` it, which keeps the window and where it was scrolled to; its red button and
+/// ⌘W close it. Clear History… sits in its toolbar menu.
 @MainActor
 final class ChatWindowController: NSObject, NSToolbarDelegate {
     static let frameName = "DeskPixieChatWindow"
@@ -22,14 +24,17 @@ final class ChatWindowController: NSObject, NSToolbarDelegate {
     /// The attachments shared with the box under Pixie; nil until Pixie is up.
     private let attachments: () -> AttachmentUI?
     private let state = ChatWindowState()
+    /// Shown or not, for the button above Pixie.
+    private let presence: ChatWindowPresence
     private let richText: RichTextStore
     private var window: NSWindow?
     private var tokens: [NSObjectProtocol] = []
     private var pasteMonitor: Any?
 
-    init(model: ChatThreadModel, engine: CoreEngine, worker: CoreWorker,
+    init(model: ChatThreadModel, engine: CoreEngine, worker: CoreWorker, presence: ChatWindowPresence,
          attachments: @escaping () -> AttachmentUI?) {
         self.model = model
+        self.presence = presence
         self.engine = engine
         self.worker = worker
         self.attachments = attachments
@@ -37,10 +42,12 @@ final class ChatWindowController: NSObject, NSToolbarDelegate {
     }
 
     /// Opens the window (or brings it forward), at this entry or, with none, at the oldest
-    /// unread, else the newest. The thread is loaded again each time it opens.
+    /// unread, else the newest. Shown again after `hide()` with nothing new, it stays where it
+    /// was. The thread is loaded again each time it opens.
     func show(at entryID: String? = nil) {
         let opening = self.window == nil
         let window = self.window ?? makeWindow()
+        let hidden = !opening && !window.isVisible
         if opening { state.opening() }
         WindowFocus.bringForward(window, app: NSApp, showInDock: true)
         updateVisible()
@@ -48,8 +55,20 @@ final class ChatWindowController: NSObject, NSToolbarDelegate {
         let model = model, state = state
         Task { @MainActor in
             await model.load()
+            if hidden && entryID == nil && model.unread == 0 { return }
             state.scroll(to: entryID)
         }
+    }
+
+    /// The window is on screen: not closed, hidden or minimized.
+    var isShown: Bool { window.map { $0.isVisible && !$0.isMiniaturized } ?? false }
+
+    /// Puts the window away, keeping it (its size, place and scroll) for the next `show`.
+    func hide() {
+        guard let window, window.isVisible else { return }
+        window.orderOut(nil)
+        updateVisible()
+        AppDock.windowClosed(Self.windowID)
     }
 
     /// Every message's links are found again (a setting changed where files open).
@@ -124,6 +143,7 @@ final class ChatWindowController: NSObject, NSToolbarDelegate {
     }
 
     private func updateVisible() {
+        presence.shown = isShown
         guard let window else { return state.visible = false }
         state.visible = window.isVisible && window.occlusionState.contains(.visible) && !window.isMiniaturized
     }
@@ -137,6 +157,7 @@ final class ChatWindowController: NSObject, NSToolbarDelegate {
         }
         window = nil
         state.visible = false
+        presence.shown = false
         model.cancelReply()
         AppDock.windowClosed(Self.windowID)
     }

@@ -253,7 +253,7 @@ public enum TrayMenu {
         }
 
         // The window reads the core, so it waits for it like Settings….
-        items.append(.action(Row(id: chatID, title: "Chat…", enabled: !starting, shortcut: "c", shift: true)))
+        items.append(.action(Row(id: chatID, title: "Chat…", enabled: !starting, shortcut: ChatToggle.shortcutKey, shift: true)))
         if micModeAvailable {
             items.append(.action(Row(id: micModeID, title: micModeLabel)))
         }

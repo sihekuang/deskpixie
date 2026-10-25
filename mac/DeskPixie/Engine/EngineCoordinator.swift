@@ -51,6 +51,10 @@ final class EngineCoordinator {
     /// The chat thread (`ChatHub`; CompositionRoot sets it), and its window, made on first show (#302).
     var chatModel: (() -> ChatThreadModel)?
     private var chatWindow: ChatWindowController?
+    /// Whether the chat window is shown and its unread count, for the button above Pixie.
+    private let chatPresence = ChatWindowPresence()
+    /// ⌘⇧C while DeskPixie is in front: shows or hides the chat window.
+    private var chatKeyMonitor: Any?
     private var presence: PresenceMonitor?
     /// The combo the Carbon hotkey is bound to right now (nil = none).
     var boundCombo: String? { hotkeys.boundCombo }
@@ -128,6 +132,7 @@ final class EngineCoordinator {
 
         if configured {
             pushKeychainKeys()
+            startChatButton()
             let pixieSettings = snapshot.flatMap(PixieSettings.fromSnapshot) ?? .defaults
             if let m = PixieController.load(engine: engine, settings: pixieSettings) {
                 pixie = m
@@ -139,7 +144,9 @@ final class EngineCoordinator {
                     }
                 }
                 m.show()
-                roster = AgentRosterController(engine: engine, worker: worker, pixie: m)
+                roster = AgentRosterController(engine: engine, worker: worker, pixie: m,
+                                               chatWindow: chatPresence,
+                                               onChatWindow: { [weak self] in self?.toggleChat() })
                 startBubble(pixie: m, settings: snapshot.flatMap(BubbleSettingsValues.fromSnapshot) ?? .defaults)
             } else {
                 appState.engineError = "Could not load the pixie pack"
@@ -203,9 +210,36 @@ final class EngineCoordinator {
         guard configured, let chatModel else { return }
         if chatWindow == nil {
             chatWindow = ChatWindowController(model: chatModel(), engine: engine, worker: worker,
+                                              presence: chatPresence,
                                               attachments: { [weak self] in self?.roster?.attachmentUI })
         }
         chatWindow?.show(at: entryID)
+    }
+
+    /// The button above Pixie and ⌘⇧C: shows the chat window, or hides it when it's shown.
+    /// The menu's Chat… only shows it (`showChat`).
+    func toggleChat() {
+        switch chatPresence.toggle.action {
+        case .show: showChat()
+        case .hide: chatWindow?.hide()
+        }
+    }
+
+    /// The thread for the button's unread dot, loaded once at launch; the core's chat events
+    /// keep it current from then on. And ⌘⇧C: Chat…'s key in the menu, which as a menu bar
+    /// item's key only works while its menu is open, so it is caught here while DeskPixie is in
+    /// front, where it toggles instead.
+    private func startChatButton() {
+        guard let chatModel else { return }
+        let model = chatModel()
+        chatPresence.model = model
+        Task { await model.load() }
+        chatKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard ChatToggle.isShortcut(flags: event.modifierFlags.rawValue, key: event.charactersIgnoringModifiers)
+            else { return event }
+            MainActor.assumeIsolated { self?.toggleChat() }
+            return nil
+        }
     }
 
     /// Hands the core the API keys kept in the Keychain (`secrets.keychain`), off main: a
@@ -232,6 +266,10 @@ final class EngineCoordinator {
         pump.stop()
         voiceIO.stop()
         presence?.stop()
+        if let m = chatKeyMonitor {
+            NSEvent.removeMonitor(m)
+            chatKeyMonitor = nil
+        }
         bubble?.stop()
         roster?.stop()
         pixie?.stop()

@@ -42,6 +42,42 @@ struct ReplyModeToggle: View {
     }
 }
 
+/// The round button after the toggle (#302): shows the chat window, or hides it while it's
+/// shown (filled then), with a dot for unread while it's hidden. Drawn like the toggle.
+struct ChatWindowButton: View {
+    let toggle: ChatToggle
+    let onClick: () -> Void
+
+    /// The toggle's height: its 26 pt segments and 3 pt padding.
+    static let size: CGFloat = 32
+
+    var body: some View {
+        Button(action: onClick) {
+            Image(systemName: "list.bullet.rectangle")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(toggle.filled ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+                .frame(width: Self.size, height: Self.size)
+                .background(Circle().fill(toggle.filled ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.regularMaterial)))
+                .overlay(Circle().strokeBorder(toggle.filled ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.separator)))
+                .overlay(alignment: .topTrailing) {
+                    if toggle.dot {
+                        Circle()
+                            .fill(Color.blue)
+                            .frame(width: 10, height: 10)
+                            .overlay(Circle().strokeBorder(.background, lineWidth: 2))
+                            .offset(x: 2, y: -2)
+                    }
+                }
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .help(toggle.help)
+        .accessibilityLabel(toggle.label)
+        .accessibilityAddTraits(toggle.filled ? .isSelected : [])
+        .accessibilityIdentifier("pixie.chatButton")
+    }
+}
+
 /// The text box (text mode): the coordinator's spoken answer, Stop while it works, and one line
 /// to type in. Built like the session list (spec §5). In voice mode it is the caption alone
 /// (#224): what Pixie said, with no input line.
