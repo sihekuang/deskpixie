@@ -21,6 +21,8 @@ public struct EngineChatClient: ChatClient, Sendable {
         let attachments: [String]
         /// Left out when the message goes to Pixie; an empty one is the core's to refuse.
         let session: String?
+        /// The chat window: the core applies its one-recipient rule (the box under Pixie doesn't).
+        var from = "window"
     }
 
     private struct DecideArgs: Encodable {

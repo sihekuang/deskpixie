@@ -14,6 +14,9 @@ import (
 // chat thread (thread.go, #302); the agent's lines come back as `chat.line` events, the mode as `replyMode`, a hotkey press in text mode as
 // `chat.focus`.
 
+// fromWindow is chat.send's `from` for the chat window (#302).
+const fromWindow = "window"
+
 // errNoCoordinator: chat.send with the agent off.
 var errNoCoordinator = errors.New("The coordinator is off.")
 
@@ -25,6 +28,10 @@ func (a *App) registerChat(r Registrar) {
 			// Session is the address of the one recipient chosen (#302): a session of yours or
 			// one of Pixie's workers, which the coordinator is asked to tell. Absent: Pixie.
 			Session *string `json:"session"`
+			// From is "window" for the chat window, which has the @ list: only there does a
+			// message go to one recipient by rule. The box under Pixie leaves it out and sends
+			// as it always has.
+			From string `json:"from"`
 		}
 		if err := decodeArgs("chat.send", args, &in); err != nil {
 			return nil, err
@@ -32,14 +39,18 @@ func (a *App) registerChat(r Registrar) {
 		if a.agent == nil {
 			return nil, errNoCoordinator
 		}
-		// One recipient per message: refused here, so every shell gets the same rule.
 		rs := a.recipients()
 		label := ""
 		if in.Session != nil && *in.Session != "" {
 			label = a.sessionLabel(*in.Session)
 		}
-		if err := chat.CheckOneRecipient(in.Text, in.Session, label, rs); err != nil {
-			return nil, err
+		if in.From == fromWindow {
+			// One recipient per message: refused here, so every shell's window gets the same rule.
+			if err := chat.CheckOneRecipient(in.Text, in.Session, label, rs); err != nil {
+				return nil, err
+			}
+		} else if in.Session != nil && *in.Session == "" {
+			in.Session = nil // the box: no address, Pixie
 		}
 		if in.Session != nil {
 			to := *in.Session

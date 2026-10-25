@@ -159,6 +159,7 @@ func TestChatSendRefusesMoreThanOneRecipient(t *testing.T) {
 	}
 	before := len(h.entries(nil))
 	for _, c := range cases {
+		c.args["from"] = "window"
 		_, err := h.callErr("chat.send", c.args)
 		if err == nil || err.Error() != c.want {
 			t.Errorf("%v: %v, want %q", c.args, err, c.want)
@@ -171,10 +172,29 @@ func TestChatSendRefusesMoreThanOneRecipient(t *testing.T) {
 		t.Fatalf("a refused message joined the thread: %d entries, was %d", n, before)
 	}
 	// Fine: a mention of the target itself, a word that names no one, an email address.
-	h.call("chat.send", map[string]any{"text": "@w1 ship it", "session": "w1"})
-	h.call("chat.send", map[string]any{"text": "ask @nobody, mail me@w1.com"})
+	h.call("chat.send", map[string]any{"text": "@w1 ship it", "session": "w1", "from": "window"})
+	h.call("chat.send", map[string]any{"text": "ask @nobody, mail me@w1.com", "from": "window"})
 	if !slices.Equal(f.sent, []string{"Tell the docs session: @w1 ship it", "ask @nobody, mail me@w1.com"}) {
 		t.Fatalf("sent %q", f.sent)
+	}
+}
+
+// The box under Pixie keeps today's behaviour (#302 scope): no `from`, no one-recipient rule.
+func TestTheBoxUnderPixieSendsAsBefore(t *testing.T) {
+	f := &fakeAgent{tray: AgentTray{Enabled: true}, roster: rosterWith()}
+	h := newHarness(t, withAgent(f))
+	h.call("chat.send", map[string]any{"text": "@w1 and @w2, both of you"})
+	h.call("chat.send", map[string]any{"text": "@w1 ship it", "session": ""})
+	if !slices.Equal(f.sent, []string{"@w1 and @w2, both of you", "@w1 ship it"}) || f.delegated != 0 {
+		t.Fatalf("sent %q, delegated %d", f.sent, f.delegated)
+	}
+	// The same text from the window is refused.
+	if _, err := h.callErr("chat.send", map[string]any{"text": "@w1 and @w2, both of you", "from": "window"}); err == nil ||
+		err.Error() != "Send to one at a time: pick @w1 or @w2." {
+		t.Fatal("the window's send went:", err)
+	}
+	if len(f.sent) != 2 {
+		t.Fatal("a refused send went:", f.sent)
 	}
 }
 

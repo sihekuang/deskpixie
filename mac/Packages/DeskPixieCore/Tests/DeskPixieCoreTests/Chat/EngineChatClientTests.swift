@@ -50,12 +50,13 @@ final class EngineChatClientTests: XCTestCase {
                                         "chat.read", "agent.decide", "agent.choose", "agent.typedAnswer",
                                         "chat.clear", "chat.stop"])
         // The Go input structs' json names: text, attachments, session | before, limit | upTo | token, allow...
-        XCTAssertEqual(keys(calls[0].1), ["text", "attachments"], "session is left out for Pixie")
+        XCTAssertEqual(keys(calls[0].1), ["text", "attachments", "from"], "session is left out for Pixie")
+        XCTAssertEqual(calls[0].1["from"] as? String, "window", "the window's rule applies")
         XCTAssertEqual(calls[0].1["attachments"] as? [String], [], "an empty list, not null")
-        XCTAssertEqual(keys(calls[1].1), ["text", "attachments", "session"])
+        XCTAssertEqual(keys(calls[1].1), ["text", "attachments", "session", "from"])
         XCTAssertEqual(calls[1].1["session"] as? String, "web-claude")
         XCTAssertEqual(calls[1].1["attachments"] as? [String], ["/a.png"])
-        XCTAssertEqual(keys(calls[2].1), ["text", "attachments", "session"], "an empty address goes, for the core to refuse")
+        XCTAssertEqual(keys(calls[2].1), ["text", "attachments", "session", "from"], "an empty address goes, for the core to refuse")
         XCTAssertEqual(calls[2].1["session"] as? String, "")
         XCTAssertEqual(calls[3].1["before"] as? String, "")
         XCTAssertEqual(calls[3].1["limit"] as? Int, 50)
