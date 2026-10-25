@@ -28,6 +28,7 @@ import (
 
 	"github.com/sihekuang/deskpixie/core/audio/denoise"
 	"github.com/sihekuang/deskpixie/core/canvas"
+	"github.com/sihekuang/deskpixie/core/chat"
 	"github.com/sihekuang/deskpixie/core/packs"
 	"github.com/sihekuang/deskpixie/core/settings"
 	"github.com/sihekuang/deskpixie/core/tools"
@@ -133,6 +134,11 @@ type App struct {
 
 	agent Agent // nil when delegation is off
 
+	// thread is the chat window's thread (#302); threadMu guards a change to it and the events
+	// it makes (thread.go). Never held while calling the agent.
+	thread   *chat.Store
+	threadMu sync.Mutex
+
 	// localTools are built once and shared by the voice loop (voiceTools) and the agent.
 	localTools []tools.Tool
 	voiceTools *voice.ToolRegistry
@@ -226,6 +232,8 @@ func New(d Deps) (*App, error) {
 		log.Printf("canvas: unavailable: %v", err)
 		a.canvas = nil
 	}
+	// Before the agent and the voice loop, which both add to it.
+	a.thread = openThread(filepath.Join(p.AppSupport, "chat"), cfg.ChatKeepDays)
 	// Before the agent and the voice loop, which both hold these instances. The alarm reaches
 	// the voice loop lazily (a.voiceLink), so it works with no voice loop at all.
 	a.localTools = NewLocalTools(homeCity(cfg), &TimerAlarm{Voice: a.voiceLink, Notify: a.notify}, d.LocalTools)
@@ -241,12 +249,15 @@ func New(d Deps) (*App, error) {
 			NotifyUpdate: func(title, body string, update any) {
 				a.emit("notify", map[string]any{"title": title, "body": body, "update": update})
 			},
-			Updates:  func(items any) { a.emit("updates", map[string]any{"lines": items}) },
-			Reply:    func(c any) { a.emit("reply.card", fieldsOf(c)) },
-			Roster:   func(view any) { a.emit("agents", map[string]any{"roster": view}) },
-			ShowPane: func(job, worker string) { a.emit("showPane", map[string]any{"job": job, "worker": worker}) },
-			Focus:    func(plan any) { a.emit("focusPlan", map[string]any{"plan": plan}) },
-			Chat:     func(line any) { a.emit("chat.line", fieldsOf(line)) },
+			Updates:        func(items any) { a.emit("updates", map[string]any{"lines": items}) },
+			Reply:          func(c any) { a.emit("reply.card", fieldsOf(c)) },
+			Roster:         func(view any) { a.emit("agents", map[string]any{"roster": view}) },
+			ShowPane:       func(job, worker string) { a.emit("showPane", map[string]any{"job": job, "worker": worker}) },
+			Focus:          func(plan any) { a.emit("focusPlan", map[string]any{"plan": plan}) },
+			Chat:           func(line any) { a.emit("chat.line", fieldsOf(line)) },
+			ThreadLine:     a.threadAdd,
+			ThreadRequests: a.threadRequests,
+			ThreadAnswer:   a.threadAdd,
 		})
 		if a.agent != nil {
 			a.agent.SetTextMode(cfg.ReplyMode == settings.ReplyText)
@@ -417,6 +428,9 @@ func (a *App) Close() {
 			_ = a.cleaner.Close()
 		}
 		a.wg.Wait()
+		if err := a.thread.Close(); err != nil {
+			log.Printf("chat: closing the thread: %v", err)
+		}
 	})
 }
 
@@ -470,6 +484,8 @@ func (a *App) onVoiceEvent(ev voice.UIEvent) {
 			a.pushTray()
 		}
 		return
+	case "transcript":
+		a.threadSpoken(ev.Role, ev.Text)
 	case "mouth":
 		// Non-zero only while Pixie's reply is audibly playing: feeds the agent's echo gate.
 		if a.agent != nil {
@@ -1041,6 +1057,8 @@ func (ap applier) Apply(field string, cfg settings.Config) error {
 	case settings.RouteCaptions:
 		a.emit("captions", map[string]any{"always": cfg.AlwaysShowCaption, "dismissSecs": cfg.CaptionDismissSecs,
 			"fadeSecs": cfg.CaptionFadeSecs, "historyMins": cfg.ReplyHistoryMins})
+	case settings.RouteChat:
+		err = a.applyChatKeepDays(cfg.ChatKeepDays)
 	}
 	// The tray shows the size, pack and fade checkmarks and the hotkey line.
 	a.pushTray()
@@ -1248,6 +1266,7 @@ func (a *App) Register(r Registrar) {
 		return struct{}{}, nil
 	})
 	a.registerChat(r)
+	a.registerThread(r)
 	a.registerAttachments(r)
 	a.registerLogs(r)
 	r.Register("agent.updates", func(json.RawMessage) (any, error) {
@@ -1302,6 +1321,7 @@ func (a *App) Register(r Registrar) {
 		if err := decodeArgs("agent.decide", args, &in); err != nil {
 			return nil, err
 		}
+		a.threadAnswered(in.Token, allowedOutcome(in.Allow))
 		if a.agent != nil {
 			a.agent.Decide(in.Token, in.Allow)
 		}
@@ -1315,6 +1335,7 @@ func (a *App) Register(r Registrar) {
 		if err := decodeArgs("agent.choose", args, &in); err != nil {
 			return nil, err
 		}
+		a.threadAnswered(in.Token, chosenOutcome(in.Option))
 		if a.agent != nil {
 			a.agent.Choose(in.Token, in.Option)
 		}
@@ -1328,6 +1349,7 @@ func (a *App) Register(r Registrar) {
 		if err := decodeArgs("agent.typedAnswer", args, &in); err != nil {
 			return nil, err
 		}
+		a.threadAnswered(in.Token, typedOutcome(in.Text))
 		if a.agent != nil {
 			a.agent.TypedAnswer(in.Token, in.Text)
 		}

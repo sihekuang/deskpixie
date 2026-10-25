@@ -7,8 +7,8 @@ import (
 	"github.com/sihekuang/deskpixie/core/settings"
 )
 
-// The text box under Pixie (#221): chat.send, chat.stop and chat.mode; the agent's lines come
-// back as `chat.line` events, the mode as `replyMode`, a hotkey press in text mode as
+// The text box under Pixie (#221): chat.send, chat.stop and chat.mode; what you send joins the
+// chat thread (thread.go, #302); the agent's lines come back as `chat.line` events, the mode as `replyMode`, a hotkey press in text mode as
 // `chat.focus`.
 
 // errNoCoordinator: chat.send with the agent off.
@@ -17,7 +17,11 @@ var errNoCoordinator = errors.New("The coordinator is off.")
 func (a *App) registerChat(r Registrar) {
 	r.Register("chat.send", func(args json.RawMessage) (any, error) {
 		var in struct {
-			Text string `json:"text"`
+			Text        string   `json:"text"`
+			Attachments []string `json:"attachments"`
+			// Session is the address of the session you're replying to (#302): the coordinator
+			// is asked to tell it.
+			Session string `json:"session"`
 		}
 		if err := decodeArgs("chat.send", args, &in); err != nil {
 			return nil, err
@@ -25,10 +29,15 @@ func (a *App) registerChat(r Registrar) {
 		if a.agent == nil {
 			return nil, errNoCoordinator
 		}
-		job, err := a.agent.ChatSend(in.Text)
+		text := in.Text
+		if in.Session != "" {
+			text = "Tell the " + a.sessionLabel(in.Session) + " session: " + in.Text
+		}
+		job, err := a.agent.ChatSend(text)
 		if err != nil {
 			return nil, err
 		}
+		a.threadSent(job, in.Text, in.Attachments, in.Session)
 		return map[string]any{"job": job}, nil
 	})
 	r.Register("chat.stop", func(json.RawMessage) (any, error) {

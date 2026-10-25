@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -19,7 +20,7 @@ func (f *fakeAgent) ChatSend(text string) (string, error) {
 		return "", f.chatErr
 	}
 	f.sent = append(f.sent, text)
-	return "job_000000000001", nil
+	return fmt.Sprintf("job_%012d", len(f.sent)), nil // numbered, as the real one
 }
 func (f *fakeAgent) ChatStop() { f.mu.Lock(); f.stops++; f.mu.Unlock() }
 func (f *fakeAgent) SetTextMode(on bool) {

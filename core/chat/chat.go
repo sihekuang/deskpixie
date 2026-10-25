@@ -155,6 +155,17 @@ func (s *Store) Update(id string, fn func(*Entry)) (Entry, bool) {
 	return clone(e), true
 }
 
+// Get is the entry with this ID; false when there is none.
+func (s *Store) Get(id string) (Entry, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	i, ok := s.index[id]
+	if !ok {
+		return Entry{}, false
+	}
+	return clone(s.entries[i]), true
+}
+
 // Page is up to limit entries (PageSize when limit is not above 0), newest first, that come
 // before the entry with ID before; "" starts from the end. An unknown ID gives none.
 func (s *Store) Page(before string, limit int) []Entry {

@@ -221,3 +221,19 @@ func TestMarkReadDoesNotRepeatLinesAfterAJoinOrReAdd(t *testing.T) {
 		t.Fatalf("mark after re-add = %v", got)
 	}
 }
+
+func TestGetIsTheEntryWithThatIDAsACopy(t *testing.T) {
+	s := NewMemory(func() int64 { return 0 })
+	s.Add(Entry{ID: "req1", Who: Who{Kind: "session", Name: "w1"}, Text: "ok?", Request: &Request{Item: 1, Kind: "permission"}})
+	got, ok := s.Get("req1")
+	if !ok || got.Text != "ok?" || got.Request == nil {
+		t.Fatalf("Get = %+v, %v", got, ok)
+	}
+	got.Request.Outcome = "changed"
+	if again, _ := s.Get("req1"); again.Request.Outcome != "" {
+		t.Fatal("Get shares memory with the store")
+	}
+	if _, ok := s.Get("nope"); ok {
+		t.Fatal("an unknown id was found")
+	}
+}
