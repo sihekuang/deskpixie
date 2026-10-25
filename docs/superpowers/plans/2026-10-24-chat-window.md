@@ -437,6 +437,45 @@ the finished turns only.
 - [ ] Implement. Run `go test ./...`, `swift test` and the signed build. Expected: PASS.
 - [ ] Commit: "Chat window: live text while you and Pixie speak, and the coordinator's steps (#302)".
 
+### Task 8c: a button that shows and hides the chat window
+
+The maintainer picked the recommended design (artifact "Chat Window Button", 2026-10-24).
+
+**Placement and look:**
+- A round button to the right of the voice/text capsule above Pixie, after a thin divider. Same
+  material, border and height as the capsule.
+- A window icon (SF Symbol `macwindow` or `rectangle.and.text.magnifyingglass`-like; pick one
+  that reads "a window with text", not a speech bubble).
+
+**Behaviour:**
+- A click shows the chat window when it's hidden, at the first unread entry (as `show(at: nil)`
+  does), and hides it when it's shown.
+- Hiding keeps its size, place and scroll position.
+- While shown, the button is filled with the accent colour.
+- The tooltip and VoiceOver name are "Show chat" / "Hide chat", plus ", N unread" when there's
+  unread.
+- A blue dot on the button when `unread > 0` and the window is hidden.
+- Every way of closing (the red button, ⌘W) puts the button back to "Show chat".
+- **⌘⇧C toggles too:** the Chat… menu item's key equivalent, while DeskPixie is active.
+- **Chat… in the menu bar** shows the window or brings it to the front; it never hides it.
+- The 💬 side of the capsule is unchanged: the quick box under Pixie.
+
+**Code:**
+- The toggle decision goes in the package: a small `ChatToggle` (or a method on
+  `ChatWindowState`) that maps (shown, unread) → action, label and dot.
+- `ChatWindowController` publishes shown/hidden.
+- The button lives beside `ReplyModeToggle` in the roster view.
+- Identifier: `pixie.chatButton`.
+
+**Tests:**
+- Package: `testTheButtonShowsWhenHiddenAndHidesWhenShown`, `testItsNameSaysWhatAClickDoes`,
+  `testTheDotIsForUnreadWhileHidden`.
+- UI (8a's target): `testTheChatButtonShowsAndHidesTheWindow`, and closing with ⌘W turns it
+  back to "Show chat".
+
+- [ ] Write the failing tests. Implement. Run `swift test`, the signed build and the UI tests.
+- [ ] Commit: "mac: a button above Pixie shows and hides the chat window (#302)".
+
 ### Task 8a: UI tests for the window (XCUITest)
 
 The app has no UI test target yet; this adds one and covers the window.
