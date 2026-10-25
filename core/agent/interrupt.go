@@ -34,6 +34,10 @@ func (h *AgentHandle) Interrupt(ctx context.Context, name string) (bool, error) 
 	if err != nil {
 		return false, stopFailed(name, err)
 	}
+	who := name // in its failures, named as the session list names it
+	if a.User != nil {
+		who = a.User.Label()
+	}
 	if a.Status != PaneWorking {
 		h.stops.changed(name)
 		return false, nil
@@ -44,7 +48,7 @@ func (h *AgentHandle) Interrupt(ctx context.Context, name string) (bool, error) 
 		return true, nil // the stop before it is still on its way
 	case stopWaitTimedOut:
 		// That one may yet land: a second Esc would open a menu. Say so rather than nothing.
-		return false, stopSentence(name, "it hasn't answered the last stop yet")
+		return false, stopSentence(who, "it hasn't answered the last stop yet")
 	}
 	sent, err := h.interrupt(ctx, a)
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
@@ -57,7 +61,7 @@ func (h *AgentHandle) Interrupt(ctx context.Context, name string) (bool, error) 
 		h.stops.drop(name, now)
 	}
 	if err != nil {
-		return false, stopFailed(name, err)
+		return false, stopFailed(who, err)
 	}
 	return sent, nil
 }

@@ -171,9 +171,24 @@ func TestStoppingYourSessionPixCantReachSaysSo(t *testing.T) {
 	user.unreachable = true
 	user.mu.Unlock()
 	sent, err := r.h.Interrupt(context.Background(), "focus-claude")
-	wantStopErr(t, sent, err, "Couldn't stop focus-claude: its pix can't be reached; it may have been closed.")
+	wantStopErr(t, sent, err, "Couldn't stop login bug: its pix can't be reached; it may have been closed.")
 	if len(user.Keys()) != 0 {
 		t.Fatal(user.Keys())
+	}
+}
+
+// The stop button says "Stop login bug": so does its failure, not pix's "focus-claude". A
+// session with no description is "<tool> in <repo>", as the list has it.
+func TestAStopsFailureNamesYourSessionAsTheListDoes(t *testing.T) {
+	r, user := pixRig(t)
+	user.SetStatus("focus-claude", PaneWorking)
+	user.mu.Lock()
+	user.keysErr = HostError{Kind: HostOther, Detail: "Codex is waiting for you."}
+	user.mu.Unlock()
+	sent, err := r.h.Interrupt(context.Background(), "focus-claude")
+	wantStopErr(t, sent, err, "Couldn't stop login bug: Codex is waiting for you.")
+	if got := (&UserSession{Tool: "claude", Repo: "focus"}).Label(); got != "claude in focus" {
+		t.Fatal(got)
 	}
 }
 
@@ -186,10 +201,10 @@ func TestStoppingYourSessionSaysWhyPixRefused(t *testing.T) {
 	}{
 		// #306: pix refuses keys while a startup menu only you should answer is up.
 		{HostError{Kind: HostOther, Detail: "Codex is waiting for you to answer its update question."},
-			"Couldn't stop focus-claude: Codex is waiting for you to answer its update question."},
-		{ErrNoAgent("focus-claude"), "Couldn't stop focus-claude: it isn't running anymore."},
+			"Couldn't stop login bug: Codex is waiting for you to answer its update question."},
+		{ErrNoAgent("focus-claude"), "Couldn't stop login bug: it isn't running anymore."},
 		// Last: a timeout holds the next stop back (its Esc may still land).
-		{HostError{Kind: HostTimeout, Detail: "pix session focus-claude"}, "Couldn't stop focus-claude: it didn't answer in time."},
+		{HostError{Kind: HostTimeout, Detail: "pix session focus-claude"}, "Couldn't stop login bug: it didn't answer in time."},
 	} {
 		user.mu.Lock()
 		user.keysErr = c.err
@@ -325,7 +340,7 @@ func TestAStopThatTimedOutHoldsTheNextUntilTheStatusChanges(t *testing.T) {
 	user.keysErr = HostError{Kind: HostTimeout}
 	user.mu.Unlock()
 	sent, err := r.h.Interrupt(context.Background(), "focus-claude")
-	wantStopErr(t, sent, err, "Couldn't stop focus-claude: it didn't answer in time.")
+	wantStopErr(t, sent, err, "Couldn't stop login bug: it didn't answer in time.")
 	user.mu.Lock()
 	user.keysErr = nil
 	user.mu.Unlock()
@@ -333,7 +348,7 @@ func TestAStopThatTimedOutHoldsTheNextUntilTheStatusChanges(t *testing.T) {
 	// Its Esc may still land when the session catches up: a retry sends no second one, and
 	// says why rather than nothing.
 	sent, err = r.h.Interrupt(context.Background(), "focus-claude")
-	wantStopErr(t, sent, err, "Couldn't stop focus-claude: it hasn't answered the last stop yet.")
+	wantStopErr(t, sent, err, "Couldn't stop login bug: it hasn't answered the last stop yet.")
 	if n := escapes(user.Keys(), "focus-claude"); n != 0 {
 		t.Fatal(user.Keys())
 	}
@@ -396,12 +411,12 @@ func TestASendThatRunsOutOfTimeIsATimeout(t *testing.T) {
 		user.keysErr = cause
 		user.mu.Unlock()
 		sent, err := r.h.Interrupt(context.Background(), "focus-claude")
-		wantStopErr(t, sent, err, "Couldn't stop focus-claude: it didn't answer in time.")
+		wantStopErr(t, sent, err, "Couldn't stop login bug: it didn't answer in time.")
 		user.mu.Lock()
 		user.keysErr = nil
 		user.mu.Unlock()
 		sent, err = r.h.Interrupt(context.Background(), "focus-claude")
-		wantStopErr(t, sent, err, "Couldn't stop focus-claude: it hasn't answered the last stop yet.")
+		wantStopErr(t, sent, err, "Couldn't stop login bug: it hasn't answered the last stop yet.")
 		if n := escapes(user.Keys(), "focus-claude"); n != 0 {
 			t.Fatal(user.Keys())
 		}

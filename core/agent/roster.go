@@ -35,6 +35,18 @@ func EmptyRoster() RosterView { return RosterView{Agents: []RosterRow{}, Yours: 
 
 // BuildRoster turns the combined host list into the roster; workers (the jobs' worker rows)
 // tell workers from other panes; hostName ("herdr", "tmux") is the detail of those other panes.
+// Label is how the session list names your session: its description, else "<tool> in <repo>",
+// else its tool.
+func (u *UserSession) Label() string {
+	switch {
+	case u.Description != "":
+		return u.Description
+	case u.Repo != "":
+		return u.Tool + " in " + u.Repo
+	}
+	return u.Tool
+}
+
 func BuildRoster(list []AgentInfo, workers []WorkerRow, hostName string) RosterView {
 	v := EmptyRoster()
 	repos := map[string]string{}
@@ -49,14 +61,7 @@ func BuildRoster(list []AgentInfo, workers []WorkerRow, hostName string) RosterV
 				continue
 			}
 			u := a.User
-			label := u.Description
-			if label == "" && u.Repo != "" {
-				label = u.Tool + " in " + u.Repo
-			}
-			if label == "" {
-				label = u.Tool
-			}
-			v.Yours = append(v.Yours, RosterRow{Name: a.Name, Label: label, Detail: u.Where, Status: a.Status.String(),
+			v.Yours = append(v.Yours, RosterRow{Name: a.Name, Label: u.Label(), Detail: u.Where, Status: a.Status.String(),
 				Kind: "session", Reachable: u.Reachable, App: u.App})
 			if u.Reachable {
 				v.YourCount++
