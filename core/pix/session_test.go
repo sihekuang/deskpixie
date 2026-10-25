@@ -157,7 +157,7 @@ func newLoggedHarness(t *testing.T, tool string, agent Launch, log *Log) *harnes
 	s.runner.Tap = func(b []byte) {
 		tapMu.Lock()
 		tapped[s] = append(tapped[s], b...)
-		writes[s] = append(writes[s], write{string(b), time.Now()})
+		writes[s] = append(writes[s], agentWrite{string(b), time.Now()})
 		tapMu.Unlock()
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1194,6 +1194,9 @@ func TestFlushSetsYourDraftAsideAndPutsItBack(t *testing.T) {
 
 // Claude Code stashes the draft itself (Ctrl-S) and restores it once the message is sent: pix
 // needn't know the text, so it works even after keys pix couldn't follow.
+//
+// The agents in these flush tests draw nothing themselves: pix's wait for the agent to take a
+// paste (#305) settles on the terminal's echo of it.
 func TestFlushStashesTheDraftInClaudeCode(t *testing.T) {
 	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}})
 	h.stdinW.WriteString("draft\x1b[Dx") // an arrow: pix can't follow
@@ -1220,13 +1223,13 @@ func (s *Session) typedForTest() string {
 }
 
 // writesForTest is each write pix made to the agent, and when.
-func (s *Session) writesForTest() []write {
+func (s *Session) writesForTest() []agentWrite {
 	tapMu.Lock()
 	defer tapMu.Unlock()
-	return append([]write(nil), writes[s]...)
+	return append([]agentWrite(nil), writes[s]...)
 }
 
-type write struct {
+type agentWrite struct {
 	b  string
 	at time.Time
 }
@@ -1234,14 +1237,14 @@ type write struct {
 var (
 	tapMu  sync.Mutex
 	tapped = map[*Session][]byte{}
-	writes = map[*Session][]write{}
+	writes = map[*Session][]agentWrite{}
 )
 
 // #305: Claude Code drops an Enter that comes with a pasted image path, so pix presses Enter on
 // its own once the agent has taken the paste: here, an agent that redraws 300 ms after it.
 func TestEnterWaitsUntilTheAgentHasTakenThePaste(t *testing.T) {
 	h := agentHarness(t, "claude", `stty raw -echo; echo ready; head -c 1 >/dev/null; sleep 0.3; printf '[Image #1]'; sleep 30`)
-	shown(t, h, "ready")
+	agentShown(t, h, "ready")
 	msg := "look\nAttached: /tmp/x.png"
 	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: msg})
 	waitEvent(t, h.d.events, "typed", func(m wire.Msg) bool { return m.ID == "1" && m.Status == "typed" })
@@ -1254,8 +1257,8 @@ func TestEnterWaitsUntilTheAgentHasTakenThePaste(t *testing.T) {
 	}
 }
 
-// shown waits for the agent to print text.
-func shown(t *testing.T, h *harness, text string) {
+// agentShown waits for the agent to print text.
+func agentShown(t *testing.T, h *harness, text string) {
 	t.Helper()
 	var all []byte
 	buf := make([]byte, 256)
@@ -1271,13 +1274,49 @@ func shown(t *testing.T, h *harness, text string) {
 	}
 }
 
+// Keys you type while pix waits for the agent to take its paste go in after its Enter, not
+// inside the message it sends.
+func TestYourKeysWaitUntilPixiesMessageIsSent(t *testing.T) {
+	h := agentHarness(t, "claude", `stty raw -echo; echo ready; head -c 1 >/dev/null; sleep 0.3; printf '[Image #1]'; sleep 30`)
+	agentShown(t, h, "ready")
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "look"})
+	eventually(t, "the paste", func() bool { return len(h.s.writesForTest()) > 0 })
+	h.stdinW.WriteString("mine")
+	waitEvent(t, h.d.events, "typed", func(m wire.Msg) bool { return m.ID == "1" && m.Status == "typed" })
+	eventually(t, "your keys", func() bool { return len(h.s.writesForTest()) == 3 })
+	w := h.s.writesForTest()
+	if w[0].b != string(Paste("look")) || w[1].b != "\r" || w[2].b != "mine" {
+		t.Fatalf("writes %+v", w)
+	}
+}
+
+// Messages that waited go in as one prompt with one wait (#305): a wait per message could
+// outlast the command's time limit.
+func TestMessagesThatWaitedGoInAsOnePrompt(t *testing.T) {
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}}) // settles on the echo
+	t.Cleanup(func() { h.s.runner.Hangup(); h.s.finish() })
+	h.s.setStatus("working")
+	for _, id := range []string{"1", "2"} {
+		wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: id, Command: "prompt", Text: "message " + id})
+		waitEvent(t, h.d.events, "waiting "+id, func(m wire.Msg) bool { return m.ID == id && m.Status == "waiting" })
+	}
+	h.s.setStatus("idle")
+	if !h.s.flushNow() {
+		t.Fatal("not typed")
+	}
+	w := h.s.writesForTest()
+	if len(w) != 2 || w[0].b != string(Paste("message 1\n\nmessage 2")) || w[1].b != "\r" {
+		t.Fatalf("writes %+v", w)
+	}
+}
+
 // An agent that never shows the paste still gets its Enter, after pasteLimit, and pix logs why.
 func TestEnterGoesAnywayWhenTheAgentShowsNothing(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "pix.log")
 	h := newLoggedHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "stty raw -echo; echo ready; sleep 30"}}, openLog(logPath, 2<<20, "claude"))
 	waitEvent(t, h.d.events, "connected", func(m wire.Msg) bool { return m.Event == "status" })
 	t.Cleanup(func() { h.s.runner.Hangup(); h.s.finish() })
-	shown(t, h, "ready")
+	agentShown(t, h, "ready")
 	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "hello"})
 	waitEvent(t, h.d.events, "typed", func(m wire.Msg) bool { return m.ID == "1" && m.Status == "typed" })
 	w := h.s.writesForTest()

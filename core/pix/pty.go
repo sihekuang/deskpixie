@@ -112,7 +112,10 @@ func (r *Runner) copyOut() {
 	for {
 		n, err := r.ptmx.Read(buf)
 		if n > 0 {
-			r.sawOutput(time.Now()) // counted before anyone sees it, so a write after it isn't answered by it
+			// Counted before anyone sees it, so output pix has already passed on can't count as the
+			// answer to a later write. Output the agent made just before reading that write still can:
+			// Settle's quiet must be longer than the agent's redraw for it.
+			r.sawOutput(time.Now())
 			r.Stdout.Write(buf[:n])
 			if r.OnOutput != nil {
 				r.OnOutput(buf[:n])
@@ -128,11 +131,29 @@ func (r *Runner) copyOut() {
 func (r *Runner) WriteToAgent(b []byte) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.write(b)
+}
+
+func (r *Runner) write(b []byte) error {
 	if r.Tap != nil {
 		r.Tap(b)
 	}
 	_, err := r.ptmx.Write(b)
 	return err
+}
+
+// PasteAndEnter writes paste, waits for the agent to take it (Settle), then presses Enter, as one
+// write to the agent: your keys and other writes wait until the Enter is in, so none land inside
+// the message. unsettled is why it pressed Enter without seeing the agent take the paste.
+func (r *Runner) PasteAndEnter(paste []byte, quiet, limit time.Duration) (unsettled, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	mark := r.Outputs()
+	if err := r.write(paste); err != nil {
+		return nil, err
+	}
+	unsettled = r.Settle(mark, quiet, limit)
+	return unsettled, r.write([]byte{'\r'})
 }
 
 func (r *Runner) sawOutput(now time.Time) {

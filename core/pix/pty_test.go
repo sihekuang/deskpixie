@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -132,27 +133,34 @@ func TestWaitReturnsWhenADescendantKeepsTheTerminal(t *testing.T) {
 func TestSettleWaitsForTheAgentToShowAndGoQuiet(t *testing.T) {
 	r := &Runner{}
 	mark := r.Outputs()
+	const quiet = 200 * time.Millisecond
+	var last atomic.Int64
 	go func() {
 		for i := 0; i < 3; i++ {
-			time.Sleep(20 * time.Millisecond)
-			r.sawOutput(time.Now())
+			time.Sleep(5 * time.Millisecond)
+			now := time.Now()
+			last.Store(now.UnixNano())
+			r.sawOutput(now)
 		}
 	}()
-	start := time.Now()
-	if err := r.Settle(mark, 50*time.Millisecond, 2*time.Second); err != nil {
+	if err := r.Settle(mark, quiet, 5*time.Second); err != nil {
 		t.Fatal(err)
 	}
-	if took := time.Since(start); took < 110*time.Millisecond || r.Outputs() != mark+3 {
-		t.Fatalf("settled after %v and %d outputs: before the agent was done", took, r.Outputs()-mark)
+	if n := r.Outputs() - mark; n != 3 {
+		t.Fatalf("settled after %d of 3 outputs", n)
+	}
+	if since := time.Since(time.Unix(0, last.Load())); since < quiet {
+		t.Fatalf("settled %v after the last output, before %v of quiet", since, quiet)
 	}
 }
 
 func TestSettleFailsWhenTheAgentShowsNothing(t *testing.T) {
 	r := &Runner{}
 	r.sawOutput(time.Now()) // before the write: not an answer to it
+	const limit = 100 * time.Millisecond
 	start := time.Now()
-	err := r.Settle(r.Outputs(), 10*time.Millisecond, 100*time.Millisecond)
-	if err == nil || !strings.Contains(err.Error(), "showed nothing") || time.Since(start) < 100*time.Millisecond {
+	err := r.Settle(r.Outputs(), 5*time.Millisecond, limit)
+	if err == nil || !strings.Contains(err.Error(), "showed nothing") || time.Since(start) < limit {
 		t.Fatalf("err %v after %v", err, time.Since(start))
 	}
 }
@@ -172,7 +180,7 @@ func TestSettleFailsWhenTheAgentNeverStops(t *testing.T) {
 			}
 		}
 	}()
-	if err := r.Settle(mark, 50*time.Millisecond, 200*time.Millisecond); err == nil || !strings.Contains(err.Error(), "didn't settle") {
+	if err := r.Settle(mark, 200*time.Millisecond, 500*time.Millisecond); err == nil || !strings.Contains(err.Error(), "didn't settle") {
 		t.Fatalf("err %v", err)
 	}
 }
