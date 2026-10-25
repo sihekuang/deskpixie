@@ -136,26 +136,37 @@ final class ChatSessionsUITests: XCTestCase {
 
     // MARK: The terminal button
 
-    /// alpha's message has the terminal button by its name; a click brings forward the app alpha
-    /// runs in. Here that's this test runner: the stand-in runs under `script`, started from it.
-    func testTheTerminalButtonBringsAlphasTerminalForward() throws {
+    /// alpha's message has the terminal button by its name, and a click asks the core for alpha's
+    /// own session. alpha runs in no terminal app (`UITestApp.startSession`), so the core finds the
+    /// session and says it can't find its terminal; a wrong address would say "no session of
+    /// yours named …".
+    func testTheTerminalButtonReachesAlphasSession() throws {
         let (h, window, _) = try start()
         let words = "The build is green."
         try h.endTurn("alpha", reply: words)
-        XCTAssertTrue(window.text(words).waitForExistence(timeout: 30), "alpha's message isn't in the thread")
+        XCTAssertTrue(window.waitForText(words, timeout: 30), "alpha's message isn't in the thread")
         let button = window.buttons.matching(identifier: "chat.entry.terminal")
             .matching(NSPredicate(format: "label == %@", "Open alpha's terminal")).firstMatch
         XCTAssertTrue(button.waitForExistence(timeout: 5), "no terminal button by alpha's name")
-        XCTAssertNotEqual(NSWorkspace.shared.frontmostApplication?.processIdentifier, getpid(), "DeskPixie is in front")
 
         button.click()
-        let me = getpid()
-        let forward = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            NSWorkspace.shared.frontmostApplication?.processIdentifier == me
-        }, object: nil)
-        XCTAssertEqual(XCTWaiter().wait(for: [forward], timeout: 15), .completed,
-                       "alpha's terminal app (the test runner) didn't come forward; in front: " +
-                       "\(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "-")")
+        let deadline = Date().addingTimeInterval(15)
+        var lines: [String] = []
+        repeat {
+            Thread.sleep(forTimeInterval: 1)
+            lines = statusLines(h)
+        } while !lines.contains(where: { $0.contains("could not find the terminal of session process") }) && Date() < deadline
+        XCTAssertTrue(lines.contains { $0.contains("could not find the terminal of session process") },
+                      "focusSession didn't reach alpha: \(lines)")
+        XCTAssertFalse(lines.contains { $0.contains("no session of yours named") }, "\(lines)")
+    }
+
+    /// The menu bar menu's status lines.
+    private func statusLines(_ h: UITestApp) -> [String] {
+        h.app.statusItems.firstMatch.click()
+        let items = h.app.menuItems.allElementsBoundByIndex.map(\.title)
+        h.app.typeKey(.escape, modifierFlags: [])
+        return items.filter { $0.hasPrefix("Coordinator:") }
     }
 
     // MARK: A session that ends

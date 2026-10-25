@@ -103,12 +103,17 @@ final class UITestApp {
 
     // MARK: Sessions of yours
 
-    private var sessions: [String: Process] = [:]
+    /// A running session: `script`'s pid, and the input it reads, held open.
+    private struct Session { let pid: pid_t; let input: Int32 }
+    private var sessions: [String: Session] = [:]
 
     /// A session of yours, as `pix --description <description> claude` in a terminal would start
     /// one: the app's own pix, in a pty (`script`), on this run's data folder and home, with a
     /// stand-in claude that does nothing but end the turns `endTurn` gives it. Nothing reaches the user's own pix:
-    /// no PIX_* from this process, and the socket is this data folder's.
+    /// no PIX_* from this process, and the socket is this data folder's. It runs apart from this
+    /// test runner (its parent is launchd), as in a terminal the app can't name: the terminal
+    /// button then says "could not find the terminal of session process …" rather than bring
+    /// the runner, which won't come forward, to the front.
     func startSession(description: String) throws {
         let bin = root.appendingPathComponent("bin", isDirectory: true)
         let claude = bin.appendingPathComponent("claude")
@@ -134,26 +139,48 @@ final class UITestApp {
         }
         let turns = root.appendingPathComponent("turns-\(description)", isDirectory: true)
         try fm.createDirectory(at: turns, withIntermediateDirectories: true)
+        // script's input is a pipe from cat, which reads a FIFO this process holds open: it never
+        // ends, so the session keeps running. (script refuses a FIFO itself as its input.)
+        let fifo = root.appendingPathComponent("input-\(description)").path
+        guard mkfifo(fifo, 0o600) == 0 else { throw SessionError(description: "mkfifo \(fifo): \(errno)") }
+        let input = open(fifo, O_RDWR)
+        guard input >= 0 else { throw SessionError(description: "open \(fifo): \(errno)") }
+        // sh starts script in the background and leaves: script is launchd's from then on.
         let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/script")
-        p.arguments = ["-q", "/dev/null", pix, "--description", description, "claude"]
+        p.executableURL = URL(fileURLWithPath: "/bin/sh")
+        p.arguments = ["-c", #"cat "$2" 2>/dev/null | /usr/bin/script -q /dev/null "$0" --description "$1" claude > /dev/null 2>&1 & echo $!"#,
+                       pix, description, fifo]
         p.currentDirectoryURL = root.appendingPathComponent("projects")
         p.environment = ["HOME": home.path, "DESKPIXIE_SUPPORT_DIR": support.path, "TERM": "xterm-256color",
                          "PATH": "\(bin.path):/usr/bin:/bin", "TURNS": turns.path]
-        // A pipe kept open: script's input never ends, so the session keeps running.
-        p.standardInput = Pipe()
-        p.standardOutput = FileHandle.nullDevice
+        let out = Pipe()
+        p.standardOutput = out
         p.standardError = FileHandle.nullDevice
         try p.run()
-        sessions[description] = p
+        let said = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        p.waitUntilExit()
+        guard let pid = pid_t(said.trimmingCharacters(in: .whitespacesAndNewlines)), pid > 1 else {
+            close(input)
+            throw SessionError(description: "no pid for \(description): \(said)")
+        }
+        sessions[description] = Session(pid: pid, input: input)
     }
+
+    struct SessionError: Error, CustomStringConvertible { let description: String }
 
     /// Ends the session `description`, as closing its terminal would: pix goes, and the app
     /// stops counting it.
     func stopSession(_ description: String) {
-        guard let p = sessions.removeValue(forKey: description) else { return }
-        if p.isRunning { p.terminate() }
-        p.waitUntilExit()
+        guard let s = sessions.removeValue(forKey: description) else { return }
+        Self.end(s)
+    }
+
+    /// SIGTERM to script, then waits up to 10 s for it to go (launchd reaps it).
+    private static func end(_ s: Session) {
+        kill(s.pid, SIGTERM)
+        let deadline = Date().addingTimeInterval(10)
+        while kill(s.pid, 0) == 0 && Date() < deadline { Thread.sleep(forTimeInterval: 0.1) }
+        close(s.input)
     }
 
     /// The session `description` finishes a turn with this reply, as claude's Stop hook would
@@ -198,8 +225,7 @@ final class UITestApp {
     /// own preferences file changed meanwhile.
     @discardableResult
     func cleanUp() -> Bool {
-        for p in sessions.values where p.isRunning { p.terminate() }
-        for p in sessions.values { p.waitUntilExit() }
+        for s in sessions.values { Self.end(s) }
         sessions = [:]
         terminate()
         if let herdr = Self.herdr {
@@ -382,7 +408,9 @@ extension XCUIElement {
         descendants(matching: .any).matching(identifier: id).firstMatch
     }
 
-    /// Words shown under this element: a label, or a text's value (a message's text view).
+    /// Words shown under this element: a label, or a text's value (a message's text view). The
+    /// kind of element is picked when this is called, and the last resort matches labels only,
+    /// so words that may not be there yet are waited for with `waitForText`, not on this.
     func text(_ words: String) -> XCUIElement {
         let label = NSPredicate(format: "label CONTAINS %@", words)
         let value = NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", words, words)

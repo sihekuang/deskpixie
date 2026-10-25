@@ -367,8 +367,8 @@ final class ChatWindowUITests: XCTestCase {
 
         button.click()
         XCTAssertTrue(h.chatWindow.waitForExistence(timeout: 15))
+        XCTAssertTrue(h.chatWindow.waitForText(words, timeout: 10), "it isn't in the thread")
         let landed = h.chatWindow.text(words)
-        XCTAssertTrue(landed.waitForExistence(timeout: 10), "it isn't in the thread")
         XCTAssertTrue(landed.isHittable, "the window didn't land on it")
         XCTAssertTrue(waitForLabel(button, "Hide chat", timeout: 15), "read once shown: \(button.label)")
     }
@@ -509,8 +509,7 @@ final class ChatWindowUITests: XCTestCase {
         composer.typeText("Reply with just the word pong.")
         composer.typeKey(.return, modifierFlags: [])
 
-        let sent = window.text("Reply with just the word pong.")
-        XCTAssertTrue(sent.waitForExistence(timeout: 10), "your message isn't in the thread")
+        XCTAssertTrue(window.waitForText("Reply with just the word pong.", timeout: 10), "your message isn't in the thread")
         let thinking = window.element("chat.thinking"), step = window.element("chat.live.coordinator")
         XCTAssertTrue(thinking.waitForExistence(timeout: 15) || step.exists, "no Thinking… while it works")
 
