@@ -246,10 +246,23 @@ final class UITestApp {
         return attributes?[.modificationDate] as? Date
     }
 
+    /// The chat window, from the round button above Pixie: always on screen, where a menu bar
+    /// item can sit past the edge of a crowded menu bar and never become clickable. The menu
+    /// bar's Chat… has its own test (`openChatFromMenuBar`).
+    @discardableResult
+    func openChat(file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
+        let button = app.buttons["pixie.chatButton"]
+        XCTAssertTrue(button.waitForExistence(timeout: 60), "no chat button above Pixie", file: file, line: line)
+        let window = chatWindow
+        if !window.exists { button.click() }
+        XCTAssertTrue(window.waitForExistence(timeout: 15), "the chat window didn't open", file: file, line: line)
+        return window
+    }
+
     /// The menu bar's Chat…, then the window. Chat… waits for the core to start, so the menu is
     /// opened again until it can be chosen.
     @discardableResult
-    func openChat(file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
+    func openChatFromMenuBar(file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
         let status = app.statusItems.firstMatch
         XCTAssertTrue(status.waitForExistence(timeout: 30), "no menu bar item", file: file, line: line)
         // Just after a launch the item may be listed before it has its place in the menu bar, and a

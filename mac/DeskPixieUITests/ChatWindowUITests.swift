@@ -68,7 +68,7 @@ final class ChatWindowUITests: XCTestCase {
 
     func testChatOpensFromTheMenuBar() throws {
         let h = try start()
-        let window = h.openChat()
+        let window = h.openChatFromMenuBar()
         XCTAssertEqual(window.title, "Pixie")
         XCTAssertTrue(window.element("chat.thread").exists)
         XCTAssertTrue(window.element("chat.composer").exists)
@@ -494,15 +494,22 @@ final class ChatWindowUITests: XCTestCase {
         pill.click()
         let card = entry(id, in: window)
         XCTAssertTrue(card.waitForExistence(timeout: 10))
+        // Claude asks either as a permission (Allow / Deny) or, for a path outside the project, as a
+        // question whose first option is "Yes": either way the first yes answers it.
         let allow = card.element("chat.request.allow")
-        XCTAssertTrue(allow.waitForExistence(timeout: 5))
-        XCTAssertTrue(allow.isHittable, "the pill scrolls its card into view")
-        XCTAssertTrue(card.element("chat.request.deny").exists)
+        let yes = card.buttons.matching(NSPredicate(format: "label == 'Yes'")).firstMatch
+        let deadline0 = Date().addingTimeInterval(5)
+        while !allow.exists, !yes.exists, Date() < deadline0 { Thread.sleep(forTimeInterval: 0.25) }
+        let answer = allow.exists ? allow : yes
+        XCTAssertTrue(answer.exists, "the card has neither Allow nor Yes")
+        XCTAssertTrue(answer.isHittable, "the pill scrolls its card into view")
+        if allow.exists { XCTAssertTrue(card.element("chat.request.deny").exists) }
 
-        allow.click()
+        answer.click()
         XCTAssertTrue(pill.waitForGone(timeout: 15), "the strip loses the pill")
-        XCTAssertTrue(card.waitForText("You allowed", timeout: 15), "the card shrinks to its outcome")
-        XCTAssertFalse(card.element("chat.request.allow").exists)
+        XCTAssertTrue(card.waitForText("You allowed", timeout: 15) || card.waitForText("You answered", timeout: 1),
+                      "the card shrinks to its outcome")
+        XCTAssertFalse(answer.exists, "the card still offers its answers")
 
         let deadline = Date().addingTimeInterval(90)
         while !FileManager.default.fileExists(atPath: marker), Date() < deadline {
