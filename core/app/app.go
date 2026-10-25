@@ -1440,6 +1440,22 @@ func (a *App) Register(r Registrar) {
 		}
 		return struct{}{}, nil
 	})
+	r.Register("agent.interrupt", func(args json.RawMessage) (any, error) {
+		var in struct {
+			Name string `json:"name"`
+		}
+		if err := decodeArgs("agent.interrupt", args, &in); err != nil {
+			return nil, err
+		}
+		if a.agent == nil {
+			return nil, errNoCoordinator
+		}
+		sent, err := a.agent.Interrupt(in.Name)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"interrupted": sent}, nil
+	})
 	r.Register("agent.reportFocusOutcome", func(args json.RawMessage) (any, error) {
 		var in struct {
 			Success bool   `json:"success"`

@@ -46,6 +46,9 @@ type fakeAgent struct {
 	askingSession   string // and the session that asked it, when a session did
 	chatErr         error
 	stops           int
+	interrupted     []string
+	interruptErr    error
+	interruptIdle   bool
 	textModes       []bool
 	attach          *attach.Store
 	places          map[string][2]string // session → folder, app

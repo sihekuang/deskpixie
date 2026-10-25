@@ -44,6 +44,17 @@ func (f *fakeAgent) ChatDelegate(text string) (string, error) {
 	return fmt.Sprintf("job_%012d", f.jobs), nil
 }
 func (f *fakeAgent) ChatStop() { f.mu.Lock(); f.stops++; f.mu.Unlock() }
+
+// Interrupt records the name; interruptErr refuses it, interruptIdle finds it not working.
+func (f *fakeAgent) Interrupt(name string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.interruptErr != nil {
+		return false, f.interruptErr
+	}
+	f.interrupted = append(f.interrupted, name)
+	return !f.interruptIdle, nil
+}
 func (f *fakeAgent) SetTextMode(on bool) {
 	f.mu.Lock()
 	f.textModes = append(f.textModes, on)

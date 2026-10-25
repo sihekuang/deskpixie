@@ -114,6 +114,10 @@ type Agent interface {
 	FocusAgent(name string)
 	// FocusSession is a click on one of your own sessions in the roster: the tab it runs in (async).
 	FocusSession(name string)
+	// Interrupt is the stop button by a working agent (#309), by its roster name: its turn is
+	// interrupted as Esc in its terminal would. False: it wasn't working, nothing was sent. An
+	// error is a sentence for the user.
+	Interrupt(name string) (bool, error)
 	// SessionPlaces are where your sessions named run (#277), in order, from one listing: their
 	// folders and terminal apps, for the paths in their replies. Names not yours are left out.
 	SessionPlaces(names []string) []SessionPlace

@@ -22,6 +22,19 @@ type userFake struct {
 	mu        sync.Mutex      // lastTurn and asks: the running agent lists sessions while a test sets them
 	lastTurn  string
 	asks      bool
+	// unreachable: pix no longer reaches the sessions; keysErr: pix refuses keys with it.
+	unreachable bool
+	keysErr     error
+}
+
+func (u *userFake) SendKeys(ctx context.Context, n string, keys []string) error {
+	u.mu.Lock()
+	err := u.keysErr
+	u.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	return u.FakeSessionHost.SendKeys(ctx, n, keys)
 }
 
 func (u *userFake) setTurn(text string, asks bool) {
@@ -40,7 +53,7 @@ func (u *userFake) List(ctx context.Context) ([]agent.AgentInfo, error) {
 		l[i].Cwd = "/x/focus"
 		desc, past := cmp.Or(u.desc, "login bug"), cmp.Or(u.past, "auth")
 		l[i].User = &agent.UserSession{Tool: "claude", Repo: "focus", Where: "WebStorm", Description: desc,
-			PastDescriptions: []string{past}, Reachable: true, Verbatim: !u.labeled[l[i].Name],
+			PastDescriptions: []string{past}, Reachable: !u.unreachable, Verbatim: !u.labeled[l[i].Name],
 			LastTurn: u.lastTurn, LastTurnAsks: u.asks,
 			Started: time.Now().Add(-90 * time.Minute), LastActive: time.Now().Add(-3 * time.Minute)}
 	}

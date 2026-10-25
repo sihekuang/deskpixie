@@ -741,6 +741,20 @@ func (a *Agent) FocusSession(name string) {
 	})
 }
 
+// interruptLimit: a stop that takes longer says so (the app waits on it).
+const interruptLimit = 5 * time.Second
+
+// Interrupt is the stop button by a working agent (#309): the core decides what it calls.
+func (a *Agent) Interrupt(name string) (bool, error) {
+	ctx, cancel := context.WithTimeout(a.ctx, interruptLimit)
+	defer cancel()
+	sent, err := a.handle.Interrupt(ctx, name)
+	if err != nil {
+		log.Printf("agent: stop %s: %v", name, err)
+	}
+	return sent, err
+}
+
 // SessionPlaces: where your sessions named run, for the paths in their replies (#277).
 func (a *Agent) SessionPlaces(names []string) []app.SessionPlace {
 	if len(names) == 0 {

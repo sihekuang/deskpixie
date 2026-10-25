@@ -28,12 +28,12 @@ func TestRosterWorkersPanesAndSessions(t *testing.T) {
 	v := BuildRoster(list, workers, "herdr")
 	b, _ := json.Marshal(v)
 	want := `{"agents":[` +
-		`{"name":"coordinator","label":"Coordinator","status":"working","kind":"coordinator","reachable":true},` +
-		`{"name":"deskpixie-claude","label":"deskpixie-claude","detail":"deskpixie","status":"working","kind":"worker","reachable":true},` +
+		`{"name":"coordinator","label":"Coordinator","status":"working","kind":"coordinator","reachable":true,"stoppable":true},` +
+		`{"name":"deskpixie-claude","label":"deskpixie-claude","detail":"deskpixie","status":"working","kind":"worker","reachable":true,"stoppable":true},` +
 		`{"name":"old-claude","label":"old-claude","detail":"herdr","status":"blocked","kind":"pane","reachable":true}],` +
 		`"yours":[` +
 		`{"name":"focus-claude","label":"login bug","detail":"WebStorm","status":"idle","kind":"session","reachable":true,"app":"com.jetbrains.WebStorm"},` +
-		`{"name":"api-codex","label":"codex in api","detail":"iTerm","status":"working","kind":"session","reachable":true},` +
+		`{"name":"api-codex","label":"codex in api","detail":"iTerm","status":"working","kind":"session","reachable":true,"stoppable":true},` +
 		`{"name":"repo-claude","label":"claude","detail":"terminal","status":"idle","kind":"session","reachable":false}],` +
 		`"agent_count":2,"your_count":2,"busy":true}`
 	if string(b) != want {

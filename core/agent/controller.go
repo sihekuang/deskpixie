@@ -164,6 +164,7 @@ const (
 	InSessionSent                          // Name, Text, Message: the coordinator's message_session reached your session Name, described Text (#177); Message: why it waits ("" = typed, #183)
 	InTextMode                             // Away: text mode on (#221): no conversation is opened for updates
 	InRepliesShown                         // IDs: the reply deck showed these lines (#286)
+	InInterruptTurn                        // the stop button by the working coordinator (#309)
 )
 
 // Input is one stimulus for AgentController.Step. Build it with the *Input constructors.
@@ -232,6 +233,9 @@ func TypedDelegateInput(id JobID, task, context string) Input {
 // TextModeInput: the user switched to text (on) or back to voice (#221).
 func TextModeInput(on bool) Input { return Input{Kind: InTextMode, Away: on} }
 func CancelInput(id JobID) Input  { return Input{Kind: InCancel, Job: id} }
+
+// InterruptTurnInput is the stop button by the coordinator while it works (#309).
+func InterruptTurnInput() Input { return Input{Kind: InInterruptTurn} }
 
 // AnswerInput: id "" means the only job waiting on an answer.
 func AnswerInput(id JobID, text string) Input { return Input{Kind: InAnswer, Job: id, Text: text} }
@@ -650,6 +654,8 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 		c.textMode = in.Away
 	case InCancel:
 		c.cancel(in.Job, now, &fx)
+	case InInterruptTurn:
+		c.interruptTurn(now, &fx)
 	case InAnswer:
 		c.answer(in.Job, in.Text, now, &fx)
 	case InEnsureCoordinator:
@@ -1002,6 +1008,37 @@ func (c *AgentController) cancel(id JobID, now Millis, fx *[]Effect) {
 	}
 	c.syncHold(fx)
 	c.flush(now, fx)
+}
+
+// interruptTurn is the stop button by the working coordinator (#309): the typed jobs its turn
+// carries are cancelled, as Stop in the text box cancels one (that interrupts it, and the rest
+// of the turn goes out again). A turn carrying none (a worker's report, a note, words you typed
+// in its terminal) is interrupted as Esc there would: it is over, unanswered, and its jobs stay
+// open. A coordinator that isn't up has no turn to stop.
+func (c *AgentController) interruptTurn(now Millis, fx *[]Effect) {
+	if c.coordinator != coordUp {
+		return
+	}
+	var typed []JobID
+	for _, id := range c.openInFlight() {
+		if c.typed[id] {
+			typed = append(typed, id)
+		}
+	}
+	if len(typed) > 0 {
+		for _, id := range typed {
+			c.cancel(id, now, fx)
+		}
+		return
+	}
+	*fx = append(*fx, Effect{Kind: EfInterrupt}, logEffect("the user interrupted the coordinator"))
+	if c.landing {
+		return // the prompt in flight hasn't been taken yet: it still has to land
+	}
+	// We end that turn ourselves (an interrupt fires no Stop): the Idle it brings counts.
+	c.inbox.FinishTurn()
+	c.awaitingStop = false
+	c.idleWaitAt = optMs{}
 }
 
 // flush sends what is queued if the coordinator can take it, starting it first if needed.

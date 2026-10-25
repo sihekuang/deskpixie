@@ -14,6 +14,9 @@ type RosterRow struct {
 	Reachable bool   `json:"reachable"`
 	// App is a session's terminal app bundle id ("" = unknown: the row isn't clickable).
 	App string `json:"app,omitempty"`
+	// Stoppable: it is working and can be reached, so its row and its chat header show a
+	// stop button (agent.interrupt, #309).
+	Stoppable bool `json:"stoppable,omitempty"`
 }
 
 // RosterView is the whole roster. AgentCount excludes the coordinator; YourCount counts only
@@ -72,6 +75,11 @@ func BuildRoster(list []AgentInfo, workers []WorkerRow, hostName string) RosterV
 	v.Agents = append(coordinator, v.Agents...)
 	if v.Agents == nil {
 		v.Agents = []RosterRow{}
+	}
+	for _, rows := range [][]RosterRow{v.Agents, v.Yours} {
+		for i := range rows {
+			rows[i].Stoppable = rows[i].Reachable && rows[i].Status == PaneWorking.String()
+		}
 	}
 	v.Busy = v.IsBusy()
 	return v
