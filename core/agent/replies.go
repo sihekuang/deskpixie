@@ -89,12 +89,16 @@ func (c *AgentController) cardFor(l OutboxLine, fx *[]Effect) {
 	*fx = append(*fx, Effect{Kind: EfReply, Reply: &card})
 }
 
-// releaseHeldCards: the conversation that was to say the held cards can't open: they show.
+// releaseHeldCards: the conversation that was to say the held cards can't open: they show. The
+// next update starts a card of its own, so a shown line is never held again (#319).
 func (c *AgentController) releaseHeldCards(now Millis, fx *[]Effect) {
+	if len(c.heldCards) == 0 {
+		return
+	}
 	for i := range c.heldCards {
 		*fx = append(*fx, Effect{Kind: EfReply, Reply: &c.heldCards[i]})
 	}
-	c.heldCards = nil
+	c.heldCards, c.lastCard = nil, nil
 }
 
 // dropHeldCards: a conversation opened and says them; the next update starts a card of its own.
@@ -118,9 +122,9 @@ func (c *AgentController) settleHeldCards(now Millis, fx *[]Effect) {
 }
 
 // repliesShown marks the lines of a card the deck showed delivered, so they aren't replayed.
-// A line held for the conversation opening to say it stays (#319): the deck never shows a held
-// card, so only the chat thread read it, and Pixie still says it; if the open fails, the card
-// shows and the deck reports it.
+// A line held for the conversation opening to say it stays (#319): that read came from the chat
+// thread (or, just after launch, the deck's PendingReplies), and Pixie still says it; if the open
+// fails, the card shows and the deck reports it.
 func (c *AgentController) repliesShown(ids []uint64, fx *[]Effect) {
 	held := map[uint64]bool{}
 	for _, card := range c.heldCards {

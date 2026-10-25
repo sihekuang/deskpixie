@@ -225,7 +225,25 @@ func TestAChatReadWhileItOpensStillLetsPixieSayIt(t *testing.T) {
 		eInject("Coordinator replies while you were away:\n- Session update: "+longTurnLine), "said")
 }
 
-// #319: the open fails after the chat window read it: the card shows and the read counts.
+// #319: a card shown after a failed open isn't held again by the next update, so the deck's
+// showing of it still counts and Pixie doesn't say it again.
+func TestACardShownAfterAFailedOpenIsNotHeldAgain(t *testing.T) {
+	c := ctlWith(func(s *Settings) { s.OpenConversation = true; s.SessionTurns = true })
+	lines := outboxLines(sessionTurn(c, longTurn, T0))
+	c.Step(voiceClosed(), T0+500) // failed connect: card {A} shows
+	other := longTurn
+	other.Label = "live-like: benchmark"
+	c.Step(PaneInput(PaneEvent{Kind: PaneEventTurn, Agent: "live-claude", Turn: &other}), T0+1_000)
+	c.Step(RepliesShownInput([]uint64{lines[0].ID}), T0+1_100) // the deck's report of {A}
+	for _, l := range c.outbox.Undelivered() {
+		if l.ID == lines[0].ID {
+			t.Fatal("the shown line is still waiting to be said")
+		}
+	}
+}
+
+// #319: the open fails after the chat window read it: the card shows, and the deck's showing
+// of it counts.
 func TestAChatReadWhileItOpensCountsOnceTheOpenFails(t *testing.T) {
 	c := ctlWith(func(s *Settings) { s.OpenConversation = true; s.SessionTurns = true })
 	lines := outboxLines(sessionTurn(c, longTurn, T0))
