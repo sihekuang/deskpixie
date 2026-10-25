@@ -12,10 +12,23 @@ import (
 	"github.com/sihekuang/deskpixie/core/agent/agenttest"
 )
 
-// recChat records the text box's lines.
+// recChat records the text box's lines, and the typed jobs that ended with none.
 type recChat struct {
 	mu    sync.Mutex
 	lines []ChatLine
+	ended []JobID
+}
+
+func (r *recChat) ChatEnded(job JobID) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ended = append(r.ended, job)
+}
+
+func (r *recChat) Ended() []JobID {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.ended)
 }
 
 func (r *recChat) Chat(l ChatLine) {
@@ -120,10 +133,60 @@ func TestChatStopCancelsTheTypedJob(t *testing.T) {
 		if r.h.JobStatus()[0].Status != JobCancelled {
 			t.Fatal(r.h.JobStatus())
 		}
+		if got := r.chat.Ended(); !slices.Equal(got, []JobID{"job_000000000001"}) {
+			t.Fatal("the chat sink is told the stopped job ended:", got)
+		}
 		r.h.ChatStop() // nothing open: no-op
 		settle()
 		if len(r.host.Keys()) != 1 {
 			t.Fatal(r.host.Keys())
+		}
+	})
+}
+
+// #302: the thread records the answer on the question it answered.
+func TestChatMessageSaysItAnsweredTheWaitingQuestion(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRig(t)
+		sent, err := r.h.ChatMessage("fix the flaky test")
+		if err != nil || sent != (ChatSent{Job: JobID("job_000000000001")}) {
+			t.Fatal("a new job answers nothing", sent, err)
+		}
+		settle()
+		stopHook(r, `<spoken ref="job_000000000001" status="question">Which repo?</spoken>`)
+		settle()
+		r.host.SetStatus(Coordinator, PaneIdle)
+		settle()
+		sent, err = r.h.ChatMessage("deskpixie")
+		if err != nil || sent != (ChatSent{Job: JobID("job_000000000001"), Answered: true}) {
+			t.Fatal(sent, err)
+		}
+	})
+}
+
+// #302: a reply to a session is never taken for the answer to a question waiting in the box.
+func TestChatDelegateIsANewJobWhileAQuestionWaits(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRig(t)
+		if _, err := r.h.ChatSend("fix the flaky test"); err != nil {
+			t.Fatal(err)
+		}
+		settle()
+		stopHook(r, `<spoken ref="job_000000000001" status="question">Which repo?</spoken>`)
+		settle()
+		r.host.SetStatus(Coordinator, PaneIdle)
+		settle()
+		id, err := r.h.ChatDelegate("Tell the docs session: ship it")
+		if err != nil || id != JobID("job_000000000002") {
+			t.Fatal("a new job", id, err)
+		}
+		settle()
+		prompts := r.host.Prompts()
+		if last := prompts[len(prompts)-1].Text; strings.Contains(last, "The user answered") || !strings.Contains(last, "Tell the docs session: ship it") {
+			t.Fatal(prompts)
+		}
+		if _, err := r.h.ChatDelegate("  "); err == nil {
+			t.Fatal("an empty message went")
 		}
 	})
 }

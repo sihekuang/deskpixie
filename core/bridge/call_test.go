@@ -3,6 +3,7 @@ package bridge
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -50,6 +51,23 @@ func TestCallErrorWrapsMessage(t *testing.T) {
 	var msg string
 	if err := json.Unmarshal(m["error"], &msg); err != nil || msg != `bad "field"` {
 		t.Fatalf("error = %s (%v)", m["error"], err)
+	}
+}
+
+type codedErr struct{}
+
+func (codedErr) Error() string { return "no" }
+func (codedErr) Code() string  { return "refused" }
+
+func TestCallErrorCarriesItsCode(t *testing.T) {
+	e := newEngine(t, Options{})
+	e.Register("t.refuse", func(json.RawMessage) (any, error) { return nil, fmt.Errorf("wrapped: %w", codedErr{}) })
+	if got := string(e.Call("t.refuse", nil)); got != `{"error":"wrapped: no","code":"refused"}` {
+		t.Fatalf("got %s", got)
+	}
+	e.Register("t.fail", func(json.RawMessage) (any, error) { return nil, errors.New("bad") })
+	if got := string(e.Call("t.fail", nil)); got != `{"error":"bad"}` {
+		t.Fatalf("no code: got %s", got)
 	}
 }
 

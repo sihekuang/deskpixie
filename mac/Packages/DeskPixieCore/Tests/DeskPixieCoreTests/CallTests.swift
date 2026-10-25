@@ -35,6 +35,12 @@ final class CallTests: XCTestCase {
         XCTAssertThrowsError(try CallEnvelope.unwrap(Data(#"{"error":"nope"}"#.utf8))) {
             XCTAssertEqual($0 as? DeskPixieEngineError, .callFailed("nope"))
         }
+        XCTAssertThrowsError(try CallEnvelope.unwrap(Data(#"{"error":"Pick @w1 from the list.","code":"refused"}"#.utf8))) {
+            XCTAssertEqual($0 as? DeskPixieEngineError, .refused("Pick @w1 from the list."))
+        }
+        XCTAssertThrowsError(try CallEnvelope.unwrap(Data(#"{"error":"nope","code":"other"}"#.utf8))) {
+            XCTAssertEqual($0 as? DeskPixieEngineError, .callFailed("nope"), "only a refusal is one")
+        }
         XCTAssertThrowsError(try CallEnvelope.unwrap(Data("garbage".utf8)))
         XCTAssertThrowsError(try CallEnvelope.unwrap(Data("{}".utf8)))
     }

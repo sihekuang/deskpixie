@@ -17,6 +17,13 @@ final class KeychainSecretsTests: XCTestCase {
         XCTAssertEqual(KeychainSecrets().service, "DeskPixie")
     }
 
+    func test_the_app_keeps_DeskPixie_and_a_copy_under_another_ID_its_own() {
+        XCTAssertEqual(KeychainSecrets.forApp(bundleID: "com.sihekuang.deskpixie").service, "DeskPixie")
+        XCTAssertEqual(KeychainSecrets.forApp(bundleID: nil).service, "DeskPixie")
+        XCTAssertEqual(KeychainSecrets.forApp(bundleID: "com.sihekuang.deskpixie.uitest").service,
+                       "DeskPixie (com.sihekuang.deskpixie.uitest)")
+    }
+
     func test_save_read_replace_delete() throws {
         XCTAssertNil(try store.read("OPENAI_API_KEY"))
         XCTAssertFalse(store.contains("OPENAI_API_KEY"))

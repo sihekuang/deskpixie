@@ -33,15 +33,17 @@ public struct EmptyArgs: Encodable, Sendable {
     public init() {}
 }
 
-/// The `dp_call` reply envelope: `{"ok":<json>}` or `{"error":"<msg>"}`.
+/// The `dp_call` reply envelope: `{"ok":<json>}` or `{"error":"<msg>"}`, with `"code":"refused"`
+/// when the core refused, in words for you, rather than failed.
 public enum CallEnvelope {
-    /// Returns the `ok` value re-encoded as JSON, or throws `callFailed`.
+    /// Returns the `ok` value re-encoded as JSON, or throws `refused` or `callFailed`.
     public static func unwrap(_ data: Data) throws -> Data {
         guard let obj = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]),
               let dict = obj as? [String: Any] else {
             throw DeskPixieEngineError.callFailed("malformed reply: \(String(decoding: data, as: UTF8.self))")
         }
         if let msg = dict["error"] {
+            if dict["code"] as? String == "refused" { throw DeskPixieEngineError.refused(msg as? String ?? "\(msg)") }
             throw DeskPixieEngineError.callFailed(msg as? String ?? "\(msg)")
         }
         guard let ok = dict["ok"] else {
@@ -57,4 +59,7 @@ public enum DeskPixieEngineError: Error, Equatable {
     case invalidConfig(String)
     case configureFailed(String)
     case callFailed(String)
+    /// The core refused the call, and says why in words to show as they are (`chat.send`'s
+    /// one-recipient rule).
+    case refused(String)
 }

@@ -149,3 +149,31 @@ func TestReplyHistoryMinsIsALivePixieNumber(t *testing.T) {
 		}
 	}
 }
+
+// #302: the chat window keeps history this many days, 7 by default (1 to 90).
+func TestChatKeepDaysDefaultsToSevenAndIsLive(t *testing.T) {
+	if got := Default().ChatKeepDays; got != 7 {
+		t.Fatal(got)
+	}
+	c, err := ParseConfig([]byte(`{"hotkey":"ctrl+alt+Space"}`))
+	if err != nil || c.ChatKeepDays != 7 {
+		t.Fatal("an old settings.json gets the default:", c.ChatKeepDays, err)
+	}
+	f := FieldByPath("chatKeepDays")
+	if f.Section != SectionGeneral || f.Apply != ApplyLive || f.Kind.Type != KindInt || f.Kind.Unit != "days" {
+		t.Fatalf("%+v", f)
+	}
+	if r, ok := RouteFor("chatKeepDays"); !ok || r != RouteChat {
+		t.Fatal(r, ok)
+	}
+	env := testEnv(t)
+	for days, ok := range map[uint32]bool{0: false, 1: true, 7: true, 90: true, 91: false} {
+		c := Default()
+		c.ChatKeepDays = days
+		got := problems(c, env)
+		bad := len(got) == 1 && got[0][0] == "chatKeepDays"
+		if ok && len(got) != 0 || !ok && !bad {
+			t.Errorf("%d: %v", days, got)
+		}
+	}
+}

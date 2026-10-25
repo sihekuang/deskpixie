@@ -129,6 +129,7 @@ type Agent struct {
 	hooks   app.AgentHooks
 	addr    string
 	attach  *attach.Store
+	feed    *threadFeed // the chat thread's feed (#302); nil until built
 
 	// toAgent receives the voice signals the echo gate admits (handle.Voice; tests replace it).
 	toAgent func(voice.VoiceSignal)
@@ -351,6 +352,8 @@ func Build(c Config) *Agent {
 	// A coordinator found running is the kept one: adopted as it is.
 	recipe.AdoptEarlier = kept.CoordinatorToken != ""
 	recipe.ResumeLast = true
+	feed := newThreadFeed(c.Hooks)
+	a.feed = feed
 	deps := agent.Deps{
 		Host:        agent.NewAgentHost(session, c.Clock, recipe),
 		Voice:       a.link,
@@ -365,17 +368,19 @@ func Build(c Config) *Agent {
 		Clock:       c.Clock,
 		IDs:         c.IDs,
 		Kept:        KeptFile(paths.Kept()),
-		Updates:     updatesSink{c.Hooks},
+		Updates:     updatesSink{hooks: c.Hooks, feed: feed},
+		Lines:       lineSink{feed},
+		Delivered:   lineSink{feed},
 		Replies:     replySink{c.Hooks},
 		Panes:       paneSink{c.Hooks},
-		Roster:      rosterSink{c.Hooks},
+		Roster:      rosterSink{hooks: c.Hooks, feed: feed},
 		Modes:       a,
 	}
 	a.attach = attach.New(paths.Attachments, filepath.Join(paths.Root, "attachment-copies.jsonl"), time.Now)
 	a.attach.Sweep()
 	deps.Attachments = a.attach
 	if c.Hooks.Chat != nil {
-		deps.Chat = chatSink{c.Hooks}
+		deps.Chat = chatSink{hooks: c.Hooks, feed: feed}
 	}
 	// Exactly 127.0.0.1 (the hook server refuses any non-loopback listener). Bound before the
 	// runtime is built, so a busy port is known before a warm start could launch anything.
@@ -681,8 +686,21 @@ func (a *Agent) FocusJob(job, worker string) {
 // Attachments are the files waiting for the next request (#240).
 func (a *Agent) Attachments() *attach.Store { return a.attach }
 
-func (a *Agent) ChatSend(text string) (string, error) {
-	id, err := a.handle.ChatSend(text)
+func (a *Agent) ChatSend(text string) (app.ChatSent, error) {
+	s, err := a.handle.ChatMessage(text)
+	if err == nil {
+		a.feed.sent(s.Job)
+	}
+	return app.ChatSent{Job: string(s.Job), Answered: s.Answered, Session: s.Session}, err
+}
+
+// ChatDelegate is a message typed in the text box that is always a new job (a reply to a
+// session, #302).
+func (a *Agent) ChatDelegate(text string) (string, error) {
+	id, err := a.handle.ChatDelegate(text)
+	if err == nil {
+		a.feed.sent(id)
+	}
 	return string(id), err
 }
 

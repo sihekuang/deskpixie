@@ -16,7 +16,7 @@ final class TrayLabelsAndRoutingTests: XCTestCase {
             case .separator: return ["\(pad)---"]
             case .action(let r):
                 let check = r.checked.map { $0 ? "[x] " : "[ ] " } ?? ""
-                let key = r.shortcut.map { " ⌘\($0)" } ?? ""
+                let key = r.shortcut.map { " ⌘\(r.shift ? "⇧" : "")\($0)" } ?? ""
                 return ["\(pad)\(check)\(r.title)\(key)\(r.enabled ? "" : " (off)")"]
             case .submenu(let t, let enabled, let children):
                 return ["\(pad)> \(t)\(enabled ? "" : " (off)")"] + render(children, depth: depth + 1)
@@ -57,6 +57,7 @@ final class TrayLabelsAndRoutingTests: XCTestCase {
             "  Open coordinator terminal",
             "  Restart coordinator…",
             "---",
+            "Chat… ⌘⇧c",
             "Mic Mode (Voice Isolation)…",
             "Welcome to DeskPixie…",
             "Settings… ⌘,",

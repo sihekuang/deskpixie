@@ -95,6 +95,10 @@ type Deps struct {
 	Updates UpdatesSink
 	// Replies gets each reply card for the reply deck (nil: ignored).
 	Replies ReplySink
+	// Lines gets each reply line for the chat thread (nil: ignored).
+	Lines LineSink
+	// Delivered gets the lines heard or seen, for the chat thread (nil: ignored).
+	Delivered DeliveredSink
 	// Roster gets the roster beside Pixie on every change (nil: no roster is kept).
 	Roster RosterSink
 	// Panes brings up an agent's pane waiting at a prompt in its terminal (nil: ignored).
@@ -549,6 +553,9 @@ func (h *AgentHandle) Answer(jobID, text string) (JobID, error) {
 	return id, err
 }
 
+// toNewRequest: AnswerAsked found no question waiting, so the words went as a new request.
+const toNewRequest = "the coordinator, as a new request"
+
 // AnswerAsked is Answer that also says where the answer went when not to one job (#161): the
 // session whose turn asked the question Pixie relayed last, or the coordinator, to work out
 // which of several waiting questions it answers.
@@ -588,7 +595,7 @@ func (h *AgentHandle) answerAsked(jobID, text string, withAttachments bool) (_ J
 		if err != nil {
 			return "", "", err
 		}
-		return id, "the coordinator, as a new request", nil
+		return id, toNewRequest, nil
 	}
 	if r.Err != "" {
 		return "", "", errors.New(r.Err)
@@ -1975,6 +1982,18 @@ func (h *AgentHandle) apply(e Effect) {
 	case EfReply:
 		if d.Replies != nil {
 			d.Replies.Reply(*e.Reply)
+		}
+	case EfLine:
+		if d.Lines != nil {
+			d.Lines.Line(e.Outbox)
+		}
+	case EfChatEnded:
+		if ender, ok := d.Chat.(ChatEnder); ok {
+			ender.ChatEnded(e.Job)
+		}
+	case EfDelivered:
+		if d.Delivered != nil {
+			d.Delivered.Delivered(e.Value.([]uint64))
 		}
 	case EfUpdates:
 		if d.Updates != nil {

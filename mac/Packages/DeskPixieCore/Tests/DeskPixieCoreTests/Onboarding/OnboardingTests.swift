@@ -44,6 +44,10 @@ final class OnboardingTests: XCTestCase {
         // Only the closing one, or windows that never show in the Dock: back to the menu bar.
         XCTAssertFalse(DockPresence.keepsDockIcon(closing: "onboarding", windows: [onboarding, canvas]))
         XCTAssertFalse(DockPresence.keepsDockIcon(closing: "settings", windows: [settings]))
+        // #302: the chat window shows in the Dock too.
+        let chat = DockPresence.Window(id: "chat", visible: true, miniaturized: false)
+        XCTAssertTrue(DockPresence.keepsDockIcon(closing: "settings", windows: [settings, chat]))
+        XCTAssertFalse(DockPresence.keepsDockIcon(closing: "chat", windows: [chat, canvas]))
     }
 
     func testTheSettingsFileIsTheOneInTheAppDataFolder() {

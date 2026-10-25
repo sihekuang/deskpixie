@@ -48,6 +48,13 @@ final class EngineCoordinator {
     private var onboarding: OnboardingController?
     /// The Settings window's model, shared with the first-run window (CompositionRoot sets it).
     var settingsModel: (() -> SettingsModel)?
+    /// The chat thread (`ChatHub`; CompositionRoot sets it), and its window, made on first show (#302).
+    var chatModel: (() -> ChatThreadModel)?
+    private var chatWindow: ChatWindowController?
+    /// Whether the chat window is shown and its unread count, for the button above Pixie.
+    private let chatPresence = ChatWindowPresence()
+    /// ⌘⇧C while DeskPixie is in front: shows or hides the chat window.
+    private var chatKeyMonitor: Any?
     private var presence: PresenceMonitor?
     /// The combo the Carbon hotkey is bound to right now (nil = none).
     var boundCombo: String? { hotkeys.boundCombo }
@@ -125,6 +132,7 @@ final class EngineCoordinator {
 
         if configured {
             pushKeychainKeys()
+            startChatButton()
             let pixieSettings = snapshot.flatMap(PixieSettings.fromSnapshot) ?? .defaults
             if let m = PixieController.load(engine: engine, settings: pixieSettings) {
                 pixie = m
@@ -136,7 +144,9 @@ final class EngineCoordinator {
                     }
                 }
                 m.show()
-                roster = AgentRosterController(engine: engine, worker: worker, pixie: m)
+                roster = AgentRosterController(engine: engine, worker: worker, pixie: m,
+                                               chatWindow: chatPresence,
+                                               onChatWindow: { [weak self] in self?.toggleChat() })
                 startBubble(pixie: m, settings: snapshot.flatMap(BubbleSettingsValues.fromSnapshot) ?? .defaults)
             } else {
                 appState.engineError = "Could not load the pixie pack"
@@ -195,13 +205,50 @@ final class EngineCoordinator {
         onboarding?.show(at: page)
     }
 
+    /// The chat window (#302), at this entry or where the thread opens.
+    func showChat(at entryID: String? = nil) {
+        guard configured, let chatModel else { return }
+        if chatWindow == nil {
+            chatWindow = ChatWindowController(model: chatModel(), engine: engine, worker: worker,
+                                              presence: chatPresence,
+                                              attachments: { [weak self] in self?.roster?.attachmentUI })
+        }
+        chatWindow?.show(at: entryID)
+    }
+
+    /// The button above Pixie and ⌘⇧C: shows the chat window, or hides it when it's shown.
+    /// The menu's Chat… only shows it (`showChat`).
+    func toggleChat() {
+        switch chatPresence.toggle.action {
+        case .show: showChat()
+        case .hide: chatWindow?.hide()
+        }
+    }
+
+    /// The thread for the button's unread dot, loaded once at launch; the core's chat events
+    /// keep it current from then on. And ⌘⇧C: Chat…'s key in the menu, which as a menu bar
+    /// item's key only works while its menu is open, so it is caught here while DeskPixie is in
+    /// front, where it toggles instead.
+    private func startChatButton() {
+        guard let chatModel else { return }
+        let model = chatModel()
+        chatPresence.model = model
+        Task { await model.load() }
+        chatKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard ChatToggle.isShortcut(flags: event.modifierFlags.rawValue, key: event.charactersIgnoringModifiers)
+            else { return event }
+            MainActor.assumeIsolated { self?.toggleChat() }
+            return nil
+        }
+    }
+
     /// Hands the core the API keys kept in the Keychain (`secrets.keychain`), off main: a
     /// Keychain read can block on an access prompt. Queued before any conversation can start a
     /// worker call; the voice loop reads keys on each connect.
     private func pushKeychainKeys() {
         let client = EngineSettingsClient(engine: engine)
         worker.async {
-            let values = KeychainSecrets().values(for: SettingsSecretID.allCases.map(\.variable))
+            let values = KeychainSecrets.forApp(bundleID: Bundle.main.bundleIdentifier).values(for: SettingsSecretID.allCases.map(\.variable))
             do {
                 try client.setKeychain(values)
             } catch {
@@ -219,6 +266,10 @@ final class EngineCoordinator {
         pump.stop()
         voiceIO.stop()
         presence?.stop()
+        if let m = chatKeyMonitor {
+            NSEvent.removeMonitor(m)
+            chatKeyMonitor = nil
+        }
         bubble?.stop()
         roster?.stop()
         pixie?.stop()
@@ -275,7 +326,7 @@ final class EngineCoordinator {
         startAudio(retryForHotkey: true)
     }
 
-    /// A tray menu id. Quit and Mic Mode are handled here (Settings… by the menu view), and
+    /// A tray menu id. Quit, Mic Mode and Chat… are handled here (Settings… by the menu view), and
     /// Restart coordinator… asks first; every other id is the core's (`app.action`), after
     /// which the menu is re-read.
     func perform(_ id: String) {
@@ -286,6 +337,8 @@ final class EngineCoordinator {
             MicModes.show(using: appState.micModes)
         case .onboarding:
             showOnboarding()
+        case .chat:
+            showChat()
         case .copy(let text):
             // Terminal commands are only ever copied, never run.
             NSPasteboard.general.clearContents()
@@ -512,6 +565,7 @@ final class EngineCoordinator {
             SettingsHub.shared?.refresh()
             bubble?.settingsChanged()
             roster?.settingsChanged()
+            chatWindow?.settingsChanged()
         case .settingsOpen(let hit):
             // Reveal first, so the window opens on the setting's page.
             if let hit { settingsModel?().reveal(hit) }
@@ -542,6 +596,21 @@ final class EngineCoordinator {
             roster?.apply(mode: mode)
         case .captions(let always, let secs, let fade, let history):
             roster?.apply(captions: always, dismissSecs: secs, fadeSecs: fade, historyMins: history)
+        case .chatEntry(let e):
+            ChatHub.shared?.apply(e)
+        case .chatNeeds(let n):
+            ChatHub.shared?.applyNeeds(n)
+        case .chatBadge(let b):
+            ChatHub.shared?.applyBadge(b)
+        case .chatReset:
+            if let model = ChatHub.shared {
+                model.clearLive() // now, so a chat.live after the reset survives it
+                Task { await model.reset() }
+            }
+        case .chatLive(let l):
+            ChatHub.shared?.applyLive(l)
+        case .chatRecipients(let rs):
+            ChatHub.shared?.applyRecipients(rs)
         case .showPane(let r):
             bubble?.showPane(r)
         case .focusPlan(let plan):

@@ -272,10 +272,11 @@ func TestEndToEndDelegateToStopHookToVoiceInject(t *testing.T) {
 func TestEndToEndATypedMessageAnswersInTheTextBox(t *testing.T) {
 	f := newFixture(t, nil)
 	v := openVoice(t, f)
-	id, err := f.agent.ChatSend("count the open issues")
-	if err != nil {
-		t.Fatal(err)
+	sent, err := f.agent.ChatSend("count the open issues")
+	if err != nil || sent.Answered {
+		t.Fatal(sent, err)
 	}
+	id := sent.Job
 	waitFor(t, "the coordinator prompt", func() bool {
 		for _, p := range f.host.Prompts() {
 			if strings.Contains(p.Text, "count the open issues") && strings.Contains(p.Text, "[ref "+id+"]") {
