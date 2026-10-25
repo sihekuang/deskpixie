@@ -102,15 +102,12 @@ private struct NeedsStrip: View {
 }
 
 /// The thread's content in the scroll view's coordinates: where its last row ends and how tall
-/// it is. Measured outside the lazy stack, so it is always laid out.
+/// it is. Measured outside the lazy stack, so it is always laid out. Set straight from the
+/// content's own GeometryReader: a preference set inside a macOS ScrollView's content never
+/// reaches `onPreferenceChange` outside it.
 private struct ThreadGeometry: Equatable {
     var bottom = CGFloat.infinity
     var height: CGFloat = 0
-}
-
-private struct ThreadGeometryKey: PreferenceKey {
-    static let defaultValue = ThreadGeometry()
-    static func reduce(value: inout ThreadGeometry, nextValue: () -> ThreadGeometry) { value = nextValue() }
 }
 
 /// The thread, newest at the bottom. It opens at the message asked for, else the oldest unread,
@@ -166,7 +163,10 @@ private struct ChatThreadView: View {
                 }
                 .background(GeometryReader { g in
                     let f = g.frame(in: .named(Self.space))
-                    Color.clear.preference(key: ThreadGeometryKey.self, value: ThreadGeometry(bottom: f.maxY, height: f.height))
+                    let now = ThreadGeometry(bottom: f.maxY, height: f.height)
+                    Color.clear
+                        .onAppear { geometry = now }
+                        .onChange(of: now) { _, n in geometry = n }
                 })
                 .frame(maxWidth: ChatWindowView.column)
                 .padding(.horizontal, 24)
@@ -179,7 +179,6 @@ private struct ChatThreadView: View {
                     .onAppear { viewport = g.size.height }
                     .onChange(of: g.size.height) { viewport = g.size.height }
             })
-            .onPreferenceChange(ThreadGeometryKey.self) { geometry = $0 }
             .onChange(of: geometry) { old, new in
                 // The layout after the opening scroll: only now does at-bottom hold.
                 if awaitingLayout {
