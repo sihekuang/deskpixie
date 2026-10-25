@@ -104,8 +104,12 @@ counted until it reconnects.
 pix types Pixie's messages in, for Claude Code and Codex alike. It waits until the agent is
 idle **and** you have typed nothing since your last Enter and have stopped typing for a moment.
 Option+Enter, Ctrl-J and pasted lines keep your draft, so they don't count as Enter; after
-Enter, pix also waits until the agent has started on what you sent. While a message waits, the
-tab title starts with 📨 and the count.
+Enter on a line you typed (not a `/command`), pix also waits until the agent has started on
+what you sent. While a message waits, the tab title starts with 📨 and the count.
+
+To push a waiting message through, tell Pixie to send it anyway. pix then types it even if it
+thinks you're typing. Your unsent text is set aside and put back afterwards: Claude Code stashes
+it itself, and for Codex pix deletes it and types it back.
 
 Claude Code's own cross-session messaging isn't used (#129): Claude labels anything arriving
 that way as another session's message, and won't take it as your own words or approval.
