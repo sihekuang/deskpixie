@@ -27,8 +27,8 @@ final class ChatWindowUITests: XCTestCase {
         pasteboard = nil
     }
 
-    private func start(_ entries: [SeedEntry] = [], live: Bool = false) throws -> UITestApp {
-        let h = try UITestApp(live: live)
+    private func start(_ entries: [SeedEntry] = [], live: Bool = false, agent: Bool? = nil) throws -> UITestApp {
+        let h = try UITestApp(live: live, agent: agent)
         harness = h
         if !entries.isEmpty { try h.seed(entries) }
         h.launch()
@@ -205,8 +205,10 @@ final class ChatWindowUITests: XCTestCase {
         window.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Remove '"))
     }
 
+    /// With the agent on (it keeps the attachments; off, the box says "The coordinator is off."),
+    /// but no coordinator started: nothing is sent.
     func testTheHintRowAttachesACopiedImage() throws {
-        let h = try start()
+        let h = try start(agent: true)
         let window = h.openChat()
         XCTAssertTrue(window.element("chat.composer").waitForExistence(timeout: 10))
         XCTAssertEqual(chips(in: window).count, 0)
@@ -214,7 +216,8 @@ final class ChatWindowUITests: XCTestCase {
         // Copied after launch: only a new copy is offered.
         copyImage()
         XCTAssertTrue(window.waitForText("Screenshot copied", timeout: 10))
-        let attach = window.buttons["Attach"]
+        // A link-style button: a link to accessibility.
+        let attach = window.links["Attach"]
         XCTAssertTrue(attach.waitForExistence(timeout: 5), "no · Attach in the hint row")
         attach.click()
         XCTAssertTrue(chips(in: window).firstMatch.waitForExistence(timeout: 10), "no chip for the copy")
@@ -222,7 +225,7 @@ final class ChatWindowUITests: XCTestCase {
     }
 
     func testCmdVAttachesAnImageAndPastesText() throws {
-        let h = try start()
+        let h = try start(agent: true)
         let window = h.openChat()
         let composer = window.element("chat.composer")
         XCTAssertTrue(composer.waitForExistence(timeout: 10))

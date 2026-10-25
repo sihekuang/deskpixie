@@ -26,6 +26,9 @@ final class UITestApp {
     let session: String
     let port: Int
     let live: Bool
+    /// `agent.enabled`. Attachments live in the agent, so the clipboard tests turn it on: with
+    /// `warm` off it starts no coordinator until a message is sent.
+    let agent: Bool
     let app = XCUIApplication()
     private var launched = false
     /// The user's preferences file as it was before this test (nil: not there).
@@ -33,12 +36,13 @@ final class UITestApp {
 
     /// Skips the test while a copy of the UITest build it didn't launch is running (launching
     /// here would end it). The user's own DeskPixie, under its real bundle ID, doesn't count.
-    init(live: Bool = false) throws {
+    init(live: Bool = false, agent: Bool? = nil) throws {
         if !NSRunningApplication.runningApplications(withBundleIdentifier: Self.bundleID).isEmpty {
             throw XCTSkip("Quit DeskPixie UITest to run the UI tests")
         }
         let tag = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(12)
         self.live = live
+        self.agent = agent ?? live
         root = URL(fileURLWithPath: "/tmp/dpui-\(tag)", isDirectory: true)
         support = root.appendingPathComponent("support", isDirectory: true)
         home = root.appendingPathComponent("home", isDirectory: true)
@@ -64,8 +68,8 @@ final class UITestApp {
             "hotkey": "ctrl+alt+shift+cmd+F19",
             "canvas": ["autoOpen": false, "keep": 50],
             "agent": [
-                // Offline, no coordinator: no herdr session, no hook server, no model.
-                "enabled": live,
+                // Off, no coordinator: no herdr session, no hook server, no model.
+                "enabled": agent,
                 "session": session,
                 "port": port,
                 "keepPanesOnQuit": false,
