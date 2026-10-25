@@ -22,6 +22,9 @@ public final class ChatThreadModel {
     public private(set) var preview: ChatBadge.Preview?
     /// Who the box replies to; nil = Pixie.
     public var replyTo: ChatWho?
+    /// The question the box answers (its token), when Reply… was on a card that takes a typed
+    /// answer: the message goes as `agent.typedAnswer` while the question is still open.
+    public private(set) var replyToken: String?
     /// A typed message is being worked on; the coordinator's or Pixie's answer clears it.
     public private(set) var thinking = false
     /// Older entries remain to load.
@@ -153,21 +156,35 @@ public final class ChatThreadModel {
 
     /// Sends the box's text to `replyTo`'s session, or to Pixie. The reply target clears; a
     /// failed send puts it back and keeps the entries.
+    /// Replying to a question that takes a typed answer sends it as that answer
+    /// (`agent.typedAnswer`) while the question is open; otherwise the message goes to its session.
     public func send(_ text: String, attachments: [String] = []) async {
         let target = replyTo
+        let token = target == nil ? nil : replyToken
         replyTo = nil
+        replyToken = nil
         if target == nil { thinking = true }
         let client = client
         let session = target?.name
+        let answer = token.flatMap { t in needs.contains { $0.request?.token == t } ? t : nil }
         let result = await Task.detached {
-            Result { try client.send(text, attachments: attachments, session: session) }
+            Result {
+                if let answer {
+                    try client.typedAnswer(token: answer, text: text)
+                } else {
+                    try client.send(text, attachments: attachments, session: session)
+                }
+            }
         }.value
         switch result {
         case .success: error = nil
         case .failure(let err):
-            if replyTo == nil { replyTo = target }
+            if replyTo == nil {
+                replyTo = target
+                replyToken = token
+            }
             thinking = false
-            fail("chat.send", err)
+            fail(answer == nil ? "chat.send" : "agent.typedAnswer", err)
         }
     }
 
@@ -202,8 +219,72 @@ public final class ChatThreadModel {
     /// Aims the box at the session at this address: its label comes from the newest entry that
     /// has the address, else the address itself.
     public func reply(toSession address: String) {
+        replyTo = who(forSession: address)
+        replyToken = nil
+    }
+
+    /// Reply… on a card: a question that takes a typed answer gets it; any other goes to its
+    /// session as a message.
+    public func reply(to entry: ChatEntry) {
+        reply(toSession: entry.who.name)
+        if let r = entry.request, Self.isOpen(entry), r.typed, !r.token.isEmpty { replyToken = r.token }
+    }
+
+    /// × or Esc on the chip: back to messaging Pixie.
+    public func cancelReply() {
+        replyTo = nil
+        replyToken = nil
+    }
+
+    /// The session at this address as its newest entry names it, else by the address itself.
+    public func who(forSession address: String) -> ChatWho {
         let newest = (entries + needs).last { $0.who.name == address && !$0.who.label.isEmpty }
-        replyTo = newest?.who ?? ChatWho(kind: "session", name: address, label: address)
+        return newest?.who ?? ChatWho(kind: "session", name: address, label: address)
+    }
+
+    /// Where the window opens: the oldest entry you haven't read (your own words never are),
+    /// else the newest.
+    public var openTarget: String? {
+        if unread > 0, let first = entries.first(where: { !$0.read && $0.who.kind != "you" }) { return first.id }
+        return entries.last?.id
+    }
+
+    // MARK: Cards
+
+    /// A request still waiting on you.
+    public static func isOpen(_ e: ChatEntry) -> Bool {
+        e.request.map { $0.outcome.isEmpty } ?? false
+    }
+
+    /// Allow and Deny: a permission the core can answer.
+    public static func offersDecision(_ e: ChatEntry) -> Bool {
+        isOpen(e) && e.request?.kind == "permission" && e.request?.token.isEmpty == false
+    }
+
+    /// One button per option (`agent.choose`).
+    public static func offersOptions(_ e: ChatEntry) -> Bool {
+        guard isOpen(e), let r = e.request else { return false }
+        return r.kind == "question" && !r.token.isEmpty && !r.options.isEmpty
+    }
+
+    /// Reply…: a question that takes a typed answer, or one with no buttons, answered by a
+    /// message to its session.
+    public static func offersReply(_ e: ChatEntry) -> Bool {
+        guard isOpen(e), let r = e.request, r.kind == "question" else { return false }
+        if !r.token.isEmpty { return r.typed }
+        return e.who.kind == "session" && !e.who.name.isEmpty
+    }
+
+    /// A pill in the needs strip.
+    public static func pillLabel(_ e: ChatEntry) -> String {
+        let who = name(of: e.who)
+        return e.request?.kind == "permission" ? "\(who) wants permission" : "\(who) asks a question"
+    }
+
+    /// Messages more than 5 minutes apart get a time divider; the first one always does.
+    public static func startsNewTime(after previous: ChatEntry?, _ e: ChatEntry) -> Bool {
+        guard let previous else { return true }
+        return e.at - previous.at > 5 * 60 * 1000
     }
 
     // MARK: Copy
@@ -225,8 +306,18 @@ public final class ChatThreadModel {
         return parts.joined(separator: " · ")
     }
 
+    /// What to call who said it: its label, else its address, else "Pixie", "Coordinator", "You".
+    public static func displayName(_ w: ChatWho) -> String { name(of: w) }
+
     private static func name(of w: ChatWho) -> String {
-        w.label.isEmpty ? (w.name.isEmpty ? w.kind : w.name) : w.label
+        if !w.label.isEmpty { return w.label }
+        if !w.name.isEmpty { return w.name }
+        switch w.kind {
+        case "pixie": return "Pixie"
+        case "coordinator": return "Coordinator"
+        case "you": return "You"
+        default: return w.kind
+        }
     }
 
     // MARK: Plumbing

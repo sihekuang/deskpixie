@@ -51,7 +51,13 @@ final class FakeChatClient: ChatClient, @unchecked Sendable {
     }
     func decide(token: String, allow: Bool) throws { try check() }
     func choose(token: String, option: Int) throws { try check() }
-    func typedAnswer(token: String, text: String) throws { try check() }
+    struct Typed: Equatable { let token: String; let text: String }
+    private var _typed: [Typed] = []
+    var typed: [Typed] { lock.withLock { _typed } }
+    func typedAnswer(token: String, text: String) throws {
+        try check()
+        lock.withLock { _typed.append(Typed(token: token, text: text)) }
+    }
     func stop() throws { try check() }
 }
 
@@ -133,6 +139,8 @@ final class ChatThreadModelTests: XCTestCase {
                        "api · your session · working")
         XCTAssertEqual(ChatThreadModel.header(ChatWho(kind: "session", name: "a", label: "web")),
                        "web · Pixie's agent")
+        XCTAssertEqual(ChatThreadModel.header(ChatWho(kind: "pixie")), "Pixie")
+        XCTAssertEqual(ChatThreadModel.header(ChatWho(kind: "coordinator")), "Coordinator")
     }
 
     func testThinkingWhileATypedMessageWorks() async {
@@ -304,5 +312,147 @@ final class ChatThreadModelTests: XCTestCase {
         await model.send("go")
         model.apply(entry(1))
         XCTAssertTrue(model.thinking)
+    }
+
+    // MARK: The window (#302, Task 8)
+
+    private func ask(_ n: Int, kind: String, token: String = "tk", options: [String] = [], typed: Bool = false,
+                     who: String = "herdr:1.2", label: String = "docs") -> ChatEntry {
+        var e = entry(n, kind: "session", name: who, label: label)
+        e.id = "req\(n)"
+        e.request = ChatRequest(token: token, item: UInt64(n), kind: kind, options: options, typed: typed)
+        return e
+    }
+
+    func testWhatACardOffers() {
+        let allow = ask(1, kind: "permission")
+        XCTAssertTrue(ChatThreadModel.offersDecision(allow))
+        XCTAssertFalse(ChatThreadModel.offersOptions(allow))
+        XCTAssertFalse(ChatThreadModel.offersReply(allow))
+
+        let menu = ask(2, kind: "question", options: ["a", "b"], typed: true)
+        XCTAssertFalse(ChatThreadModel.offersDecision(menu))
+        XCTAssertTrue(ChatThreadModel.offersOptions(menu))
+        XCTAssertTrue(ChatThreadModel.offersReply(menu), "a typed answer")
+
+        let fixed = ask(3, kind: "question", options: ["a"])
+        XCTAssertFalse(ChatThreadModel.offersReply(fixed), "only its options")
+
+        let noButtons = ask(4, kind: "question", token: "", options: ["a"])
+        XCTAssertFalse(ChatThreadModel.offersOptions(noButtons), "no token, nothing to choose with")
+        XCTAssertTrue(ChatThreadModel.offersReply(noButtons), "answered by a message to its session")
+
+        var done = menu
+        done.request?.outcome = "You answered: a"
+        XCTAssertFalse(ChatThreadModel.isOpen(done))
+        XCTAssertFalse(ChatThreadModel.offersOptions(done))
+        XCTAssertFalse(ChatThreadModel.offersReply(done))
+        XCTAssertFalse(ChatThreadModel.isOpen(entry(5)), "not a request")
+    }
+
+    func testPillCopy() {
+        XCTAssertEqual(ChatThreadModel.pillLabel(ask(1, kind: "permission", label: "api-server")),
+                       "api-server wants permission")
+        XCTAssertEqual(ChatThreadModel.pillLabel(ask(2, kind: "question")), "docs asks a question")
+    }
+
+    func testReplyToATypedQuestionSendsATypedAnswer() async {
+        let client = FakeChatClient()
+        let model = ChatThreadModel(client: client)
+        let q = ask(1, kind: "question", options: ["a"], typed: true)
+        model.applyNeeds([q])
+        model.reply(to: q)
+        XCTAssertEqual(model.replyTo?.label, "docs")
+        XCTAssertEqual(model.placeholder, "Reply to docs…")
+        await model.send("use the plain list")
+        XCTAssertEqual(client.typed, [.init(token: "tk", text: "use the plain list")])
+        XCTAssertTrue(client.sent.isEmpty)
+        XCTAssertNil(model.replyTo)
+        XCTAssertFalse(model.thinking)
+    }
+
+    func testReplyToAQuestionWithoutATokenMessagesItsSession() async {
+        let client = FakeChatClient()
+        let model = ChatThreadModel(client: client)
+        let q = ask(1, kind: "question", token: "")
+        model.applyNeeds([q])
+        model.reply(to: q)
+        await model.send("yes")
+        XCTAssertEqual(client.sent, [.init(text: "yes", attachments: [], session: "herdr:1.2")])
+        XCTAssertTrue(client.typed.isEmpty)
+    }
+
+    func testAQuestionAnsweredMeanwhileFallsBackToItsSession() async {
+        let client = FakeChatClient()
+        let model = ChatThreadModel(client: client)
+        let q = ask(1, kind: "question", options: ["a"], typed: true)
+        model.applyNeeds([q])
+        model.reply(to: q)
+        model.applyNeeds([])
+        await model.send("late")
+        XCTAssertTrue(client.typed.isEmpty, "its token is gone")
+        XCTAssertEqual(client.sent.map(\.session), ["herdr:1.2"])
+    }
+
+    func testCancelReplyGoesBackToPixie() async {
+        let client = FakeChatClient()
+        let model = ChatThreadModel(client: client)
+        let q = ask(1, kind: "question", options: ["a"], typed: true)
+        model.applyNeeds([q])
+        model.reply(to: q)
+        model.cancelReply()
+        XCTAssertNil(model.replyTo)
+        XCTAssertEqual(model.placeholder, "Message Pixie…")
+        await model.send("hi")
+        XCTAssertTrue(client.typed.isEmpty)
+        XCTAssertEqual(client.sent.map(\.session), [nil])
+        XCTAssertTrue(model.thinking)
+    }
+
+    func testAFailedTypedAnswerKeepsTheReply() async {
+        let client = FakeChatClient()
+        let model = ChatThreadModel(client: client)
+        let q = ask(1, kind: "question", options: ["a"], typed: true)
+        model.applyNeeds([q])
+        model.reply(to: q)
+        client.setFailing(true)
+        await model.send("x")
+        XCTAssertNotNil(model.error)
+        XCTAssertEqual(model.replyTo?.label, "docs")
+        client.setFailing(false)
+        await model.send("x")
+        XCTAssertEqual(client.typed, [.init(token: "tk", text: "x")], "the token came back with the target")
+    }
+
+    func testATimeDividerGoesBetweenMessagesMoreThanFiveMinutesApart() {
+        let a = ChatEntry(id: "a", at: 1_000_000, who: ChatWho(kind: "you"), text: "")
+        var b = a
+        b.at = a.at + 300_000
+        var c = a
+        c.at = b.at + 300_001
+        XCTAssertTrue(ChatThreadModel.startsNewTime(after: nil, a), "the first one has its time")
+        XCTAssertFalse(ChatThreadModel.startsNewTime(after: a, b))
+        XCTAssertTrue(ChatThreadModel.startsNewTime(after: b, c))
+    }
+
+    func testItOpensAtTheOldestUnreadElseTheNewest() async {
+        var mine = entry(1, kind: "you")
+        mine.read = false
+        var seen = entry(2)
+        seen.read = true
+        let fresh = entry(3)
+        let model = ChatThreadModel(client: FakeChatClient([mine, seen, fresh, entry(4)]))
+        await model.load()
+        XCTAssertEqual(model.openTarget, "e4", "nothing unread: the newest")
+        model.applyBadge(ChatBadge(unread: 2))
+        XCTAssertEqual(model.openTarget, "e3", "your own words are never unread")
+    }
+
+    func testASessionsLabelIsItsNewestEntrys() async {
+        let model = ChatThreadModel(client: FakeChatClient([entry(1, kind: "session", name: "h:1", label: "old"),
+                                                            entry(2, kind: "session", name: "h:1", label: "api")]))
+        await model.load()
+        XCTAssertEqual(model.who(forSession: "h:1").label, "api")
+        XCTAssertEqual(model.who(forSession: "h:9").label, "h:9")
     }
 }

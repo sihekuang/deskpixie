@@ -97,13 +97,17 @@ public enum TrayMenu {
         public var enabled: Bool
         /// ⌘ + this key.
         public var shortcut: Character?
+        /// The shortcut is ⌘⇧ + the key.
+        public var shift: Bool
 
-        public init(id: String, title: String, checked: Bool? = nil, enabled: Bool = true, shortcut: Character? = nil) {
+        public init(id: String, title: String, checked: Bool? = nil, enabled: Bool = true, shortcut: Character? = nil,
+                    shift: Bool = false) {
             self.id = id
             self.title = title
             self.checked = checked
             self.enabled = enabled
             self.shortcut = shortcut
+            self.shift = shift
         }
     }
 
@@ -117,6 +121,7 @@ public enum TrayMenu {
     public static let micModeID = "mic-mode"
     public static let micModeLabel = "Mic Mode (Voice Isolation)…"
     public static let onboardingID = "onboarding"
+    public static let chatID = "chat"
 
     /// Where a clicked id goes.
     public enum Route: Equatable, Sendable {
@@ -127,6 +132,8 @@ public enum TrayMenu {
         case micMode
         /// Opens the first-run window (#149).
         case onboarding
+        /// Opens the chat window (#302).
+        case chat
         /// Put this text on the pasteboard; nothing is sent to the core.
         case copy(String)
         /// `app.action {id}`; `focusCanvas` when the user asked for a canvas page, so the
@@ -147,6 +154,7 @@ public enum TrayMenu {
         case settingsID: return .settings
         case micModeID: return .micMode
         case onboardingID: return .onboarding
+        case chatID: return .chat
         case CoordinatorRestart.actionID: return .restartCoordinator
         default: return .core(id, focusCanvas: id == "canvas:open" || id.hasPrefix("canvas:page:"))
         }
@@ -160,7 +168,7 @@ public enum TrayMenu {
     }
 
     /// Ids Swift handles itself (never sent to `app.action`).
-    public static func isLocal(_ id: String) -> Bool { [quitID, settingsID, micModeID, onboardingID].contains(id) || id.hasPrefix(copyPrefix) }
+    public static func isLocal(_ id: String) -> Bool { [quitID, settingsID, micModeID, onboardingID, chatID].contains(id) || id.hasPrefix(copyPrefix) }
 
     /// Size rows; a non-preset scale gets its own checked "Custom (×N)" row.
     public static func sizeItems(scale: Int) -> [Row] {
@@ -244,6 +252,8 @@ public enum TrayMenu {
             items.append(.separator)
         }
 
+        // The window reads the core, so it waits for it like Settings….
+        items.append(.action(Row(id: chatID, title: "Chat…", enabled: !starting, shortcut: "c", shift: true)))
         if micModeAvailable {
             items.append(.action(Row(id: micModeID, title: micModeLabel)))
         }

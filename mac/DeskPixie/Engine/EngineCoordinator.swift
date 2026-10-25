@@ -48,6 +48,9 @@ final class EngineCoordinator {
     private var onboarding: OnboardingController?
     /// The Settings window's model, shared with the first-run window (CompositionRoot sets it).
     var settingsModel: (() -> SettingsModel)?
+    /// The chat thread (`ChatHub`; CompositionRoot sets it), and its window, made on first show (#302).
+    var chatModel: (() -> ChatThreadModel)?
+    private var chatWindow: ChatWindowController?
     private var presence: PresenceMonitor?
     /// The combo the Carbon hotkey is bound to right now (nil = none).
     var boundCombo: String? { hotkeys.boundCombo }
@@ -195,6 +198,16 @@ final class EngineCoordinator {
         onboarding?.show(at: page)
     }
 
+    /// The chat window (#302), at this entry or where the thread opens.
+    func showChat(at entryID: String? = nil) {
+        guard configured, let chatModel else { return }
+        if chatWindow == nil {
+            chatWindow = ChatWindowController(model: chatModel(), engine: engine, worker: worker,
+                                              attachments: { [weak self] in self?.roster?.attachments })
+        }
+        chatWindow?.show(at: entryID)
+    }
+
     /// Hands the core the API keys kept in the Keychain (`secrets.keychain`), off main: a
     /// Keychain read can block on an access prompt. Queued before any conversation can start a
     /// worker call; the voice loop reads keys on each connect.
@@ -275,7 +288,7 @@ final class EngineCoordinator {
         startAudio(retryForHotkey: true)
     }
 
-    /// A tray menu id. Quit and Mic Mode are handled here (Settings… by the menu view), and
+    /// A tray menu id. Quit, Mic Mode and Chat… are handled here (Settings… by the menu view), and
     /// Restart coordinator… asks first; every other id is the core's (`app.action`), after
     /// which the menu is re-read.
     func perform(_ id: String) {
@@ -286,6 +299,8 @@ final class EngineCoordinator {
             MicModes.show(using: appState.micModes)
         case .onboarding:
             showOnboarding()
+        case .chat:
+            showChat()
         case .copy(let text):
             // Terminal commands are only ever copied, never run.
             NSPasteboard.general.clearContents()
@@ -512,6 +527,7 @@ final class EngineCoordinator {
             SettingsHub.shared?.refresh()
             bubble?.settingsChanged()
             roster?.settingsChanged()
+            chatWindow?.settingsChanged()
         case .settingsOpen(let hit):
             // Reveal first, so the window opens on the setting's page.
             if let hit { settingsModel?().reveal(hit) }
