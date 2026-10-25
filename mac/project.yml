@@ -147,6 +147,20 @@ targets:
           else
             rm -f "$RES/DeepFilterNet3.tar.gz"
           fi
+  # XCUITest (#302): the chat window, driven like a person would. Run on this Mac, signed
+  # (`make uitest`), not in CI. Each test runs its own app on a fresh data folder.
+  DeskPixieUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: DeskPixieUITests
+    dependencies:
+      - target: DeskPixie
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.sihekuang.deskpixie.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: DeskPixie
 schemes:
   DeskPixie:
     build:
@@ -154,3 +168,7 @@ schemes:
         DeskPixie: all
     run:
       config: Debug
+    test:
+      config: Debug
+      targets:
+        - DeskPixieUITests
