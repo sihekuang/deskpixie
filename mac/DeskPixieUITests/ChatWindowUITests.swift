@@ -155,6 +155,100 @@ final class ChatWindowUITests: XCTestCase {
         XCTAssertFalse(pixie.element("chat.entry.terminal").exists, "Pixie herself has none")
     }
 
+    // MARK: @ picks who a message goes to (Task 8e)
+
+    /// Two sessions of yours ("alpha", "beta") and the window open on them.
+    private func startWithTwoSessions() throws -> (UITestApp, XCUIElement, XCUIElement) {
+        let h = try start(agent: true)
+        try h.startSession(description: "alpha")
+        try h.startSession(description: "beta")
+        let window = h.openChat()
+        let composer = window.element("chat.composer")
+        XCTAssertTrue(composer.waitForExistence(timeout: 10))
+        composer.click()
+        return (h, window, composer)
+    }
+
+    /// Types `@` until the list shows this session (the roster takes a moment to list it), then
+    /// clears the box. Its row's @name.
+    private func waitForRecipient(_ label: String, in window: XCUIElement, _ composer: XCUIElement) -> String? {
+        let deadline = Date().addingTimeInterval(60)
+        while Date() < deadline {
+            composer.typeText("@")
+            let row = window.descendants(matching: .any).matching(identifier: "chat.mention.row")
+                .matching(NSPredicate(format: "label BEGINSWITH %@", label + ",")).firstMatch
+            if row.waitForExistence(timeout: 3) {
+                let name = row.label.components(separatedBy: "@").last
+                composer.typeKey(.delete, modifierFlags: [])
+                return name
+            }
+            composer.typeKey(.delete, modifierFlags: [])
+            Thread.sleep(forTimeInterval: 1)
+        }
+        return nil
+    }
+
+    private func draft(_ composer: XCUIElement) -> String { composer.value as? String ?? "" }
+
+    func testAtOpensThePickerAndSetsOneTarget() throws {
+        let (_, window, composer) = try startWithTwoSessions()
+        XCTAssertNotNil(waitForRecipient("alpha", in: window, composer), "alpha never came to the list")
+        XCTAssertNotNil(waitForRecipient("beta", in: window, composer))
+
+        composer.typeText("hi @")
+        let list = window.element("chat.mention.list")
+        XCTAssertTrue(list.waitForExistence(timeout: 5), "@ didn't open the list")
+        XCTAssertTrue(list.waitForText("Message Pixie", timeout: 5), "Pixie first")
+        composer.typeText("alp")
+        let rows = window.descendants(matching: .any).matching(identifier: "chat.mention.row")
+        XCTAssertTrue(rows.firstMatch.label.hasPrefix("alpha,"), "filtered to alpha: \(rows.firstMatch.label)")
+        composer.typeKey(.return, modifierFlags: [])
+        let chip = window.element("chat.replyChip")
+        XCTAssertTrue(chip.waitForExistence(timeout: 5))
+        XCTAssertTrue(chip.waitForText("Replying to alpha", timeout: 5))
+        XCTAssertTrue(list.waitForGone(timeout: 5))
+        XCTAssertEqual(draft(composer), "hi ", "the @… went from the text")
+
+        composer.typeText("@be")
+        XCTAssertTrue(list.waitForExistence(timeout: 5))
+        composer.typeKey(.return, modifierFlags: [])
+        XCTAssertTrue(chip.waitForText("Replying to beta", timeout: 5), "only the new one")
+        XCTAssertFalse(chip.text("alpha").exists)
+        XCTAssertEqual(window.descendants(matching: .any).matching(identifier: "chat.replyChip").count, 1)
+        XCTAssertEqual(draft(composer), "hi ")
+
+        // Esc closes the list and keeps the text; no match says so.
+        composer.typeText("@zz")
+        XCTAssertTrue(list.waitForText("No one called zz", timeout: 5))
+        composer.typeKey(.escape, modifierFlags: [])
+        XCTAssertTrue(list.waitForGone(timeout: 5))
+        XCTAssertEqual(draft(composer), "hi @zz")
+        XCTAssertTrue(chip.exists, "Esc closed the list, not the reply")
+    }
+
+    /// The maintainer's validation: a hand-typed @name of someone else beside the target turns
+    /// Send off and says why.
+    func testATypedMentionOfSomeoneElseTurnsSendOff() throws {
+        let (_, window, composer) = try startWithTwoSessions()
+        XCTAssertNotNil(waitForRecipient("alpha", in: window, composer))
+        guard let beta = waitForRecipient("beta", in: window, composer) else { return XCTFail("beta never came") }
+
+        composer.typeText("@alp")
+        composer.typeKey(.return, modifierFlags: [])
+        XCTAssertTrue(window.element("chat.replyChip").waitForText("Replying to alpha", timeout: 5))
+        let send = window.buttons["Send"]
+        composer.typeText("ship it")
+        XCTAssertTrue(send.isEnabled)
+        composer.typeText(" @\(beta) ")
+        let notice = window.element("chat.notice")
+        XCTAssertTrue(notice.waitForExistence(timeout: 5), "no notice")
+        XCTAssertTrue(window.waitForText("This goes to alpha only. Remove @\(beta), or pick them instead.", timeout: 5),
+                      "the notice says why")
+        XCTAssertFalse(send.isEnabled, "Send is off")
+        composer.typeKey(.return, modifierFlags: [])
+        XCTAssertEqual(draft(composer), "ship it @\(beta) ", "Return sent nothing")
+    }
+
     func testClearHistoryAsksFirstAndEmptiesTheThread() throws {
         let h = try start(Self.thread)
         let window = h.openChat()

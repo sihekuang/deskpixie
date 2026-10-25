@@ -253,9 +253,12 @@ func New(d Deps) (*App, error) {
 			NotifyUpdate: func(title, body string, update any) {
 				a.emit("notify", map[string]any{"title": title, "body": body, "update": update})
 			},
-			Updates:         func(items any) { a.emit("updates", map[string]any{"lines": items}) },
-			Reply:           func(c any) { a.emit("reply.card", fieldsOf(c)) },
-			Roster:          func(view any) { a.emit("agents", map[string]any{"roster": view}) },
+			Updates: func(items any) { a.emit("updates", map[string]any{"lines": items}) },
+			Reply:   func(c any) { a.emit("reply.card", fieldsOf(c)) },
+			Roster: func(view any) {
+				a.emit("agents", map[string]any{"roster": view})
+				a.emit("chat.recipients", map[string]any{"recipients": recipientsOf(view)})
+			},
 			ShowPane:        func(job, worker string) { a.emit("showPane", map[string]any{"job": job, "worker": worker}) },
 			Focus:           func(plan any) { a.emit("focusPlan", map[string]any{"plan": plan}) },
 			Chat:            func(line any) { a.emit("chat.line", fieldsOf(line)) },

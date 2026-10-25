@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -105,28 +106,98 @@ func TestSendingAddsYourMessage(t *testing.T) {
 	}
 }
 
+// rosterWith is a roster where w1 is a running session of yours and w2 one of Pixie's workers.
+func rosterWith() map[string]any {
+	return map[string]any{
+		"agents": []map[string]any{{"name": "coordinator", "kind": "coordinator", "reachable": true},
+			{"name": "w2", "label": "w2", "kind": "worker", "reachable": true}},
+		"yours": []map[string]any{{"name": "w1", "label": "docs", "kind": "session", "reachable": true},
+			{"name": "w3", "label": "gone", "kind": "session", "reachable": false}},
+	}
+}
+
 func TestSendingToASessionAsksTheCoordinatorToTellIt(t *testing.T) {
-	f := &fakeAgent{tray: AgentTray{Enabled: true}}
+	f := &fakeAgent{tray: AgentTray{Enabled: true}, roster: rosterWith()}
 	h := newHarness(t, withAgent(f))
 	now := time.Now().UnixMilli()
 	f.hooks.ThreadLine(sessionLine(1, "w1", "docs (old)", "started", now-2*(chat.JoinMs+1)))
 	f.hooks.ThreadLine(sessionLine(2, "w1", "docs", "done", now-(chat.JoinMs+1)))
 	f.hooks.ThreadLine(sessionLine(3, "w2", "api", "busy", now))
 	h.call("chat.send", map[string]any{"text": "ship it", "session": "w1"})
-	h.call("chat.send", map[string]any{"text": "hi", "session": "w9"}) // nothing from it: its address
-	if !slices.Equal(f.sent, []string{"Tell the docs session: ship it", "Tell the w9 session: hi"}) {
+	h.call("chat.send", map[string]any{"text": "hi", "session": "w2"}) // a worker
+	if !slices.Equal(f.sent, []string{"Tell the docs session: ship it", "Tell the api worker: hi"}) {
 		t.Fatal(f.sent)
 	}
 	got := h.entries(nil)
 	if got[1].Who.Kind != "you" || got[1].Text != "ship it" || !slices.Equal(got[1].Sessions, []string{"w1"}) {
 		t.Fatalf("your reply = %+v", got[1])
 	}
-	if got[0].Text != "hi" || !slices.Equal(got[0].Sessions, []string{"w9"}) {
+	if got[0].Text != "hi" || !slices.Equal(got[0].Sessions, []string{"w2"}) {
 		t.Fatalf("your reply = %+v", got[0])
 	}
 	// The session's lines keep the label they came with.
 	if old := got[4]; old.Text != "started" || old.Who.Label != "docs (old)" {
 		t.Fatalf("relabelled: %+v", old)
+	}
+}
+
+// #302 (one recipient per message): chat.send refuses, adds nothing and tells no one.
+func TestChatSendRefusesMoreThanOneRecipient(t *testing.T) {
+	f := &fakeAgent{tray: AgentTray{Enabled: true}, roster: rosterWith()}
+	h := newHarness(t, withAgent(f))
+	f.hooks.ThreadLine(sessionLine(1, "w3", "docs (gone)", "done", 0))
+	cases := []struct {
+		args map[string]any
+		want string
+	}{
+		{map[string]any{"text": "ship it, @w2", "session": "w1"}, "This goes to docs only. Remove @w2, or pick them instead."},
+		{map[string]any{"text": "@w1 and @W2"}, "Send to one at a time: pick @w1 or @w2."},
+		{map[string]any{"text": "@w1 ship it"}, "Pick @w1 from the list to send it to them."},
+		{map[string]any{"text": "hi", "session": "w3"}, "docs (gone) isn't running anymore."},
+		{map[string]any{"text": "hi", "session": "w9"}, "w9 isn't running anymore."},
+		{map[string]any{"text": "hi", "session": ""}, "That session isn't running anymore."},
+	}
+	before := len(h.entries(nil))
+	for _, c := range cases {
+		_, err := h.callErr("chat.send", c.args)
+		if err == nil || err.Error() != c.want {
+			t.Errorf("%v: %v, want %q", c.args, err, c.want)
+		}
+	}
+	if f.delegated != 0 || len(f.sent) != 0 {
+		t.Fatalf("a refused message went: delegated %d, sent %q", f.delegated, f.sent)
+	}
+	if n := len(h.entries(nil)); n != before {
+		t.Fatalf("a refused message joined the thread: %d entries, was %d", n, before)
+	}
+	// Fine: a mention of the target itself, a word that names no one, an email address.
+	h.call("chat.send", map[string]any{"text": "@w1 ship it", "session": "w1"})
+	h.call("chat.send", map[string]any{"text": "ask @nobody, mail me@w1.com"})
+	if !slices.Equal(f.sent, []string{"Tell the docs session: @w1 ship it", "ask @nobody, mail me@w1.com"}) {
+		t.Fatalf("sent %q", f.sent)
+	}
+}
+
+func TestChatRecipientsAreTheRostersRunningSessionsAndWorkers(t *testing.T) {
+	f := &fakeAgent{roster: rosterWith()}
+	h := newHarness(t, withAgent(f))
+	out := string(h.call("chat.recipients", nil))
+	want := `{"recipients":[{"name":"w1","label":"docs","kind":"session","yours":true,"color":` +
+		strconv.Itoa(chat.ColorFor("w1")) + `},{"name":"w2","label":"w2","kind":"worker","color":` + strconv.Itoa(chat.ColorFor("w2")) + `}]}`
+	if out != want {
+		t.Fatal(out)
+	}
+	f.hooks.Roster(map[string]any{"yours": []map[string]any{{"name": "w5", "label": "new", "kind": "session", "reachable": true}}})
+	e := h.waitFor("chat.recipients", nil, time.Second)
+	if b, _ := json.Marshal(e); !strings.Contains(string(b), `"name":"w5"`) {
+		t.Fatal("the roster changed and the recipients didn't follow:", string(b))
+	}
+}
+
+func TestChatRecipientsWithTheAgentOff(t *testing.T) {
+	h := newHarness(t)
+	if out := string(h.call("chat.recipients", nil)); out != `{"recipients":[]}` {
+		t.Fatal(out)
 	}
 }
 
@@ -444,7 +515,7 @@ func TestOneTypedJobKeepsEveryTurn(t *testing.T) {
 
 // #302 review (I4): a reply to a session is never taken for the answer to a waiting question.
 func TestASessionReplyIsNeverTakenForAWaitingAnswer(t *testing.T) {
-	f := &fakeAgent{tray: AgentTray{Enabled: true}}
+	f := &fakeAgent{tray: AgentTray{Enabled: true}, roster: rosterWith()}
 	h := newHarness(t, withAgent(f))
 	f.hooks.ThreadRequests([]chat.Entry{jobQuestion(1, "job_000000000009", "Which repo?")})
 	f.asking = "job_000000000009"

@@ -19,7 +19,7 @@ public struct EngineChatClient: ChatClient, Sendable {
     private struct SendArgs: Encodable {
         let text: String
         let attachments: [String]
-        /// Left out when the message goes to Pixie.
+        /// Left out when the message goes to Pixie; an empty one is the core's to refuse.
         let session: String?
     }
 
@@ -59,8 +59,7 @@ public struct EngineChatClient: ChatClient, Sendable {
     }
 
     public func send(_ text: String, attachments: [String], session: String?) throws {
-        _ = try engine.call("chat.send", SendArgs(text: text, attachments: attachments,
-                                                  session: session.flatMap { $0.isEmpty ? nil : $0 }))
+        _ = try engine.call("chat.send", SendArgs(text: text, attachments: attachments, session: session))
     }
 
     public func decide(token: String, allow: Bool) throws {
@@ -73,6 +72,12 @@ public struct EngineChatClient: ChatClient, Sendable {
 
     public func typedAnswer(token: String, text: String) throws {
         _ = try engine.call("agent.typedAnswer", TypedArgs(token: token, text: text))
+    }
+
+    private struct Recipients: Decodable { var recipients: [ChatRecipient] }
+
+    public func recipients() throws -> [ChatRecipient] {
+        try engine.call("chat.recipients", as: Recipients.self).recipients
     }
 
     public func stop() throws {

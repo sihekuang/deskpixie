@@ -17,14 +17,25 @@ struct ChatComposer: View {
 
     var body: some View {
         let attachments = attachmentsNow()
+        let mention = self.mention
         return VStack(alignment: .leading, spacing: 8) {
+            if let mention {
+                MentionList(query: mention, candidates: mention.candidates(model.recipients),
+                            selected: state.mentionRow) { pick($0, mention) }
+            }
             if let who = model.replyTo {
                 replyChip(who)
             }
             if let attachments, attachments.model.chipsVisible {
                 AttachmentChips(items: attachments.model.items, onRemove: attachments.onRemove)
             }
-            if let notice = attachments?.model.notice ?? model.error {
+            if let notice = model.notice(for: state.draft) {
+                // One recipient per message: why Send is off, or why the core refused it.
+                Text(notice)
+                    .font(.caption)
+                    .foregroundStyle(ChatColors.needsTitle)
+                    .accessibilityIdentifier("chat.notice")
+            } else if let notice = attachments?.model.notice ?? model.error {
                 Text(notice)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -66,12 +77,23 @@ struct ChatComposer: View {
                     // Shift-Return adds a line where the cursor is.
                     .onSubmit { send(attachments) }
                     .onKeyPress(.return, phases: .down) { press in
-                        guard press.modifiers.contains(.shift) else { return .ignored }
-                        NSApp.sendAction(#selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)), to: nil, from: nil)
-                        return .handled
+                        if press.modifiers.contains(.shift) {
+                            NSApp.sendAction(#selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)), to: nil, from: nil)
+                            return .handled
+                        }
+                        // With the @ list open, Return picks.
+                        return pickSelected() ? .handled : .ignored
                     }
+                    .onKeyPress(.tab) { pickSelected() ? .handled : .ignored }
+                    .onKeyPress(.upArrow) { moveMention(-1) }
+                    .onKeyPress(.downArrow) { moveMention(1) }
                     // With text in the field, Esc is the field editor's "complete": take it first.
+                    // It closes the @ list (the text stays), else stops the reply.
                     .onKeyPress(.escape) {
+                        if let m = mention {
+                            state.mentionClosedAt = m.start
+                            return .handled
+                        }
                         guard model.replyTo != nil else { return .ignored }
                         model.cancelReply()
                         return .handled
@@ -116,6 +138,51 @@ struct ChatComposer: View {
         }
         .onAppear { focused = true }
         .onChange(of: state.focusRequests) { focused = true }
+        .onChange(of: state.draft) { _, new in
+            state.mentionRow = 0
+            if let closed = state.mentionClosedAt, MentionQuery.active(in: new, caret: new.count)?.start != closed {
+                state.mentionClosedAt = nil // another @: its list opens
+            }
+            if new == state.keptDraft {
+                state.keptDraft = nil
+                return
+            }
+            model.draftChanged()
+        }
+    }
+
+    /// The @ being typed, while its list isn't closed. The caret is taken to be at the end of the
+    /// text: SwiftUI's field doesn't say where it is on macOS 14.
+    private var mention: MentionQuery? {
+        guard let q = MentionQuery.active(in: state.draft, caret: state.draft.count),
+              q.start != state.mentionClosedAt else { return nil }
+        return q
+    }
+
+    /// ↑/↓ in the @ list.
+    private func moveMention(_ by: Int) -> KeyPress.Result {
+        guard let m = mention else { return .ignored }
+        let n = m.candidates(model.recipients).count
+        guard n > 0 else { return .handled }
+        state.mentionRow = (state.mentionRow + by + n) % n
+        return .handled
+    }
+
+    /// Return or Tab with the list open: the row picked. False with no list (Return sends).
+    private func pickSelected() -> Bool {
+        guard let m = mention else { return false }
+        let rows = m.candidates(model.recipients)
+        guard !rows.isEmpty else { return true } // "No one called …": nothing to pick, nothing sent
+        pick(rows[min(state.mentionRow, rows.count - 1)], m)
+        return true
+    }
+
+    /// The pick is the one target (Pixie: none), and the @… leaves the text.
+    private func pick(_ c: MentionCandidate, _ m: MentionQuery) {
+        let (text, target) = m.pick(c, in: state.draft, caret: state.draft.count, previous: model.replyTo?.name)
+        state.draft = text
+        model.choose(target)
+        focused = true
     }
 
     /// "Replying to docs ×": × (or Esc) goes back to messaging Pixie.
@@ -158,10 +225,73 @@ struct ChatComposer: View {
         state.draft = ""
         Task {
             guard await model.send(text, attachments: paths) else {
-                if state.draft.isEmpty { state.draft = text }
+                if state.draft.isEmpty {
+                    state.keptDraft = text
+                    state.draft = text
+                }
                 return
             }
             attachments?.onSent()
         }
+    }
+}
+
+/// The @ list above the box (#302): Pixie, then who a message can go to on its own, filtered by
+/// what follows the @. ↑/↓ move, Return or Tab picks, Esc closes; a click picks.
+private struct MentionList: View {
+    let query: MentionQuery
+    let candidates: [MentionCandidate]
+    let selected: Int
+    let onPick: (MentionCandidate) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if candidates.isEmpty {
+                Text(query.emptyLabel())
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+            }
+            let picked = min(selected, candidates.count - 1)
+            ForEach(Array(candidates.enumerated()), id: \.element.id) { i, c in
+                Button { onPick(c) } label: {
+                    HStack(spacing: 8) {
+                        if case .recipient(let r) = c {
+                            SessionDot(color: r.color)
+                        } else {
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 10))
+                                .frame(width: 8)
+                                .accessibilityHidden(true)
+                        }
+                        Text(c.label)
+                            .fontWeight(.semibold)
+                            .lineLimit(1)
+                        Text(c.detail)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer(minLength: 0)
+                    }
+                    .font(.system(size: 13))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(RoundedRectangle(cornerRadius: 6)
+                        .fill(i == picked ? Color.accentColor.opacity(0.18) : .clear))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(c.label), \(c.detail)")
+                .accessibilityAddTraits(i == picked ? .isSelected : [])
+                .accessibilityIdentifier("chat.mention.row")
+            }
+        }
+        .padding(4)
+        .frame(maxWidth: 360, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .textBackgroundColor)))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(ChatColors.border))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("chat.mention.list")
     }
 }

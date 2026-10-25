@@ -609,6 +609,8 @@ final class EngineCoordinator {
             }
         case .chatLive(let l):
             ChatHub.shared?.applyLive(l)
+        case .chatRecipients(let rs):
+            ChatHub.shared?.applyRecipients(rs)
         case .showPane(let r):
             bubble?.showPane(r)
         case .focusPlan(let plan):

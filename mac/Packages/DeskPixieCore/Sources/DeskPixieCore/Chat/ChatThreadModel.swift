@@ -36,6 +36,14 @@ public final class ChatThreadModel {
     public private(set) var hasOlder = false
     /// Why the last call failed; cleared by the next one that works.
     public private(set) var error: String?
+    /// Who a message can go to on its own (`chat.recipients`), for the @ list and the rule
+    /// that a message has one recipient.
+    public private(set) var recipients: [ChatRecipient] = []
+    /// The list has come at least once.
+    public private(set) var recipientsKnown = false
+    /// The core refused the last send, in its words (one recipient per message, the
+    /// coordinator off…); the draft stays. Editing the text or the target clears it.
+    public private(set) var refusal: String?
 
     @ObservationIgnored private let client: any ChatClient
     @ObservationIgnored private var loads = 0
@@ -53,6 +61,7 @@ public final class ChatThreadModel {
     /// Shows the last page, the open requests and the badge counts. A newer load drops an older
     /// one's result; events that came while it ran are applied over the page.
     public func load() async {
+        Task { await loadRecipients() }
         loads += 1
         let mine = loads
         loading = true
@@ -77,6 +86,19 @@ public final class ChatThreadModel {
             fail("chat.entries", err)
         }
         replay = []
+    }
+
+    /// Asks the core who can be messaged now; the `chat.recipients` event keeps it current.
+    public func loadRecipients() async {
+        let client = client
+        let result = await Task.detached { Result { try client.recipients() } }.value
+        if case .success(let rs) = result { applyRecipients(rs) }
+    }
+
+    /// `chat.recipients`: the whole list now.
+    public func applyRecipients(_ rs: [ChatRecipient]) {
+        recipients = rs
+        recipientsKnown = true
     }
 
     /// Puts the page before the oldest entry shown in front of it.
@@ -229,6 +251,7 @@ public final class ChatThreadModel {
         switch result {
         case .success:
             error = nil
+            refusal = nil
             return true
         case .failure(let err):
             if replyTo == nil {
@@ -236,14 +259,45 @@ public final class ChatThreadModel {
                 replyToken = token
             }
             thinking = false
-            fail(answer == nil ? "chat.send" : "agent.typedAnswer", err)
+            if answer == nil, case DeskPixieEngineError.callFailed(let why) = err {
+                // The core said why, in words for you (one recipient per message, …).
+                refusal = why
+                error = nil
+                Self.log.error("chat.send: \(why, privacy: .public)")
+            } else {
+                fail(answer == nil ? "chat.send" : "agent.typedAnswer", err)
+            }
             return false
         }
     }
 
-    /// Send is offered: words or attachments to send, and no send already on its way.
+    /// What stops this text from going as it is, said under the box: the one-recipient rule
+    /// for the current target, checked here before the core does. Nil: it can go.
+    public func check(_ text: String) -> String? {
+        let answering = replyToken.map { t in needs.contains { $0.request?.token == t } } ?? false
+        return ChatRecipients.check(text, target: replyTo?.name,
+                                    label: replyTo.map(Self.name(of:)) ?? "",
+                                    recipients: recipients, knowsRecipients: recipientsKnown && !answering)
+    }
+
+    /// The line under the box: the core's refusal, else this text's own problem.
+    public func notice(for text: String) -> String? { refusal ?? check(text) }
+
+    /// The text changed: the core's last refusal no longer holds.
+    public func draftChanged() { refusal = nil }
+
+    /// A pick from the @ list: this recipient is now the one target, or (nil) Pixie.
+    public func choose(_ r: ChatRecipient?) {
+        replyTo = r?.who
+        replyToken = nil
+        refusal = nil
+    }
+
+    /// Send is offered: words or attachments to send, no send already on its way, and nothing
+    /// the one-recipient rule refuses.
     public func canSend(_ text: String, attachments: Int) -> Bool {
         !sending && (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || attachments > 0)
+            && check(text) == nil
     }
 
     public func decide(token: String, allow: Bool) async {
@@ -279,6 +333,7 @@ public final class ChatThreadModel {
     public func reply(toSession address: String) {
         replyTo = who(forSession: address)
         replyToken = nil
+        refusal = nil
     }
 
     /// Reply… on a card or a session's message: a question that takes a typed answer gets it;
@@ -288,6 +343,7 @@ public final class ChatThreadModel {
         let shown = (entries + needs).contains { $0.who.name == entry.who.name && !$0.who.label.isEmpty }
         replyTo = shown || entry.who.label.isEmpty ? who(forSession: entry.who.name) : entry.who
         replyToken = nil
+        refusal = nil
         if let r = entry.request, Self.isOpen(entry), r.typed, !r.token.isEmpty { replyToken = r.token }
     }
 
@@ -295,6 +351,7 @@ public final class ChatThreadModel {
     public func cancelReply() {
         replyTo = nil
         replyToken = nil
+        refusal = nil
     }
 
     /// The session at this address as its newest entry names it, else by the address itself.

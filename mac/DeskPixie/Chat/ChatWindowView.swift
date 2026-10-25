@@ -7,6 +7,12 @@ import SwiftUI
 @Observable
 final class ChatWindowState {
     var draft = ""
+    /// The draft put back after a send the core refused: its change isn't an edit, so the
+    /// refusal stays under the box.
+    var keptDraft: String?
+    /// The @ list: where the @ whose list Esc closed is, and the row picked by ↑/↓.
+    var mentionClosedAt: Int?
+    var mentionRow = 0
     /// Bumped to put the cursor in the box.
     var focusRequests = 0
     /// The entry to scroll to, bumped by `scrollRequests` (opening at a message, a pill).

@@ -47,6 +47,10 @@ final class FakeChatClient: ChatClient, @unchecked Sendable {
     func read(upTo: String) throws { try check(); lock.withLock { _reads.append(upTo) } }
     func send(_ text: String, attachments: [String], session: String?) throws {
         try check()
+        lock.withLock { gate }?.wait()
+        if let why = lock.withLock({ () -> String? in defer { _refuse = nil }; return _refuse }) {
+            throw DeskPixieEngineError.callFailed(why)
+        }
         lock.withLock { _sent.append(Sent(text: text, attachments: attachments, session: session)) }
     }
     func decide(token: String, allow: Bool) throws { try check() }
@@ -59,6 +63,16 @@ final class FakeChatClient: ChatClient, @unchecked Sendable {
         lock.withLock { _typed.append(Typed(token: token, text: text)) }
     }
     func stop() throws { try check() }
+    private var _recipients: [ChatRecipient] = []
+    func setRecipients(_ r: [ChatRecipient]) { lock.withLock { _recipients = r } }
+    func recipients() throws -> [ChatRecipient] { try check(); return lock.withLock { _recipients } }
+    /// The next send is refused by the core, in these words (then sends go again).
+    private var _refuse: String?
+    func refuseNextSend(_ why: String) { lock.withLock { _refuse = why } }
+    /// Sends wait here until `release()`: one is still on its way while the test goes on.
+    private var gate: DispatchSemaphore?
+    func holdSends() { lock.withLock { gate = DispatchSemaphore(value: 0) } }
+    func release() { lock.withLock { () -> DispatchSemaphore? in defer { gate = nil }; return gate }?.signal() }
 }
 
 @MainActor
@@ -442,10 +456,14 @@ final class ChatThreadModelTests: XCTestCase {
         let model = ChatThreadModel(client: client)
         XCTAssertTrue(model.canSend("", attachments: 1))
         XCTAssertFalse(model.canSend("  ", attachments: 0))
-        async let first = model.send("look", attachments: ["/a.png"])
-        async let second = model.send("look", attachments: ["/a.png"])
-        let (a, b) = await (first, second)
-        XCTAssertEqual([a, b].filter { $0 }.count, 1, "one went, one was refused")
+        client.holdSends()
+        let first = Task { await model.send("look", attachments: ["/a.png"]) }
+        await waitFor { MainActor.assumeIsolated { model.sending } }
+        let second = await model.send("look", attachments: ["/a.png"])
+        XCTAssertFalse(second, "refused while the first is on its way")
+        client.release()
+        let a = await first.value
+        XCTAssertTrue(a, "the first went")
         XCTAssertEqual(client.sent.count, 1, "the files go once")
         XCTAssertFalse(model.sending)
         XCTAssertTrue(model.canSend("again", attachments: 0))

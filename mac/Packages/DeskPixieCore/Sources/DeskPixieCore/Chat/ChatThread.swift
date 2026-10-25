@@ -233,4 +233,6 @@ public protocol ChatClient: Sendable {
     func typedAnswer(token: String, text: String) throws
     /// Stops what Pixie is working on.
     func stop() throws
+    /// `chat.recipients`: who a message can go to on its own now.
+    func recipients() throws -> [ChatRecipient]
 }

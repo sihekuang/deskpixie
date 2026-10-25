@@ -93,6 +93,38 @@ final class UITestApp {
         try text.write(to: support.appendingPathComponent("chat/thread.jsonl"))
     }
 
+    // MARK: Sessions of yours
+
+    private var sessions: [Process] = []
+
+    /// A session of yours, as `pix --description <description> claude` in a terminal would start
+    /// one: the app's own pix, in a pty (`script`), on this run's data folder and home, with a
+    /// stand-in claude that only waits for its input to end. Nothing reaches the user's own pix:
+    /// no PIX_* from this process, and the socket is this data folder's.
+    func startSession(description: String) throws {
+        let bin = root.appendingPathComponent("bin", isDirectory: true)
+        let claude = bin.appendingPathComponent("claude")
+        let fm = FileManager.default
+        if !fm.fileExists(atPath: claude.path) {
+            try fm.createDirectory(at: bin, withIntermediateDirectories: true)
+            try "#!/bin/sh\nexec cat > /dev/null\n".write(to: claude, atomically: true, encoding: .utf8)
+            try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: claude.path)
+        }
+        let pix = Self.builtApp.appendingPathComponent("Contents/Helpers/pix").path
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/script")
+        p.arguments = ["-q", "/dev/null", pix, "--description", description, "claude"]
+        p.currentDirectoryURL = root.appendingPathComponent("projects")
+        p.environment = ["HOME": home.path, "DESKPIXIE_SUPPORT_DIR": support.path, "TERM": "xterm-256color",
+                         "PATH": "\(bin.path):/usr/bin:/bin"]
+        // A pipe kept open: script's input never ends, so the session keeps running.
+        p.standardInput = Pipe()
+        p.standardOutput = FileHandle.nullDevice
+        p.standardError = FileHandle.nullDevice
+        try p.run()
+        sessions.append(p)
+    }
+
     // MARK: The app
 
     /// Launches the built app on this folder. Onboarding's keys come in the argument domain,
@@ -125,6 +157,9 @@ final class UITestApp {
     /// own preferences file changed meanwhile.
     @discardableResult
     func cleanUp() -> Bool {
+        for p in sessions where p.isRunning { p.terminate() }
+        for p in sessions { p.waitUntilExit() }
+        sessions = []
         terminate()
         if let herdr = Self.herdr {
             _ = Self.run(herdr, ["session", "stop", session])

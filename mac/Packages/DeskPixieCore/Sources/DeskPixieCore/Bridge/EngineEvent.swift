@@ -131,6 +131,8 @@ public enum EngineEvent: Sendable, Equatable {
     case chatReset
     /// Words still coming in the chat thread, never stored; empty text clears (#302).
     case chatLive(ChatLive)
+    /// Who a message in the chat window can go to on its own now, the whole list (#302).
+    case chatRecipients([ChatRecipient])
 
     private struct Kind: Decodable { var kind: String }
 
@@ -155,6 +157,7 @@ public enum EngineEvent: Sendable, Equatable {
     private struct AttachmentsEvent: Decodable { var items: [AttachmentItem] }
     private struct ChatEntryEvent: Decodable { var entry: ChatEntry }
     private struct ChatNeedsEvent: Decodable { var entries: [ChatEntry] }
+    private struct ChatRecipientsEvent: Decodable { var recipients: [ChatRecipient] }
     private struct ClipboardRead: Decodable { var request: String }
 
     /// Decodes one event JSON object; unknown kinds, malformed JSON and events missing a
@@ -205,6 +208,7 @@ public enum EngineEvent: Sendable, Equatable {
         case "chat.badge": return get(ChatBadge.self).map { .chatBadge($0) }
         case "chat.reset": return .chatReset
         case "chat.live": return get(ChatLive.self).map { .chatLive($0) }
+        case "chat.recipients": return get(ChatRecipientsEvent.self).map { .chatRecipients($0.recipients) }
         default: return nil
         }
     }
