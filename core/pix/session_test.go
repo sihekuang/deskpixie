@@ -1311,21 +1311,82 @@ func TestYourOwnEscTypesWhatWaitsAsBefore(t *testing.T) {
 	waitQueue(t, h.s, 0)
 }
 
-func TestAnEscFromPixieLongAgoDoesNotMakeYourInterruptItsStop(t *testing.T) {
-	h := turnHarness(t, "claude", escAgent(2))
+// pixieStopAfter: a working Claude session with a message waiting, Pixie's Esc sent (which
+// the stand-in takes without showing anything), then after (on pix's clock) the interrupt shows.
+func pixieStopAfter(t *testing.T, after time.Duration) *harness {
+	t.Helper()
+	h := turnHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "stty raw -echo; sleep 30"}})
 	t.Cleanup(func() { h.s.runner.Hangup(); h.s.finish() })
 	at := time.Unix(1_000, 0)
 	setClock(h.s, &at)
-	time.Sleep(200 * time.Millisecond)
+	h.s.setStatus("working")
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "check the tests"})
+	waitEvent(t, h.d.events, "waiting", func(m wire.Msg) bool { return m.ID == "1" && m.Status == "waiting" })
 	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "k", Command: "keys", Keys: []string{"Escape"}})
 	waitEvent(t, h.d.events, "keys result", func(m wire.Msg) bool { return m.ID == "k" && m.Err == "" })
 	h.s.mu.Lock()
-	at = at.Add(pixieEscWindow)
+	at = at.Add(after)
 	h.s.mu.Unlock()
-	h.s.Hook("UserPromptSubmit", map[string]any{"prompt": "a long job"})
+	h.s.interrupted() // what the screen marker does
+	return h
+}
+
+func TestPixiesEscStillCountsWhenTheInterruptIsSlowToShow(t *testing.T) {
+	h := pixieStopAfter(t, pixieEscWindow-time.Second) // a slow tool giving way
+	time.Sleep(1200 * time.Millisecond)
+	if h.s.queue.Len() != 1 {
+		t.Fatal("held", h.s.queue.Len())
+	}
+}
+
+func TestAnEscFromPixieLongAgoDoesNotMakeAnInterruptItsStop(t *testing.T) {
+	h := pixieStopAfter(t, pixieEscWindow)
+	waitQueue(t, h.s, 0)
+}
+
+func TestYourKeyAfterPixiesEscMakesTheInterruptYours(t *testing.T) {
+	// Pixie's Esc stopped nothing (the stand-in takes the first key and shows nothing); you
+	// press Esc yourself afterwards.
+	h := turnHarness(t, "claude", escAgent(2))
+	t.Cleanup(func() { h.s.runner.Hangup(); h.s.finish() })
+	time.Sleep(200 * time.Millisecond)
+	h.s.setStatus("working")
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "k", Command: "keys", Keys: []string{"Escape"}})
+	waitEvent(t, h.d.events, "keys result", func(m wire.Msg) bool { return m.ID == "k" && m.Err == "" })
 	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "check the tests"})
 	waitEvent(t, h.d.events, "waiting", func(m wire.Msg) bool { return m.ID == "1" && m.Status == "waiting" })
 	h.stdinW.Write([]byte{0x1b}) // yours
 	waitEvent(t, h.d.events, "idle after the interrupt", func(m wire.Msg) bool { return m.Event == "status" && m.Status == "idle" })
 	waitQueue(t, h.s, 0)
+}
+
+func TestAPromptAfterPixiesEscMakesALaterInterruptNotIts(t *testing.T) {
+	h := turnHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "stty raw -echo; sleep 30"}})
+	t.Cleanup(func() { h.s.runner.Hangup(); h.s.finish() })
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "k", Command: "keys", Keys: []string{"Escape"}})
+	waitEvent(t, h.d.events, "keys result", func(m wire.Msg) bool { return m.ID == "k" && m.Err == "" })
+	h.s.Hook("UserPromptSubmit", map[string]any{"prompt": "a long job"})
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "check the tests"})
+	waitEvent(t, h.d.events, "waiting", func(m wire.Msg) bool { return m.ID == "1" && m.Status == "waiting" })
+	h.s.interrupted()
+	waitQueue(t, h.s, 0)
+}
+
+// The frame Codex draws for an interrupt can still hold the busy footer of the turn it ended.
+// Built by hand from the two strings pix watches for (no recording of a real Codex frame).
+func TestCodexsInterruptFrameWithItsOldBusyFooterKeepsPixiesHold(t *testing.T) {
+	frame := "\033[2K\033[1G• Working (12s • esc to interrupt)\r\n" +
+		"\033[2K■ Conversation interrupted - tell the model what to do differently.\r\n"
+	h := turnHarness(t, "codex", Launch{Path: "/bin/sh", Args: []string{"-c",
+		"stty raw -echo; printf '• Working (1s • esc to interrupt)\\r\\n'; head -c 1 >/dev/null; printf '" + frame + "'; sleep 30"}})
+	t.Cleanup(func() { h.s.runner.Hangup(); h.s.finish() })
+	waitEvent(t, h.d.events, "working", func(m wire.Msg) bool { return m.Event == "status" && m.Status == "working" })
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "check the tests"})
+	waitEvent(t, h.d.events, "waiting", func(m wire.Msg) bool { return m.ID == "1" && m.Status == "waiting" })
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "k", Command: "keys", Keys: []string{"Escape"}})
+	waitEvent(t, h.d.events, "idle after the interrupt", func(m wire.Msg) bool { return m.Event == "status" && m.Status == "idle" })
+	time.Sleep(1200 * time.Millisecond)
+	if h.s.queue.Len() != 1 || h.s.currentStatus() != "idle" {
+		t.Fatalf("held, and idle: queue %d, status %s", h.s.queue.Len(), h.s.currentStatus())
+	}
 }
