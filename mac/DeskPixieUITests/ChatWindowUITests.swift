@@ -27,8 +27,9 @@ final class ChatWindowUITests: XCTestCase {
         pasteboard = nil
     }
 
-    private func start(_ entries: [SeedEntry] = [], live: Bool = false, agent: Bool? = nil) throws -> UITestApp {
-        let h = try UITestApp(live: live, agent: agent)
+    private func start(_ entries: [SeedEntry] = [], live: Bool = false, agent: Bool? = nil,
+                       settings: [String: Any] = [:]) throws -> UITestApp {
+        let h = try UITestApp(live: live, agent: agent, settings: settings)
         harness = h
         if !entries.isEmpty { try h.seed(entries) }
         h.launch()
@@ -337,6 +338,39 @@ final class ChatWindowUITests: XCTestCase {
         h.chatWindow.typeKey("w", modifierFlags: .command)
         XCTAssertTrue(h.chatWindow.waitForGone(timeout: 10), "⌘W didn't close it")
         XCTAssertTrue(waitForLabel(button, "Show chat"), "closing didn't turn the button back")
+    }
+
+    /// Review I1: something that comes while the window is hidden puts the dot on the button,
+    /// and showing the window again lands on it rather than marking it read out of sight first.
+    func testWhatCameWhileHiddenIsUnreadUntilShown() throws {
+        let lines = (0..<40).map { i in
+            SeedEntry(id: "p\(i)", at: SeedEntry.ms(ago: TimeInterval(400 - i)), who: .init(kind: "pixie"),
+                      text: "Line \(i) of a thread taller than the window.")
+        }
+        // Every turn of a session is told (no 30 s floor), and no bubble shows it: only the window
+        // can make it read.
+        let h = try start(lines, agent: true, settings: [
+            "notifications": ["sessionTurns": true, "sessionTurnsMinSeconds": 0, "bubble": ["enabled": false]],
+        ])
+        try h.startSession(description: "alpha")
+        let button = h.app.buttons["pixie.chatButton"]
+        XCTAssertTrue(button.waitForExistence(timeout: 60))
+        button.click()
+        XCTAssertTrue(entry("p39", in: h.chatWindow).waitForExistence(timeout: 15))
+        XCTAssertTrue(waitForLabel(button, "Hide chat"), "all read: \(button.label)")
+        button.click()
+        XCTAssertTrue(h.chatWindow.waitForGone(timeout: 10))
+
+        let words = "Tests passed on the branch, ready for review."
+        try h.endTurn("alpha", reply: words)
+        XCTAssertTrue(waitForLabel(button, "Show chat, 1 unread", timeout: 30), "no dot for it: \(button.label)")
+
+        button.click()
+        XCTAssertTrue(h.chatWindow.waitForExistence(timeout: 15))
+        let landed = h.chatWindow.text(words)
+        XCTAssertTrue(landed.waitForExistence(timeout: 10), "it isn't in the thread")
+        XCTAssertTrue(landed.isHittable, "the window didn't land on it")
+        XCTAssertTrue(waitForLabel(button, "Hide chat", timeout: 15), "read once shown: \(button.label)")
     }
 
     // MARK: The clipboard (drag and drop is left to the hand check: XCUITest can't drive it)

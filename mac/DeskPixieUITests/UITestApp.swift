@@ -41,7 +41,8 @@ final class UITestApp {
 
     /// Skips the test while a copy of the UITest build it didn't launch is running (launching
     /// here would end it). The user's own DeskPixie, under its real bundle ID, doesn't count.
-    init(live: Bool = false, agent: Bool? = nil, realHome: Bool? = nil) throws {
+    /// `settings`: top-level settings.json values this test sets on top of the ones every test has.
+    init(live: Bool = false, agent: Bool? = nil, realHome: Bool? = nil, settings extra: [String: Any] = [:]) throws {
         if !NSRunningApplication.runningApplications(withBundleIdentifier: Self.bundleID).isEmpty {
             throw XCTSkip("Quit DeskPixie UITest to run the UI tests")
         }
@@ -58,7 +59,7 @@ final class UITestApp {
         try fm.createDirectory(at: support.appendingPathComponent("chat"), withIntermediateDirectories: true)
         try fm.createDirectory(at: home, withIntermediateDirectories: true)
         try fm.createDirectory(at: root.appendingPathComponent("projects"), withIntermediateDirectories: true)
-        try writeSettings()
+        try writeSettings(extra)
     }
 
     // MARK: The data folder
@@ -66,8 +67,8 @@ final class UITestApp {
     /// settings.json as the core writes it, with this run's own session and port. Absent keys
     /// get the core's defaults (`settings.ParseConfig`). A file that is already there is what
     /// marks onboarding done for a data folder (`OnboardingGate.shouldOpenAtLaunch`).
-    private func writeSettings() throws {
-        let settings: [String: Any] = [
+    private func writeSettings(_ extra: [String: Any]) throws {
+        var settings: [String: Any] = [
             "chatKeepDays": 7,
             // Not the default ctrl+alt+Space, which the user's DeskPixie holds; one that can't be
             // bound only shows a line in the menu.
@@ -83,6 +84,7 @@ final class UITestApp {
                 "projectsRoot": root.appendingPathComponent("projects").path,
             ],
         ]
+        settings.merge(extra) { _, new in new }
         let data = try JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys])
         try data.write(to: support.appendingPathComponent("settings.json"))
     }
@@ -105,30 +107,55 @@ final class UITestApp {
 
     /// A session of yours, as `pix --description <description> claude` in a terminal would start
     /// one: the app's own pix, in a pty (`script`), on this run's data folder and home, with a
-    /// stand-in claude that only waits for its input to end. Nothing reaches the user's own pix:
+    /// stand-in claude that does nothing but end the turns `endTurn` gives it. Nothing reaches the user's own pix:
     /// no PIX_* from this process, and the socket is this data folder's.
     func startSession(description: String) throws {
         let bin = root.appendingPathComponent("bin", isDirectory: true)
         let claude = bin.appendingPathComponent("claude")
         let fm = FileManager.default
+        let pix = Self.builtApp.appendingPathComponent("Contents/Helpers/pix").path
         if !fm.fileExists(atPath: claude.path) {
             try fm.createDirectory(at: bin, withIntermediateDirectories: true)
-            try "#!/bin/sh\nexec cat > /dev/null\n".write(to: claude, atomically: true, encoding: .utf8)
+            // A turn ends as claude's Stop hook ends one: each JSON file put in $TURNS goes to
+            // `pix hook Stop` (what pix's settings tell claude to run). It stops with its pix.
+            let script = """
+            #!/bin/sh
+            while kill -0 $PPID 2>/dev/null; do
+              for f in "$TURNS"/*.json; do
+                [ -e "$f" ] || continue
+                "\(pix)" hook Stop < "$f"
+                rm -f "$f"
+              done
+              sleep 0.3
+            done
+            """
+            try script.write(to: claude, atomically: true, encoding: .utf8)
             try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: claude.path)
         }
-        let pix = Self.builtApp.appendingPathComponent("Contents/Helpers/pix").path
+        let turns = root.appendingPathComponent("turns-\(description)", isDirectory: true)
+        try fm.createDirectory(at: turns, withIntermediateDirectories: true)
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/script")
         p.arguments = ["-q", "/dev/null", pix, "--description", description, "claude"]
         p.currentDirectoryURL = root.appendingPathComponent("projects")
         p.environment = ["HOME": home.path, "DESKPIXIE_SUPPORT_DIR": support.path, "TERM": "xterm-256color",
-                         "PATH": "\(bin.path):/usr/bin:/bin"]
+                         "PATH": "\(bin.path):/usr/bin:/bin", "TURNS": turns.path]
         // A pipe kept open: script's input never ends, so the session keeps running.
         p.standardInput = Pipe()
         p.standardOutput = FileHandle.nullDevice
         p.standardError = FileHandle.nullDevice
         try p.run()
         sessions.append(p)
+    }
+
+    /// The session `description` finishes a turn with this reply, as claude's Stop hook would
+    /// report it to pix.
+    func endTurn(_ description: String, reply: String) throws {
+        let turns = root.appendingPathComponent("turns-\(description)", isDirectory: true)
+        let data = try JSONSerialization.data(withJSONObject: ["hook_event_name": "Stop", "last_assistant_message": reply])
+        let tmp = turns.appendingPathComponent(".turn")
+        try data.write(to: tmp)
+        try FileManager.default.moveItem(at: tmp, to: turns.appendingPathComponent("\(UUID().uuidString).json"))
     }
 
     // MARK: The app
