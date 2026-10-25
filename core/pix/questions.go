@@ -464,17 +464,19 @@ func shows(screen, marker, detail string) bool {
 	return strings.Contains(screen, noSpace(marker)) && strings.Contains(screen, noSpace(detail))
 }
 
-// noteScreen keeps what vt shows and closes the typed answer's done once its prompt is no
-// longer on it (PTY reader goroutine only).
+// noteScreen keeps what vt shows and the menu on it (#306), and closes the typed answer's done
+// once its prompt is no longer on it (PTY reader goroutine only).
 func (s *Session) noteScreen(vt *screen) {
-	text := noSpace(strings.Join(vt.Lines(), ""))
+	lines := vt.Lines()
+	text := noSpace(strings.Join(lines, ""))
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.screen = text
 	if l := s.landing; l != nil && !shows(text, l.marker, l.detail) {
 		s.landing = nil
 		close(l.done)
 	}
+	s.mu.Unlock()
+	s.noteMenu(lines)
 }
 
 func (s *Session) dropLanding(l *landing) {

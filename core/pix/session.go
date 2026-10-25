@@ -92,6 +92,9 @@ type Session struct {
 	screen    string     // what the agent's screen shows now, without spaces (#268)
 	qseq      int
 	hold      time.Duration // how long a question waits in its hook for Pixie (0: not held, #268)
+	menu      string        // the menu on screen in place of the agent's prompt ("": none, #306)
+	menuAt    time.Time     // when a menu last showed, or the agent started
+	settle    time.Duration // how long after menuAt it waits (menuSettle)
 
 	turnStart     time.Time        // when this turn went working (zero: none seen)
 	turnFromPixie bool             // a prompt of this turn was Pixie's
@@ -211,7 +214,7 @@ func (s *Session) keylog(format string, args ...any) {
 }
 
 func newSession(o sessionOpts) *Session {
-	s := &Session{o: o, status: "idle", afterStop: true, userDesc: o.description, now: time.Now}
+	s := &Session{o: o, status: "idle", afterStop: true, userDesc: o.description, now: time.Now, settle: menuSettle}
 	s.runner = &Runner{Launch: o.agent, Stdin: o.stdin, Stdout: o.stdout,
 		OnInput: func(b []byte) {
 			s.gate.Keys(b, time.Now())
@@ -440,7 +443,7 @@ func (s *Session) runCommand(m wire.Msg) wire.Msg {
 			return wire.Msg{Err: err.Error()}
 		}
 		s.title()
-		// Typed at once, or waiting and why (#183).
+		// Typed at once, or waiting and why (#183, #306).
 		if s.flushNow() {
 			s.keylog("prompt typed")
 			return wire.Msg{Status: "typed"}
@@ -453,6 +456,9 @@ func (s *Session) runCommand(m wire.Msg) wire.Msg {
 		// working agent gets it with its next tool; a question on screen is never typed into.
 		if st := s.currentStatus(); st != "idle" && s.queue.Len() > 0 {
 			return wire.Msg{Status: "waiting", Reason: st}
+		}
+		if m := s.menuHold(); m != "" && s.queue.Len() > 0 { // nor a menu only you should answer (#306)
+			return wire.Msg{Status: "waiting", Reason: m}
 		}
 		s.flushMu.Lock()
 		msgs := s.queue.Drain()
@@ -493,11 +499,12 @@ func (s *Session) runCommand(m wire.Msg) wire.Msg {
 	return wire.Msg{Err: "unknown command " + m.Command}
 }
 
-// flushNow types the queued messages if the agent is idle and you aren't typing; true if it did.
+// flushNow types the queued messages if the agent is idle at its prompt (no menu on screen,
+// #306) and you aren't typing; true if it did.
 func (s *Session) flushNow() bool {
 	s.flushMu.Lock()
 	defer s.flushMu.Unlock()
-	if s.queue.Len() == 0 || s.currentStatus() != "idle" || !s.gate.Clear(time.Now()) {
+	if s.queue.Len() == 0 || s.currentStatus() != "idle" || s.menuHold() != "" || !s.gate.Clear(time.Now()) {
 		return false
 	}
 	// One prompt, one wait for the agent to take it (#305): a wait per message could outlast the
@@ -509,12 +516,19 @@ func (s *Session) flushNow() bool {
 	return true
 }
 
-// waitReason is why a message isn't typed now: the agent is "working" (it gets it with its
-// next tool, or when it stops), "blocked" on a question, or you're "typing" in it.
+// waitReason is why a message isn't typed now: a menu on screen only you should answer
+// ("update", "trust", "hooks", "menu", #306), the agent is "working" (it gets it with its next
+// tool, or when it stops) or "blocked" on a question, it is "starting" (a menu may still show),
+// or you're "typing" in it.
 func (s *Session) waitReason() string {
-	switch st := s.currentStatus(); st {
-	case "working", "blocked":
+	m := s.menuHold()
+	switch st := s.currentStatus(); {
+	case m != "" && m != "starting":
+		return m
+	case st == "working" || st == "blocked":
 		return st
+	case m != "":
+		return m
 	}
 	return "typing"
 }
@@ -722,6 +736,9 @@ func (s *Session) start(ctx context.Context) error {
 		},
 	}
 	s.o.log.Printf("start in %s (%s)", cwd, strings.TrimSpace(s.o.where+" "+s.o.app))
+	s.mu.Lock()
+	s.menuAt = s.now() // a startup menu may show in a moment (#306)
+	s.mu.Unlock()
 	if err := s.runner.Start(); err != nil {
 		s.o.log.Printf("couldn't start the agent: %v", err)
 		return err
