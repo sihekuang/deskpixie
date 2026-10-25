@@ -1733,6 +1733,7 @@ func sessionSentText(description, waiting string) (text, brief, title string) {
 			"update":   "it's waiting for you to answer its update question, and gets it once you have",
 			"trust":    "it's waiting for you to say whether to trust its folder, and gets it once you have",
 			"hooks":    "it's waiting for you to say whether to trust its hooks, and gets it once you have",
+			"agents":   "it's showing its list of agents, and gets it once you're back at its prompt",
 			"menu":     "it's showing a menu, and gets it once you close it",
 			"starting": "it's still starting, and gets it in a moment",
 		}[waiting]
@@ -1747,6 +1748,7 @@ func sessionSentText(description, waiting string) (text, brief, title string) {
 			"update":   "Message held: it's asking you about an update.",
 			"trust":    "Message held: it's asking you to trust its folder.",
 			"hooks":    "Message held: it's asking you to trust its hooks.",
+			"agents":   "Message held: it's showing its list of agents.",
 			"menu":     "Message held: it's showing a menu.",
 			"starting": "Message held: it's starting.",
 		}[waiting]

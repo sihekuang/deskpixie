@@ -7,16 +7,30 @@ import (
 )
 
 // Menus an agent shows in place of its prompt (#306): Codex's update, folder and hooks
-// questions at startup, Claude Code's folder trust. Enter there picks the highlighted option
-// (pix's Enter once ran Codex's update), and only you should answer them: pix types nothing
-// while one shows, and says which one it waits for.
+// questions at startup and its list of agents, Claude Code's folder trust. Enter there picks
+// the highlighted option (pix's Enter once ran Codex's update), and only you should answer
+// them: pix types nothing while one shows, and says which one it waits for.
 
 // codexMenuFoot is the key line under a Codex picker ("enter continue · esc skip"). It is the
 // last line on the screen; at its prompt Codex shows its own footer there instead.
 var codexMenuFoot = regexp.MustCompile(`^enter \S.* · esc \S+$`)
 
+// claudeMenuFoot is the last line of Claude Code's trust dialog; claudeMenuRows how far up from
+// it the dialog's question and option are.
+const (
+	claudeMenuFoot = "Enter to confirm · Esc to cancel"
+	claudeMenuRows = 15
+)
+
+// codexPromptMarks show in Codex's empty prompt and under it: pix knows it has drawn its prompt.
+var codexPromptMarks = []string{noSpace("Ask Codex to do anything"), noSpace("? for shortcuts")}
+
+// startupMenus are the menus Codex or Claude Code show before you reach the prompt: your keys
+// there answered them, not a draft.
+var startupMenus = map[string]bool{"update": true, "trust": true, "hooks": true, "agents": true}
+
 // menuOn is the menu lines show in place of tool's prompt: "update", "trust" (the folder),
-// "hooks", "menu" (another one), or "" for none.
+// "hooks", "agents" (Codex's Agent command center), "menu" (another one), or "" for none.
 func menuOn(tool string, lines []string) string {
 	var rows []string
 	for _, l := range lines {
@@ -24,9 +38,14 @@ func menuOn(tool string, lines []string) string {
 			rows = append(rows, t)
 		}
 	}
+	if len(rows) == 0 {
+		return ""
+	}
+	last := rows[len(rows)-1]
 	switch {
-	case len(rows) == 0:
-	case tool == "codex" && codexMenuFoot.MatchString(rows[len(rows)-1]):
+	case tool == "codex" && strings.Contains(last, "esc back") && strings.Contains(last, "enter open"):
+		return "agents"
+	case tool == "codex" && codexMenuFoot.MatchString(last):
 		for _, t := range rows {
 			switch {
 			case strings.HasPrefix(t, "Update available · "):
@@ -38,12 +57,16 @@ func menuOn(tool string, lines []string) string {
 			}
 		}
 		return "menu"
-	case tool == "claude":
-		// Its dialog's question and its first option as an option, not quoted in a transcript.
+	case tool == "claude" && last == claudeMenuFoot:
+		// Its question and its option, right above its footer.
 		ask, yes := false, false
-		for _, t := range rows {
+		for _, t := range rows[max(0, len(rows)-claudeMenuRows):] {
 			ask = ask || strings.HasPrefix(t, "Quick safety check:")
-			yes = yes || strings.HasPrefix(strings.TrimSpace(strings.TrimPrefix(t, "❯")), "1. Yes, I trust this folder")
+			opt := strings.TrimSpace(strings.TrimPrefix(t, "❯"))
+			if i := strings.Index(opt, ". "); i > 0 && i <= 2 {
+				opt = opt[i+2:] // "1. " when it numbers them
+			}
+			yes = yes || opt == "Yes, I trust this folder"
 		}
 		if ask && yes {
 			return "trust"
@@ -52,10 +75,15 @@ func menuOn(tool string, lines []string) string {
 	return ""
 }
 
-// menuSettle is how long the screen must show no menu, after the agent starts or a menu
-// leaves, before pix types: Codex draws its prompt first and a startup menu over it a moment
-// later (0.2-1 s seen), and one menu may follow another. A session keeps the one it started with.
+// menuSettle is how long Codex's screen must show no menu, after it first draws its prompt or
+// a menu leaves, before pix types: Codex draws its prompt first and a startup menu over it a
+// moment later (0.2-1 s seen), and one menu may follow another. Claude Code draws its trust
+// dialog before anything else, so it gets no wait. A session keeps the one it started with.
 var menuSettle = 3 * time.Second
+
+// freshWait: how long after a resize (a fresh screen, drawn again from nothing) a menu that
+// seems gone is still taken as shown.
+const freshWait = time.Second
 
 // menuHold is why pix can't type now for the agent's menus: the menu on screen, "starting"
 // while one may still be drawn, or "" when it can.
@@ -65,7 +93,7 @@ func (s *Session) menuHold() string {
 	switch {
 	case s.menu != "":
 		return s.menu
-	case s.now().Sub(s.menuAt) < s.settle:
+	case s.o.tool == "codex" && s.now().Sub(s.menuAt) < s.settle:
 		return "starting"
 	}
 	return ""
@@ -78,33 +106,50 @@ func (s *Session) menuShown() string {
 	return s.menu
 }
 
-// menuUp: a menu showed between pix's paste and its Enter, so the message wasn't sent.
-type menuUp struct{ menu string }
+// menuUp: a menu showed before pix's Enter, so the message wasn't sent. pasted: its text was
+// typed (behind the menu), not only held back.
+type menuUp struct {
+	menu   string
+	pasted bool
+}
 
 func (m menuUp) Error() string { return "a menu showed before Enter: " + m.menu }
 
 // menuWaits says, for the coordinator to pass on, which menu tool waits on you for.
 func menuWaits(tool, menu string) string {
+	name := map[string]string{"codex": "Codex", "claude": "Claude Code"}[tool]
 	switch menu {
 	case "update":
-		return tool + " is waiting for you to answer its update question."
+		return name + " is waiting for you to answer its update question."
 	case "trust":
-		return tool + " is waiting for you to say whether to trust its folder."
+		return name + " is waiting for you to say whether to trust its folder."
 	case "hooks":
-		return tool + " is waiting for you to say whether to trust its hooks."
+		return name + " is waiting for you to say whether to trust its hooks."
+	case "agents":
+		return name + " is showing its list of agents; only you should leave it."
 	}
-	return tool + " is showing a menu only you should answer."
+	return name + " is showing a menu only you should answer."
 }
 
-// noteMenu keeps the menu lines show (PTY reader goroutine only). Keys you pressed while it
-// showed answered it, so once it leaves nothing of yours is left in the prompt.
-func (s *Session) noteMenu(lines []string) {
+// noteMenu keeps the menu lines show (PTY reader goroutine only). Keys you pressed while a
+// startup menu showed answered it, so once it leaves nothing of yours is left in the prompt.
+// Until Codex first draws its prompt, its startup menus may still come.
+func (s *Session) noteMenu(lines []string, text string) {
 	menu := menuOn(s.o.tool, lines)
 	s.mu.Lock()
 	was := s.menu
+	now := s.now()
+	if menu == "" && was != "" && now.Sub(s.freshAt) < freshWait {
+		menu = was // a resize: the menu is drawn again in a moment
+	}
 	s.menu = menu
-	if menu != "" {
-		s.menuAt = s.now()
+	if menu != "" || !s.promptSeen {
+		s.menuAt = now
+	}
+	if s.o.tool == "codex" && menu == "" && !s.promptSeen {
+		for _, p := range codexPromptMarks {
+			s.promptSeen = s.promptSeen || strings.Contains(text, p)
+		}
 	}
 	s.mu.Unlock()
 	if menu == was {
@@ -112,8 +157,116 @@ func (s *Session) noteMenu(lines []string) {
 	}
 	if menu == "" {
 		s.o.log.Printf("menu %s answered", was)
-		s.gate.Sent()
+		if startupMenus[was] {
+			s.gate.Sent()
+		}
 		return
 	}
 	s.o.log.Printf("menu %s on screen: holding messages", menu)
 }
+
+// unsent is a message a menu kept from being sent (#306): its text, typed behind the menu (""
+// when the menu showed before it was), the messages in it, your draft pix set aside for it
+// (typed back once it's sent), and the turns started when it was typed.
+type unsent struct {
+	text, draft string
+	msgs        []string
+	turns       int
+}
+
+// holdBack keeps msgs that a menu stopped (err, a menuUp): queued again if nothing was typed
+// and no draft of yours was set aside, else unsent until the menu is answered. false for
+// another error.
+func (s *Session) holdBack(err error, msgs []string, text, draft string) bool {
+	m, ok := err.(menuUp)
+	if !ok {
+		return false
+	}
+	if !m.pasted && draft == "" {
+		s.queue.Requeue(msgs)
+		return true
+	}
+	if !m.pasted {
+		text = ""
+	}
+	s.mu.Lock()
+	s.unsent = &unsent{text: text, draft: draft, msgs: msgs, turns: s.turns}
+	s.mu.Unlock()
+	return true
+}
+
+func (s *Session) hasUnsent() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.unsent != nil
+}
+
+// finishUnsent sends the unsent message once its menu is gone, the agent idle and you aren't
+// typing: Enter if its prompt still holds it, then your draft back. If the prompt doesn't (you
+// cleared it), it is queued again; if a turn started, you sent it. sent: it reached the agent.
+// Under flushMu.
+func (s *Session) finishUnsent() (sent bool) {
+	s.mu.Lock()
+	u := s.unsent
+	ranTurn := u != nil && s.turns != u.turns
+	s.mu.Unlock()
+	switch {
+	case u == nil:
+		return false
+	case ranTurn: // you pressed Enter on it yourself
+		s.dropUnsent()
+		s.o.log.Printf("the message a menu stopped was sent from the terminal")
+		return true
+	case s.currentStatus() != "idle" || s.menuHold() != "" || !s.gate.Clear(time.Now()):
+		return false
+	}
+	if u.text != "" && s.promptHolds(u.text) {
+		entered, err := s.runner.EnterIf(func() bool { return s.menuShown() == "" })
+		if err != nil || !entered {
+			return false
+		}
+		s.dropUnsent()
+		s.o.log.Printf("pressed Enter on the message a menu stopped")
+		s.restoreDraft(u.draft)
+		return true
+	}
+	s.dropUnsent()
+	if u.text != "" {
+		s.o.log.Printf("the message a menu stopped is no longer in the prompt: typing it again")
+	}
+	s.queue.Requeue(u.msgs)
+	s.restoreDraft(u.draft)
+	return false
+}
+
+func (s *Session) dropUnsent() {
+	s.mu.Lock()
+	s.unsent = nil
+	s.mu.Unlock()
+}
+
+// promptHolds: the agent's prompt shows text, or a long paste it shows as a marker.
+func (s *Session) promptHolds(text string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, m := range []string{noSpace(text), noSpace("[Pasted Content"), noSpace("[Pasted text")} {
+		if m != "" && strings.Contains(s.screen, m) {
+			return true
+		}
+	}
+	return false
+}
+
+// restoreDraft types your draft back after pix set it aside ("": none).
+func (s *Session) restoreDraft(draft string) {
+	if draft == "" {
+		return
+	}
+	time.Sleep(forceSettle)
+	s.gate.Restore(draft)
+	s.runner.WriteToAgent(Paste(draft))
+}
+
+// holdLogEvery: how often pix.log says how long a message has waited, so a menu misread as
+// shown stands out. A session keeps the one it started with.
+var holdLogEvery = 30 * time.Second

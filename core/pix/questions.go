@@ -476,7 +476,7 @@ func (s *Session) noteScreen(vt *screen) {
 		close(l.done)
 	}
 	s.mu.Unlock()
-	s.noteMenu(lines)
+	s.noteMenu(lines, text)
 }
 
 func (s *Session) dropLanding(l *landing) {
@@ -593,6 +593,11 @@ func onlyReports(b []byte) bool { return len(withoutReports(b)) == 0 }
 // then draws it all again). PTY reader goroutine only.
 func (s *Session) screenFor(vt *screen) *screen {
 	if rows, cols := s.runner.Size(); vt == nil || vt.rows != rows || vt.cols != cols {
+		if vt != nil {
+			s.mu.Lock()
+			s.freshAt = s.now() // a menu shown before is drawn again (#306)
+			s.mu.Unlock()
+		}
 		return newScreen(rows, cols)
 	}
 	return vt

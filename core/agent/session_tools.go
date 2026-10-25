@@ -104,8 +104,8 @@ type Describer interface {
 // Delivery is what became of a message to your session (#183): Status "typed" (it went in at
 // once) or "waiting" (pix holds it), with Reason why it waits: "working", "blocked" (on a
 // question) or "typing" (you are); or a menu on its screen only you should answer (#306):
-// "update", "trust" (the folder), "hooks", "menu" (another one), and "starting" while one may
-// still show. Empty from a pix too old to say.
+// "update", "trust" (the folder), "hooks", "agents" (Codex's list of agents), "menu" (another
+// one), and "starting" while one may still show. Empty from a pix too old to say.
 type Delivery struct {
 	Status string
 	Reason string
@@ -155,6 +155,8 @@ func WaitingWhy(reason string) string {
 		return "The session is waiting for the person to say whether to trust its folder; it gets the message once they have. Only the person should answer it."
 	case "hooks":
 		return "The session is waiting for the person to say whether to trust its hooks; it gets the message once they have. Only the person should answer it."
+	case "agents":
+		return "The session is showing its list of agents (Codex's Agent command center); it gets the message once the person is back at its prompt. Only the person should leave it."
 	case "menu":
 		return "The session is showing a menu; it gets the message once the person closes it."
 	case "starting":
