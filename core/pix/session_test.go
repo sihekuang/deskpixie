@@ -1243,3 +1243,89 @@ func eventually(t *testing.T, what string, f func() bool) {
 	}
 	t.Fatal("timed out waiting for " + what)
 }
+
+// #309: Pixie's stop button. A message waiting for a working session is typed when its turn
+// ends; after Pixie's stop it is held instead, still counted, until you type your next prompt
+// there or Pixie sends a new message. Your own Esc is any other end of a turn.
+
+// escAgent is a Claude stand-in that shows Claude's interrupt once it has read n keys (Esc).
+func escAgent(n int) Launch {
+	return Launch{Path: "/bin/sh", Args: []string{"-c", "stty raw -echo; " + strings.Repeat("head -c 1 >/dev/null; ", n) +
+		"printf '\\033[1m⎿  Interrupted · What should Claude do instead?\\033[0m\\r\\n'; sleep 30"}}
+}
+
+// stoppedWithAWaitingMessage is a working Claude session with one message waiting for it,
+// whose turn an Esc then interrupted: Pixie's (pixie) or yours.
+func stoppedWithAWaitingMessage(t *testing.T, pixie bool) *harness {
+	t.Helper()
+	h := turnHarness(t, "claude", escAgent(1))
+	t.Cleanup(func() { h.s.runner.Hangup(); h.s.finish() })
+	time.Sleep(200 * time.Millisecond) // its stty
+	h.s.Hook("UserPromptSubmit", map[string]any{"prompt": "a long job"})
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "check the tests"})
+	waitEvent(t, h.d.events, "waiting", func(m wire.Msg) bool { return m.ID == "1" && m.Status == "waiting" })
+	if pixie {
+		wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "k", Command: "keys", Keys: []string{"Escape"}})
+	} else {
+		h.stdinW.Write([]byte{0x1b})
+	}
+	waitEvent(t, h.d.events, "idle after the interrupt", func(m wire.Msg) bool { return m.Event == "status" && m.Status == "idle" })
+	return h
+}
+
+func waitQueue(t *testing.T, s *Session, want int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for s.queue.Len() != want {
+		if time.Now().After(deadline) {
+			t.Fatalf("queue %d, want %d", s.queue.Len(), want)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestPixiesStopHoldsWhatWaitsUntilYourNextPrompt(t *testing.T) {
+	h := stoppedWithAWaitingMessage(t, true)
+	time.Sleep(1200 * time.Millisecond) // past two of flushSoon's checks
+	if h.s.queue.Len() != 1 || !strings.HasPrefix(h.s.titleText(), "📨 1 ") {
+		t.Fatalf("held and still counted: queue %d, title %q", h.s.queue.Len(), h.s.titleText())
+	}
+	h.s.Hook("UserPromptSubmit", map[string]any{"prompt": "now do this instead"})
+	h.s.Hook("Stop", map[string]any{"last_assistant_message": "Done."})
+	waitQueue(t, h.s, 0)
+}
+
+func TestPixiesStopHoldsWhatWaitsUntilANewMessage(t *testing.T) {
+	h := stoppedWithAWaitingMessage(t, true)
+	time.Sleep(700 * time.Millisecond)
+	if h.s.queue.Len() != 1 {
+		t.Fatal("held", h.s.queue.Len())
+	}
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "2", Command: "prompt", Text: "and this"})
+	waitEvent(t, h.d.events, "typed", func(m wire.Msg) bool { return m.ID == "2" && m.Status == "typed" })
+	waitQueue(t, h.s, 0)
+}
+
+func TestYourOwnEscTypesWhatWaitsAsBefore(t *testing.T) {
+	h := stoppedWithAWaitingMessage(t, false)
+	waitQueue(t, h.s, 0)
+}
+
+func TestAnEscFromPixieLongAgoDoesNotMakeYourInterruptItsStop(t *testing.T) {
+	h := turnHarness(t, "claude", escAgent(2))
+	t.Cleanup(func() { h.s.runner.Hangup(); h.s.finish() })
+	at := time.Unix(1_000, 0)
+	setClock(h.s, &at)
+	time.Sleep(200 * time.Millisecond)
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "k", Command: "keys", Keys: []string{"Escape"}})
+	waitEvent(t, h.d.events, "keys result", func(m wire.Msg) bool { return m.ID == "k" && m.Err == "" })
+	h.s.mu.Lock()
+	at = at.Add(pixieEscWindow)
+	h.s.mu.Unlock()
+	h.s.Hook("UserPromptSubmit", map[string]any{"prompt": "a long job"})
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "check the tests"})
+	waitEvent(t, h.d.events, "waiting", func(m wire.Msg) bool { return m.ID == "1" && m.Status == "waiting" })
+	h.stdinW.Write([]byte{0x1b}) // yours
+	waitEvent(t, h.d.events, "idle after the interrupt", func(m wire.Msg) bool { return m.Event == "status" && m.Status == "idle" })
+	waitQueue(t, h.s, 0)
+}

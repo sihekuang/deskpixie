@@ -93,6 +93,12 @@ type Session struct {
 	qseq      int
 	hold      time.Duration // how long a question waits in its hook for Pixie (0: not held, #268)
 
+	// escAt: when Pixie last pressed Esc (its stop button, #309); an interrupt soon after is its.
+	escAt time.Time
+	// stopped: Pixie's stop ended the turn: what waits stays queued (still counted) until you
+	// type your next prompt here or Pixie sends a new message (#309).
+	stopped bool
+
 	turnStart     time.Time        // when this turn went working (zero: none seen)
 	turnFromPixie bool             // a prompt of this turn was Pixie's
 	now           func() time.Time // the clock (tests replace it, under mu)
@@ -212,6 +218,7 @@ func newSession(o sessionOpts) *Session {
 				s.interrupted()
 			}
 			if watch.saw(out, codexBusy) && s.currentStatus() != "working" {
+				s.release() // Codex has no prompt hook: a new turn is one you typed
 				s.setStatus("working")
 			}
 			for _, msg := range notes.messages(out) {
@@ -303,6 +310,7 @@ func (s *Session) Hook(event string, p map[string]any) string {
 		pixie := s.fromPixie(prompt)
 		if !pixie {
 			s.gate.Sent() // your prompt went in (#185)
+			s.release()   // it gets what waits with its next tool, or when it stops
 		}
 		s.mu.Lock()
 		s.turnFromPixie = s.turnFromPixie || pixie
@@ -333,6 +341,7 @@ func (s *Session) Hook(event string, p map[string]any) string {
 			}
 		}
 		s.endTurn(p, pixie)
+		s.release()      // a turn ran after a stop: one you started
 		s.gate.Started() // a turn ran, so your line was sent (a fast Codex turn shows no busy marker)
 		s.mu.Lock()
 		s.afterStop = true
@@ -417,6 +426,7 @@ func (s *Session) runCommand(m wire.Msg) wire.Msg {
 		if err := s.queue.Push(text); err != nil {
 			return wire.Msg{Err: err.Error()}
 		}
+		s.release() // a new message: what waited after a stop goes with it
 		s.title()
 		// Typed at once, or waiting and why (#183).
 		if s.flushNow() {
@@ -432,6 +442,7 @@ func (s *Session) runCommand(m wire.Msg) wire.Msg {
 		if st := s.currentStatus(); st != "idle" && s.queue.Len() > 0 {
 			return wire.Msg{Status: "waiting", Reason: st}
 		}
+		s.release()
 		s.flushMu.Lock()
 		msgs := s.queue.Drain()
 		if err := s.forceIn(msgs); err != nil {
@@ -452,6 +463,9 @@ func (s *Session) runCommand(m wire.Msg) wire.Msg {
 			switch k {
 			case "Escape":
 				b = []byte{0x1b}
+				s.mu.Lock()
+				s.escAt = s.now()
+				s.mu.Unlock()
 			case "Enter":
 				b = []byte{'\r'}
 			default:
@@ -475,7 +489,7 @@ func (s *Session) runCommand(m wire.Msg) wire.Msg {
 func (s *Session) flushNow() bool {
 	s.flushMu.Lock()
 	defer s.flushMu.Unlock()
-	if s.queue.Len() == 0 || s.currentStatus() != "idle" || !s.gate.Clear(time.Now()) {
+	if s.queue.Len() == 0 || s.currentStatus() != "idle" || s.held() || !s.gate.Clear(time.Now()) {
 		return false
 	}
 	for _, m := range s.queue.Drain() {
@@ -514,7 +528,7 @@ func (s *Session) flushSoon() {
 	s.mu.Unlock()
 	go func() {
 		defer func() { s.mu.Lock(); s.flushing = false; s.mu.Unlock() }()
-		for s.queue.Len() > 0 {
+		for s.queue.Len() > 0 && !s.held() {
 			if s.flushNow() {
 				s.delivered()
 				return
@@ -524,14 +538,38 @@ func (s *Session) flushSoon() {
 	}()
 }
 
+// pixieEscWindow: an interrupt this soon after Pixie's Esc is Pixie's stop, not yours.
+const pixieEscWindow = 5 * time.Second
+
 // interrupted: Claude shows an interrupt (Esc) and fires no Stop: the turn is over, unannounced.
+// After your own Esc what waits is typed, as after any turn. After Pixie's stop (#309) it is
+// held: a stop means stop, so it waits for your next prompt or a new message from Pixie.
 func (s *Session) interrupted() {
 	s.mu.Lock()
 	s.afterStop = true
 	s.turnStart, s.turnFromPixie = time.Time{}, false
+	pixie := !s.escAt.IsZero() && s.now().Sub(s.escAt) < pixieEscWindow
+	s.escAt = time.Time{}
+	if pixie {
+		s.stopped = true
+	}
 	s.mu.Unlock()
 	s.setStatus("idle")
 	s.flushSoon()
+}
+
+// held: Pixie's stop holds what waits (see interrupted).
+func (s *Session) held() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.stopped
+}
+
+// release ends the hold after Pixie's stop, if there is one.
+func (s *Session) release() {
+	s.mu.Lock()
+	s.stopped = false
+	s.mu.Unlock()
 }
 
 // MaxTurnReplyBytes caps the reply a turn event carries (#114).
