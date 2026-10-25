@@ -34,7 +34,7 @@ public protocol SettingsClient {
 
 /// `SettingsClient` over the Go core's `dp_call`.
 public struct EngineSettingsClient: SettingsClient, Sendable {
-    private let engine: CoreEngine
+    let engine: CoreEngine
 
     public init(engine: CoreEngine) { self.engine = engine }
 

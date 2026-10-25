@@ -3,17 +3,16 @@
 //	pix [--description "…"] claude|codex [args…]
 //	pix hook <event> [payload]   (called by the agent's per-run hooks)
 //	pix mcp                      (the agent's per-run MCP server: set_description)
-//	pix version
+//	pix version                  (pix 0.19.0 (abc1234): buildinfo, #295)
 package main
 
 import (
 	"fmt"
 	"os"
 
+	"github.com/sihekuang/deskpixie/core/buildinfo"
 	"github.com/sihekuang/deskpixie/core/pix"
 )
-
-var version = "dev" // -ldflags "-X main.version=…"
 
 func main() {
 	home, _ := os.UserHomeDir()
@@ -35,7 +34,7 @@ func main() {
 			}
 			os.Exit(0)
 		case "version", "--version":
-			fmt.Println("pix", version)
+			fmt.Println("pix", buildinfo.String())
 			os.Exit(0)
 		}
 	}

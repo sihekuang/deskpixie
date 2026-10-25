@@ -22,7 +22,8 @@ struct DeskPixieApp: App {
 
         // Tray Settings… (⌘,) opens this scene through `openSettings()` (MenuBarMenu).
         Settings {
-            SettingsWindowView(model: SettingsHub.model(for: appDelegate.composition))
+            SettingsWindowView(model: SettingsHub.model(for: appDelegate.composition),
+                               about: SettingsHub.aboutModel(for: appDelegate.composition))
         }
     }
 }

@@ -50,10 +50,12 @@ const (
 	SectionWorkers       Section = "Workers"
 	SectionNotifications Section = "Notifications"
 	SectionAdvanced      Section = "Advanced"
+	// SectionAbout has no settings: which versions are running (#295).
+	SectionAbout Section = "About"
 )
 
 // Sections are the pages, in sidebar order.
-var Sections = []Section{SectionGeneral, SectionVoice, SectionCoordinator, SectionSessions, SectionWorkers, SectionNotifications, SectionAdvanced}
+var Sections = []Section{SectionGeneral, SectionVoice, SectionCoordinator, SectionSessions, SectionWorkers, SectionNotifications, SectionAdvanced, SectionAbout}
 
 // MaxPageRows is the most rows a page shows (#290): settings guidelines put the limit at 10–15.
 const MaxPageRows = 15

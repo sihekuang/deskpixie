@@ -13,9 +13,13 @@ DFN3_MODEL := $(LIBDF_DIR)/models/DeepFilterNet3.tar.gz
 # audio/denoise/libdf/README.md to build it from source instead).
 LIBDF_SRC ?= $(HOME)/Documents/Projects/voice-keyboard/core/third_party/deepfilter
 GOTAGS := $(if $(wildcard $(LIBDF)),deepfilter,)
+# The version and commit stamped into the core and pix (buildinfo, #295): VERSION from the app
+# build (MARKETING_VERSION), else dev; the short commit, -dirty with uncommitted changes.
+COMMIT ?= $(shell c=$$(git rev-parse --short=7 HEAD 2>/dev/null) && { git diff --quiet HEAD 2>/dev/null || c=$$c-dirty; echo $$c; })
+STAMP = -X github.com/sihekuang/deskpixie/core/buildinfo.version=$${VERSION:-dev} -X github.com/sihekuang/deskpixie/core/buildinfo.commit=$(COMMIT)
 
 build-dylib:
-	MACOSX_DEPLOYMENT_TARGET=$(MACOS_MIN) CGO_CFLAGS="-mmacosx-version-min=$(MACOS_MIN)" CGO_LDFLAGS="-mmacosx-version-min=$(MACOS_MIN)" go build -tags "$(GOTAGS)" -buildmode=c-shared -o build/libdeskpixie.dylib ./cmd/libdeskpixie
+	MACOSX_DEPLOYMENT_TARGET=$(MACOS_MIN) CGO_CFLAGS="-mmacosx-version-min=$(MACOS_MIN)" CGO_LDFLAGS="-mmacosx-version-min=$(MACOS_MIN)" go build -tags "$(GOTAGS)" -ldflags "$(STAMP)" -buildmode=c-shared -o build/libdeskpixie.dylib ./cmd/libdeskpixie
 	install_name_tool -id "@rpath/libdeskpixie.dylib" build/libdeskpixie.dylib
 	@if [ -n "$(GOTAGS)" ]; then \
 		cp -pf $(LIBDF) build/libdf.dylib; \
@@ -29,7 +33,7 @@ build-dylib:
 # pix: the terminal wrapper bundled at Contents/Helpers/pix (#89). Plain Go, host arch like the dylib.
 build-pix:
 	MACOSX_DEPLOYMENT_TARGET=$(MACOS_MIN) CGO_ENABLED=0 go build -trimpath \
-		-ldflags "-X main.version=$${VERSION:-dev}" -o build/pix ./cmd/pix
+		-ldflags "$(STAMP)" -o build/pix ./cmd/pix
 
 # Re-copy libdf.dylib and the DeepFilterNet3 model into audio/denoise/libdf from Howl (both are
 # committed; this refreshes or upgrades them, see audio/denoise/libdf/VERSION.md).

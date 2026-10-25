@@ -88,6 +88,9 @@ func TestEveryExtraIsOnAPageAndNamed(t *testing.T) {
 		}
 		seen[e.ID] = true
 		found := false
+		for _, s := range Sections {
+			found = found || s == e.Section
+		}
 		for _, f := range Fields {
 			found = found || f.Section == e.Section
 		}
@@ -167,5 +170,24 @@ func TestTheSearchCallAnswersForTheCurrentValues(t *testing.T) {
 	}
 	if _, err := reg["settings.search"](json.RawMessage(`{`)); err == nil {
 		t.Fatal("bad args accepted")
+	}
+}
+
+// #295: the About page has no settings; searching "version" or "about" finds its versions.
+func TestSearchFindsTheAboutPage(t *testing.T) {
+	for _, q := range []string{"version", "versions", "about", "pix version"} {
+		hits := Search(q, Macos, Default())
+		found := false
+		for _, h := range hits {
+			found = found || h.Path == ExtraPrefix+"about" && h.Section == SectionAbout
+		}
+		if !found {
+			t.Errorf("%q: %+v", q, hits)
+		}
+	}
+	for _, f := range Fields {
+		if f.Section == SectionAbout {
+			t.Fatal("a setting on the About page:", f.Path)
+		}
 	}
 }

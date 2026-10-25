@@ -87,7 +87,7 @@ final class SettingsSearchTests: XCTestCase {
         // Go settings.Extras, in page order.
         let ids = SettingsLayout.allExtras.map(\.id)
         XCTAssertEqual(Set(ids), ["resetPosition", "key.openai", "key.gemini", "pix", "restartCoordinator",
-                                  "openFile", "exportLogs"])
+                                  "openFile", "exportLogs", "about"])
         XCTAssertEqual(ids.count, Set(ids).count)
         XCTAssertEqual(SettingsFixture.extras(on: .voice).first?.path, "extra:key.openai")
     }
@@ -102,6 +102,7 @@ final class SettingsSearchTests: XCTestCase {
             "key.gemini": ["Gemini key", "Type the key here to keep it in the Keychain (used first), or set GEMINI_API_KEY in your environment or a .env file. Keys are never shown here."],
             "pix": ["pix command", "Start Claude Code or Codex with `pix claude` or `pix codex` in any terminal (WebStorm, iTerm, …) and Pixie can see, message and interrupt that session. Quitting DeskPixie never ends it."],
             "restartCoordinator": ["Restart coordinator", "Stops the coordinator and starts it again on your next request, with its conversation. Asks first."],
+            "about": ["Versions", "About this DeskPixie: the versions of the app, its core and pix. Copy them into a bug report."],
             "openFile": ["Settings file", "settings.json holds every setting."],
             "exportLogs": ["Logs", "Saves the app's log, pix's log, the voice log and metrics in one zip to share. It can include what you said to Pixie."],
         ])

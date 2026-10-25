@@ -1250,6 +1250,7 @@ func (a *App) Register(r Registrar) {
 	a.registerChat(r)
 	a.registerAttachments(r)
 	a.registerLogs(r)
+	a.registerAbout(r)
 	r.Register("agent.updates", func(json.RawMessage) (any, error) {
 		var lines any = []any{}
 		if a.agent != nil {

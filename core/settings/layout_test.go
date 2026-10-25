@@ -137,6 +137,7 @@ func TestTheSnapshotPlacesTheExtraRows(t *testing.T) {
 		{"pix", SectionSessions, "Sessions you start with pix"},
 		{"openFile", SectionAdvanced, "Files"},
 		{"exportLogs", SectionAdvanced, "Files"},
+		{"about", SectionAbout, "Versions"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatal(got)

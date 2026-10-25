@@ -42,6 +42,16 @@ libdf (the DeepFilterNet noise filter) is vendored in `core/audio/denoise/libdf/
 toolchain is needed anywhere. Go comes from `PATH` (CI: `actions/setup-go` reading
 `core/go.mod`); xcodegen from Homebrew.
 
+## Which build is running
+
+Settings ▸ About shows the app's version and build number, the core's version and commit, and
+the version of the `pix` inside the app and of the `pix` your terminal runs, with a note when
+those two differ; Copy puts it all on the pasteboard for a bug report (#295). The core and `pix`
+get the version from `VERSION` (the app's `MARKETING_VERSION`, the tag's version in a release)
+and the short commit from git, `-dirty` with uncommitted changes (`core/Makefile`, package
+`core/buildinfo`); `pix version` prints both. A local build shows the project's default version
+(`mac/project.yml`), so the commit is what tells two of them apart.
+
 ## Cutting a release
 
 1. Merge to `main`, with CI green.
