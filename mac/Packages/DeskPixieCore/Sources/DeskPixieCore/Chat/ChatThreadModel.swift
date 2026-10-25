@@ -449,6 +449,8 @@ public final class ChatThreadModel {
 
     /// The thread's end is in view: the bottom marker's lower edge, in the scroll view's own
     /// coordinates, is within a few points of the viewport's height (infinite = not laid out).
+    /// The marker comes after the thread's bottom padding, so a scroll to it ends with the
+    /// marker at the viewport's edge on every macOS.
     public static func isAtBottom(sentinelMaxY: Double, viewportHeight: Double, tolerance: Double = 8) -> Bool {
         viewportHeight > 0 && sentinelMaxY.isFinite && sentinelMaxY <= viewportHeight + tolerance
     }
@@ -468,9 +470,10 @@ public final class ChatThreadModel {
 
     /// The thread's viewport changed height (the box under it grew or shrank: a chip, the @
     /// list, more lines typed; or the window was resized): a view that was at the bottom before
-    /// stays there. Measured against the old height, since the new one may hide the end.
-    public static func staysAtBottom(sentinelMaxY: Double, oldViewport: Double, newViewport: Double) -> Bool {
-        oldViewport != newViewport && isAtBottom(sentinelMaxY: sentinelMaxY, viewportHeight: oldViewport)
+    /// stays there. Decided by where it was, not by the end's position now: the new height may
+    /// hide the end, and the content's height may be mid-flicker.
+    public static func staysAtBottom(wasAtBottom: Bool, oldViewport: Double, newViewport: Double) -> Bool {
+        wasAtBottom && oldViewport != newViewport
     }
 
     /// The newest entry counts as seen (`sawBottom`) only after the opening scroll, with the
