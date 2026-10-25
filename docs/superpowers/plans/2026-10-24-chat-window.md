@@ -399,6 +399,59 @@ Layout, as in the mockup:
   Screenshot each step.
 - [ ] **Step 6: Commit:** "mac: the chat window (#302)". Push and open PR 2. Review, CI, fixes.
 
+### Task 8a: UI tests for the window (XCUITest)
+
+The app has no UI test target yet; this adds one and covers the window. Task 9 extends it.
+
+**Files:**
+- Create: `mac/DeskPixieUITests/ChatWindowUITests.swift` and `UITestApp.swift`, a helper
+  that builds an isolated data folder and launches the app.
+- Modify: `mac/project.yml` (target `DeskPixieUITests`, type `bundle.ui-testing`, host
+  `DeskPixie`, added to the DeskPixie scheme's test action), `mac/Makefile` (`uitest`:
+  `xcodebuild test -scheme DeskPixie -only-testing:DeskPixieUITests`, with the same sign flags as
+  `build`), `.github/workflows/ci.yml` (a "UI tests" step after the Release build).
+- Modify the Task 8 views: add accessibility identifiers. Nothing else in the app changes.
+  - `chat.window` and `chat.thread`;
+  - `chat.entry.<id>` and `chat.needs.pill.<id>`;
+  - `chat.request.allow`, `chat.request.deny` and `chat.request.reply`;
+  - `chat.composer`, `chat.replyChip` and `chat.latest`.
+
+**Isolation (AGENTS.md).** No test-only switch goes into the app. Instead, each test:
+- makes a temporary folder;
+- writes its `settings.json` there, with every value the app needs to skip onboarding, plus
+  its own `agent.session` (`dp-uitest-<uuid>`) and a free `agent.port`;
+- writes `chat/thread.jsonl` there in the store's own format, so a seeded thread comes from the
+  real persistence code;
+- launches the built app at its path, with `DESKPIXIE_SUPPORT_DIR` set to that folder;
+- cleans up: terminates the app, runs `herdr session stop/delete` for its session if herdr is
+  installed, and removes the folder.
+
+**Your own app.** If a DeskPixie with the same bundle ID is already running, the test calls
+`XCTSkip("Quit DeskPixie to run the UI tests")`. It never terminates an app it didn't launch.
+
+**Tests run on every build (CI too), with no coordinator needed:**
+- `testChatOpensFromTheMenuBar`: the status item's menu, Chat…, then the window `chat.window`.
+- `testASeededThreadShowsWhoSaidWhat`: your bubble, "Pixie", "Coordinator", and a session
+  header with its label and "Your session".
+- `testANeedsPillScrollsToItsCardAndAllowShrinksIt`: pill, card, Allow; the strip loses the
+  pill and the card reads "You allowed …".
+- `testReplyPointsTheComposerAtTheSession`: Reply… shows the chip; × clears it.
+- `testClearHistoryAsksFirstAndEmptiesTheThread`: Cancel keeps everything; Clear empties.
+- `testTheThreadIsThereAfterARelaunch`.
+
+**Live test** (`DESKPIXIE_UITEST_LIVE=1`, local only; needs herdr and an API key):
+- `testASentMessageGetsTheCoordinatorsAnswer`: type, send, see Thinking…, then a coordinator
+  entry.
+
+- [ ] **Step 1: Write the UI tests** against the identifiers above. Run `make -C mac uitest`.
+  Expected: FAIL, because the identifiers aren't there yet.
+- [ ] **Step 2: Add the identifiers** and the target. Run `make -C mac uitest` signed
+  (`SIGNING_IDENTITY=…`). Expected: PASS. Then run the live test once.
+- [ ] **Step 3: CI.** Push, and check that the UI tests step runs and passes on the runner.
+  If the runner can't drive UI (no accessibility permission), keep the target, make the CI step
+  report that, and say so in the PR.
+- [ ] **Step 4: Commit:** "mac: UI tests for the chat window (#302)".
+
 ## Step 3 (PR 3): the switch
 
 ### Task 9: one badge and the preview around Pixie
@@ -427,7 +480,13 @@ Layout, as in the mockup:
 - [ ] **Step 2:** Run `swift test`. Expected: FAIL.
 - [ ] **Step 3: Implement.**
 - [ ] **Step 4:** Run `swift test`, then the signed build. Expected: PASS.
-- [ ] **Step 5: Commit:** "mac: one badge and a preview instead of the decks (#302)".
+- [ ] **Step 5: UI tests** (extend `DeskPixieUITests`; identifiers `pixie.badge`,
+  `pixie.preview`):
+  - `testTheBadgeCountsWhatNeedsYou`: a seeded open request gives an orange badge reading 1;
+  - `testClickingThePreviewOpensTheChatAtThatEntry`: needs a coordinator, so it runs under
+    `DESKPIXIE_UITEST_LIVE=1`; with a seeded unread entry only, check the dot instead.
+  Run `make -C mac uitest`. Expected: PASS.
+- [ ] **Step 6: Commit:** "mac: one badge and a preview instead of the decks (#302)".
 
 ### Task 10: remove what the decks needed, settings and docs
 
@@ -445,6 +504,7 @@ Layout, as in the mockup:
   line set to "built".
 - Test: the settings tests (`TestAnOldFileWithRemovedKeysStillLoads`), and the layout and search
   tests' lists.
+- UI tests: the whole `DeskPixieUITests` suite still passes, and no test looks for the old deck.
 
 - [ ] **Step 1: Write the failing test** `TestAnOldFileWithRemovedKeysStillLoads`, and update
   the lists in `layout_test.go` and `search_test.go` and the Swift settings tests.
