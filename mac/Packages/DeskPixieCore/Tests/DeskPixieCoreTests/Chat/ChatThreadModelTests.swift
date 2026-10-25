@@ -71,10 +71,18 @@ final class FakeChatClient: ChatClient, @unchecked Sendable {
     /// The next interrupt is refused by the core, in these words.
     private var _refuseInterrupt: String?
     func refuseNextInterrupt(_ why: String) { lock.withLock { _refuseInterrupt = why } }
+    /// `interrupt` waits here, until `releaseInterrupt()`.
+    private var interruptGate: DispatchSemaphore?
+    func holdInterrupt() { lock.withLock { interruptGate = DispatchSemaphore(value: 0) } }
+    func releaseInterrupt() {
+        lock.withLock { () -> DispatchSemaphore? in defer { interruptGate = nil }; return interruptGate }?.signal()
+    }
     func interrupt(name: String) throws {
         try check()
+        lock.withLock { interruptGate }?.wait()
+        // The core marks its own sentences "refused" (agent.interrupt, as chat.send).
         if let why = lock.withLock({ () -> String? in defer { _refuseInterrupt = nil }; return _refuseInterrupt }) {
-            throw DeskPixieEngineError.callFailed(why)
+            throw DeskPixieEngineError.refused(why)
         }
         lock.withLock { _interrupted.append(name) }
     }

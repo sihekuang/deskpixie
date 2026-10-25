@@ -281,6 +281,7 @@ struct StopButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.borderless)
+        .disabled(target.stopping) // its call is on its way: one Esc per click (#309)
         .help(target.label)
         .accessibilityLabel(target.label)
         .accessibilityIdentifier("chat.entry.stop")

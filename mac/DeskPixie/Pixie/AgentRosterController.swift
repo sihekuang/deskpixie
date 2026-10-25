@@ -494,26 +494,28 @@ final class AgentRosterController {
         }
     }
 
-    /// The stop button on a working row (#309): the core decides what it calls. The row
-    /// changes once the core's roster says it stopped; a refusal shows under the list.
+    /// The stop button on a working row (#309): the core decides what it calls, and answers at
+    /// once (off the core worker's queue all the same). The row changes once the core's roster
+    /// says it stopped; a refusal, or `agent.stopFailed` later, shows under the list.
     private func stop(_ r: RosterRow) {
-        let engine = engine, worker = worker, name = r.name
+        let engine = engine, name = r.name
+        guard model.beginStop(name) else { return }
+        render()
         Task { @MainActor [weak self] in
-            let failure: String?? = await worker.run {
-                do {
-                    _ = try engine.call("agent.interrupt", FocusAgentArgs(name: name))
-                    return nil
-                } catch DeskPixieEngineError.callFailed(let why) {
-                    return why
-                } catch {
-                    Self.log.error("agent.interrupt: \(String(describing: error), privacy: .public)")
-                    return "Couldn't reach Pixie. Try again."
-                }
+            let result = await Task.detached { Result { _ = try engine.call("agent.interrupt", FocusAgentArgs(name: name)) } }.value
+            if case .failure(let err) = result {
+                Self.log.error("agent.interrupt: \(String(describing: err), privacy: .public)")
             }
             guard let self else { return }
-            self.model.notice = failure ?? nil
+            self.model.endStop(name, result)
             self.render()
         }
+    }
+
+    /// `agent.stopFailed`: a stop went but didn't work.
+    func stopFailed(_ text: String) {
+        model.stopFailed(text)
+        render()
     }
 
     private func poll() {

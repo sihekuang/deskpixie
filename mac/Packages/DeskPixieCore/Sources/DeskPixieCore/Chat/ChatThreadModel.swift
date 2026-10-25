@@ -44,6 +44,11 @@ public final class ChatThreadModel {
     /// The roster as the core last sent it (`agents`): who is working now, for the stop button
     /// and the status in the newest header of each responder (#309).
     public private(set) var roster: RosterView = .empty
+    /// The responders whose stop call is on its way: their button waits (a second Esc would
+    /// open a menu in the agent, #309).
+    public private(set) var stopping: Set<String> = []
+    /// The `error` a stop set, so that a stop that works clears only its own.
+    private var stopError: String?
     /// The core refused the last send, in its words (one recipient per message); the draft
     /// stays. Any other failure is `error`. Editing the text or the target clears it.
     public private(set) var refusal: String?
@@ -347,14 +352,23 @@ public final class ChatThreadModel {
     /// core's roster says it stopped; a refusal is shown in the core's words.
     public func stop(_ target: ChatStopTarget) async {
         let client = client, name = target.name
+        guard stopping.insert(name).inserted else { return }
         let result = await Task.detached { Result { try client.interrupt(name: name) } }.value
+        stopping.remove(name)
         switch result {
-        case .success: error = nil
-        case .failure(DeskPixieEngineError.callFailed(let why)):
-            Self.log.error("agent.interrupt: \(why, privacy: .public)")
-            error = why
-        case .failure(let err): fail("agent.interrupt", err)
+        case .success:
+            if let mine = stopError, error == mine { error = nil }
+            stopError = nil
+        case .failure(let err):
+            Self.log.error("agent.interrupt: \(String(describing: err), privacy: .public)")
+            stopFailed(AgentRosterModel.stopFailure(err))
         }
+    }
+
+    /// A stop that didn't work, in words to show (its call, or `agent.stopFailed`).
+    public func stopFailed(_ text: String) {
+        error = text
+        stopError = text
     }
 
     /// Empties the thread. The core's `chat.reset` that follows reloads it.
@@ -472,7 +486,7 @@ public final class ChatThreadModel {
     /// it can be stopped (working, and reachable).
     public func stopTarget(for e: ChatEntry) -> ChatStopTarget? {
         guard let row = liveRow(e), AgentRosterModel.showsStop(row) else { return nil }
-        return ChatStopTarget(name: row.name, label: "Stop \(Self.name(of: e.who))")
+        return ChatStopTarget(name: row.name, label: "Stop \(Self.name(of: e.who))", stopping: stopping.contains(row.name))
     }
 
     /// Who said it, for the header: on a responder's newest entry, with its status now (a

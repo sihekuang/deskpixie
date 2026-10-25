@@ -94,7 +94,10 @@ public struct AgentRosterModel: Sendable, Equatable {
         didSet { if !open { notice = nil } }
     }
     /// Why the last stop didn't work, in the core's words, under the list until it closes.
-    public var notice: String?
+    public private(set) var notice: String?
+    /// The rows whose stop call is on its way: their button waits (a second Esc would open a
+    /// menu in the agent, #309).
+    public private(set) var stopping: Set<String> = []
 
     public init() {}
 
@@ -147,6 +150,32 @@ public struct AgentRosterModel: Sendable, Equatable {
 
     /// The square stop button on a row (#309): only while the core says it can be stopped.
     public static func showsStop(_ r: RosterRow) -> Bool { r.stoppable }
+
+    /// A click on a row's stop button: true if its call should go now (none is on its way).
+    public mutating func beginStop(_ name: String) -> Bool {
+        stopping.insert(name).inserted
+    }
+
+    /// The row's stop call came back: a refusal shows under the list, while it is open.
+    public mutating func endStop(_ name: String, _ result: Result<Void, Error>) {
+        stopping.remove(name)
+        if case .failure(let err) = result { show(Self.stopFailure(err)) }
+    }
+
+    /// `agent.stopFailed`: the stop went but didn't work.
+    public mutating func stopFailed(_ text: String) { show(text) }
+
+    /// Only while the list is open: a closed list's notice would greet its next opening.
+    private mutating func show(_ text: String) {
+        if open { notice = text }
+    }
+
+    /// A failed `agent.interrupt` call in words to show (the roster and the chat window): the
+    /// core's own refusal as it is, anything else "Couldn't reach Pixie. Try again.".
+    public static func stopFailure(_ err: Error) -> String {
+        if case DeskPixieEngineError.refused(let why) = err { return why }
+        return "Couldn't reach Pixie. Try again."
+    }
 
     /// "Stop docs-writer": the stop button's tooltip and VoiceOver name.
     public static func stopLabel(_ r: RosterRow) -> String { "Stop \(r.label.isEmpty ? r.name : r.label)" }

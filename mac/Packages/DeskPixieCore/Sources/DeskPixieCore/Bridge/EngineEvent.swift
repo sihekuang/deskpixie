@@ -102,6 +102,8 @@ public enum EngineEvent: Sendable, Equatable {
     case updates([UpdateLine])
     /// The roster beside Pixie (#91): Pixie's agents and your pix sessions, with counts.
     case agents(RosterView)
+    /// A stop button's stop didn't work (#309): the agent's roster name, and why in words to show.
+    case stopFailed(name: String, text: String)
     /// Bring up the pane of an agent waiting at a prompt in its terminal (#110).
     case showPane(PaneRequest)
     /// Show a terminal by walking a core-built fallback plan (#116).
@@ -151,6 +153,7 @@ public enum EngineEvent: Sendable, Equatable {
     private struct CanvasOpen: Decodable { var url: String, title: String }
     private struct Updates: Decodable { var lines: [UpdateLine] }
     private struct Agents: Decodable { var roster: RosterView }
+    private struct StopFailed: Decodable { var name: String, text: String }
     private struct FocusPlanEvent: Decodable { var plan: FocusPlan }
     private struct ReplyModeEvent: Decodable { var mode: String }
     private struct CaptionsEvent: Decodable { var always: Bool; var dismissSecs: Int; var fadeSecs: Int?; var historyMins: Int? }
@@ -194,6 +197,7 @@ public enum EngineEvent: Sendable, Equatable {
         case "canvas.open": return get(CanvasOpen.self).map { .canvasOpen(url: $0.url, title: $0.title) }
         case "updates": return get(Updates.self).map { .updates($0.lines) }
         case "agents": return get(Agents.self).map { .agents($0.roster) }
+        case "agent.stopFailed": return get(StopFailed.self).map { .stopFailed(name: $0.name, text: $0.text) }
         case "showPane": return get(PaneRequest.self).map { .showPane($0) }
         case "focusPlan": return get(FocusPlanEvent.self).map { .focusPlan($0.plan) }
         case "chat.line": return get(ChatLine.self).map { .chatLine($0) }

@@ -585,6 +585,9 @@ final class EngineCoordinator {
         case .agents(let view):
             roster?.apply(view: view)
             ChatHub.shared?.applyRoster(view)
+        case .stopFailed(_, let text):
+            roster?.stopFailed(text)
+            ChatHub.shared?.stopFailed(text)
         case .chatLine(let line):
             roster?.apply(chatLine: line)
         case .replyCard(let card):

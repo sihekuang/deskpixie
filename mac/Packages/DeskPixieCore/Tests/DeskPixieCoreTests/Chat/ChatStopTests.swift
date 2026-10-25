@@ -81,4 +81,40 @@ final class ChatStopTests: XCTestCase {
         await m.stop(ChatStopTarget(name: "api", label: "Stop api"))
         XCTAssertEqual(m.error, "Couldn't reach Pixie. Try again.")
     }
+
+    func testAStopGoesOnceWhileItsCallRuns() async {
+        let (m, client) = await model([said("a1", 1, name: "api", label: "api-server")],
+                                      yours: [row("api", kind: "session", status: "working", stoppable: true)])
+        client.holdInterrupt()
+        let target = ChatStopTarget(name: "api", label: "Stop api-server")
+        let first = Task { await m.stop(target) }
+        while !m.stopping.contains("api") { await Task.yield() }
+        XCTAssertEqual(m.stopTarget(for: m.entries[0])?.stopping, true, "the button waits")
+        await m.stop(target) // a second click
+        client.releaseInterrupt()
+        await first.value
+        XCTAssertEqual(client.interrupted, ["api"], "one call: no second Esc")
+        XCTAssertEqual(m.stopTarget(for: m.entries[0])?.stopping, false)
+    }
+
+    func testAStopThatWorksClearsOnlyTheErrorAStopSet() async {
+        let (m, client) = await model([])
+        client.setFailing(true)
+        await m.decide(token: "t", allow: true)
+        XCTAssertEqual(m.error, "Couldn't reach Pixie. Try again.")
+        client.setFailing(false)
+        await m.stop(ChatStopTarget(name: "api", label: "Stop api"))
+        XCTAssertEqual(m.error, "Couldn't reach Pixie. Try again.", "another call's error stays")
+        client.refuseNextInterrupt("Couldn't stop it.")
+        await m.stop(ChatStopTarget(name: "api", label: "Stop api"))
+        XCTAssertEqual(m.error, "Couldn't stop it.")
+        await m.stop(ChatStopTarget(name: "api", label: "Stop api"))
+        XCTAssertNil(m.error, "its own goes")
+    }
+
+    func testAFailedStopEventShowsItsWords() async {
+        let (m, _) = await model([])
+        m.stopFailed("Couldn't stop alpha: it isn't running anymore.")
+        XCTAssertEqual(m.error, "Couldn't stop alpha: it isn't running anymore.")
+    }
 }

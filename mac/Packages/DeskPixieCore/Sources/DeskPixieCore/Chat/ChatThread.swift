@@ -218,10 +218,13 @@ public struct ChatStopTarget: Equatable, Sendable {
     public var name: String
     /// "Stop api-server": the tooltip and VoiceOver name.
     public var label: String
+    /// Its stop call is on its way: the button waits.
+    public var stopping: Bool
 
-    public init(name: String, label: String) {
+    public init(name: String, label: String, stopping: Bool = false) {
         self.name = name
         self.label = label
+        self.stopping = stopping
     }
 }
 

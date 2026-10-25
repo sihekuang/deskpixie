@@ -216,6 +216,7 @@ struct AgentRosterView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.borderless)
+                .disabled(model.stopping.contains(r.name)) // its call is on its way (#309)
                 .help(AgentRosterModel.stopLabel(r))
                 .accessibilityLabel(AgentRosterModel.stopLabel(r))
                 .accessibilityIdentifier("roster.stop")

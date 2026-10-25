@@ -113,10 +113,44 @@ final class AgentRosterModelTests: XCTestCase {
     func testAStopsNoticeGoesWhenTheListCloses() {
         var m = AgentRosterModel()
         m.open = true
-        m.notice = "Couldn't stop docs-writer: it isn't running anymore."
+        m.stopFailed("Couldn't stop docs-writer: it isn't running anymore.")
         m.apply(view(agents: [row("coordinator", kind: "coordinator"), row("a")], yours: []))
         XCTAssertNotNil(m.notice, "a new roster keeps it while the list is open")
         m.open = false
         XCTAssertNil(m.notice)
+    }
+
+    func testAStopsNoticeIsSetOnlyWhileTheListIsOpen() {
+        var m = AgentRosterModel()
+        m.stopFailed("Couldn't stop docs-writer: it isn't running anymore.")
+        XCTAssertTrue(m.beginStop("docs-writer"))
+        m.endStop("docs-writer", .failure(DeskPixieEngineError.refused("The coordinator is off.")))
+        XCTAssertNil(m.notice, "no stale line the next time it opens")
+        m.open = true
+        XCTAssertNil(m.notice)
+    }
+
+    func testARowsStopWaitsForItsCall() {
+        var m = AgentRosterModel()
+        XCTAssertTrue(m.beginStop("docs-writer"))
+        XCTAssertFalse(m.beginStop("docs-writer"), "a second click while the first is on its way")
+        XCTAssertTrue(m.beginStop("api"), "another row's is its own")
+        XCTAssertEqual(m.stopping, ["docs-writer", "api"])
+        m.endStop("docs-writer", .success(()))
+        XCTAssertTrue(m.beginStop("docs-writer"))
+    }
+
+    func testAFailedStopCallReadsInTheCoresWordsOrTryAgain() {
+        var m = AgentRosterModel()
+        m.open = true
+        _ = m.beginStop("a")
+        m.endStop("a", .failure(DeskPixieEngineError.refused("The coordinator is off.")))
+        XCTAssertEqual(m.notice, "The coordinator is off.")
+        _ = m.beginStop("a")
+        m.endStop("a", .failure(DeskPixieEngineError.callFailed("unknown method agent.interrupt")))
+        XCTAssertEqual(m.notice, "Couldn't reach Pixie. Try again.", "never the core's internals")
+        m.stopFailed("Couldn't stop a: it didn't answer in time.")
+        XCTAssertEqual(m.notice, "Couldn't stop a: it didn't answer in time.")
+        XCTAssertEqual(AgentRosterModel.stopFailure(DeskPixieEngineError.notInitialized), "Couldn't reach Pixie. Try again.")
     }
 }

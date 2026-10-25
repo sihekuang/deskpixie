@@ -144,6 +144,12 @@ final class EngineEventTests: XCTestCase {
         XCTAssertNil(EngineEvent.decode(Data(#"{"kind":"agents"}"#.utf8)), "roster is required")
     }
 
+    func testDecodesAFailedStop() {
+        XCTAssertEqual(d(#"{"kind":"agent.stopFailed","name":"docs","text":"Couldn't stop docs: it isn't running anymore."}"#),
+                       .stopFailed(name: "docs", text: "Couldn't stop docs: it isn't running anymore."))
+        XCTAssertNil(d(#"{"kind":"agent.stopFailed","name":"docs"}"#), "text is required")
+    }
+
     func testMouthDefaultsToZeroWhenLevelOmitted() {
         XCTAssertEqual(d(#"{"kind":"mouth"}"#), .mouth(0))
     }
