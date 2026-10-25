@@ -191,16 +191,26 @@ final class UITestApp {
     func openChat(file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
         let status = app.statusItems.firstMatch
         XCTAssertTrue(status.waitForExistence(timeout: 30), "no menu bar item", file: file, line: line)
+        // Just after a launch the item may be listed before it has its place in the menu bar, and a
+        // click on it then opens nothing and fails outright ("menu open notification").
+        let placed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: status)
+        XCTAssertEqual(XCTWaiter().wait(for: [placed], timeout: 30), .completed, "the menu bar item never took its place",
+                       file: file, line: line)
         let deadline = Date().addingTimeInterval(60)
         while Date() < deadline {
             status.click()
             let chat = app.menuItems["Chat…"]
             if chat.waitForExistence(timeout: 5), chat.isEnabled {
-                chat.click()
+                // Chosen by typing its name and Return, not by clicking the item: while the core
+                // starts, the menu is rebuilt as it stays open (status lines, the agent), and a
+                // click on an item that was just replaced fails the test outright ("open menu
+                // during menu traversal"). The menu's own type-select finds the new one.
+                for key in "chat" { app.typeKey(String(key), modifierFlags: []) }
+                app.typeKey(.return, modifierFlags: [])
                 break
             }
             app.typeKey(.escape, modifierFlags: [])
-            Thread.sleep(forTimeInterval: 1)
+            Thread.sleep(forTimeInterval: 1) // the core is still starting: ask again in a moment
         }
         let window = chatWindow
         XCTAssertTrue(window.waitForExistence(timeout: 15), "the chat window didn't open", file: file, line: line)
