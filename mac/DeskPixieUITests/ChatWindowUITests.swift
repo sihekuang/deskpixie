@@ -284,10 +284,11 @@ final class ChatWindowUITests: XCTestCase {
         }
     }
 
-    /// The toolbar's More menu, then Clear History….
+    /// The toolbar's More menu, then Clear History…. macOS 15 lists the toolbar item and its
+    /// button inside it as two "More" menu buttons: the outer one, which opens the same menu.
     private func chooseClearHistory(in window: XCUIElement, _ app: XCUIApplication) {
-        let more = window.toolbars.menuButtons["More"].exists ? window.toolbars.menuButtons["More"]
-            : window.toolbars.buttons["More"].exists ? window.toolbars.buttons["More"]
+        let more = window.toolbars.menuButtons["More"].exists ? window.toolbars.menuButtons["More"].firstMatch
+            : window.toolbars.buttons["More"].exists ? window.toolbars.buttons["More"].firstMatch
             : window.descendants(matching: .any).matching(NSPredicate(format: "label == 'More'")).firstMatch
         XCTAssertTrue(more.waitForExistence(timeout: 5), "no More menu in the toolbar")
         more.click()
