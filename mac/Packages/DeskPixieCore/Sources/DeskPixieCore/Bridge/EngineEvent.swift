@@ -95,6 +95,8 @@ public enum EngineEvent: Sendable, Equatable {
     case notify(title: String, body: String, sound: String?, update: UpdateLine? = nil)
     case canvasOpen(url: String, title: String)
     case settingsChanged
+    /// Pixie's open_settings (#288): show the Settings window, at the setting when there is one.
+    case settingsOpen(SettingsHit?)
     case restart
     /// The unheard agent updates, oldest first (the whole current list; empty = none left).
     case updates([UpdateLine])
@@ -166,6 +168,7 @@ public enum EngineEvent: Sendable, Equatable {
             }
         case "tray": return .tray
         case "settings.changed": return .settingsChanged
+        case "settings.open": return .settingsOpen(get(SettingsHit.self))
         case "restart": return .restart
         case "pack": return get(PackEvent.self).map { .pack($0) }
         case "position": return get(Position.self).map { .position(x: $0.x, y: $0.y) }

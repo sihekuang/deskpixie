@@ -269,6 +269,12 @@ public final class SettingsModel {
         revealCount += 1
     }
 
+    /// The page of a reveal not yet pointed out: the window opens there (a reveal made before
+    /// the window was built, as Pixie's open_settings does, #288).
+    public var pendingRevealSection: SettingsSection? {
+        revealCount != shownReveal ? revealed?.section : nil
+    }
+
     /// The reveal `section`'s page has yet to point out, if any; taking it marks it pointed out.
     public func takeReveal(for section: SettingsSection) -> SettingsHit? {
         guard let hit = revealed, hit.section == section, revealCount != shownReveal else { return nil }

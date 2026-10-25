@@ -42,6 +42,10 @@ struct SettingsWindowView: View {
             // (menu-bar only) when it closes (Howl's AppDelegate.showSettingsWindow).
             NSApp.setActivationPolicy(.regular)
             NSApp.activate()
+            // A reveal made before the window was built (Pixie's open_settings) picks the page.
+            if let section = model.pendingRevealSection, let index = SettingsLayout.tabIndex(section) {
+                tab = index
+            }
             model.load()
         }
         // A picked search result, or a setting Pixie was asked to show (#288): go to its page;
@@ -227,7 +231,11 @@ private struct SettingsDetailView: View {
                 withAnimation { proxy.scrollTo(hit.path, anchor: .center) }
                 highlighted = hit.path
                 do {
-                    try await Task.sleep(for: .seconds(2))
+                    // A window just brought forward (Pixie's open_settings, #288) reloads and lays
+                    // the page out again, losing the first scroll: scroll once more.
+                    try await Task.sleep(for: .milliseconds(400))
+                    withAnimation { proxy.scrollTo(hit.path, anchor: .center) }
+                    try await Task.sleep(for: .milliseconds(1600))
                 } catch {
                     highlighted = nil
                     return

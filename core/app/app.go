@@ -231,7 +231,7 @@ func New(d Deps) (*App, error) {
 	a.localTools = NewLocalTools(homeCity(cfg), &TimerAlarm{Voice: a.voiceLink, Notify: a.notify}, d.LocalTools)
 	if d.Agent != nil {
 		a.agent = d.Agent(cfg, p.AppSupport, AgentHooks{
-			LocalTools:  a.localTools,
+			LocalTools:  a.coordinatorTools(),
 			Celebrate:   a.Celebrate,
 			FlashError:  a.FlashError,
 			RefreshTray: a.pushTray,
