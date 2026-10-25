@@ -4,6 +4,7 @@ package chat
 
 import (
 	"hash/fnv"
+	"os"
 	"slices"
 	"strconv"
 	"sync"
@@ -65,6 +66,10 @@ type Store struct {
 	next    int             // for the next generated id
 	named   map[string]bool // ids the caller chose: those entries never take a joined line
 	handed  map[uint64]bool // outbox lines MarkRead has returned, so it returns each once
+
+	path     string   // dir/thread.jsonl; empty for a memory store
+	file     *os.File // appended to on every change; nil for a memory store
+	keepDays int
 }
 
 // NewMemory is an empty store; now is the clock in ms, for entries added with no At.
@@ -90,6 +95,7 @@ func (s *Store) Add(e Entry) Entry {
 	}
 	if i, ok := s.index[e.ID]; ok && e.ID != "" {
 		s.entries[i] = e
+		s.persist(e)
 		return clone(e)
 	}
 	if n := len(s.entries); n > 0 && e.ID == "" && !s.named[s.entries[n-1].ID] && joins(s.entries[n-1], e) {
@@ -101,6 +107,7 @@ func (s *Store) Add(e Entry) Entry {
 		last.Attachments = append(last.Attachments, e.Attachments...)
 		last.Spoken = last.Spoken || e.Spoken
 		last.Read = last.Read && e.Read
+		s.persist(*last)
 		return clone(*last)
 	}
 	if e.ID == "" {
@@ -111,6 +118,7 @@ func (s *Store) Add(e Entry) Entry {
 	}
 	s.index[e.ID] = len(s.entries)
 	s.entries = append(s.entries, e)
+	s.persist(e)
 	return clone(e)
 }
 
@@ -143,6 +151,7 @@ func (s *Store) Update(id string, fn func(*Entry)) (Entry, bool) {
 	fn(&e)
 	e.ID = id
 	s.entries[i] = e
+	s.persist(e)
 	return clone(e), true
 }
 
@@ -194,7 +203,10 @@ func (s *Store) MarkRead(upTo string) []uint64 {
 	var lines []uint64
 	for i := 0; i <= end; i++ {
 		e := &s.entries[i]
-		e.Read = true
+		if !e.Read {
+			e.Read = true
+			s.persist(*e)
+		}
 		for _, l := range e.Lines {
 			if !s.handed[l] {
 				s.handed[l] = true
