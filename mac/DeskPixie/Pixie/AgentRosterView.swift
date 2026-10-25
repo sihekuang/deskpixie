@@ -10,6 +10,8 @@ struct AgentRosterView: View {
     let maxChipWidth: CGFloat
     let onChip: () -> Void
     let onRow: (RosterRow) -> Void
+    /// The stop button on a working row (#309).
+    var onStopRow: (RosterRow) -> Void = { _ in }
     /// The text box and its toggle (#221).
     let chat: QuickChatModel
     let chatState: QuickChatState
@@ -137,6 +139,7 @@ struct AgentRosterView: View {
         .frame(maxWidth: maxChipWidth)
         .accessibilityLabel("\(model.view.agentCount) of Pixie's agents, \(model.view.yourCount) of your sessions"
                             + (model.busy ? ", working" : ""))
+        .accessibilityIdentifier("roster.chip")
     }
 
     private func count(_ symbol: String, _ n: Int) -> some View {
@@ -154,17 +157,7 @@ struct AgentRosterView: View {
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 8)
                     .padding(.top, 4)
-                ForEach(section.rows) { r in
-                    let clickable = AgentRosterModel.clickable(r)
-                    Button { onRow(r) } label: { row(r) }
-                        .buttonStyle(.plain)
-                        .disabled(!clickable)
-                        .onHover { inside in
-                            // A pointing hand on clickable rows only (spec §4).
-                            guard clickable else { return }
-                            if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-                        }
-                }
+                ForEach(section.rows) { r in row(r) }
                 if section.more > 0 {
                     Text("+\(section.more) more")
                         .font(.callout)
@@ -173,6 +166,15 @@ struct AgentRosterView: View {
                         .padding(.vertical, 2)
                 }
             }
+            if let notice = model.notice {
+                Text(notice)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 8)
+                    .padding(.top, 4)
+                    .accessibilityIdentifier("roster.notice")
+            }
         }
         .padding(6)
         .frame(width: Self.listWidth, alignment: .leading)
@@ -180,13 +182,44 @@ struct AgentRosterView: View {
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.separator))
     }
 
+    /// A row: a click brings its agent forward; while it works, a stop button sits before its
+    /// detail ("terminal", its repo) and interrupts its turn (#309). Two buttons side by side,
+    /// not one inside the other, so each gets its own clicks.
     private func row(_ r: RosterRow) -> some View {
-        HStack(spacing: 6) {
-            Text(AgentRosterModel.dot(r.status))
-                .foregroundStyle(r.status == "working" ? .green : r.status == "blocked" ? .orange : .secondary)
-            Text(r.label).font(.callout).lineLimit(1).truncationMode(.tail)
-            Spacer(minLength: 4)
-            Text(r.status).font(.caption).foregroundStyle(.secondary)
+        let clickable = AgentRosterModel.clickable(r)
+        return HStack(spacing: 6) {
+            Button { onRow(r) } label: {
+                HStack(spacing: 6) {
+                    Text(AgentRosterModel.dot(r.status))
+                        .foregroundStyle(r.status == "working" ? .green : r.status == "blocked" ? .orange : .secondary)
+                    Text(r.label).font(.callout).lineLimit(1).truncationMode(.tail)
+                    Spacer(minLength: 4)
+                    Text(r.status).font(.caption).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!clickable)
+            .onHover { inside in
+                // A pointing hand on clickable rows only (spec §4).
+                guard clickable else { return }
+                if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+            }
+            .accessibilityIdentifier("roster.row")
+            if AgentRosterModel.showsStop(r) {
+                Button { onStopRow(r) } label: {
+                    Image(systemName: "stop.fill")
+                        .font(.system(size: 8, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 16, height: 14)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .help(AgentRosterModel.stopLabel(r))
+                .accessibilityLabel(AgentRosterModel.stopLabel(r))
+                .accessibilityIdentifier("roster.stop")
+            }
             if let d = r.detail, !d.isEmpty {
                 Text(d).font(.caption).foregroundStyle(.tertiary).lineLimit(1)
             }
@@ -195,7 +228,6 @@ struct AgentRosterView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
-        .contentShape(Rectangle())
     }
 }
 

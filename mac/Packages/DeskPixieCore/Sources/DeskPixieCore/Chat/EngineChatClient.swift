@@ -85,4 +85,10 @@ public struct EngineChatClient: ChatClient, Sendable {
     public func stop() throws {
         _ = try engine.call("chat.stop")
     }
+
+    private struct NameArgs: Encodable { let name: String }
+
+    public func interrupt(name: String) throws {
+        _ = try engine.call("agent.interrupt", NameArgs(name: name))
+    }
 }

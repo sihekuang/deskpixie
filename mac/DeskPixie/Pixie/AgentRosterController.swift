@@ -494,6 +494,28 @@ final class AgentRosterController {
         }
     }
 
+    /// The stop button on a working row (#309): the core decides what it calls. The row
+    /// changes once the core's roster says it stopped; a refusal shows under the list.
+    private func stop(_ r: RosterRow) {
+        let engine = engine, worker = worker, name = r.name
+        Task { @MainActor [weak self] in
+            let failure: String?? = await worker.run {
+                do {
+                    _ = try engine.call("agent.interrupt", FocusAgentArgs(name: name))
+                    return nil
+                } catch DeskPixieEngineError.callFailed(let why) {
+                    return why
+                } catch {
+                    Self.log.error("agent.interrupt: \(String(describing: error), privacy: .public)")
+                    return "Couldn't reach Pixie. Try again."
+                }
+            }
+            guard let self else { return }
+            self.model.notice = failure ?? nil
+            self.render()
+        }
+    }
+
     private func poll() {
         let mouse = NSEvent.mouseLocation
         let overPanel = panel.isVisible && panel.frame.contains(mouse)
@@ -568,6 +590,7 @@ final class AgentRosterController {
                 self.render()
             },
             onRow: { [weak self] in self?.clicked($0) },
+            onStopRow: { [weak self] in self?.stop($0) },
             chat: chat, chatState: chatState, captionCard: captionCard,
             earlier: chat.earlier, earlierPhase: chat.earlierPhase(now: Date()),
             onMode: { [weak self] in self?.pick($0) },

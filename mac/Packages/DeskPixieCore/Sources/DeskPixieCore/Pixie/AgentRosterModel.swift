@@ -12,9 +12,12 @@ public struct RosterRow: Decodable, Sendable, Equatable, Identifiable {
     public let reachable: Bool
     /// A session's terminal app bundle id; nil when unknown.
     public let app: String?
+    /// It is working and can be reached: the core offers a stop button for it (#309).
+    public let stoppable: Bool
     public var id: String { name }
 
-    public init(name: String, label: String, detail: String?, status: String, kind: String, reachable: Bool, app: String?) {
+    public init(name: String, label: String, detail: String?, status: String, kind: String, reachable: Bool, app: String?,
+                stoppable: Bool = false) {
         self.name = name
         self.label = label
         self.detail = detail
@@ -22,7 +25,20 @@ public struct RosterRow: Decodable, Sendable, Equatable, Identifiable {
         self.kind = kind
         self.reachable = reachable
         self.app = app
+        self.stoppable = stoppable
     }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(name: try c.decode(String.self, forKey: .name), label: try c.decode(String.self, forKey: .label),
+                  detail: try c.decodeIfPresent(String.self, forKey: .detail), status: try c.decode(String.self, forKey: .status),
+                  kind: try c.decode(String.self, forKey: .kind), reachable: try c.decode(Bool.self, forKey: .reachable),
+                  app: try c.decodeIfPresent(String.self, forKey: .app),
+                  // Left out when false.
+                  stoppable: try c.decodeIfPresent(Bool.self, forKey: .stoppable) ?? false)
+    }
+
+    private enum CodingKeys: String, CodingKey { case name, label, detail, status, kind, reachable, app, stoppable }
 }
 
 /// The whole roster. `agentCount` never counts the coordinator; `yourCount` only reachable sessions.
@@ -73,8 +89,12 @@ public struct AgentRosterModel: Sendable, Equatable {
     }
 
     public private(set) var view: RosterView = .empty
-    /// The list is open (pointer over the chip, or a click).
-    public var open = false
+    /// The list is open (pointer over the chip, or a click). Closing it clears `notice`.
+    public var open = false {
+        didSet { if !open { notice = nil } }
+    }
+    /// Why the last stop didn't work, in the core's words, under the list until it closes.
+    public var notice: String?
 
     public init() {}
 
@@ -124,6 +144,12 @@ public struct AgentRosterModel: Sendable, Equatable {
     public static func clickable(_ r: RosterRow) -> Bool {
         r.kind != "session" || r.reachable
     }
+
+    /// The square stop button on a row (#309): only while the core says it can be stopped.
+    public static func showsStop(_ r: RosterRow) -> Bool { r.stoppable }
+
+    /// "Stop docs-writer": the stop button's tooltip and VoiceOver name.
+    public static func stopLabel(_ r: RosterRow) -> String { "Stop \(r.label.isEmpty ? r.name : r.label)" }
 
     public static func dot(_ status: String) -> String {
         switch status {

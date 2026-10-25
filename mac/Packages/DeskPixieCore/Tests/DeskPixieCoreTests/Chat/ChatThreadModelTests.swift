@@ -66,6 +66,18 @@ final class FakeChatClient: ChatClient, @unchecked Sendable {
         lock.withLock { _typed.append(Typed(token: token, text: text)) }
     }
     func stop() throws { try check() }
+    private var _interrupted: [String] = []
+    var interrupted: [String] { lock.withLock { _interrupted } }
+    /// The next interrupt is refused by the core, in these words.
+    private var _refuseInterrupt: String?
+    func refuseNextInterrupt(_ why: String) { lock.withLock { _refuseInterrupt = why } }
+    func interrupt(name: String) throws {
+        try check()
+        if let why = lock.withLock({ () -> String? in defer { _refuseInterrupt = nil }; return _refuseInterrupt }) {
+            throw DeskPixieEngineError.callFailed(why)
+        }
+        lock.withLock { _interrupted.append(name) }
+    }
     private var _recipients: [ChatRecipient] = []
     func setRecipients(_ r: [ChatRecipient]) { lock.withLock { _recipients = r } }
     func recipients() throws -> [ChatRecipient] {

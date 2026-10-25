@@ -93,4 +93,30 @@ final class AgentRosterModelTests: XCTestCase {
         XCTAssertEqual(got.map(\.name), ["web-claude", "fruit-claude"])
         XCTAssertEqual(AgentRosterModel.buttons(for: [], in: view), [])
     }
+
+    // MARK: The stop button (#309)
+
+    func testTheStopButtonShowsOnlyWhereTheCoreOffersIt() throws {
+        let json = #"""
+        {"agents":[{"name":"coordinator","label":"Coordinator","status":"working","kind":"coordinator","reachable":true,"stoppable":true},
+                   {"name":"docs-writer","label":"docs-writer","status":"idle","kind":"worker","reachable":true}],
+         "yours":[{"name":"api","label":"api-server","detail":"terminal","status":"working","kind":"session","reachable":true,"stoppable":true}],
+         "agent_count":1,"your_count":1,"busy":true}
+        """#
+        let v = try JSONDecoder().decode(RosterView.self, from: Data(json.utf8))
+        XCTAssertEqual(v.agents.map(AgentRosterModel.showsStop), [true, false], "stoppable left out means no")
+        XCTAssertTrue(AgentRosterModel.showsStop(v.yours[0]))
+        XCTAssertEqual(AgentRosterModel.stopLabel(v.yours[0]), "Stop api-server")
+        XCTAssertEqual(AgentRosterModel.stopLabel(v.agents[0]), "Stop Coordinator")
+    }
+
+    func testAStopsNoticeGoesWhenTheListCloses() {
+        var m = AgentRosterModel()
+        m.open = true
+        m.notice = "Couldn't stop docs-writer: it isn't running anymore."
+        m.apply(view(agents: [row("coordinator", kind: "coordinator"), row("a")], yours: []))
+        XCTAssertNotNil(m.notice, "a new roster keeps it while the list is open")
+        m.open = false
+        XCTAssertNil(m.notice)
+    }
 }

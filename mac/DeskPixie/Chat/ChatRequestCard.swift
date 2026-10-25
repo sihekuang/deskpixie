@@ -11,7 +11,8 @@ struct ChatRequestCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            ChatWhoHeader(who: entry.who, terminal: ChatThreadModel.terminalTarget(for: entry), onTerminal: actions.focus)
+            ChatWhoHeader(who: actions.liveWho(entry), terminal: ChatThreadModel.terminalTarget(for: entry), onTerminal: actions.focus,
+                          stop: actions.stopTarget(entry), onStop: actions.stop)
             if entry.request?.kind == "permission" {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Image(systemName: "lock")
