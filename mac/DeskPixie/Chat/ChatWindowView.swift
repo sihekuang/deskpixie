@@ -14,7 +14,10 @@ final class ChatWindowState {
     private(set) var scrollRequests = 0
     /// The opening scroll has run since the window last opened: until then, a page arriving
     /// neither scrolls nor counts as read, and the top doesn't load older pages.
-    private(set) var opened = false
+    var opened: Bool { open.opened }
+    /// A view that appears runs this open's scroll if it was asked for before the view saw it.
+    var scrollsOnAppear: Bool { open.scrollsOnAppear }
+    private var open = ChatOpening()
     /// The window is on screen: not hidden behind others, minimized or on another Space (the
     /// controller sets it from the window's occlusion state).
     var visible = false
@@ -22,12 +25,14 @@ final class ChatWindowState {
     func scroll(to id: String?) {
         scrollTarget = id
         scrollRequests += 1
+        open.asked()
     }
 
-    /// The window is opening: wait for its first scroll again.
-    func opening() { opened = false }
+    /// The window is opening: wait for its own first scroll again.
+    func opening() { open.opening() }
 
-    func didOpen() { opened = true }
+    /// A scroll ran: the window is open.
+    func scrolled() { open.scrolled() }
 }
 
 /// The chat window (#302, spec §4): the needs strip, the thread in a column at most 680 pt
@@ -222,7 +227,8 @@ private struct ChatThreadView: View {
             .onChange(of: state.visible) { markRead() }
             .onChange(of: state.scrollRequests) { scroll(proxy, to: state.scrollTarget) }
             // A request made before this view's first update never reaches onChange.
-            .onAppear { if !state.opened && state.scrollRequests > 0 { scroll(proxy, to: state.scrollTarget) } }
+            // Only this open's request: a view made for a new open must not run the last one's.
+            .onAppear { if state.scrollsOnAppear { scroll(proxy, to: state.scrollTarget) } }
         }
     }
 
@@ -265,7 +271,7 @@ private struct ChatThreadView: View {
                 awaitingLayout = ChatThreadModel.scrollMoves(contentHeight: Double(geometry.height) + 40,
                                                              viewportHeight: Double(viewport))
             }
-            if !state.opened { state.didOpen() }
+            state.scrolled()
             markRead()
         }
     }
