@@ -168,12 +168,11 @@ struct ChatComposer: View {
         return .handled
     }
 
-    /// Return or Tab with the list open: the row picked. False with no list (Return sends).
+    /// Return or Tab with the list open: the row picked. False with no list, or nothing in it
+    /// ("No one called …"): Return sends.
     private func pickSelected() -> Bool {
-        guard let m = mention else { return false }
-        let rows = m.candidates(model.recipients)
-        guard !rows.isEmpty else { return true } // "No one called …": nothing to pick, nothing sent
-        pick(rows[min(state.mentionRow, rows.count - 1)], m)
+        guard let m = mention, let row = m.selected(row: state.mentionRow, model.recipients) else { return false }
+        pick(row, m)
         return true
     }
 

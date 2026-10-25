@@ -164,10 +164,12 @@ public struct MentionQuery: Equatable, Sendable {
     }
 
     /// Pixie, then the recipients, that fit what's typed: those whose name or @name starts with
-    /// it first, then those that contain it, in any case; each kept in list order.
+    /// it first, then those that contain it, in any case; each kept in list order. A full stop
+    /// at the end is left out, as `ChatRecipients.mentions` leaves it out.
     public func candidates(_ recipients: [ChatRecipient]) -> [MentionCandidate] {
         let all: [MentionCandidate] = [.pixie] + recipients.map { .recipient($0) }
-        let q = query.lowercased()
+        var q = query.lowercased()
+        while q.hasSuffix(".") { q.removeLast() }
         guard !q.isEmpty else { return all }
         func keys(_ c: MentionCandidate) -> [String] {
             if case .recipient(let r) = c { return [r.label.lowercased(), r.name.lowercased()] }
@@ -176,6 +178,13 @@ public struct MentionQuery: Equatable, Sendable {
         let prefix = all.filter { keys($0).contains { $0.hasPrefix(q) } }
         let contains = all.filter { c in !prefix.contains(c) && keys(c).contains { $0.contains(q) } }
         return prefix + contains
+    }
+
+    /// The row Return or Tab picks (`row`, clamped), nil when nothing fits: then Return sends
+    /// the text as it is, @word and all.
+    public func selected(row: Int, _ recipients: [ChatRecipient]) -> MentionCandidate? {
+        let rows = candidates(recipients)
+        return rows.isEmpty ? nil : rows[max(0, min(row, rows.count - 1))]
     }
 
     /// "No one called <query>" when nothing fits.

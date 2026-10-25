@@ -61,6 +61,20 @@ final class ChatMentionsTests: XCTestCase {
         XCTAssertEqual(q.emptyLabel(), "No one called zed")
     }
 
+    func testAFullStopAtTheEndIsLeftOut() {
+        XCTAssertEqual(MentionQuery(start: 0, query: "api-codex.").candidates(Self.all), [.recipient(Self.api)])
+        XCTAssertEqual(MentionQuery(start: 0, query: "api-codex.").selected(row: 0, Self.all), .recipient(Self.api))
+    }
+
+    func testReturnPicksTheRowElseNothing() {
+        let q = MentionQuery(start: 0, query: "")
+        XCTAssertEqual(q.selected(row: 1, Self.all), .recipient(Self.docs))
+        XCTAssertEqual(q.selected(row: 99, Self.all), .recipient(Self.worker), "clamped")
+        XCTAssertNil(MentionQuery.active(in: "ping @nobody", caret: 12)!.selected(row: 0, Self.all),
+                     "no one called nobody: Return sends \"ping @nobody\"")
+        XCTAssertNil(ChatRecipients.check("ping @nobody", target: nil, label: "", recipients: Self.all), "and it may go")
+    }
+
     // MARK: Picking
 
     func testPickTakesTheAtOutAndSetsTheTarget() {
