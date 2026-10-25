@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -164,6 +165,9 @@ func TestChatSendRefusesMoreThanOneRecipient(t *testing.T) {
 		if err == nil || err.Error() != c.want {
 			t.Errorf("%v: %v, want %q", c.args, err, c.want)
 		}
+		if code := codeOf(err); code != "refused" {
+			t.Errorf("%v: code %q, want refused (the shell shows it as a refusal)", c.args, code)
+		}
 	}
 	if f.delegated != 0 || len(f.sent) != 0 {
 		t.Fatalf("a refused message went: delegated %d, sent %q", f.delegated, f.sent)
@@ -177,6 +181,15 @@ func TestChatSendRefusesMoreThanOneRecipient(t *testing.T) {
 	if !slices.Equal(f.sent, []string{"Tell the docs session: @w1 ship it", "ask @nobody, mail me@w1.com"}) {
 		t.Fatalf("sent %q", f.sent)
 	}
+}
+
+// codeOf is the code a call's error carries to the shell (bridge.Coder), "" for none.
+func codeOf(err error) string {
+	var c interface{ Code() string }
+	if errors.As(err, &c) {
+		return c.Code()
+	}
+	return ""
 }
 
 // The box under Pixie keeps today's behaviour (#302 scope): no `from`, no one-recipient rule.

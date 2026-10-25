@@ -58,8 +58,12 @@ func TestChatSendCallsTheAgent(t *testing.T) {
 		t.Fatal(string(out))
 	}
 	f.chatErr = errors.New("Delegation is off (Coordinator: herdr not found).")
-	if _, err := h.callErr("chat.send", map[string]string{"text": "again"}); err == nil || err.Error() != "Delegation is off (Coordinator: herdr not found)." {
+	_, err := h.callErr("chat.send", map[string]string{"text": "again"})
+	if err == nil || err.Error() != "Delegation is off (Coordinator: herdr not found)." {
 		t.Fatal(err)
+	}
+	if code := codeOf(err); code != "" {
+		t.Fatalf("a failure, not a refusal: code %q", code)
 	}
 	if !slices.Equal(f.sent, []string{"hello"}) {
 		t.Fatal(f.sent)
@@ -68,8 +72,12 @@ func TestChatSendCallsTheAgent(t *testing.T) {
 
 func TestChatSendWithoutAnAgentSaysTheCoordinatorIsOff(t *testing.T) {
 	h := newHarness(t)
-	if _, err := h.callErr("chat.send", map[string]string{"text": "hello"}); err == nil || err.Error() != "The coordinator is off." {
+	_, err := h.callErr("chat.send", map[string]any{"text": "hello", "from": "window"})
+	if err == nil || err.Error() != "The coordinator is off." {
 		t.Fatal(err)
+	}
+	if code := codeOf(err); code != "" {
+		t.Fatalf("not a refusal: code %q", code)
 	}
 	h.call("chat.stop", nil) // no agent: a no-op
 }

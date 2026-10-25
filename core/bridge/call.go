@@ -3,6 +3,7 @@ package bridge
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 )
@@ -52,7 +53,8 @@ func unregisterPackage(method string) { pkgHandlers.set(method, nil) }
 func (e *Engine) Register(method string, fn Handler) { e.calls.set(method, fn) }
 
 // Call runs method with args (JSON; empty = `{}`) and returns the envelope
-// `{"ok":<result>}` or `{"error":"<msg>"}`. Unknown methods yield
+// `{"ok":<result>}` or `{"error":"<msg>"}`, with `"code"` too when the error has one (a
+// `Coder`, such as chat's refusals: "refused"). Unknown methods yield
 // `{"error":"unknown method <method>"}`. A panicking handler is reported as an error.
 func (e *Engine) Call(method string, args []byte) []byte {
 	fn, ok := e.calls.get(method)
@@ -80,6 +82,14 @@ func invoke(method string, fn Handler, ok bool, args []byte) (out []byte) {
 	}()
 	res, err := fn(json.RawMessage(args))
 	if err != nil {
+		var c Coder
+		if errors.As(err, &c) && c.Code() != "" {
+			b, _ := json.Marshal(struct {
+				Error string `json:"error"`
+				Code  string `json:"code"`
+			}{err.Error(), c.Code()})
+			return b
+		}
 		return errEnvelope(err.Error())
 	}
 	if res == nil {
@@ -93,6 +103,10 @@ func invoke(method string, fn Handler, ok bool, args []byte) (out []byte) {
 	}
 	return b
 }
+
+// Coder is an error that says what kind it is, for the shell to tell it from a failure: the
+// envelope carries it as `code`.
+type Coder interface{ Code() string }
 
 func errEnvelope(msg string) []byte {
 	b, _ := json.Marshal(struct {

@@ -119,6 +119,9 @@ type Refusal struct{ Text string }
 
 func (r *Refusal) Error() string { return r.Text }
 
+// Code marks it a refusal for the shell (bridge.Coder): the box shows its words, not a failure.
+func (r *Refusal) Code() string { return "refused" }
+
 // CheckOneRecipient is the rule that a message goes to one recipient (#302). target is the one
 // chosen (nil: Pixie); label names it when it isn't running ("" for its address). It refuses a
 // target that isn't a recipient now, a mention of anyone else beside a target, and, with no
