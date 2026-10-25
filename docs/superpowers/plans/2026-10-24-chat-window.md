@@ -399,6 +399,43 @@ Layout, as in the mockup:
   Screenshot each step.
 - [ ] **Step 6: Commit:** "mac: the chat window (#302)". Push and open PR 2. Review, CI, fixes.
 
+### Task 8b: live text in the window (streaming)
+
+What streams today shows in the window as it happens. Nothing live is stored: the thread keeps
+the finished turns only.
+
+**Go** (`core/app/thread.go`, `core/app/app.go`):
+- A new event `chat.live {who, text, job?}`, where `who` is `you`, `pixie` or `coordinator`.
+  An empty `text` clears that live line.
+- Sources:
+  - you: voice `heard` (the live caption of your words);
+  - pixie: voice `saying` (Pixie's words while it speaks);
+  - coordinator: a typed job's line while the job is still working, which `EntryForChat`
+    drops today. It carries `job`.
+- Clears:
+  - your line clears on your final transcript, and Pixie's on Pixie's final transcript;
+  - the coordinator's line clears when that job's done, failed or question line arrives, or
+    when its job ends;
+  - all lines clear on `chat.reset`.
+- Test: `TestLiveLinesComeAndGo`, covering each source and each clear, and that nothing live is
+  stored.
+
+**Swift:**
+- `ChatThreadModel` gets `live: [ChatLive]`, and `applyLive(_:)` replaces by `who`, plus
+  `job` for the coordinator.
+- `EngineEvent` gets `chat.live`, routed in `EngineCoordinator`.
+- The view: your live words are a lighter bubble on the right; Pixie's live words are on the
+  left, under the "Pixie" label, in the secondary colour. The coordinator's latest step is
+  shown after "Thinking…" ("Thinking… · <step>").
+- A live line that grows keeps the view at the bottom, the same as a growing row.
+- Identifiers: `chat.live.you`, `chat.live.pixie`, `chat.live.coordinator`.
+- Tests: `testLiveReplacesByWho`, `testAFinalEntryClearsItsLiveLine` (the model also clears on
+  the matching `chat.entry`, in case events cross), and the event decode test.
+
+- [ ] Write the failing tests (Go and Swift). Run them. Expected: FAIL.
+- [ ] Implement. Run `go test ./...`, `swift test` and the signed build. Expected: PASS.
+- [ ] Commit: "Chat window: live text while you and Pixie speak, and the coordinator's steps (#302)".
+
 ### Task 8a: UI tests for the window (XCUITest)
 
 The app has no UI test target yet; this adds one and covers the window. Task 9 extends it.
