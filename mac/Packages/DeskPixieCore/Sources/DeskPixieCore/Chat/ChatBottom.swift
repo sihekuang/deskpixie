@@ -39,4 +39,29 @@ public struct ChatBottom: Equatable, Sendable {
 
     /// The layout after the opening scroll: from here, only where the end is counts.
     public mutating func settled() { held = false }
+
+    // MARK: Landing
+
+    /// How many times an opening scroll to the end is tried again.
+    public static let landingTries = 3
+    private var triesLeft = 0
+    /// The opening scroll went to the end and hasn't been seen there yet. On macOS 15, opened from
+    /// Pixie's button with DeskPixie in the background, the scroll can run without moving
+    /// anything, and the window came up at the top under "↓ Latest".
+    public var landing: Bool { triesLeft > 0 }
+
+    /// The opening scroll went to the end (true) or to a message (false).
+    public mutating func aimed(atBottom: Bool) { triesLeft = atBottom ? Self.landingTries : 0 }
+
+    /// A layout report while the opening scroll lands. True: scroll to the end again. A report
+    /// before the viewport has its height decides nothing.
+    public mutating func landed(sentinelMaxY: Double, viewportHeight: Double) -> Bool {
+        guard landing, viewportHeight > 0 else { return false }
+        if ChatThreadModel.isAtBottom(sentinelMaxY: sentinelMaxY, viewportHeight: viewportHeight) {
+            triesLeft = 0
+            return false
+        }
+        triesLeft -= 1
+        return true
+    }
 }

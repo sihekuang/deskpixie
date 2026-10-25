@@ -208,6 +208,10 @@ private struct ChatThreadView: View {
                     .onChange(of: g.size.height) { _, new in viewport = new }
             })
             .onChange(of: viewport) { old, new in
+                // The opening scroll went to the end and didn't get there: again.
+                if bottom.landed(sentinelMaxY: Double(geometry.bottom), viewportHeight: Double(new)) {
+                    return proxy.scrollTo(Self.bottomID, anchor: .bottom)
+                }
                 // The box under the thread grew (a chip, the @ list, more lines): at the bottom
                 // before, stay there instead of showing ↓ Latest.
                 if bottom.resized(sentinelMaxY: Double(geometry.bottom), oldViewport: Double(old),
@@ -216,6 +220,13 @@ private struct ChatThreadView: View {
                 }
             }
             .onChange(of: geometry) { old, new in
+                // The opening scroll went to the end and didn't get there (macOS 15, opened from
+                // Pixie's button): again, still waiting for the layout after it.
+                if bottom.landed(sentinelMaxY: Double(new.bottom), viewportHeight: Double(viewport)) {
+                    proxy.scrollTo(Self.bottomID, anchor: .bottom)
+                    if awaitingLayout { giveUpWaiting() }
+                    return
+                }
                 // The layout after the opening scroll: only now does at-bottom hold, from where
                 // the end is.
                 if awaitingLayout {
@@ -309,12 +320,14 @@ private struct ChatThreadView: View {
     private func scroll(_ proxy: ScrollViewProxy, to id: String?) {
         let target = id ?? model.openTarget
         DispatchQueue.main.async {
-            if let target, target != model.entries.last?.id, model.entries.contains(where: { $0.id == target }) {
+            let toMessage = target.map { t in t != model.entries.last?.id && model.entries.contains { $0.id == t } } ?? false
+            if toMessage, let target {
                 // The oldest unread (or the message asked for) at the top, what came after below.
                 proxy.scrollTo(target, anchor: .top)
             } else {
                 proxy.scrollTo(Self.bottomID, anchor: .bottom)
             }
+            if !state.opened { bottom.aimed(atBottom: !toMessage) }
             // The geometry known now is from before the scroll: the next report decides. Content
             // that fits doesn't move, so what is known holds.
             if !state.opened {
