@@ -125,9 +125,10 @@ final class UITestApp {
             try fm.createDirectory(at: bin, withIntermediateDirectories: true)
             // A turn starts and ends as claude's hooks do: each JSON file put in $TURNS goes to
             // `pix hook <event>` (what pix's settings tell claude to run), the event named by the
-            // file's name up to its first "-". An Esc typed into it (pix interrupting it) is
+            // file's name up to its first "-". A lone Esc typed into it (pix interrupting it) is
             // noted in $TURNS.esc and answered with what claude shows then, which ends the turn
-            // for pix. It stops with its pix.
+            // for pix; an Esc that a "[" or "O" follows within 0.1 s starts an escape sequence
+            // (a bracketed paste, a key), not an interrupt. It stops with its pix.
             let script = """
             #!/bin/sh
             stty -icanon -echo min 1 time 0 2>/dev/null
@@ -136,8 +137,13 @@ final class UITestApp {
                 c=$(dd bs=1 count=1 2>/dev/null | od -An -tx1 | tr -d ' \\n')
                 [ -n "$c" ] || sleep 0.2
                 if [ "$c" = "1b" ]; then
-                  touch "$TURNS.esc"
-                  printf 'What should Claude do instead?\\r\\n'
+                  stty min 0 time 1 2>/dev/null
+                  n=$(dd bs=1 count=1 2>/dev/null | od -An -tx1 | tr -d ' \\n')
+                  stty min 1 time 0 2>/dev/null
+                  if [ "$n" != "5b" ] && [ "$n" != "4f" ]; then
+                    touch "$TURNS.esc"
+                    printf 'What should Claude do instead?\\r\\n'
+                  fi
                 fi
               done
             ) <&0 & # a job in the background reads /dev/null unless told otherwise
@@ -190,6 +196,14 @@ final class UITestApp {
     func stopSession(_ description: String) {
         guard let s = sessions.removeValue(forKey: description) else { return }
         Self.end(s)
+    }
+
+    /// Ends the session `description` at once (SIGKILL to script, so its pix goes with the pty),
+    /// without waiting: as a session that dies under a click.
+    func killSession(_ description: String) {
+        guard let s = sessions.removeValue(forKey: description) else { return }
+        kill(s.pid, SIGKILL)
+        close(s.input)
     }
 
     /// SIGTERM to script, then waits up to 10 s for it to go (launchd reaps it).
