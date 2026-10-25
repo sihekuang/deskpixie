@@ -74,7 +74,7 @@ final class ChatMentionsTests: XCTestCase {
     func testAPickReplacesAnEarlierTargetAndItsMention() {
         let text = "@api-codex ship it @fi"
         let q = MentionQuery.active(in: text, caret: text.count)!
-        let (out, target) = q.pick(.recipient(Self.worker), in: text, caret: text.count, previous: "api-codex")
+        let (out, target) = q.pick(.recipient(Self.worker), in: text, caret: text.count, previous: Self.api)
         XCTAssertEqual(out, "ship it ")
         XCTAssertEqual(target, Self.worker)
         XCTAssertNil(ChatRecipients.check(out, target: target?.name, label: "", recipients: Self.all),
@@ -84,7 +84,7 @@ final class ChatMentionsTests: XCTestCase {
     func testPickingPixieClearsTheTarget() {
         let text = "tell @API-CODEX. @pi"
         let q = MentionQuery.active(in: text, caret: text.count)!
-        let (out, target) = q.pick(.pixie, in: text, caret: text.count, previous: "api-codex")
+        let (out, target) = q.pick(.pixie, in: text, caret: text.count, previous: Self.api)
         XCTAssertNil(target)
         XCTAssertEqual(out, "tell. ", "its mention went too, any case; the full stop stays")
     }
@@ -92,8 +92,14 @@ final class ChatMentionsTests: XCTestCase {
     func testPickingTheSameTargetKeepsItsMention() {
         let text = "@api-codex hi @api"
         let q = MentionQuery.active(in: text, caret: text.count)!
-        XCTAssertEqual(q.pick(.recipient(Self.api), in: text, caret: text.count, previous: "api-codex").text,
+        XCTAssertEqual(q.pick(.recipient(Self.api), in: text, caret: text.count, previous: Self.api).text,
                        "@api-codex hi ")
+    }
+
+    func testAPickTakesOutTheOldTargetsLabelToo() {
+        let text = "@API-SERVER ship it @fi"
+        let q = MentionQuery.active(in: text, caret: text.count)!
+        XCTAssertEqual(q.pick(.recipient(Self.worker), in: text, caret: text.count, previous: Self.api).text, "ship it ")
     }
 
     @MainActor
@@ -115,7 +121,10 @@ final class ChatMentionsTests: XCTestCase {
             ("ping @nobody", nil, "", nil),
             ("write to me@api-codex.com", nil, "", nil),
             ("@api-codex ship it", nil, "", "Pick @api-codex from the list to send it to them."),
-            ("@Api-Codex ship it", nil, "", "Pick @api-codex from the list to send it to them."),
+            ("@Api-Codex ship it", nil, "", "Pick @Api-Codex from the list to send it to them."),
+            ("@api-server ship it", nil, "", "Pick @api-server from the list to send it to them."),
+            ("@chat is two words", nil, "", nil),
+            ("@api-server ship it", "api-codex", "", nil),
             ("@fix-login and @api-codex", nil, "", "Send to one at a time: pick @fix-login or @api-codex."),
             ("@fix-login @fix-login", nil, "", "Pick @fix-login from the list to send it to them."),
             ("ship it", "api-codex", "", nil),

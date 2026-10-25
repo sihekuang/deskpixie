@@ -151,7 +151,7 @@ func TestChatSendRefusesMoreThanOneRecipient(t *testing.T) {
 		want string
 	}{
 		{map[string]any{"text": "ship it, @w2", "session": "w1"}, "This goes to docs only. Remove @w2, or pick them instead."},
-		{map[string]any{"text": "@w1 and @W2"}, "Send to one at a time: pick @w1 or @w2."},
+		{map[string]any{"text": "@w1 and @W2"}, "Send to one at a time: pick @w1 or @W2."},
 		{map[string]any{"text": "@w1 ship it"}, "Pick @w1 from the list to send it to them."},
 		{map[string]any{"text": "hi", "session": "w3"}, "docs (gone) isn't running anymore."},
 		{map[string]any{"text": "hi", "session": "w9"}, "w9 isn't running anymore."},

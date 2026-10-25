@@ -50,11 +50,18 @@ public enum ChatRecipients {
         c.isLetter || c.isNumber || c == "-" || c == "_" || c == "."
     }
 
-    /// The recipients named with @name, in order, each once: an @ at the start or after a
-    /// space, and the whole word, in any case ("a@b", an email address, "@docs2" for docs name no
-    /// one). A full stop after it ends the sentence, not the name.
-    public static func mentions(in text: String, _ recipients: [ChatRecipient]) -> [ChatRecipient] {
-        var out: [ChatRecipient] = []
+    /// A recipient the text names, and the word after the @ as typed.
+    public struct Mention: Equatable, Sendable {
+        public let recipient: ChatRecipient
+        public let said: String
+    }
+
+    /// The recipients named with @name, in order, each once. The name is the address or the
+    /// label (a label of one word: "@beta"); an @ at the start or after a space, and the whole
+    /// word, in any case ("a@b", an email address, "@docs2" for docs name no one). A full stop
+    /// after it ends the sentence, not the name.
+    public static func mentions(in text: String, _ recipients: [ChatRecipient]) -> [Mention] {
+        var out: [Mention] = []
         let chars = Array(text)
         var i = 0
         while i < chars.count {
@@ -66,8 +73,10 @@ public enum ChatRecipients {
             while name.hasSuffix(".") { name.removeLast() }
             i = j - 1
             guard !name.isEmpty else { continue }
-            for r in recipients where r.name.lowercased() == name.lowercased() && !out.contains(where: { $0.name == r.name }) {
-                out.append(r)
+            let lower = name.lowercased()
+            if let r = recipients.first(where: { $0.name.lowercased() == lower || $0.label.lowercased() == lower }),
+               !out.contains(where: { $0.recipient.name == r.name }) {
+                out.append(Mention(recipient: r, said: name))
             }
         }
         return out
@@ -80,8 +89,8 @@ public enum ChatRecipients {
                              recipients: [ChatRecipient], knowsRecipients: Bool = true) -> String? {
         let named = mentions(in: text, recipients)
         guard let target else {
-            if named.count >= 2 { return "Send to one at a time: pick @\(named[0].name) or @\(named[1].name)." }
-            if let one = named.first { return "Pick @\(one.name) from the list to send it to them." }
+            if named.count >= 2 { return "Send to one at a time: pick @\(named[0].said) or @\(named[1].said)." }
+            if let one = named.first { return "Pick @\(one.said) from the list to send it to them." }
             return nil
         }
         guard let to = recipients.first(where: { !target.isEmpty && $0.name == target }) else {
@@ -89,8 +98,8 @@ public enum ChatRecipients {
             let name = !label.isEmpty ? label : !target.isEmpty ? target : "That session"
             return "\(name) isn't running anymore."
         }
-        if let other = named.first(where: { $0.name != to.name }) {
-            return "This goes to \(to.label) only. Remove @\(other.name), or pick them instead."
+        if let other = named.first(where: { $0.recipient.name != to.name }) {
+            return "This goes to \(to.label) only. Remove @\(other.said), or pick them instead."
         }
         return nil
     }
@@ -160,24 +169,24 @@ public struct MentionQuery: Equatable, Sendable {
     /// "No one called <query>" when nothing fits.
     public func emptyLabel() -> String { "No one called \(query)" }
 
-    /// The text after picking: this @… goes, and so does any @name of the target it replaces
-    /// (`previous`), so the text never names two. The target is the pick's (nil: Pixie).
+    /// The text after picking: this @… goes, and so does any @name (or @label) of the target it
+    /// replaces (`previous`), so the text never names two. The target is the pick's (nil: Pixie).
     public func pick(_ candidate: MentionCandidate, in text: String, caret: Int,
-                     previous: String?) -> (text: String, target: ChatRecipient?) {
+                     previous: ChatRecipient?) -> (text: String, target: ChatRecipient?) {
         var chars = Array(text)
         let end = max(start, min(caret, chars.count))
         chars.removeSubrange(start..<end)
         var out = String(chars)
         let target: ChatRecipient? = if case .recipient(let r) = candidate { r } else { nil }
-        if let previous, previous != target?.name {
+        if let previous, previous.name != target?.name {
             out = Self.removingMentions(of: previous, from: out)
         }
         return (out, target)
     }
 
     /// The text without @name (whole words, any case), each with one space beside it.
-    static func removingMentions(of name: String, from text: String) -> String {
-        let one = ChatRecipient(name: name)
+    static func removingMentions(of target: ChatRecipient, from text: String) -> String {
+        let one = target
         var chars = Array(text)
         var i = 0
         while i < chars.count {

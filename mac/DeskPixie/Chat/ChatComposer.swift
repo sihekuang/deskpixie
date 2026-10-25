@@ -179,7 +179,7 @@ struct ChatComposer: View {
 
     /// The pick is the one target (Pixie: none), and the @… leaves the text.
     private func pick(_ c: MentionCandidate, _ m: MentionQuery) {
-        let (text, target) = m.pick(c, in: state.draft, caret: state.draft.count, previous: model.replyTo?.name)
+        let (text, target) = m.pick(c, in: state.draft, caret: state.draft.count, previous: model.replyTo.map { ChatRecipient(name: $0.name, label: $0.label) })
         state.draft = text
         model.choose(target)
         focused = true

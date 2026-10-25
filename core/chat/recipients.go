@@ -55,12 +55,19 @@ func isHandle(r rune) bool {
 	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '-' || r == '_' || r == '.'
 }
 
-// Mentions are the recipients the text names with @name, in order, each once. An @ counts only
-// at the start or after a space, and the name must be the whole word, matched without regard to
-// case: "a@b", an email address or "@docs2" for docs mention no one. A full stop after it ends
-// the sentence, not the name.
-func Mentions(text string, rs []Recipient) []Recipient {
-	var out []Recipient
+// Mention is a recipient the text names, and how: the word after the @, as typed.
+type Mention struct {
+	Recipient
+	Said string
+}
+
+// Mentions are the recipients the text names with @name, in order, each once. The name is the
+// recipient's address or its label (a label of one word: "@beta"). An @ counts only at the
+// start or after a space, and the name must be the whole word, matched without regard to case:
+// "a@b", an email address or "@docs2" for docs mention no one. A full stop after it ends the
+// sentence, not the name.
+func Mentions(text string, rs []Recipient) []Mention {
+	var out []Mention
 	seen := map[string]bool{}
 	runes := []rune(text)
 	for i := 0; i < len(runes); i++ {
@@ -77,9 +84,10 @@ func Mentions(text string, rs []Recipient) []Recipient {
 			continue
 		}
 		for _, r := range rs {
-			if strings.EqualFold(r.Name, name) && !seen[r.Name] {
+			if (strings.EqualFold(r.Name, name) || strings.EqualFold(r.Label, name)) && !seen[r.Name] {
 				seen[r.Name] = true
-				out = append(out, r)
+				out = append(out, Mention{r, name})
+				break
 			}
 		}
 	}
@@ -101,9 +109,9 @@ func CheckOneRecipient(text string, target *string, label string, rs []Recipient
 	if target == nil {
 		switch {
 		case len(mentioned) >= 2:
-			return &Refusal{"Send to one at a time: pick @" + mentioned[0].Name + " or @" + mentioned[1].Name + "."}
+			return &Refusal{"Send to one at a time: pick @" + mentioned[0].Said + " or @" + mentioned[1].Said + "."}
 		case len(mentioned) == 1:
-			return &Refusal{"Pick @" + mentioned[0].Name + " from the list to send it to them."}
+			return &Refusal{"Pick @" + mentioned[0].Said + " from the list to send it to them."}
 		}
 		return nil
 	}
@@ -126,7 +134,7 @@ func CheckOneRecipient(text string, target *string, label string, rs []Recipient
 	}
 	for _, m := range mentioned {
 		if m.Name != to.Name {
-			return &Refusal{"This goes to " + to.Label + " only. Remove @" + m.Name + ", or pick them instead."}
+			return &Refusal{"This goes to " + to.Label + " only. Remove @" + m.Said + ", or pick them instead."}
 		}
 	}
 	return nil

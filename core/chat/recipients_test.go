@@ -57,6 +57,9 @@ func TestMentionsAreWholeWordsAfterASpace(t *testing.T) {
 		{"@ nothing @", nil},
 		{"@nobody here", nil},
 		{"@api-codex and @fix-login and @api-codex", []string{"api-codex", "fix-login"}},
+		{"by its label @API-SERVER", []string{"api-codex"}},
+		{"@api-server and @api-codex", []string{"api-codex"}},
+		{"@chat is two words", nil},
 	}
 	for _, c := range cases {
 		var got []string
@@ -82,11 +85,15 @@ func TestOneRecipientPerMessage(t *testing.T) {
 		{"to Pixie, a word that names no one", "ping @nobody", nil, "", ""},
 		{"to Pixie, an email address", "write to me@api-codex.com", nil, "", ""},
 		{"to Pixie, one recipient named", "@api-codex ship it", nil, "", "Pick @api-codex from the list to send it to them."},
-		{"to Pixie, any case", "@Api-Codex ship it", nil, "", "Pick @api-codex from the list to send it to them."},
+		{"to Pixie, any case, said as typed", "@Api-Codex ship it", nil, "", "Pick @Api-Codex from the list to send it to them."},
+		{"to Pixie, by label", "@api-server ship it", nil, "", "Pick @api-server from the list to send it to them."},
 		{"to Pixie, two named", "@fix-login and @api-codex", nil, "", "Send to one at a time: pick @fix-login or @api-codex."},
 		{"to Pixie, the same one twice", "@fix-login @fix-login", nil, "", "Pick @fix-login from the list to send it to them."},
 		{"a target, plain text", "ship it", str("api-codex"), "", ""},
 		{"a target, mentioning itself", "@api-codex ship it", str("api-codex"), "", ""},
+		{"a target, mentioning itself by label", "@api-server ship it", str("api-codex"), "", ""},
+		{"a target, someone else by label", "and @fix-login.", str("api-codex"), "",
+			"This goes to api-server only. Remove @fix-login, or pick them instead."},
 		{"a target, a word that names no one", "cc @nobody", str("api-codex"), "", ""},
 		{"a target, someone else named", "tell @fix-login too", str("api-codex"), "",
 			"This goes to api-server only. Remove @fix-login, or pick them instead."},
