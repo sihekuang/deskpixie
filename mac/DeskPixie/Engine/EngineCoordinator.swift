@@ -542,6 +542,14 @@ final class EngineCoordinator {
             roster?.apply(mode: mode)
         case .captions(let always, let secs, let fade, let history):
             roster?.apply(captions: always, dismissSecs: secs, fadeSecs: fade, historyMins: history)
+        case .chatEntry(let e):
+            ChatHub.shared?.apply(e)
+        case .chatNeeds(let n):
+            ChatHub.shared?.applyNeeds(n)
+        case .chatBadge(let b):
+            ChatHub.shared?.applyBadge(b)
+        case .chatReset:
+            if let model = ChatHub.shared { Task { await model.reset() } }
         case .showPane(let r):
             bubble?.showPane(r)
         case .focusPlan(let plan):
