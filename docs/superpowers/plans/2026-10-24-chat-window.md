@@ -409,7 +409,8 @@ The app has no UI test target yet; this adds one and covers the window. Task 9 e
 - Modify: `mac/project.yml` (target `DeskPixieUITests`, type `bundle.ui-testing`, host
   `DeskPixie`, added to the DeskPixie scheme's test action), `mac/Makefile` (`uitest`:
   `xcodebuild test -scheme DeskPixie -only-testing:DeskPixieUITests`, with the same sign flags as
-  `build`), `.github/workflows/ci.yml` (a "UI tests" step after the Release build).
+  `build`). No CI step: the UI tests run on this Mac, signed, before every push of PR 2 and
+  PR 3 (the maintainer's call, 2026-10-24).
 - Modify the Task 8 views: add accessibility identifiers. Nothing else in the app changes.
   - `chat.window` and `chat.thread`;
   - `chat.entry.<id>` and `chat.needs.pill.<id>`;
@@ -429,7 +430,7 @@ The app has no UI test target yet; this adds one and covers the window. Task 9 e
 **Your own app.** If a DeskPixie with the same bundle ID is already running, the test calls
 `XCTSkip("Quit DeskPixie to run the UI tests")`. It never terminates an app it didn't launch.
 
-**Tests run on every build (CI too), with no coordinator needed:**
+**Tests that need no coordinator:**
 - `testChatOpensFromTheMenuBar`: the status item's menu, Chat…, then the window `chat.window`.
 - `testASeededThreadShowsWhoSaidWhat`: your bubble, "Pixie", "Coordinator", and a session
   header with its label and "Your session".
@@ -447,9 +448,8 @@ The app has no UI test target yet; this adds one and covers the window. Task 9 e
   Expected: FAIL, because the identifiers aren't there yet.
 - [ ] **Step 2: Add the identifiers** and the target. Run `make -C mac uitest` signed
   (`SIGNING_IDENTITY=…`). Expected: PASS. Then run the live test once.
-- [ ] **Step 3: CI.** Push, and check that the UI tests step runs and passes on the runner.
-  If the runner can't drive UI (no accessibility permission), keep the target, make the CI step
-  report that, and say so in the PR.
+- [ ] **Step 3: Run the whole suite on this Mac** (your DeskPixie quit first, restarted after),
+  and put the result in the PR description.
 - [ ] **Step 4: Commit:** "mac: UI tests for the chat window (#302)".
 
 ## Step 3 (PR 3): the switch
