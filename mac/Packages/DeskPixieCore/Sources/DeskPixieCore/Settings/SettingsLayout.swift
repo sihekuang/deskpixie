@@ -46,6 +46,21 @@ public enum SettingsLayout {
         Tab(section: .advanced, title: "Advanced", symbol: "gearshape.2", tint: .gray),
     ]
 
+    /// The sidebar index of `section`'s page.
+    public static func tabIndex(_ section: SettingsSection) -> Int? {
+        tabs.firstIndex { $0.section == section }
+    }
+
+    /// The page title a search result names (the sidebar's, e.g. "Coordinator" for Agent).
+    public static func tabTitle(_ section: SettingsSection) -> String {
+        tabs.first { $0.section == section }?.title ?? section.rawValue
+    }
+
+    /// The search's line when nothing matches (#287).
+    public static func noResultsText(_ query: String) -> String {
+        "No settings match “\(query.trimmingCharacters(in: .whitespaces))”."
+    }
+
     /// Whether `platforms` includes `platform`; nil means everywhere.
     public static func availableOn(_ platforms: [SettingsPlatform]?, _ platform: SettingsPlatform) -> Bool {
         platforms?.contains(platform) ?? true
@@ -448,7 +463,7 @@ public enum SettingsLayout {
 
     // MARK: Extra rows
 
-    public enum Action: Equatable, Sendable { case resetPosition, openFile, restartCoordinator, exportLogs }
+    public enum Action: String, Equatable, Sendable { case resetPosition, openFile, restartCoordinator, exportLogs }
 
     /// The rows a section has besides its fields.
     public enum Extra: Equatable, Sendable {
@@ -458,6 +473,33 @@ public enum SettingsLayout {
         case secret(id: SettingsSecretID, label: String, help: String)
         /// The pix command row (#89): install state, Install / Uninstall, the PATH line, Copy Aliases.
         case pix(help: String)
+
+        /// The row's id, as the core's search names it (Go `settings.Extras`, path `extra:<id>`).
+        public var id: String {
+            switch self {
+            case .button(_, _, _, let action): return action.rawValue
+            case .secret(let id, _, _): return "key.\(id.rawValue)"
+            case .pix: return "pix"
+            }
+        }
+
+        /// The row's search path (`SettingsHit.path`).
+        public var path: String { "extra:\(id)" }
+
+        /// The row's name, as the core's search has it.
+        public var label: String {
+            switch self {
+            case .button(let label, _, _, _), .secret(_, let label, _): return label
+            case .pix: return "pix command"
+            }
+        }
+
+        /// The row's help, as the core's search has it.
+        public var help: String {
+            switch self {
+            case .button(_, let help, _, _), .secret(_, _, let help), .pix(let help): return help
+            }
+        }
     }
 
     /// Export Logs…'s suggested file name (#225), e.g. "DeskPixie logs 2026-10-21 1402.zip".

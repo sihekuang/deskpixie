@@ -53,6 +53,17 @@ final class FakeSettingsClient: SettingsClient {
         return secretsResult
     }
 
+    /// What each search answers; set to make it throw. Every query asked, in order.
+    var searchResult: [SettingsHit] = []
+    var searchThrows: Error?
+    var queries: [String] = []
+    func search(_ query: String) throws -> [SettingsHit] {
+        calls.append("settings.search")
+        queries.append(query)
+        if let searchThrows { throw searchThrows }
+        return searchResult
+    }
+
     func openFile() throws {
         calls.append("settings.openFile")
         if let openFileThrows { throw openFileThrows }
@@ -334,6 +345,7 @@ final class SettingsModelTests: XCTestCase {
             func reload() throws -> SettingsSnapshot { try snapshot() }
             func set(_ field: String, _ value: JSONValue) throws -> SettingsSnapshot { try snapshot() }
             func secrets() throws -> SettingsSecrets { throw DeskPixieEngineError.notInitialized }
+            func search(_ query: String) throws -> [SettingsHit] { [] }
             func openFile() throws {}
             func restart() throws {}
             func restartCoordinator() throws {}

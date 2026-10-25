@@ -20,20 +20,13 @@ struct SettingsWindowView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            List(selection: Binding<Int?>(
-                get: { selectedIndex },
-                set: { new in
-                    guard let new, new != selectedIndex else { return }
-                    tab = new
-                    model.recordingPath = nil
+            sidebar
+                .safeAreaInset(edge: .top) {
+                    SettingsSearchField(text: Binding(get: { model.query }, set: { model.query = $0 }))
+                        .padding(.horizontal, 10)
+                        .padding(.bottom, 4)
                 }
-            )) {
-                ForEach(Array(SettingsLayout.tabs.enumerated()), id: \.offset) { index, t in
-                    SettingsSidebarRow(tab: t).tag(index)
-                }
-            }
-            .listStyle(.sidebar)
-            .frame(width: 200)
+                .frame(width: 200)
 
             SettingsDetailView(model: model, tab: SettingsLayout.tabs[selectedIndex])
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -51,6 +44,97 @@ struct SettingsWindowView: View {
             NSApp.activate()
             model.load()
         }
+        // A picked search result, or a setting Pixie was asked to show (#288): go to its page;
+        // the page scrolls to the row and points it out.
+        .onChange(of: model.revealCount) {
+            guard let hit = model.revealed, let index = SettingsLayout.tabIndex(hit.section) else { return }
+            tab = index
+        }
+    }
+
+    /// The pages, or while searching, what the search found (#287).
+    @ViewBuilder
+    private var sidebar: some View {
+        if model.searching {
+            List(selection: Binding<String?>(
+                get: { model.revealed?.path },
+                set: { path in
+                    if let hit = model.hits.first(where: { $0.path == path }) { model.reveal(hit) }
+                }
+            )) {
+                if model.hits.isEmpty {
+                    Text(SettingsLayout.noResultsText(model.query))
+                        .foregroundStyle(.secondary)
+                        .selectionDisabled()
+                }
+                ForEach(model.hits, id: \.path) { hit in
+                    SettingsHitRow(hit: hit).tag(hit.path)
+                }
+            }
+            .listStyle(.sidebar)
+        } else {
+            List(selection: Binding<Int?>(
+                get: { selectedIndex },
+                set: { new in
+                    guard let new, new != selectedIndex else { return }
+                    tab = new
+                    model.recordingPath = nil
+                }
+            )) {
+                ForEach(Array(SettingsLayout.tabs.enumerated()), id: \.offset) { index, t in
+                    SettingsSidebarRow(tab: t).tag(index)
+                }
+            }
+            .listStyle(.sidebar)
+        }
+    }
+}
+
+/// The search field above the sidebar (#287): ⌘F focuses it, Escape clears it.
+private struct SettingsSearchField: View {
+    @Binding var text: String
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            TextField("Search", text: $text)
+                .textFieldStyle(.plain)
+                .focused($focused)
+                .onExitCommand { text = "" }
+                .accessibilityLabel("Search settings")
+            if !text.isEmpty {
+                Button {
+                    text = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary))
+        .background(Button("") { focused = true }.keyboardShortcut("f").opacity(0).accessibilityHidden(true))
+    }
+}
+
+/// One search result: the setting's name, and the page it is on.
+private struct SettingsHitRow: View {
+    let hit: SettingsHit
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(hit.label)
+            Text(SettingsLayout.tabTitle(hit.section))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .help(hit.help)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -111,21 +195,45 @@ private struct SettingsDetailView: View {
     let model: SettingsModel
     let tab: SettingsLayout.Tab
 
+    /// The row being pointed out, for a moment after it was revealed.
+    @State private var highlighted: String?
+
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack(spacing: 10) {
-                    SettingsIconTile(tab: tab, size: 28, glyph: 14, radius: 7)
-                    Text(tab.title)
-                        .font(.title2)
-                        .fontWeight(.semibold)
-                        .accessibilityAddTraits(.isHeader)
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack(spacing: 10) {
+                        SettingsIconTile(tab: tab, size: 28, glyph: 14, radius: 7)
+                        Text(tab.title)
+                            .font(.title2)
+                            .fontWeight(.semibold)
+                            .accessibilityAddTraits(.isHeader)
+                    }
+                    SettingsTabView(model: model, section: tab.section, highlighted: highlighted)
                 }
-                SettingsTabView(model: model, section: tab.section)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 20)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 20)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            // Runs again when the page changes, since a reveal can switch to another page first.
+            .task(id: "\(model.revealCount)|\(tab.section.rawValue)") {
+                guard let hit = model.takeReveal(for: tab.section) else { return }
+                // The page may have only just been switched to: let its rows lay out first.
+                do {
+                    try await Task.sleep(for: .milliseconds(50))
+                } catch {
+                    return
+                }
+                withAnimation { proxy.scrollTo(hit.path, anchor: .center) }
+                highlighted = hit.path
+                do {
+                    try await Task.sleep(for: .seconds(2))
+                } catch {
+                    highlighted = nil
+                    return
+                }
+                withAnimation(.easeOut(duration: 0.6)) { highlighted = nil }
+            }
         }
     }
 }
@@ -178,6 +286,8 @@ struct SettingsTabView: View {
     /// Restart Coordinator… was clicked: ask first (#179).
     @State private var confirmRestart = false
     let section: SettingsSection
+    /// The row a search or Pixie pointed out (a field path or an extra's `path`).
+    var highlighted: String? = nil
 
     var body: some View {
         SettingsPane {
@@ -212,7 +322,7 @@ struct SettingsTabView: View {
         Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 8, verticalSpacing: 4) {
             ForEach(model.fields(in: section), id: \.path) { field in
                 let spec = model.spec(field)
-                row(label: spec.label) {
+                row(label: spec.label, id: field.path) {
                     SettingsControlView(model: model, spec: spec)
                         .disabled(!model.enabled)
                 } note: {
@@ -277,7 +387,7 @@ struct SettingsTabView: View {
     private func extraRow(_ extra: SettingsLayout.Extra) -> some View {
         switch extra {
         case .button(let label, let help, let title, let action):
-            row(label: SettingsLayout.labelText(label)) {
+            row(label: SettingsLayout.labelText(label), id: extra.path) {
                 Button(title) {
                     switch action {
                     case .resetPosition: model.resetPosition()
@@ -292,7 +402,7 @@ struct SettingsTabView: View {
                 NoteText(text: help, isError: false)
             }
         case .pix(let help):
-            row(label: "pix command") {
+            row(label: extra.label, id: extra.path) {
                 HStack(spacing: 6) {
                     switch pix.state {
                     case .installed:
@@ -328,7 +438,7 @@ struct SettingsTabView: View {
                 }
             }
         case .secret(let id, let label, let help):
-            row(label: SettingsLayout.labelText(label)) {
+            row(label: SettingsLayout.labelText(label), id: extra.path) {
                 HStack(spacing: 6) {
                     // Never shows a stored key: the field starts empty and clears after a save.
                     SecureField("Paste key", text: Binding(get: { model.keyDraft(id) },
@@ -360,15 +470,21 @@ struct SettingsTabView: View {
     }
 
     @ViewBuilder
-    private func row<Control: View, Note: View>(label: String, @ViewBuilder control: () -> Control,
+    private func row<Control: View, Note: View>(label: String, id: String, @ViewBuilder control: () -> Control,
                                                 @ViewBuilder note: () -> Note) -> some View {
         GridRow {
             Text(label)
+                .padding(.horizontal, 4)
+                .background(
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .fill(Color.accentColor.opacity(highlighted == id ? 0.3 : 0))
+                )
                 .gridColumnAlignment(.trailing)
                 .accessibilityHidden(true)
             control()
                 .gridColumnAlignment(.leading)
         }
+        .id(id)
         .padding(.top, 10)
         GridRow {
             Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])

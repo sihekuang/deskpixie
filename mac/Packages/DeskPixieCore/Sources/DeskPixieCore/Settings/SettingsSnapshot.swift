@@ -34,6 +34,22 @@ public enum SettingsSection: String, Codable, Sendable, CaseIterable {
     case advanced = "Advanced"
 }
 
+/// One search result (Go `Hit`, #287): a setting, or one of the window's other rows, whose
+/// path is `extra:` and its id (`SettingsLayout.Extra.id`).
+public struct SettingsHit: Codable, Equatable, Sendable {
+    public var path: String
+    public var section: SettingsSection
+    public var label: String
+    public var help: String
+
+    public init(path: String, section: SettingsSection, label: String, help: String = "") {
+        self.path = path
+        self.section = section
+        self.label = label
+        self.help = help
+    }
+}
+
 /// One choice. `platforms` nil means everywhere (the web page's `availableOn`).
 public struct SettingsOption: Codable, Equatable, Sendable {
     public var value: String

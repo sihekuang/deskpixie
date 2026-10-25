@@ -29,6 +29,19 @@ public final class SettingsModel {
     public var recordingPath: String?
     /// The projects folder checked on disk (#216); nil until read, or when the read failed.
     public private(set) var projectsFolder: ProjectsFolderStatus?
+    /// The search field's text (#287); while it isn't blank the sidebar lists `hits`.
+    public var query = "" {
+        didSet { if query != oldValue { search() } }
+    }
+    /// What `query` matches, best first; empty while it is blank or the search failed.
+    public private(set) var hits: [SettingsHit] = []
+    /// The row to show and point out: a search result picked, or one Pixie was asked for.
+    public private(set) var revealed: SettingsHit?
+    /// Counts reveals, so revealing the same row again points it out again.
+    public private(set) var revealCount = 0
+    /// The last reveal a page pointed out. Kept here, not in the view, so reopening the window
+    /// doesn't point out an old one again.
+    @ObservationIgnored private var shownReveal = 0
 
     /// Where typed API keys are stored (the app sets the Keychain); nil = keys can't be typed.
     @ObservationIgnored public var keyStore: APIKeyStore?
@@ -128,6 +141,8 @@ public final class SettingsModel {
         var s = next
         s.setError = nil
         snapshot = s
+        // A changed value can show or hide a result (visibleWhen).
+        if searching { search() }
     }
 
     public func fields(in section: SettingsSection) -> [SettingsField] {
@@ -226,6 +241,39 @@ public final class SettingsModel {
             notice = "Couldn't update the API keys: \(Self.describe(error))"
         }
         readKeyStatus()
+    }
+
+    // MARK: Search (#287)
+
+    /// Whether the sidebar lists search results instead of the pages.
+    public var searching: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
+
+    /// Asks the core what `query` matches. A failure shows no results.
+    private func search() {
+        guard searching else {
+            hits = []
+            return
+        }
+        do {
+            hits = try client.search(query)
+        } catch {
+            Self.log.error("settings.search failed: \(String(describing: error), privacy: .public)")
+            hits = []
+        }
+    }
+
+    /// Shows `hit`'s page and points it out.
+    public func reveal(_ hit: SettingsHit) {
+        recordingPath = nil
+        revealed = hit
+        revealCount += 1
+    }
+
+    /// The reveal `section`'s page has yet to point out, if any; taking it marks it pointed out.
+    public func takeReveal(for section: SettingsSection) -> SettingsHit? {
+        guard let hit = revealed, hit.section == section, revealCount != shownReveal else { return nil }
+        shownReveal = revealCount
+        return hit
     }
 
     // MARK: Committing
