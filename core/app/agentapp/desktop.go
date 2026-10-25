@@ -82,12 +82,16 @@ func (m pixieCue) Cue(cue agent.Cue) {
 }
 
 // updatesSink: the updates bubble's list → the app's `updates` event.
-type updatesSink struct{ hooks app.AgentHooks }
+type updatesSink struct {
+	hooks app.AgentHooks
+	feed  *threadFeed // nil: no thread
+}
 
 func (u updatesSink) Updates(items []agent.UpdateItem) {
 	if u.hooks.Updates != nil {
 		u.hooks.Updates(items)
 	}
+	u.feed.requests(items)
 }
 
 // paneSink: an agent waiting at a prompt in its terminal → the app's `showPane` event.
@@ -111,7 +115,12 @@ func (f focusSink) Focus(plan agent.FocusPlan) {
 // chatSink: a typed job's line → the app's `chat.line` event (#221).
 type chatSink struct{ hooks app.AgentHooks }
 
-func (c chatSink) Chat(l agent.ChatLine) { c.hooks.Chat(l) }
+func (c chatSink) Chat(l agent.ChatLine) {
+	c.hooks.Chat(l)
+	if e, ok := EntryForChat(l); ok && c.hooks.ThreadAnswer != nil {
+		c.hooks.ThreadAnswer(e)
+	}
+}
 
 // replySink: a reply card → the app's `reply.card` event.
 type replySink struct{ hooks app.AgentHooks }
@@ -122,13 +131,22 @@ func (r replySink) Reply(c agent.ReplyCard) {
 	}
 }
 
-type rosterSink struct{ hooks app.AgentHooks }
+type rosterSink struct {
+	hooks app.AgentHooks
+	feed  *threadFeed // nil: no thread
+}
 
 func (r rosterSink) Roster(v agent.RosterView) {
+	r.feed.setRoster(v)
 	if r.hooks.Roster != nil {
 		r.hooks.Roster(v)
 	}
 }
+
+// lineSink: a reply line → the thread's ThreadLine hook (#302).
+type lineSink struct{ feed *threadFeed }
+
+func (l lineSink) Line(line agent.OutboxLine) { l.feed.line(line) }
 
 func call(f func()) {
 	if f != nil {

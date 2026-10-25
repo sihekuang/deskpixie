@@ -95,6 +95,8 @@ type Deps struct {
 	Updates UpdatesSink
 	// Replies gets each reply card for the reply deck (nil: ignored).
 	Replies ReplySink
+	// Lines gets each reply line for the chat thread (nil: ignored).
+	Lines LineSink
 	// Roster gets the roster beside Pixie on every change (nil: no roster is kept).
 	Roster RosterSink
 	// Panes brings up an agent's pane waiting at a prompt in its terminal (nil: ignored).
@@ -1975,6 +1977,10 @@ func (h *AgentHandle) apply(e Effect) {
 	case EfReply:
 		if d.Replies != nil {
 			d.Replies.Reply(*e.Reply)
+		}
+	case EfLine:
+		if d.Lines != nil {
+			d.Lines.Line(e.Outbox)
 		}
 	case EfUpdates:
 		if d.Updates != nil {

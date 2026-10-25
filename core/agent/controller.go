@@ -379,6 +379,7 @@ const (
 	EfTellSession      // Name, Text: type your answer to the question session Name's turn ended on (#161); a failure comes back as InSessionAnswerFailed
 	EfChat             // Chat: a spoken line for a job typed in the text box (#221)
 	EfReply            // Reply: a card for the reply deck (#286)
+	EfLine             // Outbox: a reply line for the chat thread (#302)
 )
 
 // Effect is one thing the caller must do, in order. Err set (non-empty) is the Err branch of
@@ -412,6 +413,8 @@ type Effect struct {
 	Chat ChatLine
 	// Reply (EfReply): the card for the reply deck.
 	Reply *ReplyCard
+	// Outbox (EfLine): the reply line for the chat thread.
+	Outbox OutboxLine
 }
 
 type coordinatorState int
@@ -2138,6 +2141,7 @@ func (c *AgentController) applyDelivery(d RouteDelivery, now Millis, fx *[]Effec
 		c.noteAsking(pushed)
 		if !alerting(pushed) {
 			c.cardFor(pushed, fx)
+			*fx = append(*fx, Effect{Kind: EfLine, Outbox: pushed})
 		}
 	}
 }

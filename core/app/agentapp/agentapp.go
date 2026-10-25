@@ -351,6 +351,7 @@ func Build(c Config) *Agent {
 	// A coordinator found running is the kept one: adopted as it is.
 	recipe.AdoptEarlier = kept.CoordinatorToken != ""
 	recipe.ResumeLast = true
+	feed := newThreadFeed(c.Hooks)
 	deps := agent.Deps{
 		Host:        agent.NewAgentHost(session, c.Clock, recipe),
 		Voice:       a.link,
@@ -365,10 +366,11 @@ func Build(c Config) *Agent {
 		Clock:       c.Clock,
 		IDs:         c.IDs,
 		Kept:        KeptFile(paths.Kept()),
-		Updates:     updatesSink{c.Hooks},
+		Updates:     updatesSink{hooks: c.Hooks, feed: feed},
+		Lines:       lineSink{feed},
 		Replies:     replySink{c.Hooks},
 		Panes:       paneSink{c.Hooks},
-		Roster:      rosterSink{c.Hooks},
+		Roster:      rosterSink{hooks: c.Hooks, feed: feed},
 		Modes:       a,
 	}
 	a.attach = attach.New(paths.Attachments, filepath.Join(paths.Root, "attachment-copies.jsonl"), time.Now)

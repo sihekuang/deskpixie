@@ -141,6 +141,29 @@ func TestAnAlertingLineGetsNoCard(t *testing.T) {
 	}
 }
 
+func outboxLines(fx []Effect) []OutboxLine {
+	var out []OutboxLine
+	for _, e := range fx {
+		if e.Kind == EfLine {
+			out = append(out, e.Outbox)
+		}
+	}
+	return out
+}
+
+func TestEveryReplyLineAlsoGoesToTheThread(t *testing.T) {
+	c := ctlWith(func(s *Settings) { s.SessionTurns = true })
+	lines := outboxLines(sessionTurn(c, longTurn, T0))
+	if len(lines) != 1 || lines[0].Session != "api-claude" || lines[0].ID == 0 {
+		t.Fatalf("%+v", lines)
+	}
+	asking := longTurn
+	asking.Reply = "Shall I go ahead and push?"
+	if n := len(outboxLines(sessionTurn(c, asking, T0+10))); n != 0 {
+		t.Fatalf("%d thread lines for a question", n)
+	}
+}
+
 // #286 table: open-for-updates holds the card while Pixie opens a conversation to say it.
 func TestOpenForUpdatesHoldsTheCardWhileItOpens(t *testing.T) {
 	c := ctlWith(func(s *Settings) { s.OpenConversation = true; s.SessionTurns = true })

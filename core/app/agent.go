@@ -2,6 +2,7 @@ package app
 
 import (
 	"github.com/sihekuang/deskpixie/core/attach"
+	"github.com/sihekuang/deskpixie/core/chat"
 	"github.com/sihekuang/deskpixie/core/settings"
 	"github.com/sihekuang/deskpixie/core/tools"
 	"github.com/sihekuang/deskpixie/core/voice"
@@ -38,6 +39,14 @@ type AgentHooks struct {
 	// Reply is a reply card for the reply deck (the `reply.card` event's ReplyCard); a card that
 	// gains a row comes again whole with the same id.
 	Reply func(card any)
+	// ThreadLine is a session update or coordinator line for the chat thread, ready to Add (#302).
+	ThreadLine func(chat.Entry)
+	// ThreadRequests is every open request now (from the updates list), whole each time, empty
+	// when all are answered.
+	ThreadRequests func([]chat.Entry)
+	// ThreadAnswer is a typed job's final answer (a done, failed or question ChatLine); an
+	// answer that grows comes again with the same id.
+	ThreadAnswer func(chat.Entry)
 	// Roster is the roster beside Pixie (the `agents` event's roster), on every change (#91).
 	Roster func(view any)
 	// ShowPane asks the shell to bring up an agent's pane (the `showPane` event, #110).

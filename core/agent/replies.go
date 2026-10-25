@@ -19,6 +19,10 @@ type ReplyCard struct {
 // ReplySink gets each new or grown reply card (nil in Deps: ignored).
 type ReplySink interface{ Reply(ReplyCard) }
 
+// LineSink gets each reply line (one that isn't alerting) as it is pushed, for the chat
+// thread (#302), whole rather than joined into a card (nil in Deps: ignored).
+type LineSink interface{ Line(OutboxLine) }
+
 // replyRow is a line as one row of a card: "**who:** the news" when it has a title (its brief, else its text).
 func replyRow(l OutboxLine) string {
 	body := l.Brief
