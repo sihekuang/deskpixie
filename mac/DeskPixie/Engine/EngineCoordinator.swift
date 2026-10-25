@@ -565,7 +565,10 @@ final class EngineCoordinator {
         case .chatBadge(let b):
             ChatHub.shared?.applyBadge(b)
         case .chatReset:
-            if let model = ChatHub.shared { Task { await model.reset() } }
+            if let model = ChatHub.shared {
+                model.clearLive() // now, so a chat.live after the reset survives it
+                Task { await model.reset() }
+            }
         case .chatLive(let l):
             ChatHub.shared?.applyLive(l)
         case .showPane(let r):

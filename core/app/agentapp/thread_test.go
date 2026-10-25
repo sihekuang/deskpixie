@@ -297,3 +297,17 @@ func TestAWorkingLineIsTheJobsLiveStepUntilItsAnswer(t *testing.T) {
 		t.Fatal("an answer was lost with no live hook")
 	}
 }
+
+// #302 Task 8b fix round 1: a stopped typed job (no line follows) clears its live step.
+func TestAStoppedJobsStepClears(t *testing.T) {
+	var got []string
+	f := newThreadFeed(app.AgentHooks{ThreadLive: func(job, text string) { got = append(got, job+" "+text) }})
+	sink := chatSink{hooks: app.AgentHooks{Chat: func(any) {}}, feed: f}
+	sink.Chat(agent.ChatLine{Job: "j1", Status: "working", Text: "Reading the logs."})
+	var ender agent.ChatEnder = sink // the runtime finds it on the chat sink
+	ender.ChatEnded("j1")
+	chatSink{hooks: app.AgentHooks{Chat: func(any) {}}}.ChatEnded("j2") // nil feed: nothing
+	if !reflect.DeepEqual(got, []string{"j1 Reading the logs.", "j1 "}) {
+		t.Fatalf("%q", got)
+	}
+}

@@ -132,14 +132,18 @@ public final class ChatThreadModel {
         if !l.text.isEmpty { live.append(l) }
     }
 
-    /// An entry's words are final: the live line they were goes, in case its clear crossed with
-    /// them. Yours or Pixie's by who; the coordinator's every job (an entry's ID is opaque, so
-    /// it can't be matched to one; a job still working sends its next step again).
+    /// An entry's words are final: your or Pixie's live line goes, in case its clear crossed
+    /// with them. The coordinator's steps are left to the core, which clears each job's before
+    /// its entry (an entry's ID is opaque, so it can't be matched to a job here).
     private func clearLive(for e: ChatEntry) {
-        switch e.who.kind {
-        case "you", "pixie", "coordinator": live.removeAll { $0.who == e.who.kind }
-        default: break
-        }
+        guard e.who.kind == "you" || e.who.kind == "pixie" else { return }
+        live.removeAll { $0.who == e.who.kind }
+    }
+
+    /// `chat.reset`: every live line goes. Called as the event comes, before `reset()` runs, so
+    /// a `chat.live` that follows the reset isn't wiped by it.
+    public func clearLive() {
+        live = []
     }
 
     /// Your words or Pixie's still coming ("you" or "pixie"), nil when none.
@@ -174,7 +178,6 @@ public final class ChatThreadModel {
     public func reset() async {
         entries = []
         needs = []
-        live = []
         hasOlder = false
         await load()
     }

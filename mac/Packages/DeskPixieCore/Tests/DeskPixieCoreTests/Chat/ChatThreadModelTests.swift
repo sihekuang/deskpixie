@@ -562,10 +562,10 @@ final class ChatThreadModelTests: XCTestCase {
         XCTAssertEqual(model.thinkingLabel, "Thinking…")
         model.applyLive(ChatLive(who: "coordinator", text: "Reading the logs.", job: "j1"))
         XCTAssertEqual(model.thinkingLabel, "Thinking… · Reading the logs.")
-        await model.stop()
+        model.apply(entry(2, kind: "coordinator")) // an answer ends the wait; the core clears steps
         XCTAssertFalse(model.thinking)
         XCTAssertTrue(model.showsThinking, "a step shows Thinking… even when not waiting on a send")
-        model.applyLive(ChatLive(who: "coordinator", text: "", job: "j1"))
+        model.applyLive(ChatLive(who: "coordinator", text: "", job: "j1")) // the core's clear (Stop too)
         XCTAssertFalse(model.showsThinking)
     }
 
@@ -588,14 +588,17 @@ final class ChatThreadModelTests: XCTestCase {
         model.apply(grown)
         XCTAssertNil(model.liveText("pixie"), "Pixie's words grown in place are final too")
         model.apply(entry(4, kind: "coordinator"))
-        XCTAssertNil(model.coordinatorStep, "a coordinator entry clears every job's step")
-        XCTAssertTrue(model.live.isEmpty)
+        XCTAssertEqual(model.coordinatorStep, "Reading.", "the core clears a job's step, not a coordinator entry")
+        XCTAssertEqual(model.live.count, 2)
     }
 
-    func testResetClearsLiveLines() async {
-        let model = ChatThreadModel(client: FakeChatClient())
+    func testClearLiveEmptiesAndAReloadKeepsALineThatCameAfter() async {
+        let model = ChatThreadModel(client: FakeChatClient([entry(1)]))
         model.applyLive(ChatLive(who: "you", text: "hey"))
-        await model.reset()
+        model.clearLive() // chat.reset, as it comes
         XCTAssertTrue(model.live.isEmpty)
+        model.applyLive(ChatLive(who: "pixie", text: "Hi")) // came after the reset
+        await model.reset()
+        XCTAssertEqual(model.liveText("pixie"), "Hi", "the reload doesn't wipe a line that came after the reset")
     }
 }

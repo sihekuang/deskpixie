@@ -174,6 +174,13 @@ func (f *threadFeed) answer(l agent.ChatLine) {
 	}
 }
 
+// stopped: job ended with no line to say so (Stop), so its live step clears.
+func (f *threadFeed) stopped(job agent.JobID) {
+	if f != nil && f.hooks.ThreadLive != nil {
+		f.hooks.ThreadLive(string(job), "")
+	}
+}
+
 // sent: you sent something for job, so its next answer is a turn of its own.
 func (f *threadFeed) sent(job agent.JobID) {
 	if f == nil || job == "" {

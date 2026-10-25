@@ -1987,6 +1987,10 @@ func (h *AgentHandle) apply(e Effect) {
 		if d.Lines != nil {
 			d.Lines.Line(e.Outbox)
 		}
+	case EfChatEnded:
+		if ender, ok := d.Chat.(ChatEnder); ok {
+			ender.ChatEnded(e.Job)
+		}
 	case EfDelivered:
 		if d.Delivered != nil {
 			d.Delivered.Delivered(e.Value.([]uint64))

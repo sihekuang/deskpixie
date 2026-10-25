@@ -381,6 +381,7 @@ const (
 	EfReply            // Reply: a card for the reply deck (#286)
 	EfLine             // Outbox: a reply line for the chat thread (#302)
 	EfDelivered        // Value ([]uint64): outbox lines you heard or saw, read in the chat thread (#302)
+	EfChatEnded        // Job: a typed job ended with no line to say so (Stop): its live step goes (#302)
 )
 
 // Effect is one thing the caller must do, in order. Err set (non-empty) is the Err branch of
@@ -977,6 +978,10 @@ func (c *AgentController) cancel(id JobID, now Millis, fx *[]Effect) {
 		return
 	}
 	c.saveJob(id, fx)
+	if c.typed[id] {
+		// No line follows (the coordinator's confirmation is dropped, #221): say it ended.
+		*fx = append(*fx, Effect{Kind: EfChatEnded, Job: id})
+	}
 	c.forgetUpdates(id)
 	c.denyPendingFor(id, "The user cancelled the job.", fx)
 	c.stopJobWorkers(id, fx)
