@@ -146,10 +146,20 @@ type harness struct {
 
 func newHarness(t *testing.T, tool string, agent Launch) *harness {
 	t.Helper()
+	return newLoggedHarness(t, tool, agent, nil)
+}
+
+func newLoggedHarness(t *testing.T, tool string, agent Launch, log *Log) *harness {
+	t.Helper()
 	d, sock := newFakeDaemon(t, "")
 	inR, inW, outR, outW := pipes(t)
-	s := newSession(sessionOpts{tool: tool, daemonSock: sock, home: t.TempDir(), stdin: inR, stdout: outW, agent: agent, where: "terminal"})
-	s.runner.Tap = func(b []byte) { tapMu.Lock(); tapped[s] = append(tapped[s], b...); tapMu.Unlock() }
+	s := newSession(sessionOpts{tool: tool, daemonSock: sock, home: t.TempDir(), stdin: inR, stdout: outW, agent: agent, where: "terminal", log: log})
+	s.runner.Tap = func(b []byte) {
+		tapMu.Lock()
+		tapped[s] = append(tapped[s], b...)
+		writes[s] = append(writes[s], agentWrite{string(b), time.Now()})
+		tapMu.Unlock()
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	if err := s.start(ctx); err != nil {
@@ -1184,6 +1194,9 @@ func TestFlushSetsYourDraftAsideAndPutsItBack(t *testing.T) {
 
 // Claude Code stashes the draft itself (Ctrl-S) and restores it once the message is sent: pix
 // needn't know the text, so it works even after keys pix couldn't follow.
+//
+// The agents in these flush tests draw nothing themselves: pix's wait for the agent to take a
+// paste (#305) settles on the terminal's echo of it.
 func TestFlushStashesTheDraftInClaudeCode(t *testing.T) {
 	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}})
 	h.stdinW.WriteString("draft\x1b[Dx") // an arrow: pix can't follow
@@ -1209,10 +1222,111 @@ func (s *Session) typedForTest() string {
 	return string(tapped[s])
 }
 
+// writesForTest is each write pix made to the agent, and when.
+func (s *Session) writesForTest() []agentWrite {
+	tapMu.Lock()
+	defer tapMu.Unlock()
+	return append([]agentWrite(nil), writes[s]...)
+}
+
+type agentWrite struct {
+	b  string
+	at time.Time
+}
+
 var (
 	tapMu  sync.Mutex
 	tapped = map[*Session][]byte{}
+	writes = map[*Session][]agentWrite{}
 )
+
+// #305: Claude Code drops an Enter that comes with a pasted image path, so pix presses Enter on
+// its own once the agent has taken the paste: here, an agent that redraws 300 ms after it.
+func TestEnterWaitsUntilTheAgentHasTakenThePaste(t *testing.T) {
+	h := agentHarness(t, "claude", `stty raw -echo; echo ready; head -c 1 >/dev/null; sleep 0.3; printf '[Image #1]'; sleep 30`)
+	agentShown(t, h, "ready")
+	msg := "look\nAttached: /tmp/x.png"
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: msg})
+	waitEvent(t, h.d.events, "typed", func(m wire.Msg) bool { return m.ID == "1" && m.Status == "typed" })
+	w := h.s.writesForTest()
+	if len(w) != 2 || w[0].b != string(Paste(msg)) || w[1].b != "\r" {
+		t.Fatalf("writes %+v", w)
+	}
+	if gap := w[1].at.Sub(w[0].at); gap < 300*time.Millisecond || gap >= pasteLimit {
+		t.Fatalf("Enter %v after the paste: not after the agent took it", gap)
+	}
+}
+
+// agentShown waits for the agent to print text.
+func agentShown(t *testing.T, h *harness, text string) {
+	t.Helper()
+	var all []byte
+	buf := make([]byte, 256)
+	for deadline := time.Now().Add(5 * time.Second); !strings.Contains(string(all), text); {
+		if time.Now().After(deadline) {
+			t.Fatalf("the agent didn't show %q: %q", text, all)
+		}
+		n, err := h.out.Read(buf)
+		all = append(all, buf[:n]...)
+		if err != nil {
+			t.Fatalf("the agent didn't show %q: %v", text, err)
+		}
+	}
+}
+
+// Keys you type while pix waits for the agent to take its paste go in after its Enter, not
+// inside the message it sends.
+func TestYourKeysWaitUntilPixiesMessageIsSent(t *testing.T) {
+	h := agentHarness(t, "claude", `stty raw -echo; echo ready; head -c 1 >/dev/null; sleep 0.3; printf '[Image #1]'; sleep 30`)
+	agentShown(t, h, "ready")
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "look"})
+	eventually(t, "the paste", func() bool { return len(h.s.writesForTest()) > 0 })
+	h.stdinW.WriteString("mine")
+	waitEvent(t, h.d.events, "typed", func(m wire.Msg) bool { return m.ID == "1" && m.Status == "typed" })
+	eventually(t, "your keys", func() bool { return len(h.s.writesForTest()) == 3 })
+	w := h.s.writesForTest()
+	if w[0].b != string(Paste("look")) || w[1].b != "\r" || w[2].b != "mine" {
+		t.Fatalf("writes %+v", w)
+	}
+}
+
+// Messages that waited go in as one prompt with one wait (#305): a wait per message could
+// outlast the command's time limit.
+func TestMessagesThatWaitedGoInAsOnePrompt(t *testing.T) {
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}}) // settles on the echo
+	t.Cleanup(func() { h.s.runner.Hangup(); h.s.finish() })
+	h.s.setStatus("working")
+	for _, id := range []string{"1", "2"} {
+		wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: id, Command: "prompt", Text: "message " + id})
+		waitEvent(t, h.d.events, "waiting "+id, func(m wire.Msg) bool { return m.ID == id && m.Status == "waiting" })
+	}
+	h.s.setStatus("idle")
+	if !h.s.flushNow() {
+		t.Fatal("not typed")
+	}
+	w := h.s.writesForTest()
+	if len(w) != 2 || w[0].b != string(Paste("message 1\n\nmessage 2")) || w[1].b != "\r" {
+		t.Fatalf("writes %+v", w)
+	}
+}
+
+// An agent that never shows the paste still gets its Enter, after pasteLimit, and pix logs why.
+func TestEnterGoesAnywayWhenTheAgentShowsNothing(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "pix.log")
+	h := newLoggedHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "stty raw -echo; echo ready; sleep 30"}}, openLog(logPath, 2<<20, "claude"))
+	waitEvent(t, h.d.events, "connected", func(m wire.Msg) bool { return m.Event == "status" })
+	t.Cleanup(func() { h.s.runner.Hangup(); h.s.finish() })
+	agentShown(t, h, "ready")
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "hello"})
+	waitEvent(t, h.d.events, "typed", func(m wire.Msg) bool { return m.ID == "1" && m.Status == "typed" })
+	w := h.s.writesForTest()
+	if len(w) != 2 || w[1].b != "\r" || w[1].at.Sub(w[0].at) < pasteLimit {
+		t.Fatalf("writes %+v", w)
+	}
+	if b, _ := os.ReadFile(logPath); !strings.Contains(string(b), "pressing Enter after a paste anyway: the agent showed nothing") {
+		t.Fatalf("log %q", b)
+	}
+}
 
 // #189: pix tells the app which build it is; told it's older than the app's, it shows that on
 // its tab title until it reconnects to an app that says otherwise.
