@@ -171,3 +171,53 @@ func TestConcurrentUse(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func job(at int64, id, text string) Entry {
+	return Entry{ID: id, At: at, Who: Who{Kind: "coordinator"}, Text: text}
+}
+
+func TestEntryWithAnIDIsNotJoinedOntoALine(t *testing.T) {
+	s := NewMemory(func() int64 { return 0 })
+	s.Add(coordinator(1_000, "line", 1))
+	s.Add(job(2_000, "job1", "answer"))
+	s.Add(job(3_000, "job1", "answer, longer"))
+	p := s.Page("", 10)
+	if len(p) != 2 || p[0].ID != "job1" || p[0].Text != "answer, longer" || p[1].Text != "line" {
+		t.Fatalf("page = %+v", p)
+	}
+}
+
+func TestLineIsNotJoinedOntoAnEntryWithAnID(t *testing.T) {
+	s := NewMemory(func() int64 { return 0 })
+	s.Add(job(1_000, "job1", "answer"))
+	s.Add(coordinator(2_000, "line", 5))
+	s.Add(job(3_000, "job1", "answer, longer"))
+	p := s.Page("", 10)
+	if len(p) != 2 || p[0].Text != "line" || !slices.Equal(p[0].Lines, []uint64{5}) || p[1].Text != "answer, longer" {
+		t.Fatalf("page = %+v", p)
+	}
+}
+
+func TestMarkReadDoesNotRepeatLinesAfterAJoinOrReAdd(t *testing.T) {
+	s := NewMemory(func() int64 { return 0 })
+	s.Add(coordinator(1_000, "a", 1))
+	if got := s.MarkRead("e0"); !slices.Equal(got, []uint64{1}) {
+		t.Fatalf("first mark = %v", got)
+	}
+	s.Add(coordinator(2_000, "b", 2)) // joins e0, which is unread again
+	if u := s.Unread(); u != 1 {
+		t.Fatalf("unread = %d, want 1", u)
+	}
+	if got := s.MarkRead("e0"); !slices.Equal(got, []uint64{2}) {
+		t.Fatalf("second mark = %v", got)
+	}
+	s.Add(Entry{ID: "x", At: 50_000, Who: Who{Kind: "session", Name: "w"}, Lines: []uint64{3}})
+	s.MarkRead("x")
+	s.Add(Entry{ID: "x", At: 50_000, Who: Who{Kind: "session", Name: "w"}, Lines: []uint64{3, 4}})
+	if u := s.Unread(); u != 1 {
+		t.Fatalf("unread after re-add = %d, want 1", u)
+	}
+	if got := s.MarkRead("x"); !slices.Equal(got, []uint64{4}) {
+		t.Fatalf("mark after re-add = %v", got)
+	}
+}

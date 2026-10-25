@@ -61,19 +61,23 @@ type Store struct {
 	mu      sync.Mutex
 	now     func() int64
 	entries []Entry
-	index   map[string]int // id -> position in entries
-	next    int            // for the next generated id
+	index   map[string]int  // id -> position in entries
+	next    int             // for the next generated id
+	named   map[string]bool // ids the caller chose: those entries never take a joined line
+	handed  map[uint64]bool // outbox lines MarkRead has returned, so it returns each once
 }
 
 // NewMemory is an empty store; now is the clock in ms, for entries added with no At.
 func NewMemory(now func() int64) *Store {
-	return &Store{now: now, index: map[string]int{}}
+	return &Store{now: now, index: map[string]int{}, named: map[string]bool{}, handed: map[uint64]bool{}}
 }
 
 // Add puts e in the thread and returns it as stored. An ID already there is replaced in
 // place; a line from the same sender within JoinMs of the last entry joins it (its text on a
 // new line, its At the newer one); anything else is appended. An empty ID gets e<n>, and your
-// own entries are read when added.
+// own entries are read when added. An entry with an ID of its own never joins or is joined,
+// so the ID keeps pointing at it; replacing one makes it unread again (its lines already
+// handed out by MarkRead are not handed out twice).
 func (s *Store) Add(e Entry) Entry {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -88,7 +92,7 @@ func (s *Store) Add(e Entry) Entry {
 		s.entries[i] = e
 		return clone(e)
 	}
-	if n := len(s.entries); n > 0 && joins(s.entries[n-1], e) {
+	if n := len(s.entries); n > 0 && e.ID == "" && !s.named[s.entries[n-1].ID] && joins(s.entries[n-1], e) {
 		last := &s.entries[n-1]
 		last.Text += "\n" + e.Text
 		last.At = e.At
@@ -102,6 +106,8 @@ func (s *Store) Add(e Entry) Entry {
 	if e.ID == "" {
 		e.ID = "e" + strconv.Itoa(s.next)
 		s.next++
+	} else {
+		s.named[e.ID] = true
 	}
 	s.index[e.ID] = len(s.entries)
 	s.entries = append(s.entries, e)
@@ -125,7 +131,7 @@ func unite[T comparable](a, b []T) []T {
 }
 
 // Update changes the entry with this ID by fn and returns it; false when there is none. The
-// ID stays what it was.
+// ID stays what it was. fn runs under the store's lock and must not call the store.
 func (s *Store) Update(id string, fn func(*Entry)) (Entry, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -177,7 +183,7 @@ func (s *Store) Needs() []Entry {
 }
 
 // MarkRead marks every entry up to and including upTo read, and returns the outbox line ids
-// of those that were not read before. An unknown ID marks nothing.
+// not handed out before. An unknown ID marks nothing.
 func (s *Store) MarkRead(upTo string) []uint64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -187,9 +193,13 @@ func (s *Store) MarkRead(upTo string) []uint64 {
 	}
 	var lines []uint64
 	for i := 0; i <= end; i++ {
-		if e := &s.entries[i]; !e.Read {
-			e.Read = true
-			lines = append(lines, e.Lines...)
+		e := &s.entries[i]
+		e.Read = true
+		for _, l := range e.Lines {
+			if !s.handed[l] {
+				s.handed[l] = true
+				lines = append(lines, l)
+			}
 		}
 	}
 	return lines
