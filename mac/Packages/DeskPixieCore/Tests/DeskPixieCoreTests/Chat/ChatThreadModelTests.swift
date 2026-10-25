@@ -48,8 +48,11 @@ final class FakeChatClient: ChatClient, @unchecked Sendable {
     func send(_ text: String, attachments: [String], session: String?) throws {
         try check()
         lock.withLock { gate }?.wait()
-        if let why = lock.withLock({ () -> String? in defer { _refuse = nil }; return _refuse }) {
+        if let why = lock.withLock({ () -> String? in defer { _failNext = nil }; return _failNext }) {
             throw DeskPixieEngineError.callFailed(why)
+        }
+        if let why = lock.withLock({ () -> String? in defer { _refuse = nil }; return _refuse }) {
+            throw DeskPixieEngineError.refused(why)
         }
         lock.withLock { _sent.append(Sent(text: text, attachments: attachments, session: session)) }
     }
@@ -65,7 +68,23 @@ final class FakeChatClient: ChatClient, @unchecked Sendable {
     func stop() throws { try check() }
     private var _recipients: [ChatRecipient] = []
     func setRecipients(_ r: [ChatRecipient]) { lock.withLock { _recipients = r } }
-    func recipients() throws -> [ChatRecipient] { try check(); return lock.withLock { _recipients } }
+    func recipients() throws -> [ChatRecipient] {
+        try check()
+        let asked = lock.withLock { _recipientCalls += 1; return _recipients }
+        lock.withLock { recipientsGate }?.wait()
+        return asked
+    }
+    /// `recipients()` waits here, answering with the list as it was when asked, until `releaseRecipients()`.
+    private var recipientsGate: DispatchSemaphore?
+    private var _recipientCalls = 0
+    var recipientCalls: Int { lock.withLock { _recipientCalls } }
+    func holdRecipients() { lock.withLock { recipientsGate = DispatchSemaphore(value: 0) } }
+    func releaseRecipients() {
+        lock.withLock { () -> DispatchSemaphore? in defer { recipientsGate = nil }; return recipientsGate }?.signal()
+    }
+    /// The next send fails as a call does (`callFailed`), not as a refusal.
+    private var _failNext: String?
+    func failNextSend(_ why: String) { lock.withLock { _failNext = why } }
     /// The next send is refused by the core, in these words (then sends go again).
     private var _refuse: String?
     func refuseNextSend(_ why: String) { lock.withLock { _refuse = why } }
@@ -524,6 +543,69 @@ final class ChatThreadModelTests: XCTestCase {
         XCTAssertTrue(client.sent.isEmpty)
         XCTAssertNil(model.replyTo)
         XCTAssertFalse(model.thinking)
+    }
+
+    /// The core sends a typed answer as `agent.typedAnswer`, without the one-recipient rule
+    /// (#302 review M4): the box doesn't hold it back for an @name either.
+    func testATypedAnswerSkipsTheMentionRule() async {
+        let client = FakeChatClient()
+        let api = ChatRecipient(name: "api-codex", label: "api-server")
+        client.setRecipients([api, ChatRecipient(name: "herdr:1.2", label: "docs")])
+        let model = ChatThreadModel(client: client)
+        await model.loadRecipients()
+        let q = ask(1, kind: "question", options: ["a"], typed: true)
+        model.applyNeeds([q])
+        model.reply(to: q)
+        let text = "same as @api-codex did"
+        XCTAssertNil(model.check(text), "answering: no rule")
+        XCTAssertTrue(model.canSend(text, attachments: 0))
+        await model.send(text)
+        XCTAssertEqual(client.typed, [.init(token: "tk", text: text)])
+
+        model.applyNeeds([])
+        model.reply(to: q) // answered meanwhile: a message to its session, and the rule holds
+        XCTAssertEqual(model.check(text), "This goes to docs only. Remove @api-codex, or pick them instead.")
+    }
+
+    /// A `chat.recipients` answer asked before the last event is older than it (#302 review M1).
+    func testAnOlderRecipientsAnswerDoesNotOverwriteAnEvent() async {
+        let client = FakeChatClient()
+        let old = ChatRecipient(name: "old-claude", label: "old")
+        let new = ChatRecipient(name: "new-claude", label: "new")
+        client.setRecipients([old])
+        client.holdRecipients()
+        let model = ChatThreadModel(client: client)
+        let asking = Task { await model.loadRecipients() }
+        await waitFor { client.recipientCalls == 1 } // the call is on its way, with [old]
+        model.applyRecipients([new])
+        client.releaseRecipients()
+        await asking.value
+        XCTAssertEqual(model.recipients, [new], "the event is newer than the answer")
+
+        client.setRecipients([old])
+        await model.loadRecipients()
+        XCTAssertEqual(model.recipients, [old], "with no event meanwhile, the answer is the list")
+    }
+
+    /// Only a refusal shows as one; any other failed send is a failure (#302 review M2).
+    func testAFailedSendIsNotARefusal() async {
+        let client = FakeChatClient()
+        let api = ChatRecipient(name: "api-codex", label: "api-server")
+        client.setRecipients([api])
+        let model = ChatThreadModel(client: client)
+        await model.loadRecipients()
+        model.choose(api)
+        client.failNextSend("Delegation is off (Coordinator: herdr not found).")
+        let went = await model.send("ship it")
+        XCTAssertFalse(went)
+        XCTAssertNil(model.refusal)
+        XCTAssertNil(model.notice(for: "ship it"), "nothing under the box")
+        XCTAssertEqual(model.error, "Couldn't reach Pixie. Try again.")
+        XCTAssertEqual(model.replyTo, api.who, "the target is back")
+
+        client.refuseNextSend("api-server isn't running anymore.")
+        await model.send("ship it")
+        XCTAssertEqual(model.refusal, "api-server isn't running anymore.")
     }
 
     func testReplyToAQuestionWithoutATokenMessagesItsSession() async {

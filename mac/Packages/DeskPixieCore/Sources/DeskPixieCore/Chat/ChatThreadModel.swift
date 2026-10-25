@@ -41,8 +41,8 @@ public final class ChatThreadModel {
     public private(set) var recipients: [ChatRecipient] = []
     /// The list has come at least once.
     public private(set) var recipientsKnown = false
-    /// The core refused the last send, in its words (one recipient per message, the
-    /// coordinator off…); the draft stays. Editing the text or the target clears it.
+    /// The core refused the last send, in its words (one recipient per message); the draft
+    /// stays. Any other failure is `error`. Editing the text or the target clears it.
     public private(set) var refusal: String?
 
     @ObservationIgnored private let client: any ChatClient
@@ -50,6 +50,9 @@ public final class ChatThreadModel {
     @ObservationIgnored private var readUpTo: String?
     @ObservationIgnored private var loading = false
     @ObservationIgnored private var replay: [ChatEntry] = []
+    /// How many `chat.recipients` events have come: a call's answer asked before the last one
+    /// is older than it.
+    @ObservationIgnored private var recipientEvents = 0
     @ObservationIgnored private static let log = Logger(subsystem: "com.sihekuang.deskpixie", category: "chat")
 
     public init(client: any ChatClient) {
@@ -88,15 +91,23 @@ public final class ChatThreadModel {
         replay = []
     }
 
-    /// Asks the core who can be messaged now; the `chat.recipients` event keeps it current.
+    /// Asks the core who can be messaged now; the `chat.recipients` event keeps it current. An
+    /// event that came while it was asked is newer, so the answer is dropped.
     public func loadRecipients() async {
+        let asked = recipientEvents
         let client = client
         let result = await Task.detached { Result { try client.recipients() } }.value
-        if case .success(let rs) = result { applyRecipients(rs) }
+        guard asked == recipientEvents else { return }
+        if case .success(let rs) = result { setRecipients(rs) }
     }
 
     /// `chat.recipients`: the whole list now.
     public func applyRecipients(_ rs: [ChatRecipient]) {
+        recipientEvents += 1
+        setRecipients(rs)
+    }
+
+    private func setRecipients(_ rs: [ChatRecipient]) {
         recipients = rs
         recipientsKnown = true
     }
@@ -259,8 +270,8 @@ public final class ChatThreadModel {
                 replyToken = token
             }
             thinking = false
-            if answer == nil, case DeskPixieEngineError.callFailed(let why) = err {
-                // The core said why, in words for you (one recipient per message, …).
+            if answer == nil, case DeskPixieEngineError.refused(let why) = err {
+                // The core said why, in words for you (one recipient per message).
                 refusal = why
                 error = nil
                 Self.log.error("chat.send: \(why, privacy: .public)")
@@ -272,12 +283,14 @@ public final class ChatThreadModel {
     }
 
     /// What stops this text from going as it is, said under the box: the one-recipient rule
-    /// for the current target, checked here before the core does. Nil: it can go.
+    /// for the current target, checked here before the core does. Nil: it can go. A typed
+    /// answer to an open question isn't a `chat.send`, and the core doesn't apply the rule to
+    /// it, so neither does the box.
     public func check(_ text: String) -> String? {
-        let answering = replyToken.map { t in needs.contains { $0.request?.token == t } } ?? false
+        if let t = replyToken, needs.contains(where: { $0.request?.token == t }) { return nil }
         return ChatRecipients.check(text, target: replyTo?.name,
                                     label: replyTo.map(Self.name(of:)) ?? "",
-                                    recipients: recipients, knowsRecipients: recipientsKnown && !answering)
+                                    recipients: recipients, knowsRecipients: recipientsKnown)
     }
 
     /// The line under the box: the core's refusal, else this text's own problem.
