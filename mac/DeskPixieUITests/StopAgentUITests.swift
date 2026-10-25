@@ -9,6 +9,8 @@ import XCTest
 @MainActor
 final class StopAgentUITests: XCTestCase {
     private var harness: UITestApp?
+    /// alpha's pix was frozen (SIGSTOP): tearDown thaws it before cleaning up.
+    private var frozen = false
 
     override func setUp() async throws {
         continueAfterFailure = false
@@ -16,6 +18,8 @@ final class StopAgentUITests: XCTestCase {
     }
 
     override func tearDown() async throws {
+        if frozen, let harness { harness.signalPix("alpha", SIGCONT) }
+        frozen = false
         if let harness {
             XCTAssertTrue(harness.cleanUp(),
                           "~/Library/Preferences/\(UITestApp.userBundleID).plist changed during the test")
@@ -71,24 +75,23 @@ final class StopAgentUITests: XCTestCase {
         XCTAssertFalse(h.app.descendants(matching: .any)["roster.notice"].exists, "no failure line")
     }
 
-    /// alpha dies under the click: the stop can't reach it, and the line under the list says so.
+    /// alpha's pix is frozen under the click: still listed and working, but it answers nothing,
+    /// so the stop times out and the line under the list says so. Deterministic: nothing in the
+    /// list changes meanwhile.
     func testAStopThatCantReachItsSessionSaysSo() throws {
         let h = try start()
         XCTAssertTrue(openList(h.app), "the session list never opened")
         let stop = stopButtons(in: h.app, "roster.stop").firstMatch
         try h.startTurn("alpha", prompt: "Run the slow tests")
         XCTAssertTrue(stop.waitForExistence(timeout: 20), "no stop button on the working row")
-        // Where the button is, then alpha goes: the click lands before the list hears of it.
-        let window = h.app.windows.containing(.any, identifier: "roster.stop").firstMatch
-        let (frame, at) = (window.frame, stop.frame)
-        let spot = window.coordinate(withNormalizedOffset: .zero)
-            .withOffset(CGVector(dx: at.midX - frame.minX, dy: at.midY - frame.minY))
-        h.killSession("alpha")
-        spot.click()
+        XCTAssertNotNil(h.signalPix("alpha", SIGSTOP), "alpha's pix not found")
+        frozen = true
+        stop.click()
 
         let notice = h.app.descendants(matching: .any)["roster.notice"]
-        XCTAssertTrue(notice.waitForExistence(timeout: 20), "no failure line")
-        XCTAssertEqual(notice.label, "Couldn't stop alpha: it isn't running anymore.")
+        XCTAssertTrue(notice.waitForExistence(timeout: 10), "no failure line")
+        XCTAssertEqual(notice.label, "Couldn't stop alpha: it didn't answer in time.")
+        // Before it thaws: then pix types the Esc it was sent late (the core holds the next).
         XCTAssertFalse(h.escaped("alpha"), "nothing reached it")
     }
 }

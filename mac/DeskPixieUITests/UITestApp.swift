@@ -198,12 +198,23 @@ final class UITestApp {
         Self.end(s)
     }
 
-    /// Ends the session `description` at once (SIGKILL to script, so its pix goes with the pty),
-    /// without waiting: as a session that dies under a click.
-    func killSession(_ description: String) {
-        guard let s = sessions.removeValue(forKey: description) else { return }
-        kill(s.pid, SIGKILL)
-        close(s.input)
+    /// Freezes (SIGSTOP) or thaws (SIGCONT) the session `description`'s pix: frozen, it stays
+    /// listed as it was, but answers nothing. The pid of the pix it froze; nil if none was found.
+    @discardableResult
+    func signalPix(_ description: String, _ signal: Int32) -> pid_t? {
+        guard let s = sessions[description] else { return nil }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+        p.arguments = ["-P", String(s.pid), "-x", "pix"]
+        let out = Pipe()
+        p.standardOutput = out
+        p.standardError = FileHandle.nullDevice
+        guard (try? p.run()) != nil else { return nil }
+        let said = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        p.waitUntilExit()
+        guard let pid = pid_t(said.split(separator: "\n").first ?? ""), pid > 1 else { return nil }
+        kill(pid, signal)
+        return pid
     }
 
     /// SIGTERM to script, then waits up to 10 s for it to go (launchd reaps it).
