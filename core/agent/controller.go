@@ -164,7 +164,8 @@ const (
 	InSessionSent                          // Name, Text, Message: the coordinator's message_session reached your session Name, described Text (#177); Message: why it waits ("" = typed, #183)
 	InTextMode                             // Away: text mode on (#221): no conversation is opened for updates
 	InRepliesShown                         // IDs: the reply deck showed these lines (#286)
-	InInterruptTurn                        // the stop button by the working coordinator (#309)
+	InInterruptTurn                        // the stop button by the working coordinator (#309); answered with EfToolResult (Value: whether a turn was stopped)
+	InWorkerInterrupted                    // Name: the stop button pressed Esc in this worker (#309); answered with EfToolResult (Value: whether it was Pixie's worker)
 )
 
 // Input is one stimulus for AgentController.Step. Build it with the *Input constructors.
@@ -236,6 +237,9 @@ func CancelInput(id JobID) Input  { return Input{Kind: InCancel, Job: id} }
 
 // InterruptTurnInput is the stop button by the coordinator while it works (#309).
 func InterruptTurnInput() Input { return Input{Kind: InInterruptTurn} }
+
+// WorkerInterruptedInput: the stop button pressed Esc in worker name (#309).
+func WorkerInterruptedInput(name string) Input { return Input{Kind: InWorkerInterrupted, Name: name} }
 
 // AnswerInput: id "" means the only job waiting on an answer.
 func AnswerInput(id JobID, text string) Input { return Input{Kind: InAnswer, Job: id, Text: text} }
@@ -504,8 +508,11 @@ type AgentController struct {
 	landingRefs []JobID
 	landingText string
 	landBy      optMs
-	held        bool
-	status      string
+	// stopOnLand: the stop button came while the prompt was landing: its turn is stopped once
+	// it lands, never with an Esc into the prompt being typed (#309).
+	stopOnLand bool
+	held       bool
+	status     string
 	// injected: recently injected notices and the lines each one carried (none: narration,
 	// which is dropped rather than notified if it bounces).
 	injected []injectedNotice
@@ -655,7 +662,9 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 	case InCancel:
 		c.cancel(in.Job, now, &fx)
 	case InInterruptTurn:
-		c.interruptTurn(now, &fx)
+		fx = append(fx, Effect{Kind: EfToolResult, Value: c.interruptTurn(now, &fx)})
+	case InWorkerInterrupted:
+		fx = append(fx, Effect{Kind: EfToolResult, Value: c.workerInterrupted(in.Name, now, &fx)})
 	case InAnswer:
 		c.answer(in.Job, in.Text, now, &fx)
 	case InEnsureCoordinator:
@@ -964,13 +973,16 @@ func (c *AgentController) restore(jobs, outbox []string, keep bool, now Millis, 
 	)
 }
 
+// newRequestPrefix starts the message that hands the coordinator a new job.
+const newRequestPrefix = "New request from the user: "
+
 func (c *AgentController) delegate(id JobID, task, context string, now Millis, fx *[]Effect) {
 	if c.isDisabled() {
 		return
 	}
 	c.jobs.Create(id, task, now)
 	c.saveJob(id, fx)
-	text := "New request from the user: " + task
+	text := newRequestPrefix + task
 	if ctx := strings.TrimSpace(context); ctx != "" {
 		text += "\n" + ctx
 	}
@@ -1010,35 +1022,60 @@ func (c *AgentController) cancel(id JobID, now Millis, fx *[]Effect) {
 	c.flush(now, fx)
 }
 
-// interruptTurn is the stop button by the working coordinator (#309): the typed jobs its turn
-// carries are cancelled, as Stop in the text box cancels one (that interrupts it, and the rest
-// of the turn goes out again). A turn carrying none (a worker's report, a note, words you typed
-// in its terminal) is interrupted as Esc there would: it is over, unanswered, and its jobs stay
-// open. A coordinator that isn't up has no turn to stop.
-func (c *AgentController) interruptTurn(now Millis, fx *[]Effect) {
-	if c.coordinator != coordUp {
-		return
+// stoppedTurnNote rides with the coordinator's next turn for the jobs a stopped turn was about
+// but didn't start (a worker's report, a note): they stay open (#309).
+const stoppedTurnNote = "The user stopped your turn; don't continue unless asked."
+
+// interruptTurn is the stop button by the working coordinator (#309): its turn ends at once (an
+// interrupt fires no Stop, so we end it ourselves). Every job whose request is in that turn,
+// typed or spoken, is cancelled as Stop in the text box cancels one. The other jobs it was
+// about (a worker's report, a note) stay open, and the coordinator hears with its next turn
+// that the user stopped it. A prompt still landing is stopped once it lands: an Esc now could
+// land in the middle of it. False: no turn was running.
+func (c *AgentController) interruptTurn(now Millis, fx *[]Effect) bool {
+	busy := c.awaitingStop || c.turnOpen || c.landing || c.coordStatus == PaneWorking || c.coordStatus == PaneBlocked
+	if c.coordinator != coordUp || !busy {
+		return false
 	}
-	var typed []JobID
+	if c.landing {
+		c.stopOnLand = true
+		*fx = append(*fx, logEffect("the user stopped the coordinator: once its prompt lands"))
+		return true
+	}
+	requests := map[JobID]bool{}
+	for _, id := range c.inbox.InFlightRequests() {
+		requests[id] = true
+	}
+	var cancel, others []JobID
 	for _, id := range c.openInFlight() {
-		if c.typed[id] {
-			typed = append(typed, id)
+		if requests[id] {
+			cancel = append(cancel, id)
+		} else {
+			others = append(others, id)
 		}
-	}
-	if len(typed) > 0 {
-		for _, id := range typed {
-			c.cancel(id, now, fx)
-		}
-		return
 	}
 	*fx = append(*fx, Effect{Kind: EfInterrupt}, logEffect("the user interrupted the coordinator"))
-	if c.landing {
-		return // the prompt in flight hasn't been taken yet: it still has to land
-	}
-	// We end that turn ourselves (an interrupt fires no Stop): the Idle it brings counts.
 	c.inbox.FinishTurn()
+	c.turnOpen = false
 	c.awaitingStop = false
 	c.idleWaitAt = optMs{}
+	for _, id := range others {
+		c.inbox.PushRider(MessageForJob(id, stoppedTurnNote))
+	}
+	for _, id := range cancel {
+		c.cancel(id, now, fx) // its turn is over: the note that it was cancelled goes next
+	}
+	c.syncHold(fx)
+	return true
+}
+
+// landed: the prompt in flight was seen taken; a stop that came meanwhile stops its turn now.
+func (c *AgentController) landed(now Millis, fx *[]Effect) {
+	stop := c.stopOnLand
+	c.stopLanding()
+	if stop {
+		c.interruptTurn(now, fx)
+	}
 }
 
 // flush sends what is queued if the coordinator can take it, starting it first if needed.
@@ -1194,8 +1231,8 @@ func (c *AgentController) onSubmit(prompt string, now Millis, fx *[]Effect) {
 		return
 	}
 	if c.isLanding(prompt) {
-		c.stopLanding()
 		c.watchdog = nil
+		c.landed(now, fx)
 	} else {
 		c.landBy = optMs{}
 	}
@@ -1217,6 +1254,7 @@ func (c *AgentController) isLanding(prompt string) bool {
 func (c *AgentController) stopLanding() {
 	c.landing, c.landingRefs, c.landingText = false, nil, ""
 	c.landBy = optMs{}
+	c.stopOnLand = false
 }
 
 // promptFailed: a prompt never reached the coordinator: what it carried goes back to the front
@@ -1226,6 +1264,12 @@ func (c *AgentController) stopLanding() {
 func (c *AgentController) promptFailed(now Millis, fx *[]Effect) {
 	*fx = append(*fx, logEffect("prompt failed"))
 	c.promptFailures++
+	// A stop that came while it was landing: the requests it carried are cancelled (no Esc,
+	// nothing was typed).
+	var stopped []JobID
+	if c.stopOnLand {
+		stopped = c.inbox.InFlightRequests()
+	}
 	c.stopLanding()
 	carried := unique(c.inbox.InFlightRefs())
 	c.inbox.RequeueInFlight()
@@ -1242,6 +1286,9 @@ func (c *AgentController) promptFailed(now Millis, fx *[]Effect) {
 		c.syncHold(fx)
 	} else if c.coordinator == coordUp {
 		c.retryAt = someMs(now + PromptRetryMs<<(c.promptFailures-1))
+	}
+	for _, id := range stopped {
+		c.cancel(id, now, fx)
 	}
 }
 

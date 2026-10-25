@@ -535,3 +535,8 @@ func NeverStartedLine(name string) string {
 func UnreachableLine(name string) string {
 	return fmt.Sprintf("Worker %s could not be reached; your message was not delivered.", name)
 }
+
+// StoppedWorkerLine: the user stopped a worker's turn with the stop button (#309).
+func StoppedWorkerLine(name string) string {
+	return fmt.Sprintf("The user stopped %s's turn. Don't restart it unless they ask.", name)
+}

@@ -229,6 +229,8 @@ type AgentHandle struct {
 	rosterLast RosterView
 	rosterSent bool
 	rosterErr  string // the last roster list error logged ("" = none)
+	// stops: the stop button's last stop of each agent, against a second Esc (#309).
+	stops stopGuard
 }
 
 // NewRuntime builds the runtime without workers (start_worker is refused).
@@ -943,7 +945,9 @@ func (h *AgentHandle) rebuildRoster() {
 		last = EmptyRoster()
 	}
 	h.rosterMu.Unlock()
-	v := BuildRoster(append(parts.Primary, parts.Secondary...), workers, session.Name())
+	list := append(parts.Primary, parts.Secondary...)
+	h.stops.seen(list)
+	v := BuildRoster(list, workers, session.Name())
 	if parts.PrimaryErr != nil {
 		v.Agents, v.AgentCount = last.Agents, last.AgentCount
 	}

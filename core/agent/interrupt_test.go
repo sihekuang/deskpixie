@@ -2,7 +2,9 @@ package agent_test
 
 import (
 	"context"
+	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"testing/synctest"
 
@@ -53,7 +55,7 @@ func TestStoppingTheCoordinatorCancelsTheTypedJobItWorksOn(t *testing.T) {
 	})
 }
 
-func TestStoppingTheCoordinatorOnAnotherTurnInterruptsItAndKeepsTheJob(t *testing.T) {
+func TestStoppingTheCoordinatorOnASpokenJobCancelsItToo(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		r := newRig(t)
 		if _, err := r.h.Delegate("a spoken request", ""); err != nil {
@@ -67,8 +69,8 @@ func TestStoppingTheCoordinatorOnAnotherTurnInterruptsItAndKeepsTheJob(t *testin
 		if n := escapes(r.host.Keys(), Coordinator); n != 1 {
 			t.Fatal(r.host.Keys())
 		}
-		if st := r.h.JobStatus()[0].Status; st == JobCancelled {
-			t.Fatal("only typed jobs are cancelled; a spoken one stays open", st)
+		if st := r.h.JobStatus()[0].Status; st != JobCancelled {
+			t.Fatal("a spoken request in the stopped turn is cancelled", st)
 		}
 	})
 }
@@ -98,16 +100,14 @@ func TestStoppingAnUnknownNameSaysItIsNotRunning(t *testing.T) {
 	sent, err = r.h.Interrupt(context.Background(), Coordinator)
 	wantStopErr(t, sent, err, "Couldn't stop the coordinator: it isn't running anymore.")
 	sent, err = r.h.Interrupt(context.Background(), "")
-	wantStopErr(t, sent, err, "Couldn't stop that: it has no name.")
+	wantStopErr(t, sent, err, "Couldn't stop it.")
 }
 
 func TestStoppingWhenPixiesHostCantBeListedSaysWhy(t *testing.T) {
 	r := newRig(t)
 	r.host.FailList(true)
 	sent, err := r.h.Interrupt(context.Background(), "focus-fix")
-	if sent || err == nil || err.Error() == "Couldn't stop focus-fix: it isn't running anymore." {
-		t.Fatal("the listing's failure, not a guess that it ended", sent, err)
-	}
+	wantStopErr(t, sent, err, "Pixie couldn't check on it. Try again.") // not a guess that it ended, nor herdr's words
 }
 
 func TestStoppingOneOfPixiesPanesPressesEscInIt(t *testing.T) {
@@ -217,4 +217,116 @@ func TestTheRosterOffersStopOnlyWhileWorkingAndReachable(t *testing.T) {
 			t.Errorf("%s: stoppable %v, want %v", n, got[n], w)
 		}
 	}
+}
+
+func TestAStopThatFailsForNoHostsReasonSaysTryAgain(t *testing.T) {
+	r, user := pixRig(t)
+	user.SetStatus("focus-claude", PaneWorking)
+	user.mu.Lock()
+	user.keysErr = errors.New("dial unix /tmp/pix.sock: connect: connection refused")
+	user.mu.Unlock()
+	sent, err := r.h.Interrupt(context.Background(), "focus-claude")
+	wantStopErr(t, sent, err, "Pixie couldn't check on it. Try again.")
+}
+
+// workingPane is one of Pixie's panes, working, that takes an Esc and keeps working (as one
+// slow to show its interrupt).
+func workingPane(t *testing.T) *rtRig {
+	r := newRig(t)
+	r.host.StartAgent(context.Background(), AgentSpec{Name: "focus-fix"})
+	r.host.SetStatus("focus-fix", PaneWorking)
+	r.host.Inject(agenttest.IgnoreEscape)
+	if sent, err := r.h.Interrupt(context.Background(), "focus-fix"); !sent || err != nil {
+		t.Fatal(sent, err)
+	}
+	return r
+}
+
+func TestASecondStopSoonAfterSendsNoSecondEsc(t *testing.T) {
+	r := workingPane(t)
+	for range 2 { // the chat and the roster, or a double click
+		if sent, err := r.h.Interrupt(context.Background(), "focus-fix"); !sent || err != nil {
+			t.Fatal("a success, sending nothing", sent, err)
+		}
+	}
+	if n := escapes(r.host.Keys(), "focus-fix"); n != 1 {
+		t.Fatal("a second Esc opens Claude's rewind menu", r.host.Keys())
+	}
+}
+
+func TestAStopBeforeTheStatusChangedSendsNoSecondEsc(t *testing.T) {
+	r := workingPane(t)
+	r.clock.Advance(10 * StopRepeatMs)
+	if sent, err := r.h.Interrupt(context.Background(), "focus-fix"); !sent || err != nil {
+		t.Fatal(sent, err)
+	}
+	if n := escapes(r.host.Keys(), "focus-fix"); n != 1 {
+		t.Fatal("still working since the last stop: no second Esc", r.host.Keys())
+	}
+	// Seen idle, then working on a new turn: that one can be stopped.
+	r.host.SetStatus("focus-fix", PaneIdle)
+	if sent, err := r.h.Interrupt(context.Background(), "focus-fix"); sent || err != nil {
+		t.Fatal(sent, err)
+	}
+	r.host.SetStatus("focus-fix", PaneWorking)
+	if sent, err := r.h.Interrupt(context.Background(), "focus-fix"); !sent || err != nil {
+		t.Fatal(sent, err)
+	}
+	if n := escapes(r.host.Keys(), "focus-fix"); n != 2 {
+		t.Fatal(r.host.Keys())
+	}
+}
+
+func TestAStopRightAfterAChangedStatusStillWaitsItsTwoSeconds(t *testing.T) {
+	r := workingPane(t)
+	r.host.SetStatus("focus-fix", PaneIdle)
+	r.h.Interrupt(context.Background(), "focus-fix")
+	r.host.SetStatus("focus-fix", PaneWorking)
+	r.clock.Advance(StopRepeatMs - 1)
+	if sent, err := r.h.Interrupt(context.Background(), "focus-fix"); !sent || err != nil {
+		t.Fatal(sent, err)
+	}
+	if n := escapes(r.host.Keys(), "focus-fix"); n != 1 {
+		t.Fatal(r.host.Keys())
+	}
+}
+
+func TestAFailedStopDoesNotHoldBackTheNext(t *testing.T) {
+	r, user := pixRig(t)
+	user.SetStatus("focus-claude", PaneWorking)
+	user.mu.Lock()
+	user.keysErr = HostError{Kind: HostTimeout}
+	user.mu.Unlock()
+	if _, err := r.h.Interrupt(context.Background(), "focus-claude"); err == nil {
+		t.Fatal("it timed out")
+	}
+	user.mu.Lock()
+	user.keysErr = nil
+	user.mu.Unlock()
+	if sent, err := r.h.Interrupt(context.Background(), "focus-claude"); !sent || err != nil {
+		t.Fatal(sent, err)
+	}
+	if n := escapes(user.Keys(), "focus-claude"); n != 1 {
+		t.Fatal(user.Keys())
+	}
+}
+
+func TestStoppingPixiesWorkerTellsTheCoordinator(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRig(t)
+		r.h.Input(EnsureCoordinatorInput())
+		settle()
+		r.host.StartAgent(context.Background(), AgentSpec{Name: "focus-fix"})
+		r.host.SetStatus("focus-fix", PaneWorking)
+		// Not one of Pixie's workers: only the Esc, nothing for the coordinator.
+		if sent, err := r.h.Interrupt(context.Background(), "focus-fix"); !sent || err != nil {
+			t.Fatal(sent, err)
+		}
+		settle()
+		for _, p := range r.host.Prompts() {
+			if strings.Contains(p.Text, "The user stopped") {
+				t.Fatal(p)
+			}
+		}
+	})
 }

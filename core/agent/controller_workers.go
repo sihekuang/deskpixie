@@ -499,6 +499,19 @@ func (c *AgentController) tickWorkers(now Millis, fx *[]Effect) {
 	}
 }
 
+// workerInterrupted: the stop button pressed Esc in worker name (#309): its turn is over, its
+// queue waits, and the coordinator is told at once, so it doesn't restart it on its own. False:
+// not one of Pixie's live workers.
+func (c *AgentController) workerInterrupted(name string, now Millis, fx *[]Effect) bool {
+	if !c.workers.Interrupted(name) {
+		return false
+	}
+	w := c.workers.Get(name)
+	*fx = append(*fx, logEffect(fmt.Sprintf("worker %s: the user stopped its turn", name)))
+	c.tellCoordinator(w.Plan.Job, StoppedWorkerLine(name), now, fx)
+	return true
+}
+
 // flushWorker sends the worker's queue if it can take it; true if a prompt went out.
 func (c *AgentController) flushWorker(name string, now Millis, fx *[]Effect) bool {
 	if c.shutDown {
