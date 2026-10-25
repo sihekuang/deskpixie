@@ -90,7 +90,7 @@ type Session struct {
 	q           *question  // the prompt waiting on you that Pixie may answer (#105)
 	landing     *landing   // an answer typed from Pixie, until its prompt leaves the screen (#268)
 	screen      string     // what the agent's screen shows now, without spaces (#268)
-	bottom      string     // its bottom rows (its prompt), the same way (#306)
+	prompt      string     // what its prompt holds, the same way (#306)
 	qseq        int
 	hold        time.Duration // how long a question waits in its hook for Pixie (0: not held, #268)
 	menu        string        // the menu on screen in place of the agent's prompt ("": none, #306)

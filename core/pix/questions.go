@@ -469,15 +469,9 @@ func shows(screen, marker, detail string) bool {
 func (s *Session) noteScreen(vt *screen) {
 	lines := vt.Lines()
 	text := noSpace(strings.Join(lines, ""))
-	var rows []string
-	for _, l := range lines {
-		if strings.TrimSpace(l) != "" {
-			rows = append(rows, l)
-		}
-	}
-	bottom := noSpace(strings.Join(rows[max(0, len(rows)-promptRows):], ""))
+	prompt := promptOf(s.o.tool, lines)
 	s.mu.Lock()
-	s.screen, s.bottom = text, bottom
+	s.screen, s.prompt = text, prompt
 	if l := s.landing; l != nil && !shows(text, l.marker, l.detail) {
 		s.landing = nil
 		close(l.done)

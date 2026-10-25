@@ -506,19 +506,71 @@ func TestATurnWithAnotherPromptDidntSendTheStoppedMessage(t *testing.T) {
 	}
 }
 
-// The prompt is the bottom of the screen: the message quoted above it in the transcript isn't in it.
-func TestOnlyTheBottomRowsAreThePrompt(t *testing.T) {
-	s := newSession(sessionOpts{tool: "codex"})
-	v := newScreen(30, 40)
-	v.Write([]byte("hello\r\n" + strings.Repeat("line\r\n", promptRows) + "› "))
-	s.noteScreen(v)
-	if s.promptHolds("hello") {
-		t.Fatal("the transcript counted as the prompt")
+// codexScreenWith is Codex's prompt (codex-prompt.raw) with a transcript line just above its
+// prompt and text in the prompt ("" leaves its placeholder).
+func codexScreenWith(t *testing.T, said, text string) *screen {
+	v := realScreen(t, "codex-prompt.raw")
+	v.Write([]byte("\x1b[44;1H• " + said))
+	if text != "" {
+		v.Write([]byte("\x1b[47;1H\x1b[2K› " + text))
 	}
-	v.Write([]byte("hello"))
-	s.noteScreen(v)
-	if !s.promptHolds("hello") {
-		t.Fatal("the prompt didn't count")
+	return v
+}
+
+// The prompt is its own row (and the rows it wraps onto): not the transcript above it, nor the
+// status line (model, folder) and keys under it, where short text often shows too.
+func TestOnlyThePromptRowIsThePrompt(t *testing.T) {
+	s := newSession(sessionOpts{tool: "codex"})
+	s.noteScreen(codexScreenWith(t, "ok, done", ""))
+	for _, text := range []string{"ok", "tmp", "default", "shortcuts", "hello"} {
+		if s.promptHolds(text) {
+			t.Errorf("%q counted as in the prompt", text)
+		}
+	}
+	s.noteScreen(codexScreenWith(t, "ok, done", "fix it"))
+	if !s.promptHolds("fix it") || s.promptHolds("ok") {
+		t.Fatal("the prompt row didn't count, or the transcript did")
+	}
+	c := newSession(sessionOpts{tool: "claude"})
+	c.noteMenu(nil, "")
+	c.noteScreen(realScreen(t, "claude-bash-dialog.raw")) // its last ❯ is an option, its prompt above is a past one
+	if c.promptHolds("python3") {
+		t.Fatal("claude: an option counted as the prompt")
+	}
+	v := newScreen(10, 40) // Claude Code's prompt box, a past prompt above it
+	v.Write([]byte("❯ ok then\r\n\r\n⏺ Done.\r\n────────\r\n❯ fix it\r\n  please\r\n────────\r\n  ? for shortcuts"))
+	c.noteScreen(v)
+	if !c.promptHolds("fix it please") || c.promptHolds("ok then") || c.promptHolds("shortcuts") {
+		t.Fatal("claude: its prompt box isn't what counts")
+	}
+}
+
+// A short stopped message you cleared from the prompt is typed again, not said delivered, though
+// the word shows in the transcript.
+func TestAShortStoppedMessageYouClearedIsQueuedAgain(t *testing.T) {
+	s := newSession(sessionOpts{tool: "codex"})
+	s.noteScreen(codexScreenWith(t, "ok, done", ""))
+	s.unsent = &unsent{text: "ok", msgs: []string{"ok"}}
+	if s.finishUnsent() || s.hasUnsent() || s.queue.Len() != 1 {
+		t.Fatalf("sent or not queued: unsent %v, %d queued", s.hasUnsent(), s.queue.Len())
+	}
+}
+
+// A short draft pix set aside comes back though the word shows elsewhere on screen.
+func TestAShortDraftIsTypedBackThoughItShowsElsewhere(t *testing.T) {
+	for _, draft := range []string{"ok", "tmp"} { // in the transcript, in the folder on the status line
+		v := codexScreenWith(t, "ok, done", "")
+		var b strings.Builder
+		for _, l := range v.Lines() {
+			b.WriteString(strings.TrimRight(l, " ") + "\r\n")
+		}
+		h := stagedHarness(t, "codex", 0, stage{0, []byte("\x1b[2J\x1b[H" + strings.TrimSuffix(b.String(), "\r\n"))})
+		agentShown(t, h, "shortcuts")
+		waitMenu(t, h, "")
+		h.s.restoreDraft(draft)
+		if got := h.s.typedForTest(); got != "\x1b[200~"+draft+"\x1b[201~" {
+			t.Errorf("%s: typed %q", draft, got)
+		}
 	}
 }
 

@@ -20,8 +20,36 @@ var codexMenuFoot = regexp.MustCompile(`^enter \S.* · esc \S+$`)
 // option are.
 const claudeMenuRows = 15
 
-// promptRows: the bottom rows that hold the agent's prompt, not its transcript.
-const promptRows = 10
+// promptMarks start the row of each agent's prompt (its input box).
+var promptMarks = map[string]string{"codex": "›", "claude": "❯"}
+
+// promptOf is what the agent's prompt holds on lines, without spaces: the last row that starts
+// with its mark (in Claude's, right under its rule) and the rows it wrapped onto (indented), up
+// to a blank row or Claude's rule. Not the transcript above, nor the status and key lines under
+// it.
+func promptOf(tool string, lines []string) string {
+	mark := promptMarks[tool]
+	if mark == "" {
+		return ""
+	}
+	at := -1
+	for i := len(lines) - 1; i >= 0 && at < 0; i-- {
+		if strings.HasPrefix(strings.TrimLeft(lines[i], " "), mark) && (tool != "claude" || ruledAbove(lines[:i])) {
+			at = i
+		}
+	}
+	if at < 0 {
+		return ""
+	}
+	rows := []string{strings.TrimPrefix(strings.TrimLeft(lines[at], " "), mark)}
+	for _, l := range lines[at+1:] {
+		if t := strings.TrimSpace(l); t == "" || strings.HasPrefix(t, "─") || !strings.HasPrefix(l, " ") {
+			break
+		}
+		rows = append(rows, l)
+	}
+	return noSpace(strings.Join(rows, ""))
+}
 
 // codexPromptMarks show in Codex's empty prompt and under it: pix knows it has drawn its prompt.
 var codexPromptMarks = []string{noSpace("Ask Codex to do anything"), noSpace("? for shortcuts")}
@@ -294,7 +322,7 @@ func (s *Session) finishUnsent() (sent bool) {
 // inTranscript: text shows on screen above the prompt, sent. Under mu.
 func (s *Session) inTranscript(text string) bool {
 	t := noSpace(text)
-	return t != "" && strings.Contains(s.screen, t) && !strings.Contains(s.bottom, t)
+	return t != "" && strings.Contains(s.screen, t) && !strings.Contains(s.prompt, t)
 }
 
 func (s *Session) dropUnsent() {
@@ -303,16 +331,28 @@ func (s *Session) dropUnsent() {
 	s.mu.Unlock()
 }
 
-// promptHolds: the agent's prompt (its bottom rows) shows text, or a long paste it shows as a
-// marker.
+// ruledAbove: the last non-blank of lines is Claude's rule, the top of its prompt box (its
+// dialogs' options and your past prompts have none right above).
+func ruledAbove(lines []string) bool {
+	for i := len(lines) - 1; i >= 0; i-- {
+		if t := strings.TrimSpace(lines[i]); t != "" {
+			return strings.HasPrefix(t, "─")
+		}
+	}
+	return false
+}
+
+// promptHolds: the agent's prompt shows text (its first paragraph: a blank line ends what
+// promptOf reads), or a long paste it shows as a marker.
 func (s *Session) promptHolds(text string) bool {
-	if noSpace(text) == "" {
+	first, _, _ := strings.Cut(strings.TrimSpace(text), "\n\n")
+	if noSpace(first) == "" {
 		return false
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, m := range []string{noSpace(text), noSpace("[Pasted Content"), noSpace("[Pasted text")} {
-		if strings.Contains(s.bottom, m) {
+	for _, m := range []string{noSpace(first), noSpace("[Pasted Content"), noSpace("[Pasted text")} {
+		if strings.Contains(s.prompt, m) {
 			return true
 		}
 	}
