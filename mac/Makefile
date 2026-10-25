@@ -24,8 +24,8 @@ test:
 # runs its own copy on a fresh data folder, herdr session and port.
 #   make uitest SIGNING_IDENTITY="Developer ID Application: ..." DEVELOPMENT_TEAM=... [DESKPIXIE_UITEST_LIVE=1] [DESKPIXIE_UITEST_SESSIONS=1]
 # DESKPIXIE_UITEST_LIVE=1 adds the tests that need herdr, claude and the coordinator.
-# DESKPIXIE_UITEST_SESSIONS=1 adds the tests with two real claude sessions (pix, in a private
-# tmux server) connected to the app; sending to one starts the coordinator. Both cost a little.
+# DESKPIXIE_UITEST_SESSIONS=1 adds the tests with two sessions of yours connected to the app:
+# the app's own pix around a stand-in claude, on a temporary home (free, touches nothing).
 uitest: project
 	TEST_RUNNER_DESKPIXIE_UITEST_LIVE="$(DESKPIXIE_UITEST_LIVE)" \
 	TEST_RUNNER_DESKPIXIE_UITEST_SESSIONS="$(DESKPIXIE_UITEST_SESSIONS)" xcodebuild -project DeskPixie.xcodeproj \

@@ -17,7 +17,7 @@ final class UITestApp {
     /// the tests that need herdr, the coordinator and a model run too.
     static var live: Bool { ProcessInfo.processInfo.environment["DESKPIXIE_UITEST_LIVE"] == "1" }
     /// `DESKPIXIE_UITEST_SESSIONS=1` (`TEST_RUNNER_DESKPIXIE_UITEST_SESSIONS`): the tests with
-    /// real claude sessions of yours connected to the app (`ChatSessionsUITests`).
+    /// sessions of yours connected to the app, stand-ins for claude (`ChatSessionsUITests`).
     static var withSessions: Bool { ProcessInfo.processInfo.environment["DESKPIXIE_UITEST_SESSIONS"] == "1" }
 
     /// A short path under /tmp: the core keeps its pix socket under the data folder, and a long
@@ -29,7 +29,7 @@ final class UITestApp {
     let session: String
     let port: Int
     let live: Bool
-    /// The real home, for claude's login: live runs, and the connected-sessions tier.
+    /// The real home, for claude's login: live runs.
     let realHome: Bool
     /// `agent.enabled`. Attachments live in the agent, so the clipboard tests turn it on: with
     /// `warm` off it starts no coordinator until a message is sent.
@@ -42,14 +42,14 @@ final class UITestApp {
     /// Skips the test while a copy of the UITest build it didn't launch is running (launching
     /// here would end it). The user's own DeskPixie, under its real bundle ID, doesn't count.
     /// `settings`: top-level settings.json values this test sets on top of the ones every test has.
-    init(live: Bool = false, agent: Bool? = nil, realHome: Bool? = nil, settings extra: [String: Any] = [:]) throws {
+    init(live: Bool = false, agent: Bool? = nil, settings extra: [String: Any] = [:]) throws {
         if !NSRunningApplication.runningApplications(withBundleIdentifier: Self.bundleID).isEmpty {
             throw XCTSkip("Quit DeskPixie UITest to run the UI tests")
         }
         let tag = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(12)
         self.live = live
         self.agent = agent ?? live
-        self.realHome = realHome ?? live
+        self.realHome = live
         root = URL(fileURLWithPath: "/tmp/dpui-\(tag)", isDirectory: true)
         support = root.appendingPathComponent("support", isDirectory: true)
         home = root.appendingPathComponent("home", isDirectory: true)
@@ -103,7 +103,7 @@ final class UITestApp {
 
     // MARK: Sessions of yours
 
-    private var sessions: [Process] = []
+    private var sessions: [String: Process] = [:]
 
     /// A session of yours, as `pix --description <description> claude` in a terminal would start
     /// one: the app's own pix, in a pty (`script`), on this run's data folder and home, with a
@@ -145,7 +145,15 @@ final class UITestApp {
         p.standardOutput = FileHandle.nullDevice
         p.standardError = FileHandle.nullDevice
         try p.run()
-        sessions.append(p)
+        sessions[description] = p
+    }
+
+    /// Ends the session `description`, as closing its terminal would: pix goes, and the app
+    /// stops counting it.
+    func stopSession(_ description: String) {
+        guard let p = sessions.removeValue(forKey: description) else { return }
+        if p.isRunning { p.terminate() }
+        p.waitUntilExit()
     }
 
     /// The session `description` finishes a turn with this reply, as claude's Stop hook would
@@ -190,9 +198,9 @@ final class UITestApp {
     /// own preferences file changed meanwhile.
     @discardableResult
     func cleanUp() -> Bool {
-        for p in sessions where p.isRunning { p.terminate() }
-        for p in sessions { p.waitUntilExit() }
-        sessions = []
+        for p in sessions.values where p.isRunning { p.terminate() }
+        for p in sessions.values { p.waitUntilExit() }
+        sessions = [:]
         terminate()
         if let herdr = Self.herdr {
             _ = Self.run(herdr, ["session", "stop", session])
