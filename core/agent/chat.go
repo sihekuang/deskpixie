@@ -18,6 +18,10 @@ type ChatLine struct {
 	Text   string `json:"text"`
 	// Sessions: the sessions the line is about, for the card's buttons that go to them (#261).
 	Sessions []string `json:"sessions,omitempty"`
+	// Asking: the line is the question itself (a job's question or a permission request, or a
+	// session asking in the box), which waits on the badge as a request too (#302). A status of
+	// question alone only says the job is waiting.
+	Asking bool `json:"asking,omitempty"`
 	// Session: the line is that session's own turn, the answer to a message typed to it (#241),
 	// not the coordinator's ("" = the coordinator's).
 	Session string `json:"session,omitempty"`
@@ -51,7 +55,7 @@ func (c *AgentController) chatLine(line Line) ChatLine {
 		// A permission request: allowed from the bubble or the notification, not by a spoken word.
 		text = strings.TrimSpace(strings.TrimSuffix(text, fmt.Sprintf("Say confirm %s.", *line.Token))) + " " + permissionHint
 	}
-	return ChatLine{Job: line.Job, Status: status, Text: text, Sessions: c.lineSessions(line)}
+	return ChatLine{Job: line.Job, Status: status, Text: text, Sessions: c.lineSessions(line), Asking: line.Kind == LineQuestion}
 }
 
 // permissionHint ends a permission request in the text box.

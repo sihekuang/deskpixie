@@ -1878,7 +1878,7 @@ func (c *AgentController) onSessionTurn(name string, t SessionTurn, now Millis, 
 				c.keepHeardAlert(line, now, fx) // on the badge too, until answered (#286 call 7)
 			}
 			c.boxAnswered = job
-			*fx = append(*fx, Effect{Kind: EfChat, Chat: ChatLine{Job: job, Status: status, Text: SessionTurnBrief(gist), Sessions: []string{name}, Session: name}})
+			*fx = append(*fx, Effect{Kind: EfChat, Chat: ChatLine{Job: job, Status: status, Text: SessionTurnBrief(gist), Sessions: []string{name}, Session: name, Asking: asking}})
 			return
 		}
 	}

@@ -139,8 +139,13 @@ func TestAWorkingChatLineIsNoEntry(t *testing.T) {
 
 // #302 review: a question is in the thread as a request already (the updates list holds it).
 func TestAQuestionChatLineIsNoEntry(t *testing.T) {
-	if _, ok := EntryForChat(agent.ChatLine{Job: "j1", Status: "question", Text: "Which repo?"}, "id", agent.EmptyRoster()); ok {
+	if _, ok := EntryForChat(agent.ChatLine{Job: "j1", Status: "question", Text: "Which repo?", Asking: true}, "id", agent.EmptyRoster()); ok {
 		t.Fatal("a question made an entry")
+	}
+	// Another line while the job waits on it (the status is the job's) is an entry.
+	e, ok := EntryForChat(agent.ChatLine{Job: "j1", Status: "question", Text: "Waiting at a prompt in its terminal."}, "id", agent.EmptyRoster())
+	if !ok || e.Text != "Waiting at a prompt in its terminal." {
+		t.Fatalf("an info line on a waiting job was dropped: %+v %v", e, ok)
 	}
 }
 
@@ -169,6 +174,18 @@ func answers(f *threadFeed, lines ...agent.ChatLine) {
 	}
 }
 
+// #302 review round 2: info lines on a job waiting on its question reach the thread; the
+// question itself doesn't (it is a request).
+func TestAWaitingJobsInfoLineReachesTheThreadButItsQuestionDoesnt(t *testing.T) {
+	var got []chat.Entry
+	f := newThreadFeed(app.AgentHooks{ThreadAnswer: func(e chat.Entry) { got = append(got, e) }})
+	answers(f, agent.ChatLine{Job: "j1", Status: "question", Text: "Which repo?", Asking: true},
+		agent.ChatLine{Job: "j1", Status: "question", Text: "The upload worker is waiting at a prompt in its terminal."})
+	if len(got) != 1 || got[0].Text != "The upload worker is waiting at a prompt in its terminal." {
+		t.Fatalf("%+v", got)
+	}
+}
+
 // #302 review (C1): one typed job with several turns keeps each turn.
 func TestEachTurnOfATypedJobIsAnEntryOfItsOwn(t *testing.T) {
 	var got []chat.Entry
@@ -178,7 +195,7 @@ func TestEachTurnOfATypedJobIsAnEntryOfItsOwn(t *testing.T) {
 		agent.ChatLine{Job: "j1", Status: "done", Text: "Two are running. One is stuck."}) // grows: the same turn
 	f.sent("j1")
 	answers(f, agent.ChatLine{Job: "j1", Status: "done", Text: "Restarted it."}) // after a send: a new turn
-	answers(f, agent.ChatLine{Job: "j1", Status: "question", Text: "Push it?"},
+	answers(f, agent.ChatLine{Job: "j1", Status: "question", Text: "Push it?", Asking: true},
 		agent.ChatLine{Job: "j1", Status: "done", Text: "Pushed."}) // after a question: a new turn
 	answers(f, agent.ChatLine{Job: "j1", Status: "done", Text: "Something else."}) // says something new
 	answers(f, agent.ChatLine{Job: "j1", Status: "done", Text: "Fixed.", Session: "api-claude"},

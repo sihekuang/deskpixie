@@ -77,10 +77,11 @@ func RequestEntries(items []agent.UpdateItem, r agent.RosterView) []chat.Entry {
 }
 
 // EntryForChat is a typed job's line as an answer, with the ID of its turn: the coordinator's,
-// or (Session set) that session's own. False for a line still working, and for a question,
-// which is in the thread already as a request (the updates list holds it too).
+// or (Session set) that session's own. False for a line still working, and for the question
+// itself (Asking), which is in the thread already as a request (the updates list holds it
+// too); another line on a job waiting on its question (status question) is kept.
 func EntryForChat(l agent.ChatLine, id string, r agent.RosterView) (chat.Entry, bool) {
-	if l.Status != "done" && l.Status != "failed" {
+	if l.Asking || (l.Status != "done" && l.Status != "failed" && l.Status != "question") {
 		return chat.Entry{}, false
 	}
 	return chat.Entry{ID: id, Who: whoFor(l.Session, "", "", r), Text: l.Text, Sessions: l.Sessions}, true
@@ -132,14 +133,14 @@ func (f *threadFeed) line(l agent.OutboxLine) {
 }
 
 // answer is a typed job's line. It grows its turn's entry while it adds to what that said;
-// anything else is a turn of its own: after a send or a question, a line from someone else (a
+// anything else is a turn of its own: after a send or the question itself, a line from someone else (a
 // session answering), or a line that says something new.
 func (f *threadFeed) answer(l agent.ChatLine) {
 	if f == nil || f.hooks.ThreadAnswer == nil {
 		return
 	}
 	f.mu.Lock()
-	if l.Status == "question" {
+	if l.Asking {
 		f.ended[l.Job] = true
 	}
 	t, ok := f.turns[l.Job]
