@@ -67,7 +67,7 @@ type ClientDelegationResult struct {
 	Error string `json:"error,omitempty"`
 }
 
-// DelegationOffNoAgent is the error when no coordinator is built (Settings ▸ Agent ▸ Delegation off).
+// DelegationOffNoAgent is the error when no coordinator is built (Settings ▸ Coordinator ▸ Hand work to the coordinator off).
 const DelegationOffNoAgent = "Delegation is off (the coordinator is turned off in Settings)."
 
 // clientDelegation is the runtime's ClientDelegationTool: it routes the task to the registry's

@@ -21,7 +21,7 @@ func TestTheCoordinatorKindDefaultsToClaude(t *testing.T) {
 
 func TestTheCoordinatorAgentPickerOffersClaudeAndCodex(t *testing.T) {
 	f := FieldByPath("agent.coordinatorKind")
-	if f == nil || f.Section != SectionAgent || f.Label != "Coordinator agent" || f.Apply != ApplyRestart {
+	if f == nil || f.Section != SectionCoordinator || f.Label != "Coordinator agent" || f.Apply != ApplyRestart {
 		t.Fatalf("%+v", f)
 	}
 	var values []string
@@ -62,7 +62,7 @@ func TestTheModelListFollowsTheCoordinatorAgent(t *testing.T) {
 	// Right under the picker, in this order.
 	var agent []string
 	for _, f := range Fields {
-		if f.Section == SectionAgent {
+		if f.Section == SectionCoordinator {
 			agent = append(agent, f.Path)
 		}
 	}

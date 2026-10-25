@@ -96,9 +96,10 @@ func TestEveryFieldPathExistsInConfig(t *testing.T) {
 }
 
 func TestTheLiveListIsPinned(t *testing.T) {
-	want := []string{"hotkey", "pack", "pixiesFolder", "scale", "replyMode", "alwaysShowCaption", "captionDismissSecs", "captionFadeSecs", "replyHistoryMins", "proximityFade.enabled", "proximityFade.radius",
-		"voice.noiseFilter", "voice.inputDevice", "voice.outputDevice", "agent.editor", "canvas.autoOpen", "logMaxMB",
-		"notifications.bubble.enabled", "notifications.bubble.popSecs", "notifications.bubble.lines", "notifications.awayAfterMins"}
+	want := []string{"hotkey", "replyMode", "pack", "scale", "pixiesFolder", "proximityFade.enabled", "proximityFade.radius",
+		"alwaysShowCaption", "captionDismissSecs", "captionFadeSecs", "replyHistoryMins",
+		"voice.inputDevice", "voice.outputDevice", "voice.noiseFilter", "canvas.autoOpen", "agent.editor",
+		"notifications.bubble.enabled", "notifications.bubble.popSecs", "notifications.bubble.lines", "notifications.awayAfterMins", "logMaxMB"}
 	if got := LivePaths(); !reflect.DeepEqual(got, want) {
 		t.Fatal(got)
 	}
@@ -163,8 +164,9 @@ func TestTheMicAndSpeakerAreLiveMacOnlyDeviceChoices(t *testing.T) {
 		}
 		return -1
 	}
-	nf := at("voice.noiseFilter")
-	if at("voice.noiseModel") != nf+1 || at("voice.inputDevice") != nf+2 || at("voice.outputDevice") != nf+3 {
+	// #290: the mic and speaker head their group, then the noise filter and its model.
+	first := at("voice.inputDevice")
+	if at("voice.outputDevice") != first+1 || at("voice.noiseFilter") != first+2 || at("voice.noiseModel") != first+3 {
 		t.Fatal(order)
 	}
 	if !(Choices{Source: SourceInputDevices}).Nullable() || !(Choices{Source: SourceOutputDevices}).Nullable() {
@@ -380,10 +382,11 @@ func TestAViewSerializesForThePage(t *testing.T) {
 	}
 	got := mustJSON(t, max)
 	want := map[string]any{
-		"path": "agent.workers.max", "section": "Workers", "label": "Most workers at once",
+		"path": "agent.workers.max", "section": "Workers", "group": "Workers", "label": "Most workers at once",
 		"help":  "Up to four workers run at the same time.",
 		"kind":  map[string]any{"type": "int", "min": float64(1), "max": float64(4), "menu": true},
 		"apply": "restart", "platforms": []any{"macos", "windows", "linux"},
+		"enabledWhen": []any{map[string]any{"key": "agent.workers.enabled", "in": []any{"true"}}},
 	}
 	if !reflect.DeepEqual(got, want) {
 		b, _ := json.Marshal(got)
@@ -409,10 +412,16 @@ func TestTheCurrentPlatformIsOneOfTheThree(t *testing.T) {
 }
 
 func TestNotificationFieldsAreInTheNotificationsSection(t *testing.T) {
-	for _, p := range []string{"notifications.debounceSecs", "notifications.bubble.enabled", "notifications.bubble.popSecs",
-		"notifications.bubble.lines", "notifications.awayAfterMins", "agent.notifyPerMinute"} {
+	for _, p := range []string{"notifications.bubble.enabled", "notifications.bubble.popSecs",
+		"notifications.bubble.lines", "notifications.awayAfterMins"} {
 		f := FieldByPath(p)
 		if f == nil || f.Section != SectionNotifications {
+			t.Fatalf("%s: %+v", p, f)
+		}
+	}
+	// #290: the coordinator's rate limits are expert settings.
+	for _, p := range []string{"notifications.debounceSecs", "agent.notifyPerMinute"} {
+		if f := FieldByPath(p); f == nil || f.Section != SectionAdvanced {
 			t.Fatalf("%s: %+v", p, f)
 		}
 	}
@@ -457,7 +466,7 @@ func TestHandOffWhenUnsureField(t *testing.T) {
 	if f == nil {
 		t.Fatal("voice.handOffWhenUnsure has no field")
 	}
-	if f.Section != SectionVoice || f.Apply != ApplyRestart || f.Kind.Type != KindBool {
+	if f.Section != SectionCoordinator || f.Apply != ApplyRestart || f.Kind.Type != KindBool {
 		t.Fatalf("%+v", f)
 	}
 	if f.Label != "Hand off when Pixie doesn't know" ||
@@ -471,18 +480,16 @@ func TestCheckClaimsField(t *testing.T) {
 	if f == nil {
 		t.Fatal("voice.checkClaims has no field")
 	}
-	if f.Section != SectionVoice || f.Apply != ApplyRestart || f.Kind.Type != KindBool {
+	if f.Section != SectionAdvanced || f.Apply != ApplyRestart || f.Kind.Type != KindBool {
 		t.Fatalf("%+v", f)
 	}
 	if f.Label != "Check Pixie's claims" ||
 		f.Help != "When Pixie says it did something, like setting a timer or handing a task off, the app checks it really did and corrects it if not." {
 		t.Fatalf("%q / %q", f.Label, f.Help)
 	}
-	// It sits right after voice.handOffWhenUnsure.
-	for i, g := range Fields {
-		if g.Path == "voice.handOffWhenUnsure" && (i+1 >= len(Fields) || Fields[i+1].Path != "voice.checkClaims") {
-			t.Fatal("voice.checkClaims is not next to voice.handOffWhenUnsure")
-		}
+	// #290: with the other expert voice settings.
+	if f.Group != "Voice" {
+		t.Fatal(f.Group)
 	}
 }
 
@@ -539,7 +546,7 @@ func TestTheGPTLiveFieldsShowOnlyForGPTLiveRightUnderTheVoiceService(t *testing.
 			voice = append(voice, f.Path)
 		}
 	}
-	if !reflect.DeepEqual(voice[:4], []string{"voice.provider", "voice.liveDelegation", "voice.liveBackendModel", "voice.audio"}) {
+	if !reflect.DeepEqual(voice[:4], []string{"voice.provider", "voice.liveDelegation", "voice.liveBackendModel", "voice.model"}) {
 		t.Fatal(voice)
 	}
 	for _, p := range []string{"voice.liveDelegation", "voice.liveBackendModel"} {
@@ -573,13 +580,13 @@ func TestVisibleWhenSerializesOnlyWhenSet(t *testing.T) {
 // #114: announcing finished pix sessions is read at startup; on by default (#229).
 func TestSessionTurnSettings(t *testing.T) {
 	on := FieldByPath("notifications.sessionTurns")
-	if on == nil || on.Section != SectionNotifications || on.Kind.Type != KindBool || on.Apply != ApplyRestart ||
+	if on == nil || on.Section != SectionSessions || on.Kind.Type != KindBool || on.Apply != ApplyRestart ||
 		on.Label != "Announce finished sessions" {
 		t.Fatalf("%+v", on)
 	}
 	min := FieldByPath("notifications.sessionTurnsMinSeconds")
-	if min == nil || min.Section != SectionNotifications || min.Apply != ApplyRestart ||
-		min.Label != "Only turns longer than (seconds)" {
+	if min == nil || min.Section != SectionSessions || min.Apply != ApplyRestart ||
+		min.Label != "Only turns longer than" || min.Kind.Unit != "seconds" {
 		t.Fatalf("%+v", min)
 	}
 	if d := Default().Notifications; !d.SessionTurns || d.SessionTurnsMinSeconds != 30 {

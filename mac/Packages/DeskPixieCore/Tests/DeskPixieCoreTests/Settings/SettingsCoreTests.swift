@@ -37,15 +37,15 @@ final class SettingsCoreTests: XCTestCase {
 
     func test_sections_come_in_the_spec_order_with_fields_filtered_by_platform() {
         let fields = [
-            field("canvas.autoOpen", .canvas, .bool),
-            field("hotkey", .pixie, .hotkey),
-            field("macOnly", .pixie, .bool, [.macos]),
+            field("canvas.autoOpen", .coordinator, .bool),
+            field("hotkey", .general, .hotkey),
+            field("macOnly", .general, .bool, [.macos]),
         ]
-        XCTAssertEqual(L.tabs.map(\.section.rawValue), ["Pixie", "Voice", "Agent", "Workers", "Notifications", "Canvas", "Advanced"])
+        XCTAssertEqual(L.tabs.map(\.section.rawValue), ["General", "Voice", "Coordinator", "Sessions", "Workers", "Notifications", "Advanced"])
         XCTAssertEqual(SettingsSection.allCases.map(\.rawValue), L.tabs.map(\.section.rawValue))
-        XCTAssertEqual(L.fields(in: .pixie, fields, platform: .linux).map(\.path), ["hotkey"])
-        XCTAssertEqual(L.fields(in: .pixie, fields, platform: .macos).map(\.path), ["hotkey", "macOnly"])
-        XCTAssertEqual(L.fields(in: .canvas, fields, platform: .linux).map(\.path), ["canvas.autoOpen"])
+        XCTAssertEqual(L.fields(in: .general, fields, platform: .linux).map(\.path), ["hotkey"])
+        XCTAssertEqual(L.fields(in: .general, fields, platform: .macos).map(\.path), ["hotkey", "macOnly"])
+        XCTAssertEqual(L.fields(in: .coordinator, fields, platform: .linux).map(\.path), ["canvas.autoOpen"])
     }
 
     func test_availableOn_treats_a_missing_platforms_list_as_everywhere() {
@@ -79,7 +79,7 @@ final class SettingsCoreTests: XCTestCase {
         XCTAssertEqual(selected.map { items[$0].label }, "System Default")
         guard case .menu(let usb, let usbSelected) = spec("USB-1").control else { return XCTFail() }
         XCTAssertEqual(usbSelected.map { usb[$0].value }, "USB-1")
-        guard case .menu(_, let eight) = L.controlSpec(field("scale", .pixie, .int(min: 1, max: 16, menu: true)),
+        guard case .menu(_, let eight) = L.controlSpec(field("scale", .general, .int(min: 1, max: 16, menu: true)),
                                                          values: ["scale": 8], platform: .macos).control
         else { return XCTFail() }
         XCTAssertEqual(eight, 7, "menus of numbers still match")
@@ -134,7 +134,7 @@ final class SettingsCoreTests: XCTestCase {
         let spec = { (f: SettingsField) in L.controlSpec(f, values: [:], platform: .macos) }
         let model = spec(field("voice.homeCity", .voice, .text(optional: true)))
         let session = spec(field("agent.session", .advanced, .text(optional: false)))
-        let root = spec(field("agent.projectsRoot", .agent, .path(dir: true, optional: false)))
+        let root = spec(field("agent.projectsRoot", .workers, .path(dir: true, optional: false)))
         XCTAssertEqual(L.commitValue(model, .text("   ")), .success(.null))
         XCTAssertEqual(L.commitValue(model, .text(" opus ")), .success("opus"))
         XCTAssertEqual(L.commitValue(session, .text("")), .failure(.init("Can't be empty")))

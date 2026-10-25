@@ -133,7 +133,7 @@ private struct SettingsHitRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(hit.label)
-            Text(SettingsLayout.tabTitle(hit.section))
+            Text(SettingsLayout.place(hit))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -328,21 +328,61 @@ struct SettingsTabView: View {
 
     private var grid: some View {
         Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 8, verticalSpacing: 4) {
-            ForEach(model.fields(in: section), id: \.path) { field in
-                let spec = model.spec(field)
-                row(label: spec.label, id: field.path) {
-                    SettingsControlView(model: model, spec: spec)
-                        .disabled(!model.enabled)
-                } note: {
-                    NoteText(text: spec.note.text, isError: spec.note.isError)
+            let groups = model.groups(in: section)
+            ForEach(Array(groups.enumerated()), id: \.element.title) { index, group in
+                // A page of one group needs no heading: the page's title names it.
+                if groups.count > 1 {
+                    groupHeader(group.title, first: index == 0)
                 }
-                if field.path == SettingsModel.projectsRootPath, let folder = model.projectsFolder {
-                    projectsFolderRow(folder)
+                ForEach(group.rows, id: \.id) { row in
+                    switch row {
+                    case .field(let field): fieldRow(field)
+                    case .extra(let extra): extraRow(extra)
+                    }
                 }
             }
-            ForEach(Array(SettingsLayout.extras(section).enumerated()), id: \.offset) { _, extra in
-                extraRow(extra)
+        }
+    }
+
+    /// A group's heading across both columns, with a rule under it (#290).
+    private func groupHeader(_ title: String, first: Bool) -> some View {
+        GridRow {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.headline)
+                    .accessibilityAddTraits(.isHeader)
+                Divider()
             }
+            .gridCellColumns(2)
+            .padding(.top, first ? 0 : 18)
+        }
+    }
+
+    /// A setting: its label, its control (and unit), and its note; greyed out while the switch
+    /// it depends on is off, with a line saying which.
+    @ViewBuilder
+    private func fieldRow(_ field: SettingsField) -> some View {
+        let spec = model.spec(field)
+        let canChange = model.canChange(field)
+        row(label: spec.label, id: field.path) {
+            HStack(spacing: 6) {
+                SettingsControlView(model: model, spec: spec)
+                if let unit = field.unit {
+                    Text(unit).foregroundStyle(.secondary)
+                }
+            }
+            .disabled(!canChange)
+        } note: {
+            VStack(alignment: .leading, spacing: 2) {
+                if let off = model.disabledNote(field) {
+                    NoteText(text: off, isError: false)
+                }
+                NoteText(text: spec.note.text, isError: spec.note.isError)
+            }
+            .opacity(canChange ? 1 : 0.6)
+        }
+        if field.path == SettingsModel.projectsRootPath, canChange, let folder = model.projectsFolder {
+            projectsFolderRow(folder)
         }
     }
 

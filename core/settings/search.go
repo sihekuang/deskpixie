@@ -8,11 +8,13 @@ import (
 )
 
 // Extra is a row of the Settings window that isn't a setting: a button, an API key, the pix
-// command. The window draws it (mac: SettingsLayout.extras) and finds it by ID; it is here so
-// the search finds it like a field. Label and Help are the window's, word for word.
+// command. Go places it (page, group: it ends its group); the window draws it by ID (mac:
+// SettingsLayout.extra). It is here so the search finds it like a field. Label and Help are the
+// window's, word for word.
 type Extra struct {
 	ID      string
 	Section Section
+	Group   string
 	Label   string
 	Help    string
 	// Title is the row's button title ("Export Logs…"); search matches it like the help.
@@ -20,15 +22,33 @@ type Extra struct {
 	Platforms []Platform
 }
 
-// Extras are the window's extra rows, in page order within each section.
+// Extras are the window's extra rows, in page order.
 var Extras = []Extra{
-	{"resetPosition", SectionPixie, "Reset position", "Move Pixie back to the bottom-right corner of the main screen.", "Reset Position", AllPlatforms},
-	{"key.openai", SectionVoice, "OpenAI key", "Type the key here to keep it in the Keychain (used first), or set OPENAI_API_KEY in your environment or a .env file. Keys are never shown here.", "", AllPlatforms},
-	{"key.gemini", SectionVoice, "Gemini key", "Type the key here to keep it in the Keychain (used first), or set GEMINI_API_KEY in your environment or a .env file. Keys are never shown here.", "", AllPlatforms},
-	{"pix", SectionAgent, "pix command", "Start Claude Code or Codex with `pix claude` or `pix codex` in any terminal (WebStorm, iTerm, …) and Pixie can see, message and interrupt that session. Quitting DeskPixie never ends it.", "", AllPlatforms},
-	{"restartCoordinator", SectionAgent, "Restart coordinator", "Stops the coordinator and starts it again on your next request, with its conversation. Asks first.", "Restart Coordinator…", AllPlatforms},
-	{"openFile", SectionAdvanced, "Settings file", "settings.json holds every setting on this page.", "Open Settings File", AllPlatforms},
-	{"exportLogs", SectionAdvanced, "Logs", "Saves the app's log, pix's log, the voice log and metrics in one zip to share. It can include what you said to Pixie.", "Export Logs…", AllPlatforms},
+	{"resetPosition", SectionGeneral, "Look", "Reset position", "Move Pixie back to the bottom-right corner of the main screen.", "Reset Position", AllPlatforms},
+	{"key.openai", SectionVoice, "Voice service", "OpenAI key", "Type the key here to keep it in the Keychain (used first), or set OPENAI_API_KEY in your environment or a .env file. Keys are never shown here.", "", AllPlatforms},
+	{"key.gemini", SectionVoice, "Voice service", "Gemini key", "Type the key here to keep it in the Keychain (used first), or set GEMINI_API_KEY in your environment or a .env file. Keys are never shown here.", "", AllPlatforms},
+	{"restartCoordinator", SectionCoordinator, "Coordinator", "Restart coordinator", "Stops the coordinator and starts it again on your next request, with its conversation. Asks first.", "Restart Coordinator…", AllPlatforms},
+	{"pix", SectionSessions, "Sessions you start with pix", "pix command", "Start Claude Code or Codex with `pix claude` or `pix codex` in any terminal (WebStorm, iTerm, …) and Pixie can see, message and interrupt that session. Quitting DeskPixie never ends it.", "", AllPlatforms},
+	{"openFile", SectionAdvanced, "Files", "Settings file", "settings.json holds every setting.", "Open Settings File", AllPlatforms},
+	{"exportLogs", SectionAdvanced, "Files", "Logs", "Saves the app's log, pix's log, the voice log and metrics in one zip to share. It can include what you said to Pixie.", "Export Logs…", AllPlatforms},
+}
+
+// ExtraView places an extra row for the window: its page and group.
+type ExtraView struct {
+	ID      string  `json:"id"`
+	Section Section `json:"section"`
+	Group   string  `json:"group"`
+}
+
+// ExtraViews are the extra rows on platform p, in page order.
+func ExtraViews(p Platform) []ExtraView {
+	out := []ExtraView{}
+	for _, e := range Extras {
+		if onPlatform(e.Platforms, p) {
+			out = append(out, ExtraView{e.ID, e.Section, e.Group})
+		}
+	}
+	return out
 }
 
 // Hit is one search result: a setting (Path is its dotted path) or an extra row (Path is
@@ -36,6 +56,7 @@ var Extras = []Extra{
 type Hit struct {
 	Path    string  `json:"path"`
 	Section Section `json:"section"`
+	Group   string  `json:"group"`
 	Label   string  `json:"label"`
 	Help    string  `json:"help"`
 }
@@ -108,11 +129,11 @@ func score(qs []string, phrase, label, help string) int {
 // search would find it now.
 func HitFor(path string) (Hit, bool) {
 	if f := FieldByPath(path); f != nil && f.Kind.Type != KindManaged {
-		return Hit{f.Path, f.Section, f.Label, f.Help}, true
+		return Hit{f.Path, f.Section, f.Group, f.Label, f.Help}, true
 	}
 	for _, e := range Extras {
 		if ExtraPrefix+e.ID == path {
-			return Hit{path, e.Section, e.Label, e.Help}, true
+			return Hit{path, e.Section, e.Group, e.Label, e.Help}, true
 		}
 	}
 	return Hit{}, false
@@ -171,7 +192,7 @@ func Search(query string, p Platform, c Config) []Hit {
 			continue
 		}
 		if s := score(qs, phrase, f.Label, f.Help); s > 0 {
-			found = append(found, scored{Hit{f.Path, f.Section, f.Label, f.Help}, s})
+			found = append(found, scored{Hit{f.Path, f.Section, f.Group, f.Label, f.Help}, s})
 		}
 	}
 	for _, e := range Extras {
@@ -179,7 +200,7 @@ func Search(query string, p Platform, c Config) []Hit {
 			continue
 		}
 		if s := score(qs, phrase, e.Label, e.Help+" "+e.Title); s > 0 {
-			found = append(found, scored{Hit{ExtraPrefix + e.ID, e.Section, e.Label, e.Help}, s})
+			found = append(found, scored{Hit{ExtraPrefix + e.ID, e.Section, e.Group, e.Label, e.Help}, s})
 		}
 	}
 	sort.SliceStable(found, func(i, j int) bool { return found[i].score > found[j].score })

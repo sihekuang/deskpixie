@@ -20,7 +20,7 @@ func TestTheCoordinatorEffortDefaultsToLow(t *testing.T) {
 
 func TestTheCoordinatorEffortPickerOffersTheLevels(t *testing.T) {
 	f := FieldByPath("agent.coordinatorEffort")
-	if f == nil || f.Section != SectionAgent || f.Apply != ApplyRestart {
+	if f == nil || f.Section != SectionCoordinator || f.Apply != ApplyRestart {
 		t.Fatalf("%+v", f)
 	}
 	var values []string

@@ -5,7 +5,7 @@ import XCTest
 @MainActor
 final class LogExportTests: XCTestCase {
     func test_advanced_has_the_export_button() {
-        let rows = SettingsLayout.extras(.advanced)
+        let rows = SettingsFixture.extras(on: .advanced)
         XCTAssertTrue(rows.contains {
             if case .button(_, _, let title, let action) = $0 { return title == "Export Logs…" && action == .exportLogs }
             return false

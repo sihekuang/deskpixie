@@ -79,3 +79,14 @@ Keychain before .env is a ruling (no source settles it): a key typed into the ap
 
 **Update (same day):** a builder-check of the resulting design doc found the delivery premise wrong — `pixie.click`, `agent.focusJob`, `agent.focusAgent`, and the tray's `agent:open` (via the generic `app.action` dispatcher) are all fire-and-forget (`core/app/agentapp/agentapp.go`'s `a.wg.Go`; `core/app/agent.go`'s methods are documented `(async)` with no return value) — there is no synchronous call to return a `FocusPlan` from. Decided: the core pushes the finished `FocusPlan` to the app as a new kind on the existing async `dp_poll_event` queue, the same mechanism `notify`/`showPane` already use for "core decides, app shows." This is trigger-agnostic, so it covers all four click paths (including the tray item, which #116 explicitly lists) with one new event case, without making any triggering call blocking (avoiding head-of-line blocking on Swift's shared `CoreWorker` queue) and without touching any of the four call sites individually. After executing the plan, the app makes one new synchronous call back reporting success/failure, so a total failure still posts to the tray through the core's existing `TerminalFailureStatus` path/wording instead of Swift duplicating it.
 **Basis:** Existing project convention (the `notify`/`showPane` push-event pattern) plus avoiding a new blocking-queue problem the original premise would have introduced.
+
+## 2026-10-24 — Settings window layout (#290)
+**Decision:** Seven sidebar pages (General, Voice, Coordinator, Sessions, Workers, Notifications, Advanced), each split into named groups with a heading, at most 15 rows a page; rarely used settings move to Advanced; units sit next to numbers. Go defines pages, groups and order once (FieldSpec.Group, Extras with a group); the window draws them. Judgement calls, made by Claude at the user's request ("U make recommendations"):
+- Keep the sidebar (System Settings, Raycast and Windows use one; HIG's toolbar tabs don't fit 7 pages).
+- Keep the label/control columns and add group headings, not System Settings' grouped cards (Apple's macOS `Form` convention; least rework).
+- A setting under a master switch that's off is greyed out with a note naming the switch (`enabledWhen`); a setting that doesn't apply to a choice stays hidden (`visibleWhen`).
+- Keep the help text under each row (Windows and Android do; DeskPixie's settings need the explanation).
+- Canvas joins the Coordinator page (the coordinator makes canvas pages).
+- A new Sessions page holds pix and sessions you start yourself.
+**Basis:** Unanimous points from Apple HIG (Settings), Android settings guidelines, Microsoft's app settings guidelines, NN/g (progressive disclosure), UX Movement and macOS System Settings; the rest are Claude's calls as above.
+**Sources:** see #290 (research report).

@@ -24,7 +24,7 @@ login-bug session doing?".
 
 ## Install
 
-1. Settings ▸ Coordinator ▸ **pix command** ▸ **Install**. This links `~/.local/bin/pix` to the
+1. Settings ▸ Sessions ▸ **pix command** ▸ **Install**. This links `~/.local/bin/pix` to the
    `pix` inside DeskPixie.app, so it updates whenever DeskPixie does. Nothing else outside the
    app changes. **Uninstall** removes the link.
 2. If Settings says `~/.local/bin` is not on your PATH, add this line to `~/.zshrc`:

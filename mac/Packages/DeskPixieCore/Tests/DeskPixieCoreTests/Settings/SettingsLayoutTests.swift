@@ -23,14 +23,14 @@ final class SettingsLayoutTests: XCTestCase {
     private func view(_ path: String) -> SettingsField { SettingsFixture.view(path) }
 
     func test_tabs_follow_the_sections_with_their_symbols() {
-        XCTAssertEqual(L.tabs.map(\.section), [.pixie, .voice, .agent, .workers, .notifications, .canvas, .advanced])
-        XCTAssertEqual(L.tabs.map(\.title), ["Pixie", "Voice", "Coordinator", "Workers", "Notifications", "Canvas", "Advanced"])
+        XCTAssertEqual(L.tabs.map(\.section), [.general, .voice, .coordinator, .sessions, .workers, .notifications, .advanced])
+        XCTAssertEqual(L.tabs.map(\.title), ["General", "Voice", "Coordinator", "Sessions", "Workers", "Notifications", "Advanced"])
         XCTAssertEqual(L.tabs.map(\.symbol),
-                       ["face.smiling", "waveform", "sparkles", "person.2", "bell.badge", "rectangle.on.rectangle", "gearshape.2"])
+                       ["face.smiling", "waveform", "sparkles", "terminal", "person.2", "bell.badge", "gearshape.2"])
     }
 
     func test_every_tab_has_its_own_tint_in_tab_order() {
-        XCTAssertEqual(L.tabs.map(\.tint), [.pink, .purple, .orange, .indigo, .red, .teal, .gray])
+        XCTAssertEqual(L.tabs.map(\.tint), [.pink, .purple, .orange, .teal, .indigo, .red, .gray])
         XCTAssertEqual(Set(L.tabs.map(\.tint)).count, L.tabs.count, "Each sidebar tile reads at a glance")
     }
 
@@ -49,7 +49,7 @@ final class SettingsLayoutTests: XCTestCase {
         let views = SettingsFixture.fields
         let count = L.tabs.map { L.fields(in: $0.section, views, platform: .macos).count }.reduce(0, +)
         XCTAssertEqual(count, views.count)
-        XCTAssertEqual(L.fields(in: .pixie, views, platform: .macos).map(\.path),
+        XCTAssertEqual(L.fields(in: .general, views, platform: .macos).map(\.path),
                        ["hotkey", "pack", "scale", "proximityFade.enabled", "proximityFade.radius"])
     }
 
@@ -316,26 +316,27 @@ final class SettingsLayoutTests: XCTestCase {
     }
 
     func test_extra_rows_match_the_web_page() {
-        guard case .button(_, _, let title, let action)? = L.extras(.pixie).first, L.extras(.pixie).count == 1
+        guard case .button(_, _, let title, let action)? = SettingsFixture.extras(on: .general).first, SettingsFixture.extras(on: .general).count == 1
         else { return XCTFail() }
         XCTAssertEqual(title, "Reset Position")
         XCTAssertEqual(action, .resetPosition)
-        guard case .button(_, _, let t2, let a2)? = L.extras(.advanced).first, L.extras(.advanced).count == 2
+        guard case .button(_, _, let t2, let a2)? = SettingsFixture.extras(on: .advanced).first, SettingsFixture.extras(on: .advanced).count == 2
         else { return XCTFail() }
         XCTAssertEqual(t2, "Open Settings File")
         XCTAssertEqual(a2, .openFile)
-        XCTAssertEqual(L.extras(.voice), [
+        XCTAssertEqual(SettingsFixture.extras(on: .voice), [
             .secret(id: .openAI, label: "OpenAI key",
                     help: "Type the key here to keep it in the Keychain (used first), or set OPENAI_API_KEY in your environment or a .env file. Keys are never shown here."),
             .secret(id: .gemini, label: "Gemini key",
                     help: "Type the key here to keep it in the Keychain (used first), or set GEMINI_API_KEY in your environment or a .env file. Keys are never shown here."),
         ])
-        XCTAssertTrue(L.extras(.workers).isEmpty)
-        guard case .pix(let help)? = L.extras(.agent).first, L.extras(.agent).count == 2
-        else { return XCTFail("the agent section has the pix command row") }
+        XCTAssertTrue(SettingsFixture.extras(on: .workers).isEmpty)
+        guard case .pix(let help)? = SettingsFixture.extras(on: .sessions).first, SettingsFixture.extras(on: .sessions).count == 1
+        else { return XCTFail("the sessions page has the pix command row") }
         XCTAssertTrue(help.contains("pix claude"), help)
-        // #179: then Restart Coordinator…, which asks first.
-        guard case .button(let label, _, let t3, let a3)? = L.extras(.agent).last else { return XCTFail() }
+        // #179: Restart Coordinator…, which asks first.
+        guard case .button(let label, _, let t3, let a3)? = SettingsFixture.extras(on: .coordinator).last,
+              SettingsFixture.extras(on: .coordinator).count == 1 else { return XCTFail() }
         XCTAssertEqual(label, "Restart coordinator")
         XCTAssertEqual(t3, "Restart Coordinator…")
         XCTAssertEqual(a3, .restartCoordinator)

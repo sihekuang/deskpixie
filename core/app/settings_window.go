@@ -28,7 +28,7 @@ func (w settingsWindow) Find(query string) []tools.SettingMatch {
 func (w settingsWindow) Open(m *tools.SettingMatch) {
 	if m != nil {
 		if h, ok := settings.HitFor(m.Path); ok {
-			w.a.emit("settings.open", map[string]any{"path": h.Path, "section": h.Section, "label": h.Label, "help": h.Help})
+			w.a.emit("settings.open", map[string]any{"path": h.Path, "section": h.Section, "group": h.Group, "label": h.Label, "help": h.Help})
 			return
 		}
 	}

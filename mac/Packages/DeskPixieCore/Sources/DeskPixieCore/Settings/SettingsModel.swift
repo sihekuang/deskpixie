@@ -153,6 +153,22 @@ public final class SettingsModel {
                                      values: snapshot.values)
     }
 
+    /// `section`'s rows in their groups, extras placed by the core (#290).
+    public func groups(in section: SettingsSection) -> [SettingsLayout.Group] {
+        SettingsLayout.groups(in: section, fields: fields(in: section), extras: snapshot?.extras ?? [])
+    }
+
+    /// Whether `field` can be changed now: settings.json is readable and its switch is on.
+    public func canChange(_ field: SettingsField) -> Bool {
+        enabled && field.isEnabled(snapshot?.values ?? [:])
+    }
+
+    /// Why `field` is greyed out: the switch to turn on. Nil while it can be changed.
+    public func disabledNote(_ field: SettingsField) -> String? {
+        guard let snapshot else { return nil }
+        return SettingsLayout.disabledNote(field, fields: snapshot.fields, values: snapshot.values)
+    }
+
     public func spec(_ field: SettingsField) -> SettingsLayout.ControlSpec {
         SettingsLayout.controlSpec(field, values: snapshot?.values ?? [:], platform: snapshot?.platform ?? .macos,
                                    error: errors[field.path])

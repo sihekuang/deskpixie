@@ -17,7 +17,7 @@ func TestQuestionWaitIsARestartAgentNumber(t *testing.T) {
 		t.Fatal("an old settings.json gets the default:", c.Agent.QuestionWaitSecs, err)
 	}
 	f := FieldByPath("agent.questionWaitSecs")
-	if f.Section != SectionAgent || f.Apply != ApplyRestart || f.Kind.Type != KindInt {
+	if f.Section != SectionSessions || f.Apply != ApplyRestart || f.Kind.Type != KindInt {
 		t.Fatalf("%+v", f)
 	}
 	most := uint64(pix.MaxHold.Seconds())

@@ -60,7 +60,7 @@ from the menu bar: Welcome to DeskPixie…. See `docs/superpowers/specs/2026-10-
 
 Start Claude Code or Codex with `pix` (`pix claude`, `pix codex`) in any terminal — WebStorm,
 iTerm, VS Code — and Pixie can see, message and interrupt it next to its own workers. Quitting
-DeskPixie never ends those sessions. Install the command from Settings ▸ Coordinator ▸ pix
+DeskPixie never ends those sessions. Install the command from Settings ▸ Sessions ▸ pix
 command. See [docs/pix.md](docs/pix.md).
 
 ## Supported Herdr versions

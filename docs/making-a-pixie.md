@@ -16,7 +16,7 @@ sprite sheet, write a short `pixie.json`, and put the two in your pixies folder.
 3. Change `"name"` in `pixie.json` to what you want to see in the menu, for example
    `"My Cat"`.
 4. Redraw `sheet.png` in your pixel editor (Aseprite, Pixelorama, Piskel, Photoshop…).
-5. Put the folder in your pixies folder (below), then pick your pixie in **Settings ▸ Pixie**
+5. Put the folder in your pixies folder (below), then pick your pixie in **Settings ▸ General ▸ Character**
    or the menu bar's **Pixie** menu.
 
 ## Your pixies folder
@@ -28,7 +28,7 @@ By default DeskPixie reads your pixies from:
 ```
 
 To keep them somewhere else, such as a folder you back up or keep in git, choose it in
-**Settings ▸ Pixie ▸ Your pixies folder**. DeskPixie then reads that folder instead of the one
+**Settings ▸ General ▸ Your pixies folder**. DeskPixie then reads that folder instead of the one
 above. The built-in pixies are always there too. **Pixie ▸ Open Pixies Folder** in the menu bar
 opens whichever folder is in use.
 

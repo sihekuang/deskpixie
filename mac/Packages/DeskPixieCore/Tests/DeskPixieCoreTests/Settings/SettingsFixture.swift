@@ -4,14 +4,15 @@ import Foundation
 /// The Go core's `settings.Views` output for the sources Rust's layout tests use
 /// (packs bit/dino, both providers with openai-realtime current, macos-vpio, herdr/tmux, warp/iterm,
 /// one mic, no speakers), and
-/// `settings.Default()` as JSON. Generated from core/settings on 2026-10-13; regenerate if the
-/// schema changes.
+/// `settings.Default()` as JSON. Generated from core/settings on 2026-10-13; pages, groups, labels, help, units
+/// and rules updated from it on 2026-10-24 (#290). Regenerate if the schema changes.
 enum SettingsFixture {
     static let fieldsJSON = #"""
 [
  {
   "path": "hotkey",
-  "section": "Pixie",
+  "section": "General",
+  "group": "Talking to Pixie",
   "label": "Voice hotkey",
   "help": "Starts or ends a conversation with Pixie from any app.",
   "kind": {
@@ -26,9 +27,10 @@ enum SettingsFixture {
  },
  {
   "path": "pack",
-  "section": "Pixie",
-  "label": "Pixie",
-  "help": "Which pixie pack is shown.",
+  "section": "General",
+  "group": "Look",
+  "label": "Character",
+  "help": "Which pixie is shown.",
   "kind": {
    "type": "choice",
    "options": [
@@ -61,7 +63,8 @@ enum SettingsFixture {
  },
  {
   "path": "scale",
-  "section": "Pixie",
+  "section": "General",
+  "group": "Look",
   "label": "Size",
   "help": "Whole-number sizes keep the pixel art crisp.",
   "kind": {
@@ -79,7 +82,8 @@ enum SettingsFixture {
  },
  {
   "path": "proximityFade.enabled",
-  "section": "Pixie",
+  "section": "General",
+  "group": "Look",
   "label": "Fade near the pointer",
   "help": "Pixie fades as the pointer comes close, so it never blocks your work.",
   "kind": {
@@ -94,25 +98,36 @@ enum SettingsFixture {
  },
  {
   "path": "proximityFade.radius",
-  "section": "Pixie",
+  "section": "General",
+  "group": "Look",
   "label": "Fade distance",
-  "help": "How far from Pixie, in points, the fading starts.",
+  "help": "How far from Pixie the fading starts.",
   "kind": {
    "type": "int",
    "min": 0,
    "max": 1000,
-   "menu": false
+   "menu": false,
+   "unit": "points"
   },
   "apply": "live",
   "platforms": [
    "macos",
    "windows",
    "linux"
+  ],
+  "enabledWhen": [
+   {
+    "key": "proximityFade.enabled",
+    "in": [
+     "true"
+    ]
+   }
   ]
  },
  {
   "path": "voice.provider",
   "section": "Voice",
+  "group": "Voice service",
   "label": "Voice service",
   "help": "The realtime voice service Pixie talks through.",
   "kind": {
@@ -146,32 +161,9 @@ enum SettingsFixture {
   ]
  },
  {
-  "path": "voice.audio",
-  "section": "Voice",
-  "label": "Audio",
-  "help": "The microphone and speaker backend.",
-  "kind": {
-   "type": "choice",
-   "options": [
-    {
-     "value": "macos-vpio",
-     "label": "macOS voice processing",
-     "platforms": [
-      "macos"
-     ]
-    }
-   ]
-  },
-  "apply": "restart",
-  "platforms": [
-   "macos",
-   "windows",
-   "linux"
-  ]
- },
- {
   "path": "voice.model",
   "section": "Voice",
+  "group": "Voice service",
   "label": "Model",
   "help": "The voice model. The choices follow the voice service.",
   "kind": {
@@ -207,6 +199,7 @@ enum SettingsFixture {
  {
   "path": "voice.voice",
   "section": "Voice",
+  "group": "Voice service",
   "label": "Voice",
   "help": "The voice Pixie speaks with. The choices follow the voice service.",
   "kind": {
@@ -312,65 +305,9 @@ enum SettingsFixture {
   ]
  },
  {
-  "path": "voice.chimes",
-  "section": "Voice",
-  "label": "Chimes",
-  "help": "A rising chime when Pixie listens, a falling one when it stops.",
-  "kind": {
-   "type": "bool"
-  },
-  "apply": "restart",
-  "platforms": [
-   "macos",
-   "windows",
-   "linux"
-  ]
- },
- {
-  "path": "voice.noiseFilter",
-  "section": "Voice",
-  "label": "Noise filter",
-  "help": "Cleans background noise (fans, typing, hum) from your mic on this Mac. With Hush it also turns quieter background voices down, like a TV.",
-  "kind": {
-   "type": "bool"
-  },
-  "apply": "live",
-  "platforms": [
-   "macos"
-  ]
- },
- {
-  "path": "voice.noiseModel",
-  "section": "Voice",
-  "label": "Noise model",
-  "help": "Hush also turns quieter background voices down by up to 18 dB. DeepFilterNet3 cleans steady noise only.",
-  "kind": {
-   "type": "choice",
-   "options": [
-    {
-     "value": "hush",
-     "label": "Hush (noise and background voices)",
-     "platforms": [
-      "macos"
-     ]
-    },
-    {
-     "value": "dfn3",
-     "label": "DeepFilterNet3 (steady noise only)",
-     "platforms": [
-      "macos"
-     ]
-    }
-   ]
-  },
-  "apply": "restart",
-  "platforms": [
-   "macos"
-  ]
- },
- {
   "path": "voice.inputDevice",
   "section": "Voice",
+  "group": "Microphone and speaker",
   "label": "Microphone",
   "help": "The mic Pixie listens with. If it isn't connected, Pixie uses the system default until it is. Bluetooth mics are slow to start and can cut off your first words.",
   "kind": {
@@ -404,6 +341,7 @@ enum SettingsFixture {
  {
   "path": "voice.outputDevice",
   "section": "Voice",
+  "group": "Microphone and speaker",
   "label": "Speaker",
   "help": "Where Pixie's voice plays. If it isn't connected, Pixie uses the system default until it is.",
   "kind": {
@@ -426,10 +364,79 @@ enum SettingsFixture {
   ]
  },
  {
+  "path": "voice.noiseFilter",
+  "section": "Voice",
+  "group": "Microphone and speaker",
+  "label": "Noise filter",
+  "help": "Cleans background noise (fans, typing, hum) from your mic on this Mac. With Hush it also turns quieter background voices down, like a TV.",
+  "kind": {
+   "type": "bool"
+  },
+  "apply": "live",
+  "platforms": [
+   "macos"
+  ]
+ },
+ {
+  "path": "voice.noiseModel",
+  "section": "Voice",
+  "group": "Microphone and speaker",
+  "label": "Noise model",
+  "help": "Hush also turns quieter background voices down by up to 18 dB. DeepFilterNet3 cleans steady noise only.",
+  "kind": {
+   "type": "choice",
+   "options": [
+    {
+     "value": "hush",
+     "label": "Hush (noise and background voices)",
+     "platforms": [
+      "macos"
+     ]
+    },
+    {
+     "value": "dfn3",
+     "label": "DeepFilterNet3 (steady noise only)",
+     "platforms": [
+      "macos"
+     ]
+    }
+   ]
+  },
+  "apply": "restart",
+  "platforms": [
+   "macos"
+  ],
+  "enabledWhen": [
+   {
+    "key": "voice.noiseFilter",
+    "in": [
+     "true"
+    ]
+   }
+  ]
+ },
+ {
   "path": "voice.noisyRoom",
   "section": "Voice",
+  "group": "Microphone and speaker",
   "label": "Noisy room",
-  "help": "Pixie ignores quieter voices in the background, like a TV or people nearby. Speak up a little to interrupt Pixie.",
+  "help": "Pixie ignores quieter voices in the background, like a TV or people nearby. Speak up a little to interrupt Pixie. With OpenAI GPT-Live this only changes Pixie's instructions.",
+  "kind": {
+   "type": "bool"
+  },
+  "apply": "restart",
+  "platforms": [
+   "macos",
+   "windows",
+   "linux"
+  ]
+ },
+ {
+  "path": "voice.chimes",
+  "section": "Voice",
+  "group": "Microphone and speaker",
+  "label": "Chimes",
+  "help": "A rising chime when Pixie listens, a falling one when it stops.",
   "kind": {
    "type": "bool"
   },
@@ -443,13 +450,15 @@ enum SettingsFixture {
  {
   "path": "voice.idleTimeoutSecs",
   "section": "Voice",
-  "label": "Silence timeout (seconds)",
+  "group": "Conversation",
+  "label": "Silence timeout",
   "help": "A conversation ends after this much silence.",
   "kind": {
    "type": "int",
    "min": 1,
    "max": 600,
-   "menu": false
+   "menu": false,
+   "unit": "seconds"
   },
   "apply": "restart",
   "platforms": [
@@ -461,6 +470,7 @@ enum SettingsFixture {
  {
   "path": "voice.homeCity",
   "section": "Voice",
+  "group": "Conversation",
   "label": "Home city",
   "help": "Where Pixie checks the weather when you don't name a place, e.g. Portland, Oregon.",
   "kind": {
@@ -475,27 +485,11 @@ enum SettingsFixture {
   ]
  },
  {
-  "path": "voice.personaPath",
-  "section": "Voice",
-  "label": "Persona file",
-  "help": "A Markdown file that replaces Pixie's personality. Empty uses the built-in one.",
-  "kind": {
-   "type": "path",
-   "dir": false,
-   "optional": true
-  },
-  "apply": "restart",
-  "platforms": [
-   "macos",
-   "windows",
-   "linux"
-  ]
- },
- {
   "path": "agent.enabled",
-  "section": "Agent",
-  "label": "Delegation",
-  "help": "Let Pixie hand work to the coordinator, a Claude Code agent.",
+  "section": "Coordinator",
+  "group": "Coordinator",
+  "label": "Hand work to the coordinator",
+  "help": "Pixie hands work it can't do itself to the coordinator, a Claude Code or Codex agent.",
   "kind": {
    "type": "bool"
   },
@@ -507,41 +501,11 @@ enum SettingsFixture {
   ]
  },
  {
-  "path": "agent.terminal",
-  "section": "Agent",
-  "label": "Terminal",
-  "help": "Where the coordinator's session opens when you click Pixie.",
-  "kind": {
-   "type": "choice",
-   "options": [
-    {
-     "value": "warp",
-     "label": "Warp",
-     "platforms": [
-      "macos"
-     ]
-    },
-    {
-     "value": "iterm",
-     "label": "iTerm",
-     "platforms": [
-      "macos"
-     ]
-    }
-   ]
-  },
-  "apply": "restart",
-  "platforms": [
-   "macos",
-   "windows",
-   "linux"
-  ]
- },
- {
   "path": "agent.model",
-  "section": "Agent",
+  "section": "Coordinator",
+  "group": "Coordinator",
   "label": "Coordinator model",
-  "help": "Claude Code's --model for the coordinator. Default lets Claude Code decide.",
+  "help": "Claude Code's --model for the coordinator (and Claude workers). Default lets Claude Code decide.",
   "kind": {
    "type": "choice",
    "options": [
@@ -633,11 +597,28 @@ enum SettingsFixture {
    "macos",
    "windows",
    "linux"
+  ],
+  "visibleWhen": [
+   {
+    "key": "agent.coordinatorKind",
+    "in": [
+     "claude"
+    ]
+   }
+  ],
+  "enabledWhen": [
+   {
+    "key": "agent.enabled",
+    "in": [
+     "true"
+    ]
+   }
   ]
  },
  {
   "path": "agent.warm",
-  "section": "Agent",
+  "section": "Coordinator",
+  "group": "Coordinator",
   "label": "Start at launch",
   "help": "Start the coordinator when the app starts, not on first use.",
   "kind": {
@@ -648,13 +629,90 @@ enum SettingsFixture {
    "macos",
    "windows",
    "linux"
+  ],
+  "enabledWhen": [
+   {
+    "key": "agent.enabled",
+    "in": [
+     "true"
+    ]
+   }
+  ]
+ },
+ {
+  "path": "agent.terminal",
+  "section": "Coordinator",
+  "group": "Coordinator",
+  "label": "Terminal",
+  "help": "Where the coordinator's session opens when you click Pixie.",
+  "kind": {
+   "type": "choice",
+   "options": [
+    {
+     "value": "warp",
+     "label": "Warp",
+     "platforms": [
+      "macos"
+     ]
+    },
+    {
+     "value": "iterm",
+     "label": "iTerm",
+     "platforms": [
+      "macos"
+     ]
+    }
+   ]
+  },
+  "apply": "restart",
+  "platforms": [
+   "macos",
+   "windows",
+   "linux"
+  ],
+  "enabledWhen": [
+   {
+    "key": "agent.enabled",
+    "in": [
+     "true"
+    ]
+   }
+  ]
+ },
+ {
+  "path": "agent.holdOpenSecs",
+  "section": "Coordinator",
+  "group": "Handing work off",
+  "label": "Keep listening while a job runs",
+  "help": "How long a conversation stays open while the coordinator works on something you asked.",
+  "kind": {
+   "type": "int",
+   "min": 0,
+   "max": 3600,
+   "menu": false,
+   "unit": "seconds"
+  },
+  "apply": "restart",
+  "platforms": [
+   "macos",
+   "windows",
+   "linux"
+  ],
+  "enabledWhen": [
+   {
+    "key": "agent.enabled",
+    "in": [
+     "true"
+    ]
+   }
   ]
  },
  {
   "path": "agent.narration",
-  "section": "Agent",
-  "label": "Narration",
-  "help": "Pixie says what the coordinator is doing.",
+  "section": "Coordinator",
+  "group": "Updates",
+  "label": "Say what the coordinator is doing",
+  "help": "Pixie tells you what the coordinator is up to while it works.",
   "kind": {
    "type": "bool"
   },
@@ -663,20 +721,26 @@ enum SettingsFixture {
    "macos",
    "windows",
    "linux"
+  ],
+  "enabledWhen": [
+   {
+    "key": "agent.enabled",
+    "in": [
+     "true"
+    ]
+   }
   ]
  },
  {
-  "path": "agent.holdOpenSecs",
-  "section": "Agent",
-  "label": "Hold open (seconds)",
-  "help": "How long a conversation stays open while a job runs.",
+  "path": "canvas.autoOpen",
+  "section": "Coordinator",
+  "group": "Canvas",
+  "label": "Open new pages",
+  "help": "Show new and changed canvas pages automatically.",
   "kind": {
-   "type": "int",
-   "min": 0,
-   "max": 3600,
-   "menu": false
+   "type": "bool"
   },
-  "apply": "restart",
+  "apply": "live",
   "platforms": [
    "macos",
    "windows",
@@ -684,14 +748,17 @@ enum SettingsFixture {
   ]
  },
  {
-  "path": "agent.projectsRoot",
-  "section": "Agent",
-  "label": "Projects folder",
-  "help": "The folder whose repositories workers may use, inside your home folder. DeskPixie creates it when it's missing.",
+  "path": "canvas.keep",
+  "section": "Coordinator",
+  "group": "Canvas",
+  "label": "Pages kept",
+  "help": "Older pages are deleted at startup.",
   "kind": {
-   "type": "path",
-   "dir": true,
-   "optional": false
+   "type": "int",
+   "min": 1,
+   "max": 1000,
+   "menu": false,
+   "unit": "pages"
   },
   "apply": "restart",
   "platforms": [
@@ -703,6 +770,7 @@ enum SettingsFixture {
  {
   "path": "agent.workers.enabled",
   "section": "Workers",
+  "group": "Workers",
   "label": "Workers",
   "help": "Let the coordinator start worker agents in git worktrees.",
   "kind": {
@@ -718,6 +786,7 @@ enum SettingsFixture {
  {
   "path": "agent.workers.max",
   "section": "Workers",
+  "group": "Workers",
   "label": "Most workers at once",
   "help": "Up to four workers run at the same time.",
   "kind": {
@@ -731,11 +800,20 @@ enum SettingsFixture {
    "macos",
    "windows",
    "linux"
+  ],
+  "enabledWhen": [
+   {
+    "key": "agent.workers.enabled",
+    "in": [
+     "true"
+    ]
+   }
   ]
  },
  {
   "path": "agent.workers.kinds",
   "section": "Workers",
+  "group": "Workers",
   "label": "Worker kinds",
   "help": "Which agents may work as workers.",
   "kind": {
@@ -766,44 +844,46 @@ enum SettingsFixture {
    "macos",
    "windows",
    "linux"
+  ],
+  "enabledWhen": [
+   {
+    "key": "agent.workers.enabled",
+    "in": [
+     "true"
+    ]
+   }
   ]
  },
  {
-  "path": "canvas.autoOpen",
-  "section": "Canvas",
-  "label": "Open new pages",
-  "help": "Show new and changed canvas pages automatically.",
+  "path": "agent.projectsRoot",
+  "section": "Workers",
+  "group": "Workers",
+  "label": "Projects folder",
+  "help": "The folder whose repositories workers may use, inside your home folder. DeskPixie creates it when it's missing.",
   "kind": {
-   "type": "bool"
-  },
-  "apply": "live",
-  "platforms": [
-   "macos",
-   "windows",
-   "linux"
-  ]
- },
- {
-  "path": "canvas.keep",
-  "section": "Canvas",
-  "label": "Pages kept",
-  "help": "Older pages are deleted at startup.",
-  "kind": {
-   "type": "int",
-   "min": 1,
-   "max": 1000,
-   "menu": false
+   "type": "path",
+   "dir": true,
+   "optional": false
   },
   "apply": "restart",
   "platforms": [
    "macos",
    "windows",
    "linux"
+  ],
+  "enabledWhen": [
+   {
+    "key": "agent.workers.enabled",
+    "in": [
+     "true"
+    ]
+   }
   ]
  },
  {
   "path": "agent.sessionHost",
   "section": "Advanced",
+  "group": "Session host",
   "label": "Session host",
   "help": "The terminal multiplexer that runs the coordinator. Supported: Herdr 0.7.5 (protocol 17) or 0.9.x (protocol 22), or tmux 3.2 or newer.",
   "kind": {
@@ -839,6 +919,7 @@ enum SettingsFixture {
  {
   "path": "agent.session",
   "section": "Advanced",
+  "group": "Session host",
   "label": "Session name",
   "help": "The coordinator session's name: a-z, 0-9 and -, not \"default\".",
   "kind": {
@@ -855,6 +936,7 @@ enum SettingsFixture {
  {
   "path": "agent.herdrPath",
   "section": "Advanced",
+  "group": "Session host",
   "label": "Herdr program",
   "help": "Empty finds herdr on PATH or in ~/.local/bin, /opt/homebrew/bin or /usr/local/bin. Supported: Herdr 0.7.5 (protocol 17) or 0.9.x (protocol 22).",
   "kind": {
@@ -872,6 +954,7 @@ enum SettingsFixture {
  {
   "path": "agent.tmuxPath",
   "section": "Advanced",
+  "group": "Session host",
   "label": "tmux program",
   "help": "Empty finds tmux on PATH or in /opt/homebrew/bin or /usr/local/bin. Supported: tmux 3.2 or newer.",
   "kind": {
@@ -887,9 +970,26 @@ enum SettingsFixture {
   ]
  },
  {
+  "path": "agent.keepPanesOnQuit",
+  "section": "Advanced",
+  "group": "Session host",
+  "label": "Keep agent panes on quit",
+  "help": "Leave the coordinator's and workers' terminal panes open when the app quits.",
+  "kind": {
+   "type": "bool"
+  },
+  "apply": "restart",
+  "platforms": [
+   "macos",
+   "windows",
+   "linux"
+  ]
+ },
+ {
   "path": "agent.port",
   "section": "Advanced",
-  "label": "Hook server port",
+  "group": "Coordinator",
+  "label": "Agent report port",
   "help": "The local port agents report to.",
   "kind": {
    "type": "int",
@@ -905,30 +1005,17 @@ enum SettingsFixture {
   ]
  },
  {
-  "path": "agent.keepPanesOnQuit",
-  "section": "Advanced",
-  "label": "Keep agent panes on quit",
-  "help": "Leave the coordinator's and workers' terminal panes open when the app quits.",
-  "kind": {
-   "type": "bool"
-  },
-  "apply": "restart",
-  "platforms": [
-   "macos",
-   "windows",
-   "linux"
-  ]
- },
- {
   "path": "agent.permissionTimeoutSecs",
   "section": "Advanced",
-  "label": "Permission timeout (seconds)",
+  "group": "Coordinator",
+  "label": "Permission timeout",
   "help": "An unanswered permission request is denied after this long.",
   "kind": {
    "type": "int",
    "min": 1,
    "max": 120,
-   "menu": false
+   "menu": false,
+   "unit": "seconds"
   },
   "apply": "restart",
   "platforms": [
@@ -940,13 +1027,58 @@ enum SettingsFixture {
  {
   "path": "agent.notifyPerMinute",
   "section": "Advanced",
-  "label": "Notifications per minute",
+  "group": "Coordinator",
+  "label": "Most coordinator notifications",
   "help": "The most coordinator notifications shown in one minute.",
   "kind": {
    "type": "int",
    "min": 1,
    "max": 60,
-   "menu": false
+   "menu": false,
+   "unit": "a minute"
+  },
+  "apply": "restart",
+  "platforms": [
+   "macos",
+   "windows",
+   "linux"
+  ]
+ },
+ {
+  "path": "voice.audio",
+  "section": "Advanced",
+  "group": "Voice",
+  "label": "Audio engine",
+  "help": "The microphone and speaker backend.",
+  "kind": {
+   "type": "choice",
+   "options": [
+    {
+     "value": "macos-vpio",
+     "label": "macOS voice processing",
+     "platforms": [
+      "macos"
+     ]
+    }
+   ]
+  },
+  "apply": "restart",
+  "platforms": [
+   "macos",
+   "windows",
+   "linux"
+  ]
+ },
+ {
+  "path": "voice.personaPath",
+  "section": "Advanced",
+  "group": "Voice",
+  "label": "Persona file",
+  "help": "A Markdown file that replaces Pixie's personality. Empty uses the built-in one.",
+  "kind": {
+   "type": "path",
+   "dir": false,
+   "optional": true
   },
   "apply": "restart",
   "platforms": [
@@ -962,8 +1094,22 @@ enum SettingsFixture {
 {"hotkey": "ctrl+alt+Space", "pack": "bit", "scale": 8, "position": null, "proximityFade": {"enabled": false, "radius": 150}, "voice": {"provider": "openai-realtime", "audio": "macos-vpio", "model": "gpt-realtime", "voice": "marin", "chimes": true, "idleTimeoutSecs": 7, "personaPath": null, "noiseFilter": false, "noiseModel": "hush", "noisyRoom": false, "inputDevice": null, "outputDevice": null, "homeCity": null}, "canvas": {"autoOpen": true, "keep": 50, "window": null}, "agent": {"enabled": true, "sessionHost": "herdr", "session": "deskpixie", "terminal": "warp", "herdrPath": null, "tmuxPath": null, "model": null, "warm": false, "port": 48217, "keepPanesOnQuit": true, "holdOpenSecs": 180, "permissionTimeoutSecs": 120, "notifyPerMinute": 4, "narration": true, "projectsRoot": "~/Documents/deskpixie", "workers": {"enabled": false, "max": 4, "kinds": ["claude", "codex"]}}}
 """#
 
+    /// Go `ExtraViews(Macos)`.
+    static let extrasJSON = #"""
+[{"id": "resetPosition", "section": "General", "group": "Look"}, {"id": "key.openai", "section": "Voice", "group": "Voice service"}, {"id": "key.gemini", "section": "Voice", "group": "Voice service"}, {"id": "restartCoordinator", "section": "Coordinator", "group": "Coordinator"}, {"id": "pix", "section": "Sessions", "group": "Sessions you start with pix"}, {"id": "openFile", "section": "Advanced", "group": "Files"}, {"id": "exportLogs", "section": "Advanced", "group": "Files"}]
+"""#
+
+    static let extras: [SettingsExtraPlace] = try! JSONDecoder().decode([SettingsExtraPlace].self, from: Data(extrasJSON.utf8))
     static let fields: [SettingsField] = try! JSONDecoder().decode([SettingsField].self, from: Data(fieldsJSON.utf8))
     static let defaults: JSONValue = try! JSONDecoder().decode(JSONValue.self, from: Data(defaultsJSON.utf8))
+
+    /// The extra rows the core places on `section`, in order.
+    static func extras(on section: SettingsSection) -> [SettingsLayout.Extra] {
+        SettingsLayout.groups(in: section, fields: [], extras: extras).flatMap(\.rows).compactMap {
+            if case .extra(let e) = $0 { return e }
+            return nil
+        }
+    }
 
     static func view(_ path: String) -> SettingsField {
         fields.first { $0.path == path }!
@@ -974,6 +1120,6 @@ enum SettingsFixture {
     }
 
     static func snapshot(seq: UInt64 = 1, values: JSONValue = defaults) -> SettingsSnapshot {
-        SettingsSnapshot(platform: .macos, values: values, fields: fields, seq: seq)
+        SettingsSnapshot(platform: .macos, values: values, fields: fields, extras: extras, seq: seq)
     }
 }
