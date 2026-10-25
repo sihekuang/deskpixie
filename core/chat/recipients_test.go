@@ -63,7 +63,7 @@ func TestMentionsAreWholeWordsAfterASpace(t *testing.T) {
 	}
 	for _, c := range cases {
 		var got []string
-		for _, r := range Mentions(c.text, testRecipients) {
+		for _, r := range Mentions(c.text, testRecipients, "") {
 			got = append(got, r.Name)
 		}
 		if !slices.Equal(got, c.want) {
@@ -118,5 +118,61 @@ func TestOneRecipientPerMessage(t *testing.T) {
 	}
 	if err := CheckOneRecipient("hi", new(string), "", nil); err == nil {
 		t.Error("no recipients at all: a target can't go")
+	}
+}
+
+// shadowRecipients: x's label is beta's address, and y and z share a label. The same table is
+// in the app's ChatMentionsTests.testAnAddressFirstThenALabel.
+var shadowRecipients = []Recipient{
+	{Name: "x", Label: "beta", Kind: "session", Yours: true},
+	{Name: "beta", Label: "b-session", Kind: "session", Yours: true},
+	{Name: "y", Label: "dup", Kind: "session", Yours: true},
+	{Name: "z", Label: "dup", Kind: "worker"},
+}
+
+func TestAnAddressFirstThenALabel(t *testing.T) {
+	cases := []struct {
+		text, target string
+		want         []string
+	}{
+		{"@x @beta", "", []string{"x", "beta"}},
+		{"@beta", "", []string{"beta"}},
+		{"@beta", "x", []string{"beta"}},
+		{"@b-session", "", []string{"beta"}},
+		{"@dup", "", []string{"y"}},
+		{"@dup", "z", []string{"z"}},
+		{"@dup @y", "", []string{"y"}},
+		{"@dup @y", "z", []string{"z", "y"}},
+		{"@y @dup", "", []string{"y"}},
+	}
+	for _, c := range cases {
+		var got []string
+		for _, m := range Mentions(c.text, shadowRecipients, c.target) {
+			got = append(got, m.Name)
+		}
+		if !slices.Equal(got, c.want) {
+			t.Errorf("%q to %q: %v, want %v", c.text, c.target, got, c.want)
+		}
+	}
+	str := func(s string) *string { return &s }
+	checks := []struct {
+		text   string
+		target *string
+		want   string
+	}{
+		{"@x @beta", nil, "Send to one at a time: pick @x or @beta."},
+		{"@beta hi", str("x"), "This goes to beta only. Remove @beta, or pick them instead."},
+		{"@dup hi", str("z"), ""},
+		{"@dup hi", str("y"), ""},
+		{"@dup @y", str("z"), "This goes to dup only. Remove @y, or pick them instead."},
+	}
+	for _, c := range checks {
+		got := ""
+		if err := CheckOneRecipient(c.text, c.target, "", shadowRecipients); err != nil {
+			got = err.Error()
+		}
+		if got != c.want {
+			t.Errorf("%q: %q, want %q", c.text, got, c.want)
+		}
 	}
 }

@@ -57,10 +57,13 @@ public enum ChatRecipients {
     }
 
     /// The recipients named with @name, in order, each once. The name is the address or the
-    /// label (a label of one word: "@beta"); an @ at the start or after a space, and the whole
-    /// word, in any case ("a@b", an email address, "@docs2" for docs name no one). A full stop
-    /// after it ends the sentence, not the name.
-    public static func mentions(in text: String, _ recipients: [ChatRecipient]) -> [Mention] {
+    /// label (a label of one word: "@beta"); an address is matched first, so a label never
+    /// shadows another recipient's address, and with a `target` (its address) a label it shares
+    /// with others names the target. An @ at the start or after a space, and the whole word, in
+    /// any case ("a@b", an email address, "@docs2" for docs name no one). A full stop after it
+    /// ends the sentence, not the name. The core's `chat.Mentions` is the same.
+    public static func mentions(in text: String, _ recipients: [ChatRecipient],
+                                target: String? = nil) -> [Mention] {
         var out: [Mention] = []
         let chars = Array(text)
         var i = 0
@@ -73,8 +76,7 @@ public enum ChatRecipients {
             while name.hasSuffix(".") { name.removeLast() }
             i = j - 1
             guard !name.isEmpty else { continue }
-            let lower = name.lowercased()
-            if let r = recipients.first(where: { $0.name.lowercased() == lower || $0.label.lowercased() == lower }),
+            if let r = named(name, recipients, target: target),
                !out.contains(where: { $0.recipient.name == r.name }) {
                 out.append(Mention(recipient: r, said: name))
             }
@@ -82,12 +84,22 @@ public enum ChatRecipients {
         return out
     }
 
+    /// The recipient an @name is: the one with that address, else the target if it is its
+    /// label, else the first with that label.
+    private static func named(_ name: String, _ recipients: [ChatRecipient], target: String?) -> ChatRecipient? {
+        let lower = name.lowercased()
+        if let r = recipients.first(where: { $0.name.lowercased() == lower }) { return r }
+        if let target, !target.isEmpty,
+           let r = recipients.first(where: { $0.name == target && $0.label.lowercased() == lower }) { return r }
+        return recipients.first { $0.label.lowercased() == lower }
+    }
+
     /// Why this can't go as it is, nil when it can. `target` is the one chosen (nil: Pixie),
     /// `label` names it; `knowsRecipients`: the list has come, so a target missing from it has
     /// ended (until then the core decides).
     public static func check(_ text: String, target: String?, label: String,
                              recipients: [ChatRecipient], knowsRecipients: Bool = true) -> String? {
-        let named = mentions(in: text, recipients)
+        let named = mentions(in: text, recipients, target: target)
         guard let target else {
             if named.count >= 2 { return "Send to one at a time: pick @\(named[0].said) or @\(named[1].said)." }
             if let one = named.first { return "Pick @\(one.said) from the list to send it to them." }

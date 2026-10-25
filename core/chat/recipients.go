@@ -62,11 +62,13 @@ type Mention struct {
 }
 
 // Mentions are the recipients the text names with @name, in order, each once. The name is the
-// recipient's address or its label (a label of one word: "@beta"). An @ counts only at the
-// start or after a space, and the name must be the whole word, matched without regard to case:
-// "a@b", an email address or "@docs2" for docs mention no one. A full stop after it ends the
-// sentence, not the name.
-func Mentions(text string, rs []Recipient) []Mention {
+// recipient's address or its label (a label of one word: "@beta"); an address is matched
+// first, so a label never shadows another recipient's address, and with a target (its
+// address, "" for none) a label it shares with others names the target. An @ counts only at
+// the start or after a space, and the name must be the whole word, matched without regard to
+// case: "a@b", an email address or "@docs2" for docs mention no one. A full stop after it ends
+// the sentence, not the name. The app's box runs the same (ChatRecipients.mentions).
+func Mentions(text string, rs []Recipient, target string) []Mention {
 	var out []Mention
 	seen := map[string]bool{}
 	runes := []rune(text)
@@ -83,15 +85,33 @@ func Mentions(text string, rs []Recipient) []Mention {
 		if name == "" {
 			continue
 		}
-		for _, r := range rs {
-			if (strings.EqualFold(r.Name, name) || strings.EqualFold(r.Label, name)) && !seen[r.Name] {
-				seen[r.Name] = true
-				out = append(out, Mention{r, name})
-				break
-			}
+		if r := named(name, rs, target); r != nil && !seen[r.Name] {
+			seen[r.Name] = true
+			out = append(out, Mention{*r, name})
 		}
 	}
 	return out
+}
+
+// named is the recipient an @name is: the one with that address, else the target if it is its
+// label, else the first with that label; nil for no one.
+func named(name string, rs []Recipient, target string) *Recipient {
+	for i := range rs {
+		if strings.EqualFold(rs[i].Name, name) {
+			return &rs[i]
+		}
+	}
+	for i := range rs {
+		if target != "" && rs[i].Name == target && strings.EqualFold(rs[i].Label, name) {
+			return &rs[i]
+		}
+	}
+	for i := range rs {
+		if strings.EqualFold(rs[i].Label, name) {
+			return &rs[i]
+		}
+	}
+	return nil
 }
 
 // Refusal is why a message can't go as it is: what to tell you, as it is shown.
@@ -105,7 +125,11 @@ func (r *Refusal) Error() string { return r.Text }
 // target, any mention of a recipient: one is picked from the list, never guessed from the text.
 // Mentions of the target itself, and @words that name no recipient, are fine.
 func CheckOneRecipient(text string, target *string, label string, rs []Recipient) error {
-	mentioned := Mentions(text, rs)
+	to := ""
+	if target != nil {
+		to = *target
+	}
+	mentioned := Mentions(text, rs, to)
 	if target == nil {
 		switch {
 		case len(mentioned) >= 2:
@@ -115,14 +139,14 @@ func CheckOneRecipient(text string, target *string, label string, rs []Recipient
 		}
 		return nil
 	}
-	var to *Recipient
+	var picked *Recipient
 	for i := range rs {
 		if *target != "" && rs[i].Name == *target {
-			to = &rs[i]
+			picked = &rs[i]
 			break
 		}
 	}
-	if to == nil {
+	if picked == nil {
 		switch {
 		case label != "":
 		case *target != "":
@@ -133,8 +157,8 @@ func CheckOneRecipient(text string, target *string, label string, rs []Recipient
 		return &Refusal{label + " isn't running anymore."}
 	}
 	for _, m := range mentioned {
-		if m.Name != to.Name {
-			return &Refusal{"This goes to " + to.Label + " only. Remove @" + m.Said + ", or pick them instead."}
+		if m.Name != picked.Name {
+			return &Refusal{"This goes to " + picked.Label + " only. Remove @" + m.Said + ", or pick them instead."}
 		}
 	}
 	return nil

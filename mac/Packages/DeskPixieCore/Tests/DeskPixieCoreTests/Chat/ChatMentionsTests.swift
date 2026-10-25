@@ -147,6 +147,39 @@ final class ChatMentionsTests: XCTestCase {
                      "before the list has come, the core decides")
     }
 
+    /// x's label is beta's address, and y and z share a label. The same table is in the core's
+    /// `TestAnAddressFirstThenALabel`.
+    func testAnAddressFirstThenALabel() {
+        let shadow = [ChatRecipient(name: "x", label: "beta"), ChatRecipient(name: "beta", label: "b-session"),
+                      ChatRecipient(name: "y", label: "dup"),
+                      ChatRecipient(name: "z", label: "dup", kind: "worker", yours: false)]
+        let cases: [(String, String?, [String])] = [
+            ("@x @beta", nil, ["x", "beta"]),
+            ("@beta", nil, ["beta"]),
+            ("@beta", "x", ["beta"]),
+            ("@b-session", nil, ["beta"]),
+            ("@dup", nil, ["y"]),
+            ("@dup", "z", ["z"]),
+            ("@dup @y", nil, ["y"]),
+            ("@dup @y", "z", ["z", "y"]),
+            ("@y @dup", nil, ["y"]),
+        ]
+        for (text, target, want) in cases {
+            XCTAssertEqual(ChatRecipients.mentions(in: text, shadow, target: target).map(\.recipient.name), want,
+                           "\(text) to \(target ?? "-")")
+        }
+        let checks: [(String, String?, String?)] = [
+            ("@x @beta", nil, "Send to one at a time: pick @x or @beta."),
+            ("@beta hi", "x", "This goes to beta only. Remove @beta, or pick them instead."),
+            ("@dup hi", "z", nil),
+            ("@dup hi", "y", nil),
+            ("@dup @y", "z", "This goes to dup only. Remove @y, or pick them instead."),
+        ]
+        for (text, target, want) in checks {
+            XCTAssertEqual(ChatRecipients.check(text, target: target, label: "", recipients: shadow), want, text)
+        }
+    }
+
     @MainActor
     func testTheBoxSaysWhyAndSendIsOff() async {
         let client = FakeChatClient()
