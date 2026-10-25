@@ -3,8 +3,9 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build one chat window, a single thread, for everything DeskPixie and the agents say:
-your messages, Pixie, the coordinator, each session's updates and what needs you. Then retire
-the reply deck and the badge deck around Pixie.
+your messages, Pixie, the coordinator, each session's updates and what needs you. It is an
+addition: the reply cards and the badges around Pixie stay as they are (the maintainer's call,
+2026-10-24).
 
 **Architecture:**
 - **Go keeps the thread.** It lives in a new package `core/chat`, a store backed by
@@ -12,8 +13,8 @@ the reply deck and the badge deck around Pixie.
   transcripts, and new agent hooks. It serves the thread through `chat.*` dp_calls and events.
 - **Swift draws it.** A testable `ChatThreadModel` in the package, and a normal `NSWindow` in the
   app.
-- **Three PRs**, each shippable on its own: Go thread (Tasks 1–5), window (Tasks 6–8), switch
-  (Tasks 9–10).
+- **Two PRs**: Go thread (Tasks 1–5) and the window (Tasks 6–8b, with 8a's UI tests). Step 3
+  (Tasks 9–10, replacing the decks) is withdrawn.
 
 **Tech Stack:** Go 1.26 (`core/`), Swift 6 / SwiftUI / AppKit (`mac/`), dp_call JSON and events
 over the C ABI.
@@ -438,7 +439,7 @@ the finished turns only.
 
 ### Task 8a: UI tests for the window (XCUITest)
 
-The app has no UI test target yet; this adds one and covers the window. Task 9 extends it.
+The app has no UI test target yet; this adds one and covers the window.
 
 **Files:**
 - Create: `mac/DeskPixieUITests/ChatWindowUITests.swift` and `UITestApp.swift`, a helper
@@ -446,8 +447,8 @@ The app has no UI test target yet; this adds one and covers the window. Task 9 e
 - Modify: `mac/project.yml` (target `DeskPixieUITests`, type `bundle.ui-testing`, host
   `DeskPixie`, added to the DeskPixie scheme's test action), `mac/Makefile` (`uitest`:
   `xcodebuild test -scheme DeskPixie -only-testing:DeskPixieUITests`, with the same sign flags as
-  `build`). No CI step: the UI tests run on this Mac, signed, before every push of PR 2 and
-  PR 3 (the maintainer's call, 2026-10-24).
+  `build`). No CI step: the UI tests run on this Mac, signed, before every push of PR 2
+  (the maintainer's call, 2026-10-24).
 - Modify the Task 8 views: add accessibility identifiers. Nothing else in the app changes.
   - `chat.window` and `chat.thread`;
   - `chat.entry.<id>` and `chat.needs.pill.<id>`;
@@ -489,72 +490,9 @@ The app has no UI test target yet; this adds one and covers the window. Task 9 e
   and put the result in the PR description.
 - [ ] **Step 4: Commit:** "mac: UI tests for the chat window (#302)".
 
-## Step 3 (PR 3): the switch
+## Step 3 (PR 3): withdrawn
 
-### Task 9: one badge and the preview around Pixie
-
-**Files:**
-- Modify: `mac/DeskPixie/Pixie/UpdatesBubbleController.swift` and `UpdatesBubbleView.swift`.
-  They become the badge (driven by `chat.badge`) and the one-line preview (pop for
-  `notifications.bubble.popSecs`). The deck is removed.
-- Modify: `mac/DeskPixie/Pixie/AgentRosterController.swift` and `AgentRosterView.swift`:
-  - remove `QuickChatCard` from the panel; keep the chip and the live captions ("earlier" bubble
-    and the caption);
-  - a roster row click calls `ChatWindowController.show(at:)` with that session's newest entry,
-    and ⌥-click goes to the terminal as today;
-  - the 💬 toggle and the text-mode hotkey open the window.
-- Modify: `mac/DeskPixie/Engine/EngineCoordinator.swift` (stop routing `reply.card`; a
-  notification click opens the chat at its entry)
-- Modify: `mac/Packages/DeskPixieCore/Sources/DeskPixieCore/Pixie/UpdatesBubbleModel.swift`
-  (badge state: `.needs(n)`, `.unread`, `.none`)
-- Test: `UpdatesBubbleModelTests` (rewrite for the badge)
-
-- [ ] **Step 1: Write the failing tests:**
-  - `testBadgeIsOrangeWithACountWhenSomethingNeedsYou`;
-  - `testBadgeIsADotWhenOnlyUnread`;
-  - `testNoBadgeWhenCaughtUp`;
-  - `testAPreviewPopsOnlyForANewEntryAndGoesAfterPopSecs`.
-- [ ] **Step 2:** Run `swift test`. Expected: FAIL.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4:** Run `swift test`, then the signed build. Expected: PASS.
-- [ ] **Step 5: UI tests** (extend `DeskPixieUITests`; identifiers `pixie.badge`,
-  `pixie.preview`):
-  - `testTheBadgeCountsWhatNeedsYou`: a seeded open request gives an orange badge reading 1;
-  - `testClickingThePreviewOpensTheChatAtThatEntry`: needs a coordinator, so it runs under
-    `DESKPIXIE_UITEST_LIVE=1`; with a seeded unread entry only, check the dot instead.
-  Run `make -C mac uitest`. Expected: PASS.
-- [ ] **Step 6: Commit:** "mac: one badge and a preview instead of the decks (#302)".
-
-### Task 10: remove what the decks needed, settings and docs
-
-**Files:**
-- Delete or trim: `QuickChatView.swift` (keep the composer pieces Task 8 reused, moved to
-  `ChatComposer.swift`), `DeckPager.swift` if nothing uses it, and the reply-deck parts of
-  `QuickChatModel.swift`.
-- Go:
-  - Remove the `reply.card` emit and `agent.replies` / `agent.repliesShown` once nothing calls
-    them. `RepliesShown` stays for `chat.read`.
-  - Remove the settings `alwaysShowCaption` and `captionDismissSecs`. An unknown key in
-    settings.json is ignored; add a test that an old file with them still loads.
-  - `replyHistoryMins` leaves the schema. `ReplyHistoryMs` stays an internal default of 5 min.
-- Docs: README "Talking to Pixie", the `docs/release.md` pointers if any, and the spec's status
-  line set to "built".
-- Test: the settings tests (`TestAnOldFileWithRemovedKeysStillLoads`), and the layout and search
-  tests' lists.
-- UI tests: the whole `DeskPixieUITests` suite still passes, and no test looks for the old deck.
-
-- [ ] **Step 1: Write the failing test** `TestAnOldFileWithRemovedKeysStillLoads`, and update
-  the lists in `layout_test.go` and `search_test.go` and the Swift settings tests.
-- [ ] **Step 2:** Run the Go and Swift tests. Expected: FAIL where the lists changed.
-- [ ] **Step 3: Implement** the removals.
-- [ ] **Step 4:** Run the full `(cd core && gofmt -l . && go vet ./... && go test ./...)`, then
-  `swift test`, then the signed build. Expected: all pass.
-- [ ] **Step 5: Check by hand** on an isolated build:
-  - a reply arrives: the badge dot and preview show, and there's no card under Pixie;
-  - clicking the preview opens the chat at it;
-  - a permission: the orange badge count shows; Allow in the window clears it;
-  - in voice mode, Pixie still speaks the reply, and the chat shows it as Pixie's words.
-
-  Screenshot each step.
-- [ ] **Step 6: Commit:** "Chat window replaces the reply and badge decks (#302)". Push and open
-  PR 3 ("Closes #302"). Review, CI, fixes.
+The maintainer decided on 2026-10-24 that the chat window is an addition: the reply cards, the
+updates badge and their settings stay. Tasks 9 and 10 (one badge and a preview instead of the
+decks; removing the deck code and the `alwaysShowCaption` / `captionDismissSecs` settings) are not
+built. PR 2 closes #302; it also adds a line about the window to README "Talking to Pixie".

@@ -1,8 +1,10 @@
 # Chat window (#302)
 
-Status: design, for review. Supersedes the look and the "where things show" parts of
-`2026-10-24-badge-and-reply-deck-design.md` (#286) and `2026-10-21-text-mode-design.md` (#221);
-their rules for what a reply is, combining and "delivered = shown" carry over.
+Status: design, for review. **An addition** (the maintainer's call, 2026-10-24): the chat window
+joins what's around Pixie and replaces nothing. The reply cards, the updates badge, their settings
+and `2026-10-24-badge-and-reply-deck-design.md` (#286) and `2026-10-21-text-mode-design.md` (#221)
+all stay as they are. Where this spec describes the decks going (§4.4's badge and preview, §7's
+removals, step 3 in §9), that part is withdrawn.
 
 ## 1. Why
 
@@ -230,10 +232,10 @@ It isn't added to Export Logs… unless a separate tick asks for it, and the Set
 |---|---|
 | `chatKeepDays` (new) | How long the chat keeps history; 1–90, default 7. Live. |
 | `replyMode` | Unchanged: voice or text decides whether Pixie speaks replies. |
-| `alwaysShowCaption`, `captionDismissSecs` | Only governed the card under Pixie: removed. settings.json keeps unknown keys harmlessly. |
+| `alwaysShowCaption`, `captionDismissSecs` | Unchanged: the card under Pixie stays. |
 | `captionFadeSecs` | Still the live "earlier" caption's fade. |
-| `replyHistoryMins` | Replaced by `chatKeepDays` for the window. Go keeps using `ReplyHistoryMs` internally only to decide which undelivered lines Pixie may still announce after launch. |
-| `notifications.bubble.*` | Now governs the badge's one-line preview (pop, lines). |
+| `replyHistoryMins` | Unchanged: the reply deck's history. The window's history is `chatKeepDays`. |
+| `notifications.bubble.*` | Unchanged. |
 
 ## 8. How it splits (Go decides, Swift does)
 
@@ -274,8 +276,7 @@ Each step ships on its own:
 2. **The window**: the thread, the needs strip and the message box with Reply, opened from the
    menu. The decks still exist, so the two can be
    compared.
-3. **The switch**: the badge and preview replace both decks, the roster rows and notifications
-   open the chat, and the settings change (§7). The deck code is deleted.
+3. ~~The switch~~: withdrawn. The window is an addition; the decks stay (see Status).
 
 ## 10. Calls made
 
