@@ -12,6 +12,9 @@ import (
 type Message struct {
 	Text string
 	Refs []JobID
+	// Request: it hands the coordinator a new job (its "New request from the user"), which a
+	// stop cancels (#309).
+	Request bool
 }
 
 // MessageForJob is `<text>\n[ref <job>]`.
@@ -98,15 +101,22 @@ func (i *Inbox) Carries(job JobID) bool {
 	return slices.ContainsFunc(i.inFlight, func(m Message) bool { return m.refersTo(job) })
 }
 
-// InFlightRequests are the jobs whose own request ("New request from the user") is in flight.
+// InFlightRequests are the jobs whose own request is in flight.
 func (i *Inbox) InFlightRequests() []JobID {
 	var out []JobID
 	for _, m := range i.inFlight {
-		if strings.HasPrefix(m.Text, newRequestPrefix) {
+		if m.Request {
 			out = append(out, m.Refs...)
 		}
 	}
 	return out
+}
+
+// DropRiders drops the riders about job; true if any were dropped.
+func (i *Inbox) DropRiders(job JobID) bool {
+	before := len(i.riders)
+	i.riders = slices.DeleteFunc(i.riders, func(m Message) bool { return m.refersTo(job) })
+	return len(i.riders) != before
 }
 
 // FinishTurn: the coordinator finished a turn (its Stop hook fired). Readiness is left to the

@@ -186,8 +186,9 @@ func TestStoppingYourSessionSaysWhyPixRefused(t *testing.T) {
 		// #306: pix refuses keys while a startup menu only you should answer is up.
 		{HostError{Kind: HostOther, Detail: "Codex is waiting for you to answer its update question."},
 			"Couldn't stop focus-claude: Codex is waiting for you to answer its update question."},
-		{HostError{Kind: HostTimeout, Detail: "pix session focus-claude"}, "Couldn't stop focus-claude: it didn't answer in time."},
 		{ErrNoAgent("focus-claude"), "Couldn't stop focus-claude: it isn't running anymore."},
+		// Last: a timeout holds the next stop back (its Esc may still land).
+		{HostError{Kind: HostTimeout, Detail: "pix session focus-claude"}, "Couldn't stop focus-claude: it didn't answer in time."},
 	} {
 		user.mu.Lock()
 		user.keysErr = c.err
@@ -256,14 +257,14 @@ func TestASecondStopSoonAfterSendsNoSecondEsc(t *testing.T) {
 
 func TestAStopBeforeTheStatusChangedSendsNoSecondEsc(t *testing.T) {
 	r := workingPane(t)
-	r.clock.Advance(10 * StopRepeatMs)
+	r.clock.Advance(StopRepeatMs - 1)
 	if sent, err := r.h.Interrupt(context.Background(), "focus-fix"); !sent || err != nil {
 		t.Fatal(sent, err)
 	}
 	if n := escapes(r.host.Keys(), "focus-fix"); n != 1 {
 		t.Fatal("still working since the last stop: no second Esc", r.host.Keys())
 	}
-	// Seen idle, then working on a new turn: that one can be stopped.
+	// Seen idle, then working on a new turn: that one can be stopped at once.
 	r.host.SetStatus("focus-fix", PaneIdle)
 	if sent, err := r.h.Interrupt(context.Background(), "focus-fix"); sent || err != nil {
 		t.Fatal(sent, err)
@@ -277,17 +278,72 @@ func TestAStopBeforeTheStatusChangedSendsNoSecondEsc(t *testing.T) {
 	}
 }
 
-func TestAStopRightAfterAChangedStatusStillWaitsItsTwoSeconds(t *testing.T) {
-	r := workingPane(t)
-	r.host.SetStatus("focus-fix", PaneIdle)
-	r.h.Interrupt(context.Background(), "focus-fix")
-	r.host.SetStatus("focus-fix", PaneWorking)
-	r.clock.Advance(StopRepeatMs - 1)
+func TestAStopGoesAgainOnceTheLastWasIgnoredForLong(t *testing.T) {
+	r := workingPane(t) // it ignores the Esc and keeps working
+	r.clock.Advance(StopRepeatMs)
 	if sent, err := r.h.Interrupt(context.Background(), "focus-fix"); !sent || err != nil {
 		t.Fatal(sent, err)
 	}
-	if n := escapes(r.host.Keys(), "focus-fix"); n != 1 {
-		t.Fatal(r.host.Keys())
+	if n := escapes(r.host.Keys(), "focus-fix"); n != 2 {
+		t.Fatal("the button never stays dead", r.host.Keys())
+	}
+}
+
+func TestAStopOfACoordinatorBackAtWorkWithinTheRostersDebounceGoes(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRig(t)
+		if _, err := r.h.ChatSend("a slow one"); err != nil {
+			t.Fatal(err)
+		}
+		settle()
+		if sent, err := r.h.Interrupt(context.Background(), Coordinator); !sent || err != nil {
+			t.Fatal(sent, err)
+		}
+		// Its Esc idles it, and the cancel note sets it working again: far inside the roster's
+		// debounce, so only the status events show it changed.
+		settle()
+		r.host.SetStatus(Coordinator, PaneWorking)
+		settle()
+		if st, _ := r.host.StatusOf(Coordinator); st != PaneWorking {
+			t.Fatal(st)
+		}
+		if sent, err := r.h.Interrupt(context.Background(), Coordinator); !sent || err != nil {
+			t.Fatal(sent, err)
+		}
+		settle()
+		if n := escapes(r.host.Keys(), Coordinator); n != 2 {
+			t.Fatal("a real second stop is never swallowed", r.host.Keys())
+		}
+	})
+}
+
+func TestAStopThatTimedOutHoldsTheNextUntilTheStatusChanges(t *testing.T) {
+	r, user := pixRig(t)
+	user.SetStatus("focus-claude", PaneWorking)
+	user.mu.Lock()
+	user.keysErr = HostError{Kind: HostTimeout}
+	user.mu.Unlock()
+	sent, err := r.h.Interrupt(context.Background(), "focus-claude")
+	wantStopErr(t, sent, err, "Couldn't stop focus-claude: it didn't answer in time.")
+	user.mu.Lock()
+	user.keysErr = nil
+	user.mu.Unlock()
+	r.clock.Advance(10 * StopRepeatMs)
+	// Its Esc may still land when the session catches up: a retry sends no second one.
+	if sent, err := r.h.Interrupt(context.Background(), "focus-claude"); !sent || err != nil {
+		t.Fatal(sent, err)
+	}
+	if n := escapes(user.Keys(), "focus-claude"); n != 0 {
+		t.Fatal(user.Keys())
+	}
+	user.SetStatus("focus-claude", PaneIdle)
+	r.h.Interrupt(context.Background(), "focus-claude")
+	user.SetStatus("focus-claude", PaneWorking)
+	if sent, err := r.h.Interrupt(context.Background(), "focus-claude"); !sent || err != nil {
+		t.Fatal(sent, err)
+	}
+	if n := escapes(user.Keys(), "focus-claude"); n != 1 {
+		t.Fatal(user.Keys())
 	}
 }
 
@@ -295,10 +351,10 @@ func TestAFailedStopDoesNotHoldBackTheNext(t *testing.T) {
 	r, user := pixRig(t)
 	user.SetStatus("focus-claude", PaneWorking)
 	user.mu.Lock()
-	user.keysErr = HostError{Kind: HostTimeout}
+	user.keysErr = HostError{Kind: HostOther, Detail: "Codex is waiting for you to answer its update question."}
 	user.mu.Unlock()
 	if _, err := r.h.Interrupt(context.Background(), "focus-claude"); err == nil {
-		t.Fatal("it timed out")
+		t.Fatal("it refused")
 	}
 	user.mu.Lock()
 	user.keysErr = nil

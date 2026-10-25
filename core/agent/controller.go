@@ -986,7 +986,9 @@ func (c *AgentController) delegate(id JobID, task, context string, now Millis, f
 	if ctx := strings.TrimSpace(context); ctx != "" {
 		text += "\n" + ctx
 	}
-	c.inbox.Push(MessageForJob(id, text))
+	msg := MessageForJob(id, text)
+	msg.Request = true
+	c.inbox.Push(msg)
 	c.syncHold(fx)
 	c.flush(now, fx)
 }

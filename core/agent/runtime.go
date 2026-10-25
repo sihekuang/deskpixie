@@ -326,6 +326,9 @@ func (h *AgentHandle) Run(ctx context.Context) {
 				panes = nil
 				continue
 			}
+			if ev.Kind == PaneEventExited || ev.Kind == PaneEventStatus && ev.Status != PaneWorking {
+				h.stops.changed(ev.Agent) // its next turn can be stopped (#309)
+			}
 			h.Input(PaneInput(ev))
 			h.pokeRoster()
 		case <-tick.C:

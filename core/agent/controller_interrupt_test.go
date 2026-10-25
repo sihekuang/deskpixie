@@ -204,3 +204,47 @@ func TestAStoppedWorkersMessagesGoOnceTheUserSetsItWorkingAgain(t *testing.T) {
 		t.Fatal(fmtEffects(fx))
 	}
 }
+
+func TestALateWorkingAfterAWorkersStopDoesNotReopenIt(t *testing.T) {
+	c := wctl()
+	running(t, c)
+	coordinatorTurnEnds(c, T0)
+	_, _, _ = mcp(t, c, Coordinator, McpCall{Kind: CallMessageWorker, Name: workerName, Text: "Use the main branch."}, T0)
+	at := T0 + StopSettleMs
+	interruptWorker(t, c, workerName, at)
+	// A Working queued before the Esc took, then the Idle the Esc brought.
+	c.Step(paneStatus(workerName, PaneWorking), at+1)
+	c.Step(paneStatus(workerName, PaneIdle), at+2)
+	for at += 3; at < T0+ReportGraceMs+WorkerIdleWithoutStopMs+10_000; at += 1_000 {
+		if fx := tick(c, at); anyKind(fx, EfReadWorker, EfPromptWorker) {
+			t.Fatalf("still stopped: %s", fmtEffects(fx))
+		}
+	}
+	if w := c.workers.Get(workerName); !w.stopped {
+		t.Fatal("its messages still wait")
+	}
+	// Now you type in its terminal: that is a new turn.
+	c.Step(paneStatus(workerName, PaneWorking), at)
+	if w := c.workers.Get(workerName); w.stopped {
+		t.Fatal("a new turn lets them go")
+	}
+}
+
+func TestTheNudgeForAStoppedTurnsJobSaysItOnce(t *testing.T) {
+	c := workingOnJob1()
+	stop(c, `<spoken ref="job_000000000001" status="working">On it.</spoken>`, T0)
+	tick(c, T0+StopSettleMs)
+	var fx []Effect
+	c.inbox.Push(MessageForJob(job(1), "Worker focus-upload reports done: \"Fixed it\""))
+	c.flush(T0+StopSettleMs, &fx)
+	c.Step(coordStatus(PaneWorking), T0+StopSettleMs)
+	interruptTurn(t, c, T0+StopSettleMs)
+	c.Step(coordStatus(PaneIdle), T0+StopSettleMs+1)
+	var got []string
+	for at := T0 + StopSettleMs + 1_000; at <= T0+StopSettleMs+UnbackedNudgeMs+2_000; at += 1_000 {
+		got = append(got, prompts(tick(c, at))...)
+	}
+	if len(got) != 1 || got[0] != "The user stopped your turn while you were on this; reply with what you have, or that it stopped.\n[ref job_000000000001]" {
+		t.Fatalf("one sentence, not the rider and the nudge: %q", got)
+	}
+}

@@ -241,6 +241,9 @@ type Worker struct {
 	// stopped: the user stopped its turn (#309): its queue waits until the coordinator sends it
 	// something new, or the user does (in its terminal: it works again).
 	stopped bool
+	// resumeAfterIdle: stopped, and not yet seen idle since: a Working before that Idle is the
+	// stopped turn's own (an event queued before the Esc took), not a new one.
+	resumeAfterIdle bool
 }
 
 func newWorker(plan WorkerPlan) *Worker { return &Worker{Plan: plan} }
@@ -388,7 +391,8 @@ func (ws *Workers) Interrupted(name string) bool {
 	w.inTurn = false
 	w.worked = false
 	w.reported = true
-	w.resumable = true // the user typing in its terminal is a new turn
+	w.resumable = false
+	w.resumeAfterIdle = true // once it is idle, the user typing in its terminal is a new turn
 	w.awaitingStop = false
 	w.idleWaitAt = optMs{}
 	w.graceAt = optMs{}
@@ -492,6 +496,9 @@ func statusOf(w *Worker, status PaneStatus, now Millis) {
 	case status == PaneIdle || status == PaneDone:
 		// A held Idle/Done is replaced by this one.
 		w.unhold()
+		if w.resumeAfterIdle {
+			w.resumeAfterIdle, w.resumable = false, true
+		}
 		if w.awaitingStop {
 			// Herdr's Idle can beat the Stop hook of the same turn: wait for the Stop, or for a
 			// while if it is lost.

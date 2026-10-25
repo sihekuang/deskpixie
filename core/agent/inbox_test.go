@@ -238,13 +238,16 @@ func TestARiderWaitsForTheNextPromptAndGoesInFront(t *testing.T) {
 	if _, ok := i.TakePrompt(); ok {
 		t.Fatal("no prompt of its own")
 	}
-	i.Push(MessageForJob(JobID("job_2"), "New request from the user: b"))
+	req := MessageForJob(JobID("job_2"), "New request from the user: b")
+	req.Request = true
+	i.Push(req)
+	i.Push(MessageForJob(JobID("job_4"), "New request from the user: looks like one, isn't"))
 	p, ok := i.TakePrompt()
-	if !ok || p.Text != "note\n[ref job_1]\n\nNew request from the user: b\n[ref job_2]" {
+	if !ok || p.Text != "note\n[ref job_1]\n\nNew request from the user: b\n[ref job_2]\n\nNew request from the user: looks like one, isn't\n[ref job_4]" {
 		t.Fatal(p, ok)
 	}
 	if got := i.InFlightRequests(); len(got) != 1 || got[0] != "job_2" {
-		t.Fatal("only job_2's request is in flight", got)
+		t.Fatal("only job_2's request is in flight: a request is marked, not read from its words", got)
 	}
 	i.PushRider(MessageForJob(JobID("job_3"), "note"))
 	i.DropQueued(JobID("job_3"))

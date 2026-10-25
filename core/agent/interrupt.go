@@ -19,9 +19,10 @@ import (
 //   - one of Pixie's panes: Esc in it; a worker's turn is then over, its messages wait, and the
 //     coordinator is told the user stopped it.
 //
-// A second stop of the same agent soon after (StopRepeatMs), or before its status has been seen
-// to change since, sends nothing and succeeds: another Esc would open Claude's rewind menu or
-// Codex's backtrack mode. false (no error): it wasn't working by the time the click came, so
+// A second stop of the same agent before its status was seen to change since the last one
+// (within StopRepeatMs) sends nothing and succeeds: another Esc would open Claude's rewind menu
+// or Codex's backtrack mode. A stop that timed out may still be delivered, so it holds until the
+// status changes, however long. false (no error): it wasn't working by the time the click came, so
 // nothing was sent. An error is a whole sentence for the user ("Couldn't stop docs: it isn't
 // running anymore.").
 func (h *AgentHandle) Interrupt(ctx context.Context, name string) (bool, error) {
@@ -41,13 +42,19 @@ func (h *AgentHandle) Interrupt(ctx context.Context, name string) (bool, error) 
 		return true, nil // the stop before it is still on its way
 	}
 	sent, err := h.interrupt(ctx, a)
-	if err != nil || !sent {
+	switch {
+	case IsHostError(err, HostTimeout):
+		h.stops.hold(name, now) // its Esc may still land when the session catches up
+	case err != nil || !sent:
 		h.stops.drop(name, now)
 	}
-	return sent, err
+	if err != nil {
+		return false, stopFailed(name, err)
+	}
+	return sent, nil
 }
 
-// interrupt sends a's stop.
+// interrupt sends a's stop; an error is the host's own.
 func (h *AgentHandle) interrupt(ctx context.Context, a AgentInfo) (bool, error) {
 	session := h.deps.Host.Session()
 	switch {
@@ -59,24 +66,25 @@ func (h *AgentHandle) interrupt(ctx context.Context, a AgentInfo) (bool, error) 
 		return false, nil
 	case a.Origin == OriginUser:
 		if a.User != nil && !a.User.Reachable {
-			return false, stopFailed(a.Name, errUnreachable)
+			return false, errUnreachable
 		}
 		r := sessionTool(ctx, session, McpCall{Kind: CallInterruptSession, Name: a.Name}, h.maskPending)
 		if r.Err != nil {
-			return false, stopFailed(a.Name, r.Err)
+			return false, r.Err
 		}
 		return true, nil
 	default:
 		if err := session.SendKeys(ctx, a.Name, []string{"Escape"}); err != nil {
-			return false, stopFailed(a.Name, err)
+			return false, err
 		}
 		h.stepLocked(WorkerInterruptedInput(a.Name)) // a pane not Pixie's worker: Esc was all
 		return true, nil
 	}
 }
 
-// StopRepeatMs: a stop of the same agent this soon after the last one sends nothing (#309).
-const StopRepeatMs Millis = 2_000
+// StopRepeatMs: how long a stop holds back the next one of the same agent while its status
+// hasn't been seen to change (#309); after that a stop goes regardless (it ignored the Esc).
+const StopRepeatMs Millis = 5_000
 
 // stopGuard remembers each agent's last stop, until its status is seen to change.
 type stopGuard struct {
@@ -87,13 +95,14 @@ type stopGuard struct {
 type stopMark struct {
 	at      Millis
 	changed bool // its status was seen to be other than working since
+	held    bool // it timed out: it holds until changed, not only StopRepeatMs
 }
 
 // take: a stop of name may go now (and is recorded); false: one went too recently.
 func (g *stopGuard) take(name string, now Millis) bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if m, ok := g.last[name]; ok && (satSub(now, m.at) < StopRepeatMs || !m.changed) {
+	if m, ok := g.last[name]; ok && !m.changed && (m.held || satSub(now, m.at) < StopRepeatMs) {
 		return false
 	}
 	if g.last == nil {
@@ -109,6 +118,16 @@ func (g *stopGuard) drop(name string, now Millis) {
 	defer g.mu.Unlock()
 	if m, ok := g.last[name]; ok && m.at == now {
 		delete(g.last, name)
+	}
+}
+
+// hold keeps the stop taken at now until name's status changes (it timed out).
+func (g *stopGuard) hold(name string, now Millis) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if m, ok := g.last[name]; ok && m.at == now {
+		m.held = true
+		g.last[name] = m
 	}
 }
 
