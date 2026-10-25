@@ -441,6 +441,7 @@ var Fields = concat(
 		unit(spec("captionDismissSecs", "Put away what Pixie said after", "0 keeps it until something new. The ✕ on it puts it away at once.", intKind(0, 86400, false), ApplyLive), "seconds"),
 		unit(spec("captionFadeSecs", "Fade the earlier caption after", "When you or Pixie start talking, the last caption moves up and fades this long after; 0 shows only the latest.", intKind(0, 60, false), ApplyLive), "seconds"),
 		unit(spec("replyHistoryMins", "Keep Pixie's replies for", "To step back through with the arrows on the reply; 0 keeps only the latest.", intKind(0, 60, false), ApplyLive), "minutes"),
+		unit(spec("chatKeepDays", "Keep chat for", "How many days the chat window keeps what was said. It stays on this Mac.", intKind(1, 90, false), ApplyLive), "days"),
 	),
 
 	group(SectionVoice, "Voice service",
