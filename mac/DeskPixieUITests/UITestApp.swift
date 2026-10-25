@@ -16,6 +16,9 @@ final class UITestApp {
     /// `DESKPIXIE_UITEST_LIVE=1` (passed as `TEST_RUNNER_DESKPIXIE_UITEST_LIVE` by `make uitest`):
     /// the tests that need herdr, the coordinator and a model run too.
     static var live: Bool { ProcessInfo.processInfo.environment["DESKPIXIE_UITEST_LIVE"] == "1" }
+    /// `DESKPIXIE_UITEST_SESSIONS=1` (`TEST_RUNNER_DESKPIXIE_UITEST_SESSIONS`): the tests with
+    /// real claude sessions of yours connected to the app (`ChatSessionsUITests`).
+    static var withSessions: Bool { ProcessInfo.processInfo.environment["DESKPIXIE_UITEST_SESSIONS"] == "1" }
 
     /// A short path under /tmp: the core keeps its pix socket under the data folder, and a long
     /// one would fall back to a socket shared with the user's app.
@@ -26,6 +29,8 @@ final class UITestApp {
     let session: String
     let port: Int
     let live: Bool
+    /// The real home, for claude's login: live runs, and the connected-sessions tier.
+    let realHome: Bool
     /// `agent.enabled`. Attachments live in the agent, so the clipboard tests turn it on: with
     /// `warm` off it starts no coordinator until a message is sent.
     let agent: Bool
@@ -36,13 +41,14 @@ final class UITestApp {
 
     /// Skips the test while a copy of the UITest build it didn't launch is running (launching
     /// here would end it). The user's own DeskPixie, under its real bundle ID, doesn't count.
-    init(live: Bool = false, agent: Bool? = nil) throws {
+    init(live: Bool = false, agent: Bool? = nil, realHome: Bool? = nil) throws {
         if !NSRunningApplication.runningApplications(withBundleIdentifier: Self.bundleID).isEmpty {
             throw XCTSkip("Quit DeskPixie UITest to run the UI tests")
         }
         let tag = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(12)
         self.live = live
         self.agent = agent ?? live
+        self.realHome = realHome ?? live
         root = URL(fileURLWithPath: "/tmp/dpui-\(tag)", isDirectory: true)
         support = root.appendingPathComponent("support", isDirectory: true)
         home = root.appendingPathComponent("home", isDirectory: true)
@@ -131,7 +137,7 @@ final class UITestApp {
     /// which is read before the app's own defaults and never written back.
     func launch() {
         var env = ["DESKPIXIE_SUPPORT_DIR": support.path]
-        if !live {
+        if !realHome {
             // Offline, the core's home and the app's preferences are this run's own too. Live
             // runs keep the real home: the coordinator and claude need its login.
             env["HOME"] = home.path

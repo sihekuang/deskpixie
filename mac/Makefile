@@ -22,10 +22,13 @@ test:
 # The chat window's UI tests (XCUITest), on this Mac only, against the UITest build: the app
 # under its own bundle ID (com.sihekuang.deskpixie.uitest), so yours can stay open. Each test
 # runs its own copy on a fresh data folder, herdr session and port.
-#   make uitest SIGNING_IDENTITY="Developer ID Application: ..." DEVELOPMENT_TEAM=... [DESKPIXIE_UITEST_LIVE=1]
+#   make uitest SIGNING_IDENTITY="Developer ID Application: ..." DEVELOPMENT_TEAM=... [DESKPIXIE_UITEST_LIVE=1] [DESKPIXIE_UITEST_SESSIONS=1]
 # DESKPIXIE_UITEST_LIVE=1 adds the tests that need herdr, claude and the coordinator.
+# DESKPIXIE_UITEST_SESSIONS=1 adds the tests with two real claude sessions (pix, in a private
+# tmux server) connected to the app; sending to one starts the coordinator. Both cost a little.
 uitest: project
-	TEST_RUNNER_DESKPIXIE_UITEST_LIVE="$(DESKPIXIE_UITEST_LIVE)" xcodebuild -project DeskPixie.xcodeproj \
+	TEST_RUNNER_DESKPIXIE_UITEST_LIVE="$(DESKPIXIE_UITEST_LIVE)" \
+	TEST_RUNNER_DESKPIXIE_UITEST_SESSIONS="$(DESKPIXIE_UITEST_SESSIONS)" xcodebuild -project DeskPixie.xcodeproj \
 		-scheme DeskPixie -configuration UITest -derivedDataPath build $(BUILD_SIGN_FLAGS) \
 		-only-testing:DeskPixieUITests test
 
