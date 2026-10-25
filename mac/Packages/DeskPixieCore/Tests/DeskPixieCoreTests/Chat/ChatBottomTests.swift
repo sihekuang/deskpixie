@@ -72,30 +72,37 @@ final class ChatBottomTests: XCTestCase {
     /// macOS 15, opened from Pixie's button with DeskPixie in the background: the opening scroll
     /// ran but the window came up at the top, under "↓ Latest". Until it is seen at the bottom,
     /// each layout scrolls there again.
+    private let t0 = Date(timeIntervalSinceReferenceDate: 1000)
+
     func testAnOpeningScrollThatDidntLandScrollsAgain() {
         var b = ChatBottom()
-        b.aimed(atBottom: true)
-        XCTAssertTrue(b.landing)
-        XCTAssertFalse(b.landed(sentinelMaxY: 2040, viewportHeight: 0), "no viewport yet: wait for it")
-        XCTAssertTrue(b.landed(sentinelMaxY: 2040, viewportHeight: 500), "at the top: again")
-        XCTAssertTrue(b.landed(sentinelMaxY: 2040, viewportHeight: 500))
-        XCTAssertFalse(b.landed(sentinelMaxY: 500, viewportHeight: 500), "there")
-        XCTAssertFalse(b.landing)
-        XCTAssertFalse(b.landed(sentinelMaxY: 2040, viewportHeight: 500), "a scroll up after that is yours")
+        b.aimed(atBottom: true, at: t0)
+        XCTAssertFalse(b.landed(sentinelMaxY: 2040, viewportHeight: 0, at: t0), "no viewport yet: wait for it")
+        XCTAssertTrue(b.landed(sentinelMaxY: 2040, viewportHeight: 500, at: t0), "at the top: again")
+        XCTAssertTrue(b.landed(sentinelMaxY: 2040, viewportHeight: 500, at: t0 + 0.1))
+        XCTAssertFalse(b.landed(sentinelMaxY: 500, viewportHeight: 500, at: t0 + 0.2), "there")
+        XCTAssertFalse(b.landed(sentinelMaxY: 2040, viewportHeight: 500, at: t0 + 0.3), "a scroll up after that is yours")
     }
 
     func testItTriesAFewTimesOnly() {
         var b = ChatBottom()
-        b.aimed(atBottom: true)
-        let tries = (0..<10).filter { _ in b.landed(sentinelMaxY: 2040, viewportHeight: 500) }.count
+        b.aimed(atBottom: true, at: t0)
+        let tries = (0..<10).filter { _ in b.landed(sentinelMaxY: 2040, viewportHeight: 500, at: t0) }.count
         XCTAssertEqual(tries, ChatBottom.landingTries)
-        XCTAssertFalse(b.landing)
+    }
+
+    /// Shown again after a hide, already at the bottom: the opening scroll moves nothing and no
+    /// report comes. A scroll up later is yours, not a landing to finish.
+    func testLandingEndsByItselfSoALaterScrollUpIsLeftAlone() {
+        var b = ChatBottom()
+        b.aimed(atBottom: true, at: t0)
+        XCTAssertFalse(b.landed(sentinelMaxY: 2040, viewportHeight: 500, at: t0 + ChatBottom.landingTime + 0.01))
+        XCTAssertFalse(b.landed(sentinelMaxY: 2040, viewportHeight: 500, at: t0 + 120))
     }
 
     func testAnOpeningAtAMessageIsLeftWhereItIs() {
         var b = ChatBottom()
-        b.aimed(atBottom: false)
-        XCTAssertFalse(b.landing)
-        XCTAssertFalse(b.landed(sentinelMaxY: 2040, viewportHeight: 500))
+        b.aimed(atBottom: false, at: t0)
+        XCTAssertFalse(b.landed(sentinelMaxY: 2040, viewportHeight: 500, at: t0))
     }
 }

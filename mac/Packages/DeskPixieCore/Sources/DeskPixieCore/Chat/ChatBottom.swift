@@ -42,21 +42,26 @@ public struct ChatBottom: Equatable, Sendable {
 
     // MARK: Landing
 
-    /// How many times an opening scroll to the end is tried again.
+    /// How many times an opening scroll to the end is tried again, and for how long after it.
     public static let landingTries = 3
+    public static let landingTime: TimeInterval = 1
     private var triesLeft = 0
-    /// The opening scroll went to the end and hasn't been seen there yet. On macOS 15, opened from
-    /// Pixie's button with DeskPixie in the background, the scroll can run without moving
-    /// anything, and the window came up at the top under "↓ Latest".
-    public var landing: Bool { triesLeft > 0 }
+    private var landingUntil = Date.distantPast
 
-    /// The opening scroll went to the end (true) or to a message (false).
-    public mutating func aimed(atBottom: Bool) { triesLeft = atBottom ? Self.landingTries : 0 }
+    /// The opening scroll went to the end (true) or to a message (false). On macOS 15, opened
+    /// from Pixie's button with DeskPixie in the background, it can run without moving anything,
+    /// and the window came up at the top under "↓ Latest".
+    public mutating func aimed(atBottom: Bool, at now: Date = Date()) {
+        triesLeft = atBottom ? Self.landingTries : 0
+        landingUntil = now.addingTimeInterval(Self.landingTime)
+    }
 
-    /// A layout report while the opening scroll lands. True: scroll to the end again. A report
-    /// before the viewport has its height decides nothing.
-    public mutating func landed(sentinelMaxY: Double, viewportHeight: Double) -> Bool {
-        guard landing, viewportHeight > 0 else { return false }
+    /// A layout report just after an opening scroll to the end that isn't there yet. True: scroll
+    /// to the end again. A report before the viewport has its height decides nothing; one after
+    /// the moment is over is a scroll of yours (shown again already at the bottom, no report
+    /// comes to end it).
+    public mutating func landed(sentinelMaxY: Double, viewportHeight: Double, at now: Date = Date()) -> Bool {
+        guard triesLeft > 0, now <= landingUntil, viewportHeight > 0 else { return false }
         if ChatThreadModel.isAtBottom(sentinelMaxY: sentinelMaxY, viewportHeight: viewportHeight) {
             triesLeft = 0
             return false
