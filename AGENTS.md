@@ -80,6 +80,14 @@ make -C mac build SIGNING_IDENTITY="Developer ID Application: …" DEVELOPMENT_T
   hook port. Use `t.TempDir()`, a temporary `HOME`, and `DESKPIXIE_SUPPORT_DIR` for an isolated
   app data folder. If a test leaves anything in the real home, that is a bug to fix.
 - A flaky test is a bug: fix the race, don't retry it.
+- UI tests (XCUITest, `mac/DeskPixieUITests`) run in CI on every PR and push to main, in
+  their own job: the offline set plus the stand-in sessions tier
+  (`DESKPIXIE_UITEST_SESSIONS=1`), ad-hoc signed with the hardened runtime off and automation
+  mode turned on without a password (see the workflow). The live tier
+  (`DESKPIXIE_UITEST_LIVE=1`) stays local. Locally they take over the screen, so run them
+  only when the tests or the chat window changed:
+  `make -C mac uitest DESKPIXIE_UITEST_SESSIONS=1 SIGNING_IDENTITY="Developer ID Application: …" DEVELOPMENT_TEAM=…`.
+  A failed CI run uploads its `.xcresult`.
 - Live tests (`-tags live`) hit real services. Voice runs cost money: run them only when the
   voice model's behavior itself changed, Gemini Live first, and stop there if it fails.
   Coordinator changes get the cheaper coordinator live tests instead.

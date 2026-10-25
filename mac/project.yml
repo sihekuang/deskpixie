@@ -159,9 +159,9 @@ targets:
           else
             rm -f "$RES/DeepFilterNet3.tar.gz"
           fi
-  # XCUITest (#302): the chat window, driven like a person would. Run on this Mac, signed
-  # (`make uitest`), not in CI, against the UITest build. Each test runs its own app on a fresh
-  # data folder.
+  # XCUITest (#302): the chat window, driven like a person would, against the UITest build
+  # (`make uitest`; CI runs it ad-hoc signed, .github/workflows/ci.yml). Each test runs its own
+  # app on a fresh data folder.
   DeskPixieUITests:
     type: bundle.ui-testing
     platform: macOS

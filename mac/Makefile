@@ -19,7 +19,7 @@ build: project
 test:
 	cd Packages/DeskPixieCore && swift test
 
-# The chat window's UI tests (XCUITest), on this Mac only, against the UITest build: the app
+# The chat window's UI tests (XCUITest), against the UITest build (CI runs them too: ci.yml): the app
 # under its own bundle ID (com.sihekuang.deskpixie.uitest), so yours can stay open. Each test
 # runs its own copy on a fresh data folder, herdr session and port.
 #   make uitest SIGNING_IDENTITY="Developer ID Application: ..." DEVELOPMENT_TEAM=... [DESKPIXIE_UITEST_LIVE=1] [DESKPIXIE_UITEST_SESSIONS=1]
