@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -418,5 +419,36 @@ func TestASpokenSessionNoticeWaitsOnTheBadge(t *testing.T) {
 	sessionTurn(c, longTurn, T0+20)
 	if got := c.Updates(); len(got) != 0 {
 		t.Fatalf("still there after its next turn: %+v", got)
+	}
+}
+
+func deliveredIDs(fx []Effect) []uint64 {
+	var out []uint64
+	for _, e := range fx {
+		if e.Kind == EfDelivered {
+			out = append(out, e.Value.([]uint64)...)
+		}
+	}
+	return out
+}
+
+// #302: a line replayed in a conversation was heard, so the thread shows it read.
+func TestALineReplayedInAConversationIsDelivered(t *testing.T) {
+	c := ctlWith(func(s *Settings) { s.SessionTurns = true })
+	line := outboxLines(sessionTurn(c, longTurn, T0))[0]
+	if got := deliveredIDs(c.Step(voiceOpened(), T0+10)); !slices.Equal(got, []uint64{line.ID}) {
+		t.Fatalf("delivered = %v, want [%d]", got, line.ID)
+	}
+	if got := deliveredIDs(c.Step(voiceOpened(), T0+20)); len(got) != 0 {
+		t.Fatal("delivered twice:", got)
+	}
+}
+
+// #302: a line seen in the bubble was seen, so the thread shows it read.
+func TestALineSeenInTheBubbleIsDelivered(t *testing.T) {
+	c := ctlWith(func(s *Settings) { s.SessionTurns = true })
+	line := outboxLines(sessionTurn(c, longTurn, T0))[0]
+	if got := deliveredIDs(c.Step(UpdatesSeenInput([]uint64{line.ID, 999}), T0+10)); !slices.Equal(got, []uint64{line.ID}) {
+		t.Fatalf("delivered = %v", got)
 	}
 }

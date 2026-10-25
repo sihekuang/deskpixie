@@ -60,6 +60,11 @@ func (s *Store) load() (dirty bool, err error) {
 		return false, err
 	}
 	defer f.Close()
+	return s.read(f)
+}
+
+// read reads records from f into entries, as load does.
+func (s *Store) read(f io.Reader) (dirty bool, err error) {
 	pos := map[string]int{}
 	r := bufio.NewReaderSize(f, maxLine)
 	for {
@@ -69,8 +74,11 @@ func (s *Store) load() (dirty bool, err error) {
 			for err == bufio.ErrBufferFull {
 				_, err = r.ReadSlice('\n')
 			}
-			if err != nil {
+			if err == io.EOF {
 				break
+			}
+			if err != nil {
+				return dirty, err
 			}
 			continue
 		}
@@ -165,7 +173,8 @@ func (s *Store) Close() error {
 	return err
 }
 
-// Clear empties the thread, in memory and in the file.
+// Clear empties the thread, in memory and in the file. When the file can't be replaced, it is
+// emptied in place, so what was cleared never comes back.
 func (s *Store) Clear() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -175,7 +184,18 @@ func (s *Store) Clear() error {
 	if s.path == "" {
 		return nil
 	}
-	return s.rewrite()
+	err := s.rewrite()
+	if err == nil {
+		return nil
+	}
+	if s.file != nil {
+		if s.file.Truncate(0) == nil {
+			return nil
+		}
+	} else if os.Truncate(s.path, 0) == nil {
+		return nil
+	}
+	return err
 }
 
 // persist appends e's whole JSON as one line. A store with no file keeps nothing. Called with
@@ -218,6 +238,9 @@ func (s *Store) rewrite() error {
 		w.WriteByte('\n')
 	}
 	if err := w.Flush(); err != nil {
+		return fail(err)
+	}
+	if err := f.Sync(); err != nil {
 		return fail(err)
 	}
 	if err := os.Rename(tmp, s.path); err != nil {

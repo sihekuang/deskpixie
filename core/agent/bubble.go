@@ -192,9 +192,11 @@ func (c *AgentController) syncUpdates(fx *[]Effect) {
 // still unresolved, clicked or not (#286). A reply line falls through as before.
 func (c *AgentController) updatesSeen(ids []uint64, clicked bool, fx *[]Effect) {
 	keep := func(l OutboxLine) bool { return alerting(l) && c.unresolved(l) }
+	before := c.outbox.undelivered()
 	for _, r := range c.outbox.MarkSeen(ids, keep) {
 		*fx = append(*fx, Effect{Kind: EfAppend, File: OutboxFile, Line: r})
 	}
+	c.heard(before, fx)
 }
 
 // dropDecidedQuestions: a job question (no permission token) whose job has left Question (it

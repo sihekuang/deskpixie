@@ -380,6 +380,7 @@ const (
 	EfChat             // Chat: a spoken line for a job typed in the text box (#221)
 	EfReply            // Reply: a card for the reply deck (#286)
 	EfLine             // Outbox: a reply line for the chat thread (#302)
+	EfDelivered        // Value ([]uint64): outbox lines you heard or saw, read in the chat thread (#302)
 )
 
 // Effect is one thing the caller must do, in order. Err set (non-empty) is the Err branch of
@@ -908,10 +909,12 @@ func (c *AgentController) voiceOpened(fx *[]Effect) {
 			digest = append(digest, Line{Text: l.Text, Kind: l.Kind, Token: l.Token, Job: l.Job, Worker: l.Worker, Session: l.Session})
 		}
 	}
+	before := c.outbox.undelivered()
 	notice, records := c.outbox.Replay(c.confirms.IsPendingToken)
 	for _, line := range records {
 		*fx = append(*fx, Effect{Kind: EfAppend, File: OutboxFile, Line: line})
 	}
+	c.heard(before, fx)
 	if notice != nil {
 		n := c.remember(*notice, digest)
 		*fx = append(*fx, Effect{Kind: EfInject, Notice: n})
@@ -950,7 +953,7 @@ func (c *AgentController) restore(jobs, outbox []string, keep bool, now Millis, 
 	}
 	*fx = append(*fx,
 		Effect{Kind: EfRewrite, File: JobsFile, Lines: c.jobs.Lines()},
-		Effect{Kind: EfRewrite, File: OutboxFile, Lines: c.outbox.Lines()},
+		Effect{Kind: EfRewrite, File: OutboxFile, Lines: c.outbox.Records()},
 	)
 }
 
@@ -1875,7 +1878,7 @@ func (c *AgentController) onSessionTurn(name string, t SessionTurn, now Millis, 
 				c.keepHeardAlert(line, now, fx) // on the badge too, until answered (#286 call 7)
 			}
 			c.boxAnswered = job
-			*fx = append(*fx, Effect{Kind: EfChat, Chat: ChatLine{Job: job, Status: status, Text: SessionTurnBrief(gist), Sessions: []string{name}}})
+			*fx = append(*fx, Effect{Kind: EfChat, Chat: ChatLine{Job: job, Status: status, Text: SessionTurnBrief(gist), Sessions: []string{name}, Session: name}})
 			return
 		}
 	}
@@ -2143,6 +2146,14 @@ func (c *AgentController) applyDelivery(d RouteDelivery, now Millis, fx *[]Effec
 			c.cardFor(pushed, fx)
 			*fx = append(*fx, Effect{Kind: EfLine, Outbox: pushed})
 		}
+	}
+}
+
+// heard: the lines undelivered before (outbox.undelivered) that are delivered now were heard or
+// seen, so the chat thread shows them read (#302).
+func (c *AgentController) heard(before map[uint64]bool, fx *[]Effect) {
+	if ids := c.outbox.deliveredOf(before); len(ids) > 0 {
+		*fx = append(*fx, Effect{Kind: EfDelivered, Value: ids})
 	}
 }
 

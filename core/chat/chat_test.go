@@ -237,3 +237,38 @@ func TestGetIsTheEntryWithThatIDAsACopy(t *testing.T) {
 		t.Fatal("an unknown id was found")
 	}
 }
+
+func TestRenewMakesARequestNewAgain(t *testing.T) {
+	s := NewMemory(func() int64 { return 0 })
+	s.Add(Entry{ID: "req4", At: 1_000, Who: Who{Kind: "session", Name: "w1"}, Text: "old?", Lines: []uint64{4},
+		Request: &Request{Item: 4, Kind: "question", Outcome: "Answered elsewhere"}})
+	if got := s.MarkRead("req4"); !slices.Equal(got, []uint64{4}) {
+		t.Fatal(got)
+	}
+	e := s.Renew(Entry{ID: "req4", At: 9_000, Who: Who{Kind: "session", Name: "w1"}, Text: "new?", Lines: []uint64{4},
+		Request: &Request{Item: 4, Kind: "question"}})
+	if e.Read || e.Request.Outcome != "" || len(s.Needs()) != 1 || s.Len() != 1 {
+		t.Fatalf("renewed = %+v", e)
+	}
+	if got := s.MarkRead("req4"); !slices.Equal(got, []uint64{4}) {
+		t.Fatalf("MarkRead after Renew = %v, want line 4 again", got)
+	}
+}
+
+func TestMarkLinesReadMarksTheEntriesHoldingThem(t *testing.T) {
+	s := NewMemory(func() int64 { return 0 })
+	a := s.Add(coordinator(1_000, "a", 1))
+	s.Add(Entry{At: 1_500, Who: Who{Kind: "session", Name: "w1"}, Text: "b", Lines: []uint64{2}})
+	s.Add(Entry{At: 2_000, Who: Who{Kind: "session", Name: "w2"}, Text: "c", Lines: []uint64{3}})
+	changed := s.MarkLinesRead([]uint64{1, 3, 99})
+	if len(changed) != 2 || changed[0].ID != a.ID || !changed[0].Read || s.Unread() != 1 {
+		t.Fatalf("changed = %+v, unread %d", changed, s.Unread())
+	}
+	if again := s.MarkLinesRead([]uint64{1}); len(again) != 0 {
+		t.Fatal("marked twice:", again)
+	}
+	last := s.Page("", 1)[0].ID
+	if got := s.MarkRead(last); !slices.Equal(got, []uint64{2}) {
+		t.Fatalf("MarkRead = %v, want only the line not heard", got)
+	}
+}

@@ -231,6 +231,9 @@ func TestASessionsReplyToATypedMessageGoesToTheBox(t *testing.T) {
 	fx := sessionTurn(c, pixieTurn("The redirect loop is fixed and all 412 tests pass."), T0+20)
 	wantChat(t, fx, ChatLine{Job: job(1), Status: "done", Text: "The redirect loop is fixed and all 412 tests pass."})
 	noUsualRoute(t, fx)
+	if got := chats(fx)[0].Session; got != "api-claude" {
+		t.Fatalf("the session's own turn, not the coordinator's: Session = %q", got) // #302
+	}
 	// Its later turns too (a background task it waited on), even ones Pixie didn't prompt.
 	later := pixieTurn("Also pushed the branch.")
 	later.FromPixie = false

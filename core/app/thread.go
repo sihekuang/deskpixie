@@ -11,13 +11,18 @@ import (
 	"github.com/sihekuang/deskpixie/core/chat"
 )
 
-// The chat window's thread (#302): chat.entries, chat.needs, chat.read and chat.clear; every
-// change comes back as `chat.entry` (an entry added or changed), `chat.needs` (the open requests,
-// when they change) and `chat.badge` (what Pixie's badge shows). What you send, what you and
-// Pixie say aloud, the agent's lines and requests, and your answers to them all land here.
+// The chat window's thread (#302): chat.entries, chat.needs, chat.badge, chat.read and
+// chat.clear; every change comes back as `chat.entry` (an entry added or changed), `chat.needs`
+// (the open requests, when they change) and `chat.badge` (what Pixie's badge shows), and
+// `chat.reset` when entries went (cleared, or older than chatKeepDays): the window reloads.
+// What you send, what you and Pixie say aloud, the agent's lines and requests, and your answers
+// to them all land here.
 
 // outcomeElsewhere: a request that went from the list before you answered it here.
 const outcomeElsewhere = "Answered elsewhere"
+
+// outcomeChatAbout: "Chat about this" on a session menu.
+const outcomeChatAbout = "You chose to chat about this"
 
 // threadNow is the thread's clock, in ms.
 func threadNow() int64 { return time.Now().UnixMilli() }
@@ -38,6 +43,7 @@ type threadOp struct {
 	a       *App
 	needs   []string // the open requests' ids before the change
 	changed bool
+	reset   bool        // entries went: the window reloads
 	preview *chat.Entry // the newest entry the change added that isn't yours
 }
 
@@ -58,11 +64,20 @@ func (op *threadOp) add(e chat.Entry) chat.Entry {
 		last = p[0].ID
 	}
 	stored := s.Add(e)
-	if !existed && stored.ID != last && stored.Who.Kind != "you" {
-		op.preview = &stored
-	}
-	op.sent(stored)
+	op.added(stored, !existed && stored.ID != last)
 	return stored
+}
+
+// renew puts e in as a new entry over the one with its ID, and says so.
+func (op *threadOp) renew(e chat.Entry) {
+	op.added(op.a.thread.Renew(e), true)
+}
+
+func (op *threadOp) added(e chat.Entry, isNew bool) {
+	if isNew && e.Who.Kind != "you" {
+		op.preview = &e
+	}
+	op.sent(e)
 }
 
 // update changes the entry with this id by fn and says so.
@@ -77,22 +92,31 @@ func (op *threadOp) sent(e chat.Entry) {
 	op.a.emit("chat.entry", map[string]any{"entry": e})
 }
 
-// end sends the open requests when they changed and the badge after any change, then unlocks.
+// end sends chat.reset when entries went, the open requests when they changed and the badge
+// after any change, then unlocks.
 func (op *threadOp) end() {
 	a := op.a
 	defer a.threadMu.Unlock()
-	if !op.changed {
+	if op.reset {
+		a.emit("chat.reset", nil)
+	}
+	if !op.changed && !op.reset {
 		return
 	}
 	needs := a.thread.Needs()
 	if !slices.Equal(entryIDs(needs), op.needs) {
 		a.emit("chat.needs", map[string]any{"entries": orNoEntries(needs)})
 	}
-	badge := map[string]any{"needs": len(needs), "unread": a.thread.Unread()}
+	badge := a.badgeLocked()
 	if p := op.preview; p != nil {
 		badge["preview"] = map[string]any{"id": p.ID, "who": p.Who, "text": p.Text}
 	}
 	a.emit("chat.badge", badge)
+}
+
+// badgeLocked is what Pixie's badge shows: the requests waiting on you and the entries unread.
+func (a *App) badgeLocked() map[string]any {
+	return map[string]any{"needs": len(a.thread.Needs()), "unread": a.thread.Unread()}
 }
 
 func entryIDs(es []chat.Entry) []string {
@@ -118,15 +142,20 @@ func (a *App) threadAdd(e chat.Entry) {
 }
 
 // threadRequests is every open request now. One not stored yet is added; one stored is left as
-// it is, outcome and all; an open one that is no longer listed was answered somewhere else.
+// it is, outcome and all, unless it is from another time: its line id was given to a new
+// request, which replaces it. An open one that is no longer listed was answered somewhere else.
 func (a *App) threadRequests(list []chat.Entry) {
 	op := a.beginThread()
 	defer op.end()
 	listed := map[string]bool{}
 	for _, e := range list {
 		listed[e.ID] = true
-		if _, ok := a.thread.Get(e.ID); !ok {
+		stored, ok := a.thread.Get(e.ID)
+		switch {
+		case !ok:
 			op.add(e)
+		case e.At != 0 && stored.At != e.At:
+			op.renew(e)
 		}
 	}
 	for _, e := range a.thread.Needs() {
@@ -136,17 +165,62 @@ func (a *App) threadRequests(list []chat.Entry) {
 	}
 }
 
+// threadDelivered: these outbox lines were heard or seen elsewhere, so their entries are read.
+func (a *App) threadDelivered(lines []uint64) {
+	op := a.beginThread()
+	defer op.end()
+	for _, e := range a.thread.MarkLinesRead(lines) {
+		op.sent(e)
+	}
+}
+
 // threadAnswered records your answer to the open request with this token: outcome makes its
 // text from the request's entry. No open request has it: nothing is recorded.
 func (a *App) threadAnswered(token string, outcome func(chat.Entry) string) {
+	if token == "" {
+		return
+	}
 	op := a.beginThread()
 	defer op.end()
 	for _, e := range a.thread.Needs() {
-		if e.Request.Token == token && token != "" {
+		if e.Request.Token == token {
 			text := outcome(e)
 			op.update(e.ID, func(e *chat.Entry) { e.Request.Outcome = text })
 			return
 		}
+	}
+}
+
+// threadSentAnswer records a message sent in the box as the answer to the question it
+// answered: a request with no token that is the job's own (session "") or that session's. The
+// newest one still open, or marked answered elsewhere (the agent's new list may come before
+// this does).
+func (a *App) threadSentAnswer(job, session, text string) {
+	op := a.beginThread()
+	defer op.end()
+	asked := func(e chat.Entry) bool {
+		r := e.Request
+		if r == nil || r.Token != "" || (r.Outcome != "" && r.Outcome != outcomeElsewhere) {
+			return false
+		}
+		if session != "" {
+			return e.Who.Kind == "session" && e.Who.Name == session
+		}
+		return r.Job == job && job != ""
+	}
+	before := ""
+	for {
+		page := a.thread.Page(before, chat.PageSize)
+		for _, e := range page {
+			if asked(e) {
+				op.update(e.ID, func(e *chat.Entry) { e.Request.Outcome = "You answered: " + text })
+				return
+			}
+		}
+		if len(page) < chat.PageSize {
+			return
+		}
+		before = page[len(page)-1].ID
 	}
 }
 
@@ -173,18 +247,26 @@ func typedOutcome(text string) func(chat.Entry) string {
 	return func(chat.Entry) string { return "You answered: " + text }
 }
 
-// threadSpoken is a transcript from the voice loop: yours, or Pixie's.
+func fixedOutcome(text string) func(chat.Entry) string {
+	return func(chat.Entry) string { return text }
+}
+
+// threadSpoken is a transcript from the voice loop: yours, or Pixie's (read: you heard it).
 func (a *App) threadSpoken(role, text string) {
 	if strings.TrimSpace(text) == "" {
 		return
 	}
-	who := chat.Who{Kind: "pixie"}
-	if role == "user" {
-		who = chat.Who{Kind: "you"}
-	} else if role != "assistant" {
+	var e chat.Entry
+	switch role {
+	case "user":
+		e = chat.Entry{Who: chat.Who{Kind: "you"}}
+	case "assistant":
+		e = chat.Entry{Who: chat.Who{Kind: "pixie"}, Read: true}
+	default:
 		return
 	}
-	a.threadAdd(chat.Entry{Who: who, Text: text, Spoken: true})
+	e.Text, e.Spoken = text, true
+	a.threadAdd(e)
 }
 
 // sessionLabel is the label of the newest entry from the session at this address, else the
@@ -207,10 +289,18 @@ func (a *App) sessionLabel(session string) string {
 	}
 }
 
-// threadSent is your message, sent as job. Its ID is the job's, so it never joins the one
-// before it (a reply to another session, say).
+// threadSent is your message, sent as job. Its ID is its own, so it never joins the one before
+// it (a reply to another session, say) and a later message for the same job (an answer to its
+// question) never replaces it. sentSeq starts from the clock, so no earlier run gave it out.
 func (a *App) threadSent(job, text string, attachments []string, session string) {
-	e := chat.Entry{ID: "sent" + job, Who: chat.Who{Kind: "you"}, Text: text, Attachments: attachments}
+	a.threadMu.Lock()
+	if a.sentSeq == 0 {
+		a.sentSeq = threadNow()
+	}
+	a.sentSeq++
+	id := "sent" + job + "." + strconv.FormatInt(a.sentSeq, 10)
+	a.threadMu.Unlock()
+	e := chat.Entry{ID: id, Who: chat.Who{Kind: "you"}, Text: text, Attachments: attachments}
 	if session != "" {
 		e.Sessions = []string{session}
 	}
@@ -221,12 +311,12 @@ func (a *App) threadSent(job, text string, attachments []string, session string)
 func (a *App) applyChatKeepDays(days uint32) error {
 	op := a.beginThread()
 	defer op.end()
-	before := a.thread.Unread()
+	before := a.thread.Len()
 	err := a.thread.SetKeepDays(int(days))
 	if err != nil {
 		log.Printf("chat: keeping %d days: %v", days, err)
 	}
-	op.changed = a.thread.Unread() != before || !slices.Equal(entryIDs(a.thread.Needs()), op.needs)
+	op.reset = a.thread.Len() != before
 	return err
 }
 
@@ -243,6 +333,11 @@ func (a *App) registerThread(r Registrar) {
 	})
 	r.Register("chat.needs", func(json.RawMessage) (any, error) {
 		return map[string]any{"entries": orNoEntries(a.thread.Needs())}, nil
+	})
+	r.Register("chat.badge", func(json.RawMessage) (any, error) {
+		a.threadMu.Lock()
+		defer a.threadMu.Unlock()
+		return a.badgeLocked(), nil
 	})
 	r.Register("chat.read", func(args json.RawMessage) (any, error) {
 		var in struct {
@@ -263,7 +358,7 @@ func (a *App) registerThread(r Registrar) {
 	})
 	r.Register("chat.clear", func(json.RawMessage) (any, error) {
 		op := a.beginThread()
-		op.changed = true
+		op.reset = true
 		err := a.thread.Clear()
 		op.end()
 		if err != nil {

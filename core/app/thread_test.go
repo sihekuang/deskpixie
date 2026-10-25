@@ -144,7 +144,7 @@ func TestVoiceTranscriptsAreYoursAndPixies(t *testing.T) {
 	if you.Who.Kind != "you" || !you.Spoken || you.Text != "what time is it" || you.At == 0 {
 		t.Fatalf("yours = %+v", you)
 	}
-	if pixie.Who.Kind != "pixie" || !pixie.Spoken || pixie.Text != "Ten past three." || pixie.Read {
+	if pixie.Who.Kind != "pixie" || !pixie.Spoken || pixie.Text != "Ten past three." || !pixie.Read { // heard (#302 review)
 		t.Fatalf("Pixie's = %+v", pixie)
 	}
 	if n := len(h.kinds(h.take(), "transcript")); n != 3 {
@@ -401,5 +401,198 @@ func TestClearingEmptiesTheThread(t *testing.T) {
 	}
 	if b := h.kinds(evs, "chat.badge"); len(b) != 1 || b[0]["needs"] != 0.0 || b[0]["unread"] != 0.0 {
 		t.Fatalf("chat.badge = %v", b)
+	}
+}
+
+// jobQuestion is job's own question, as the updates list holds it (no token).
+func jobQuestion(item uint64, job, text string) chat.Entry {
+	return chat.Entry{ID: fmt.Sprintf("req%d", item), At: time.Now().UnixMilli(), Who: chat.Who{Kind: "coordinator"}, Text: text,
+		Lines: []uint64{item}, Request: &chat.Request{Item: item, Kind: "question", Job: job}}
+}
+
+// #302 review (C1): send, question, answer, done are four entries, in order.
+func TestOneTypedJobKeepsEveryTurn(t *testing.T) {
+	f := &fakeAgent{tray: AgentTray{Enabled: true}}
+	h := newHarness(t, withAgent(f))
+	var out struct{ Job string }
+	json.Unmarshal(h.call("chat.send", map[string]any{"text": "fix the flaky test"}), &out)
+	f.hooks.ThreadRequests([]chat.Entry{jobQuestion(1, out.Job, "Which repo?")})
+	f.asking = out.Job // the real agent answers the waiting question with the same job
+	var again struct{ Job string }
+	json.Unmarshal(h.call("chat.send", map[string]any{"text": "deskpixie"}), &again)
+	if again.Job != out.Job {
+		t.Fatal("the answer goes to the waiting job:", again.Job)
+	}
+	f.hooks.ThreadRequests(nil)
+	f.hooks.ThreadAnswer(chat.Entry{ID: "job" + out.Job + ".2", Who: chat.Who{Kind: "coordinator"}, Text: "Fixed it."})
+	got := h.entries(nil)
+	slices.Reverse(got)
+	var texts []string
+	for _, e := range got {
+		texts = append(texts, e.Text)
+	}
+	if !slices.Equal(texts, []string{"fix the flaky test", "Which repo?", "deskpixie", "Fixed it."}) {
+		t.Fatalf("entries %q", texts)
+	}
+	if got[0].ID == got[2].ID {
+		t.Fatal("your answer replaced your first message")
+	}
+	if o := got[1].Request.Outcome; o != "You answered: deskpixie" {
+		t.Fatalf("the question's outcome = %q", o)
+	}
+}
+
+// #302 review (I4): a reply to a session is never taken for the answer to a waiting question.
+func TestASessionReplyIsNeverTakenForAWaitingAnswer(t *testing.T) {
+	f := &fakeAgent{tray: AgentTray{Enabled: true}}
+	h := newHarness(t, withAgent(f))
+	f.hooks.ThreadRequests([]chat.Entry{jobQuestion(1, "job_000000000009", "Which repo?")})
+	f.asking = "job_000000000009"
+	f.hooks.ThreadLine(sessionLine(2, "w1", "docs", "done", 0))
+	h.call("chat.send", map[string]any{"text": "ship it", "session": "w1"})
+	if f.delegated != 1 || f.asking == "" || !slices.Equal(f.sent, []string{"Tell the docs session: ship it"}) {
+		t.Fatalf("delegated %d, still waiting %q, sent %q", f.delegated, f.asking, f.sent)
+	}
+	if o := outcomeOf(t, h, "req1"); o != "" {
+		t.Fatal("the waiting question was answered:", o)
+	}
+}
+
+// #302 review (I5): an answer sent in the box is recorded on the question it answered: the
+// job's own, or the session's whose question the box shows, even after the agent's new list
+// called it answered elsewhere.
+func TestAnAnswerSentInTheBoxIsRecordedOnItsQuestion(t *testing.T) {
+	f := &fakeAgent{tray: AgentTray{Enabled: true}}
+	h := newHarness(t, withAgent(f))
+	asks := request(2, "", "Also fix the logout page?")
+	asks.Request.Kind, asks.Request.Token = "question", ""
+	f.hooks.ThreadRequests([]chat.Entry{jobQuestion(1, "job_000000000007", "Which repo?"), asks})
+	f.asking, f.askingSession = "job_000000000007", "w1"
+	h.call("chat.send", map[string]any{"text": " yes please "})
+	if o := outcomeOf(t, h, "req2"); o != "You answered: yes please" {
+		t.Fatalf("the session's question = %q", o)
+	}
+	if o := outcomeOf(t, h, "req1"); o != "" {
+		t.Fatal("the job's question was answered too:", o)
+	}
+	f.hooks.ThreadRequests([]chat.Entry{jobQuestion(1, "job_000000000007", "Which repo?")})
+	f.hooks.ThreadRequests(nil) // the list moves on before the send's answer is recorded
+	f.asking = "job_000000000007"
+	h.call("chat.send", map[string]any{"text": "deskpixie"})
+	if o := outcomeOf(t, h, "req1"); o != "You answered: deskpixie" {
+		t.Fatalf("the job's question = %q", o)
+	}
+	h.call("chat.send", map[string]any{"text": "and another thing"}) // a new job: answers nothing
+	if o := outcomeOf(t, h, "req2"); o != "You answered: yes please" {
+		t.Fatal(o)
+	}
+}
+
+// #302 review (I5, M3): Chat about this is an answer too; a blank typed answer is none.
+func TestChatAboutIsRecordedAndABlankTypedAnswerIsNot(t *testing.T) {
+	f := &fakeAgent{tray: AgentTray{Enabled: true}}
+	h := newHarness(t, withAgent(f))
+	f.hooks.ThreadRequests([]chat.Entry{request(1, "t1", "Pick one", "a", "b"), request(2, "t2", "Name it?", "Type something")})
+	h.call("agent.chatAbout", map[string]any{"token": "t1"})
+	h.call("agent.typedAnswer", map[string]any{"token": "t2", "text": "   "})
+	if o := outcomeOf(t, h, "req1"); o != "You chose to chat about this" {
+		t.Fatal(o)
+	}
+	if o := outcomeOf(t, h, "req2"); o != "" {
+		t.Fatal("a blank answer was recorded:", o)
+	}
+	if !slices.Equal(f.decided, []string{"t1:chat", "t2:typed    "}) {
+		t.Fatal(f.decided)
+	}
+}
+
+// #302 review (I6): the window and the badge read it at launch.
+func TestTheBadgeCanBeReadAtLaunch(t *testing.T) {
+	f := &fakeAgent{tray: AgentTray{Enabled: true}}
+	h := newHarness(t, withAgent(f))
+	if got := string(h.call("chat.badge", nil)); got != `{"needs":0,"unread":0}` {
+		t.Fatal(got)
+	}
+	f.hooks.ThreadLine(sessionLine(1, "w1", "docs", "done", 0))
+	f.hooks.ThreadRequests([]chat.Entry{request(2, "t2", "push?")})
+	if got := string(h.call("chat.badge", nil)); got != `{"needs":1,"unread":2}` {
+		t.Fatal(got)
+	}
+}
+
+// #302 review (R12): when entries go, the window reloads.
+func TestClearingOrKeepingFewerDaysResetsTheWindow(t *testing.T) {
+	f := &fakeAgent{tray: AgentTray{Enabled: true}}
+	h := newHarness(t, withAgent(f))
+	now := time.Now().UnixMilli()
+	f.hooks.ThreadLine(sessionLine(1, "w1", "docs", "old", now-3*24*60*60*1000))
+	f.hooks.ThreadLine(sessionLine(2, "w2", "api", "new", 0))
+	h.take()
+	h.set("chatKeepDays", 5) // drops nothing
+	if n := len(h.kinds(h.take(), "chat.reset")); n != 0 {
+		t.Fatal("reset with nothing dropped")
+	}
+	h.set("chatKeepDays", 2)
+	evs := h.take()
+	if n := len(h.kinds(evs, "chat.reset")); n != 1 {
+		t.Fatalf("chat.reset events = %d", n)
+	}
+	if b := h.kinds(evs, "chat.badge"); len(b) != 1 || b[0]["unread"] != 1.0 {
+		t.Fatalf("chat.badge = %v", b)
+	}
+	h.call("chat.clear", nil)
+	if n := len(h.kinds(h.take(), "chat.reset")); n != 1 {
+		t.Fatalf("chat.reset after clear = %d", n)
+	}
+}
+
+// #302 review (I2): a request whose line id came back for a new request (from another run) is
+// a new request: open again, unread, its line handed out again.
+func TestARequestWithAReusedIDIsANewRequest(t *testing.T) {
+	f := &fakeAgent{tray: AgentTray{Enabled: true}}
+	h := newHarness(t, withAgent(f))
+	old := request(4, "t1", "run make")
+	old.At = time.Now().UnixMilli() - 60_000
+	f.hooks.ThreadRequests([]chat.Entry{old})
+	h.call("agent.decide", map[string]any{"token": "t1", "allow": true})
+	h.call("chat.read", map[string]any{"upTo": "req4"})
+	h.take()
+	fresh := request(4, "t9", "push to main")
+	f.hooks.ThreadRequests([]chat.Entry{fresh})
+	got := h.entries(nil)
+	if len(got) != 1 || got[0].Text != "push to main" || got[0].Request.Outcome != "" || got[0].Read {
+		t.Fatalf("entries = %+v", got)
+	}
+	if b := h.kinds(h.take(), "chat.badge"); len(b) != 1 || b[0]["preview"] == nil || b[0]["needs"] != 1.0 {
+		t.Fatalf("chat.badge = %v", b)
+	}
+	h.call("chat.read", map[string]any{"upTo": "req4"})
+	if !slices.Equal(f.shownReplies(), []uint64{4, 4}) {
+		t.Fatal("the new request's line was not handed out again:", f.shownReplies())
+	}
+	f.hooks.ThreadRequests([]chat.Entry{fresh}) // the same one again: left alone
+	if n := len(h.kinds(h.take(), "chat.entry")); n != 0 {
+		t.Fatal("renewed twice")
+	}
+}
+
+// #302 review (I3): what you heard (or saw in the bubble) is read in the thread.
+func TestLinesHeardElsewhereAreRead(t *testing.T) {
+	f := &fakeAgent{tray: AgentTray{Enabled: true}}
+	h := newHarness(t, withAgent(f))
+	f.hooks.ThreadLine(sessionLine(7, "w1", "docs", "done", 0))
+	f.hooks.ThreadLine(sessionLine(8, "w2", "api", "done too", 0))
+	h.take()
+	f.hooks.ThreadDelivered([]uint64{7})
+	evs := h.take()
+	if ent := h.kinds(evs, "chat.entry"); len(ent) != 1 || !entryOf(t, ent[0]).Read || entryOf(t, ent[0]).Text != "done" {
+		t.Fatalf("chat.entry = %v", ent)
+	}
+	if b := h.kinds(evs, "chat.badge"); len(b) != 1 || b[0]["unread"] != 1.0 {
+		t.Fatalf("chat.badge = %v", b)
+	}
+	h.call("chat.read", map[string]any{"upTo": h.entries(nil)[0].ID})
+	if !slices.Equal(f.shownReplies(), []uint64{8}) {
+		t.Fatal("a heard line was shown again:", f.shownReplies())
 	}
 }

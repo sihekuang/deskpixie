@@ -40,6 +40,10 @@ type fakeAgent struct {
 	focusedSessions []string
 	focusOutcomes   []string
 	sent            []string
+	jobs            int    // jobs started by the box
+	delegated       int    // ChatDelegate calls
+	asking          string // the job whose question the box waits on ("" = none)
+	askingSession   string // and the session that asked it, when a session did
 	chatErr         error
 	stops           int
 	textModes       []bool

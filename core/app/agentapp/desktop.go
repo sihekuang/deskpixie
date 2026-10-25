@@ -112,14 +112,16 @@ func (f focusSink) Focus(plan agent.FocusPlan) {
 	}
 }
 
-// chatSink: a typed job's line → the app's `chat.line` event (#221).
-type chatSink struct{ hooks app.AgentHooks }
+// chatSink: a typed job's line → the app's `chat.line` event (#221), and its answers to the
+// thread (#302).
+type chatSink struct {
+	hooks app.AgentHooks
+	feed  *threadFeed // nil: no thread
+}
 
 func (c chatSink) Chat(l agent.ChatLine) {
 	c.hooks.Chat(l)
-	if e, ok := EntryForChat(l); ok && c.hooks.ThreadAnswer != nil {
-		c.hooks.ThreadAnswer(e)
-	}
+	c.feed.answer(l)
 }
 
 // replySink: a reply card → the app's `reply.card` event.
@@ -147,6 +149,9 @@ func (r rosterSink) Roster(v agent.RosterView) {
 type lineSink struct{ feed *threadFeed }
 
 func (l lineSink) Line(line agent.OutboxLine) { l.feed.line(line) }
+
+// Delivered: lines heard or seen elsewhere are read in the thread.
+func (l lineSink) Delivered(ids []uint64) { l.feed.delivered(ids) }
 
 func call(f func()) {
 	if f != nil {

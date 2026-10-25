@@ -34,6 +34,8 @@ type Request struct {
 	Options []string `json:"options,omitempty"`
 	Typed   bool     `json:"typed,omitempty"`
 	Outcome string   `json:"outcome,omitempty"`
+	// Job is the job asking ("" = a session's question or a permission no job owns).
+	Job string `json:"job,omitempty"`
 }
 
 // Entry is one message in the thread.
@@ -86,6 +88,27 @@ func NewMemory(now func() int64) *Store {
 func (s *Store) Add(e Entry) Entry {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.add(e)
+}
+
+// Renew puts e in the thread as a new entry: it replaces the one with its ID, if any, and its
+// lines (and the replaced entry's) are handed out by MarkRead again. For a request whose ID
+// came back for a new one.
+func (s *Store) Renew(e Entry) Entry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, l := range e.Lines {
+		delete(s.handed, l)
+	}
+	if i, ok := s.index[e.ID]; ok && e.ID != "" {
+		for _, l := range s.entries[i].Lines {
+			delete(s.handed, l)
+		}
+	}
+	return s.add(e)
+}
+
+func (s *Store) add(e Entry) Entry {
 	e = clone(e)
 	if e.At == 0 && s.now != nil {
 		e.At = s.now()
@@ -226,6 +249,34 @@ func (s *Store) MarkRead(upTo string) []uint64 {
 		}
 	}
 	return lines
+}
+
+// MarkLinesRead marks the entries holding any of these outbox lines read (they were heard or
+// seen elsewhere), and counts the lines as handed out, so MarkRead never returns them. Returns
+// the entries it changed.
+func (s *Store) MarkLinesRead(lines []uint64) []Entry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, l := range lines {
+		s.handed[l] = true
+	}
+	var changed []Entry
+	for i := range s.entries {
+		e := &s.entries[i]
+		if !e.Read && slices.ContainsFunc(e.Lines, func(l uint64) bool { return slices.Contains(lines, l) }) {
+			e.Read = true
+			s.persist(*e)
+			changed = append(changed, clone(*e))
+		}
+	}
+	return changed
+}
+
+// Len is how many entries the thread holds.
+func (s *Store) Len() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.entries)
 }
 
 // Unread is how many entries you have not read, not counting your own.

@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -312,5 +313,65 @@ func TestALineOverTheLimitIsSkipped(t *testing.T) {
 	}
 	if n := len(lines(t, dir)); n != 2 {
 		t.Fatalf("file has %d lines after compacting, want 2", n)
+	}
+}
+
+// failingReader gives data, then fails with err.
+type failingReader struct {
+	data []byte
+	err  error
+}
+
+func (r *failingReader) Read(p []byte) (int, error) {
+	if len(r.data) == 0 {
+		return 0, r.err
+	}
+	n := copy(p, r.data)
+	r.data = r.data[n:]
+	return n, nil
+}
+
+func TestAReadErrorAfterALineOverTheLimitFails(t *testing.T) {
+	broken := errors.New("disk gone")
+	s := NewMemory(nil)
+	_, err := s.read(&failingReader{data: []byte(strings.Repeat("x", maxLine+10)), err: broken})
+	if !errors.Is(err, broken) {
+		t.Fatalf("read = %v, want the read error", err)
+	}
+}
+
+func TestAClearThatCantReplaceTheFileEmptiesItInPlace(t *testing.T) {
+	dir := t.TempDir()
+	s := openAt(t, dir, 7, 10_000)
+	s.Add(Entry{At: 1_000, Who: Who{Kind: "you"}, Text: "secret"})
+	if err := os.Mkdir(filepath.Join(dir, "thread.jsonl.tmp"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Clear(); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "thread.jsonl")); len(b) != 0 {
+		t.Fatalf("file = %q", b)
+	}
+	s.Add(Entry{At: 9_000, Who: Who{Kind: "pixie"}, Text: "after"})
+	s.Close()
+	if got := openAt(t, dir, 7, 10_000).Page("", 10); len(got) != 1 || got[0].Text != "after" {
+		t.Fatalf("reopened = %+v", got)
+	}
+}
+
+func TestAClearOfAClosedStoreEmptiesTheFileInPlace(t *testing.T) {
+	dir := t.TempDir()
+	s := openAt(t, dir, 7, 10_000)
+	s.Add(Entry{At: 1_000, Who: Who{Kind: "you"}, Text: "secret"})
+	s.Close()
+	if err := os.Mkdir(filepath.Join(dir, "thread.jsonl.tmp"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Clear(); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "thread.jsonl")); len(b) != 0 {
+		t.Fatalf("file = %q", b)
 	}
 }

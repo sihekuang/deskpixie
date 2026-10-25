@@ -2,6 +2,7 @@ package agentapp
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/sihekuang/deskpixie/core/agent"
@@ -54,11 +55,28 @@ func TestASessionNotInTheRosterFallsBackToItsTitleThenItsAddress(t *testing.T) {
 	}
 }
 
+// Worker lines and requests carry Worker, not Session (#302 review).
 func TestAWorkersLineIsNotYours(t *testing.T) {
-	r := rosterWith(agent.RosterRow{Name: "w1", Label: "w1", Status: "idle", Kind: "worker"})
-	w := EntryForLine(agent.OutboxLine{ID: 1, Text: "x", Session: "w1"}, r).Who
-	if w.Yours || w.Status != "idle" {
+	r := rosterWith(agent.RosterRow{Name: "w-upload", Label: "upload worker", Status: "idle", Kind: "worker"})
+	w := EntryForLine(agent.OutboxLine{ID: 1, Text: "x", Job: "j1", Worker: "w-upload"}, r).Who
+	want := chat.Who{Kind: "session", Name: "w-upload", Label: "upload worker", Status: "idle", Color: chat.ColorFor("w-upload")}
+	if w != want {
 		t.Fatalf("%+v", w)
+	}
+	pane := rosterWith(agent.RosterRow{Name: "p1", Label: "a pane", Status: "working", Kind: "pane"})
+	if w := EntryForLine(agent.OutboxLine{ID: 2, Text: "y", Worker: "p1"}, pane).Who; w.Kind != "session" || w.Label != "a pane" || w.Yours {
+		t.Fatalf("pane %+v", w)
+	}
+}
+
+func TestAWorkersRequestIsTheWorkers(t *testing.T) {
+	r := rosterWith(agent.RosterRow{Name: "w-upload", Label: "upload worker", Status: "waiting", Kind: "worker"})
+	es := RequestEntries([]agent.UpdateItem{{ID: 5, Text: "Run rm?", Token: "t5", Job: "j1", Worker: "w-upload"}}, r)
+	if w := es[0].Who; w.Kind != "session" || w.Name != "w-upload" || w.Label != "upload worker" || w.Yours {
+		t.Fatalf("%+v", w)
+	}
+	if es[0].Request.Job != "j1" {
+		t.Fatalf("%+v", es[0].Request)
 	}
 }
 
@@ -114,17 +132,90 @@ func TestAPermissionAndAMenuMapToTheirKinds(t *testing.T) {
 }
 
 func TestAWorkingChatLineIsNoEntry(t *testing.T) {
-	if _, ok := EntryForChat(agent.ChatLine{Job: "j1", Status: "working", Text: "on it"}); ok {
+	if _, ok := EntryForChat(agent.ChatLine{Job: "j1", Status: "working", Text: "on it"}, "id", agent.EmptyRoster()); ok {
 		t.Fatal("a working line made an entry")
 	}
 }
 
+// #302 review: a question is in the thread as a request already (the updates list holds it).
+func TestAQuestionChatLineIsNoEntry(t *testing.T) {
+	if _, ok := EntryForChat(agent.ChatLine{Job: "j1", Status: "question", Text: "Which repo?"}, "id", agent.EmptyRoster()); ok {
+		t.Fatal("a question made an entry")
+	}
+}
+
 func TestADoneChatLineIsTheCoordinatorsAnswer(t *testing.T) {
-	for _, status := range []string{"done", "failed", "question"} {
-		e, ok := EntryForChat(agent.ChatLine{Job: "j1", Status: status, Text: "Finished.", Sessions: []string{"s"}})
-		if !ok || e.ID != "jobj1" || e.Who != (chat.Who{Kind: "coordinator"}) || e.Text != "Finished." || !reflect.DeepEqual(e.Sessions, []string{"s"}) {
+	for _, status := range []string{"done", "failed"} {
+		e, ok := EntryForChat(agent.ChatLine{Job: "j1", Status: status, Text: "Finished.", Sessions: []string{"s"}}, "jobj1.7", agent.EmptyRoster())
+		if !ok || e.ID != "jobj1.7" || e.Who != (chat.Who{Kind: "coordinator"}) || e.Text != "Finished." || !reflect.DeepEqual(e.Sessions, []string{"s"}) {
 			t.Fatalf("%s: %+v", status, e)
 		}
+	}
+}
+
+// #302 review: a session's own answer in the box is the session's, not the coordinator's.
+func TestASessionsChatLineIsTheSessions(t *testing.T) {
+	r := rosterWith(agent.RosterRow{Name: "api-claude", Label: "claude in api", Status: "idle", Kind: "session"})
+	e, ok := EntryForChat(agent.ChatLine{Job: "j1", Status: "done", Text: "Fixed.", Sessions: []string{"api-claude"}, Session: "api-claude"}, "x", r)
+	if !ok || e.Who.Kind != "session" || e.Who.Name != "api-claude" || e.Who.Label != "claude in api" || !e.Who.Yours {
+		t.Fatalf("%+v", e)
+	}
+}
+
+// answers feeds lines through the chat sink and returns the entries the thread got.
+func answers(f *threadFeed, lines ...agent.ChatLine) {
+	for _, l := range lines {
+		chatSink{hooks: app.AgentHooks{Chat: func(any) {}, ThreadAnswer: f.hooks.ThreadAnswer}, feed: f}.Chat(l)
+	}
+}
+
+// #302 review (C1): one typed job with several turns keeps each turn.
+func TestEachTurnOfATypedJobIsAnEntryOfItsOwn(t *testing.T) {
+	var got []chat.Entry
+	f := newThreadFeed(app.AgentHooks{ThreadAnswer: func(e chat.Entry) { got = append(got, e) }})
+	answers(f, agent.ChatLine{Job: "j1", Status: "working", Text: "On it."},
+		agent.ChatLine{Job: "j1", Status: "done", Text: "Two are running."},
+		agent.ChatLine{Job: "j1", Status: "done", Text: "Two are running. One is stuck."}) // grows: the same turn
+	f.sent("j1")
+	answers(f, agent.ChatLine{Job: "j1", Status: "done", Text: "Restarted it."}) // after a send: a new turn
+	answers(f, agent.ChatLine{Job: "j1", Status: "question", Text: "Push it?"},
+		agent.ChatLine{Job: "j1", Status: "done", Text: "Pushed."}) // after a question: a new turn
+	answers(f, agent.ChatLine{Job: "j1", Status: "done", Text: "Something else."}) // says something new
+	answers(f, agent.ChatLine{Job: "j1", Status: "done", Text: "Fixed.", Session: "api-claude"},
+		agent.ChatLine{Job: "j1", Status: "done", Text: "Fixed. Also pushed.", Session: "api-claude"}) // the session's turn grows
+	var ids, texts []string
+	for _, e := range got {
+		ids, texts = append(ids, e.ID), append(texts, e.Text)
+	}
+	wantTexts := []string{"Two are running.", "Two are running. One is stuck.", "Restarted it.", "Pushed.", "Something else.", "Fixed.", "Fixed. Also pushed."}
+	if !reflect.DeepEqual(texts, wantTexts) {
+		t.Fatalf("texts %q", texts)
+	}
+	if ids[0] != ids[1] || ids[5] != ids[6] {
+		t.Fatalf("a growing line got a new id: %q", ids)
+	}
+	distinct := map[string]bool{ids[1]: true, ids[2]: true, ids[3]: true, ids[4]: true, ids[5]: true}
+	if len(distinct) != 5 {
+		t.Fatalf("turns share ids: %q", ids)
+	}
+	if got[5].Who.Kind != "session" {
+		t.Fatalf("the session's turn: %+v", got[5].Who)
+	}
+	other := newThreadFeed(app.AgentHooks{ThreadAnswer: func(chat.Entry) {}})
+	if other.seq <= 0 {
+		t.Fatal("turn numbers start from the clock")
+	}
+}
+
+func TestDeliveredLinesReachTheThread(t *testing.T) {
+	var got [][]uint64
+	f := newThreadFeed(app.AgentHooks{ThreadDelivered: func(ids []uint64) { got = append(got, ids) }})
+	lineSink{f}.Delivered([]uint64{3, 4})
+	lineSink{f}.Delivered(nil)
+	lineSink{newThreadFeed(app.AgentHooks{})}.Delivered([]uint64{1}) // unset hook: nothing
+	lineSink{}.Delivered([]uint64{1})                                // nil feed: nothing
+	if !reflect.DeepEqual(got, [][]uint64{{3, 4}}) {
+		t.Fatal(got)
 	}
 }
 
@@ -150,14 +241,14 @@ func TestTheFeedUsesTheLastRosterAndSkipsUnsetHooks(t *testing.T) {
 	lineSink{newThreadFeed(app.AgentHooks{})}.Line(agent.OutboxLine{ID: 1})
 	updatesSink{}.Updates(nil)
 	rosterSink{}.Roster(agent.EmptyRoster())
-	chatSink{app.AgentHooks{Chat: func(any) {}}}.Chat(agent.ChatLine{Job: "j", Status: "done"})
+	chatSink{hooks: app.AgentHooks{Chat: func(any) {}}}.Chat(agent.ChatLine{Job: "j", Status: "done"})
 }
 
 func TestADoneChatLineReachesThreadAnswer(t *testing.T) {
 	var got []chat.Entry
-	chatSink{app.AgentHooks{Chat: func(any) {}, ThreadAnswer: func(e chat.Entry) { got = append(got, e) }}}.Chat(agent.ChatLine{Job: "j", Status: "working"})
-	chatSink{app.AgentHooks{Chat: func(any) {}, ThreadAnswer: func(e chat.Entry) { got = append(got, e) }}}.Chat(agent.ChatLine{Job: "j", Status: "done", Text: "ok"})
-	if len(got) != 1 || got[0].ID != "jobj" {
+	f := newThreadFeed(app.AgentHooks{ThreadAnswer: func(e chat.Entry) { got = append(got, e) }})
+	answers(f, agent.ChatLine{Job: "j", Status: "working"}, agent.ChatLine{Job: "j", Status: "done", Text: "ok"})
+	if len(got) != 1 || !strings.HasPrefix(got[0].ID, "jobj.") {
 		t.Fatalf("%+v", got)
 	}
 }

@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/sihekuang/deskpixie/core/settings"
 )
@@ -29,16 +30,24 @@ func (a *App) registerChat(r Registrar) {
 		if a.agent == nil {
 			return nil, errNoCoordinator
 		}
-		text := in.Text
 		if in.Session != "" {
-			text = "Tell the " + a.sessionLabel(in.Session) + " session: " + in.Text
+			// Always a new job: never taken for the answer to a question waiting in the box.
+			job, err := a.agent.ChatDelegate("Tell the " + a.sessionLabel(in.Session) + " session: " + in.Text)
+			if err != nil {
+				return nil, err
+			}
+			a.threadSent(job, in.Text, in.Attachments, in.Session)
+			return map[string]any{"job": job}, nil
 		}
-		job, err := a.agent.ChatSend(text)
+		sent, err := a.agent.ChatSend(in.Text)
 		if err != nil {
 			return nil, err
 		}
-		a.threadSent(job, in.Text, in.Attachments, in.Session)
-		return map[string]any{"job": job}, nil
+		a.threadSent(sent.Job, in.Text, in.Attachments, "")
+		if sent.Answered {
+			a.threadSentAnswer(sent.Job, sent.Session, strings.TrimSpace(in.Text))
+		}
+		return map[string]any{"job": sent.Job}, nil
 	})
 	r.Register("chat.stop", func(json.RawMessage) (any, error) {
 		if a.agent != nil {

@@ -23,6 +23,10 @@ type ReplySink interface{ Reply(ReplyCard) }
 // thread (#302), whole rather than joined into a card (nil in Deps: ignored).
 type LineSink interface{ Line(OutboxLine) }
 
+// DeliveredSink gets the outbox lines you heard (replayed in a conversation) or saw (in the
+// bubble), so the chat thread shows them read (#302) (nil in Deps: ignored).
+type DeliveredSink interface{ Delivered(ids []uint64) }
+
 // replyRow is a line as one row of a card: "**who:** the news" when it has a title (its brief, else its text).
 func replyRow(l OutboxLine) string {
 	body := l.Brief

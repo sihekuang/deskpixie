@@ -138,6 +138,7 @@ type App struct {
 	// it makes (thread.go). Never held while calling the agent.
 	thread   *chat.Store
 	threadMu sync.Mutex
+	sentSeq  int64 // the last of your sent entries' numbers (threadSent); under threadMu
 
 	// localTools are built once and shared by the voice loop (voiceTools) and the agent.
 	localTools []tools.Tool
@@ -249,15 +250,16 @@ func New(d Deps) (*App, error) {
 			NotifyUpdate: func(title, body string, update any) {
 				a.emit("notify", map[string]any{"title": title, "body": body, "update": update})
 			},
-			Updates:        func(items any) { a.emit("updates", map[string]any{"lines": items}) },
-			Reply:          func(c any) { a.emit("reply.card", fieldsOf(c)) },
-			Roster:         func(view any) { a.emit("agents", map[string]any{"roster": view}) },
-			ShowPane:       func(job, worker string) { a.emit("showPane", map[string]any{"job": job, "worker": worker}) },
-			Focus:          func(plan any) { a.emit("focusPlan", map[string]any{"plan": plan}) },
-			Chat:           func(line any) { a.emit("chat.line", fieldsOf(line)) },
-			ThreadLine:     a.threadAdd,
-			ThreadRequests: a.threadRequests,
-			ThreadAnswer:   a.threadAdd,
+			Updates:         func(items any) { a.emit("updates", map[string]any{"lines": items}) },
+			Reply:           func(c any) { a.emit("reply.card", fieldsOf(c)) },
+			Roster:          func(view any) { a.emit("agents", map[string]any{"roster": view}) },
+			ShowPane:        func(job, worker string) { a.emit("showPane", map[string]any{"job": job, "worker": worker}) },
+			Focus:           func(plan any) { a.emit("focusPlan", map[string]any{"plan": plan}) },
+			Chat:            func(line any) { a.emit("chat.line", fieldsOf(line)) },
+			ThreadLine:      a.threadAdd,
+			ThreadRequests:  a.threadRequests,
+			ThreadAnswer:    a.threadAdd,
+			ThreadDelivered: a.threadDelivered,
 		})
 		if a.agent != nil {
 			a.agent.SetTextMode(cfg.ReplyMode == settings.ReplyText)
@@ -1349,7 +1351,9 @@ func (a *App) Register(r Registrar) {
 		if err := decodeArgs("agent.typedAnswer", args, &in); err != nil {
 			return nil, err
 		}
-		a.threadAnswered(in.Token, typedOutcome(in.Text))
+		if strings.TrimSpace(in.Text) != "" {
+			a.threadAnswered(in.Token, typedOutcome(in.Text))
+		}
 		if a.agent != nil {
 			a.agent.TypedAnswer(in.Token, in.Text)
 		}
@@ -1362,6 +1366,7 @@ func (a *App) Register(r Registrar) {
 		if err := decodeArgs("agent.chatAbout", args, &in); err != nil {
 			return nil, err
 		}
+		a.threadAnswered(in.Token, fixedOutcome(outcomeChatAbout))
 		if a.agent != nil {
 			a.agent.ChatAbout(in.Token)
 		}
