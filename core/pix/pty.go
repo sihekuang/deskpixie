@@ -2,6 +2,7 @@ package pix
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -33,6 +34,11 @@ type Runner struct {
 	done    chan struct{}
 	code    int
 	restore func()
+
+	outMu sync.Mutex
+	outN  uint64        // reads of the agent's output so far
+	outAt time.Time     // the last one
+	outCh chan struct{} // closed and replaced on each read
 }
 
 // Start starts the agent. Raw mode and resize forwarding only when Stdin is a terminal.
@@ -106,6 +112,7 @@ func (r *Runner) copyOut() {
 	for {
 		n, err := r.ptmx.Read(buf)
 		if n > 0 {
+			r.sawOutput(time.Now()) // counted before anyone sees it, so a write after it isn't answered by it
 			r.Stdout.Write(buf[:n])
 			if r.OnOutput != nil {
 				r.OnOutput(buf[:n])
@@ -126,6 +133,56 @@ func (r *Runner) WriteToAgent(b []byte) error {
 	}
 	_, err := r.ptmx.Write(b)
 	return err
+}
+
+func (r *Runner) sawOutput(now time.Time) {
+	r.outMu.Lock()
+	defer r.outMu.Unlock()
+	r.outN++
+	r.outAt = now
+	if r.outCh != nil {
+		close(r.outCh)
+	}
+	r.outCh = make(chan struct{})
+}
+
+// Outputs counts the agent's output so far, to wait for what it shows after a write (Settle).
+func (r *Runner) Outputs() uint64 {
+	r.outMu.Lock()
+	defer r.outMu.Unlock()
+	return r.outN
+}
+
+// Settle waits until the agent has shown something since Outputs was mark and then shown
+// nothing for quiet: it has taken what was written and redrawn. An error after limit when it
+// showed nothing, or never stopped.
+func (r *Runner) Settle(mark uint64, quiet, limit time.Duration) error {
+	deadline := time.After(limit)
+	for {
+		r.outMu.Lock()
+		if r.outCh == nil {
+			r.outCh = make(chan struct{})
+		}
+		n, at, changed := r.outN, r.outAt, r.outCh
+		r.outMu.Unlock()
+		var settled <-chan time.Time
+		if n > mark {
+			left := quiet - time.Since(at)
+			if left <= 0 {
+				return nil
+			}
+			settled = time.After(left)
+		}
+		select {
+		case <-changed:
+		case <-settled:
+		case <-deadline:
+			if n == mark {
+				return fmt.Errorf("the agent showed nothing in %v", limit)
+			}
+			return fmt.Errorf("the agent's screen didn't settle in %v", limit)
+		}
+	}
 }
 
 // Pid is the agent's process id.

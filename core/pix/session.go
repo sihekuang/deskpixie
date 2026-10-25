@@ -141,25 +141,25 @@ func (s *Session) forceIn(msgs []string) error {
 	if len(msgs) == 0 {
 		return nil
 	}
-	prompt := Paste(strings.Join(msgs, "\n\n"))
+	prompt := strings.Join(msgs, "\n\n")
 	draft, known := s.gate.Draft()
 	empty := known && draft == ""
 	switch {
 	case empty:
-		return s.runner.WriteToAgent(prompt)
+		return s.typeIn(prompt)
 	case s.o.tool == "claude":
 		if err := s.runner.WriteToAgent([]byte{0x13}); err != nil { // Ctrl-S: stash
 			return err
 		}
 		time.Sleep(forceSettle)
-		return s.runner.WriteToAgent(prompt)
+		return s.typeIn(prompt)
 	case known:
 		del := []byte(strings.Repeat("\x7f", utf8.RuneCountInString(draft)))
 		if err := s.runner.WriteToAgent(del); err != nil {
 			return err
 		}
 		time.Sleep(forceSettle)
-		if err := s.runner.WriteToAgent(prompt); err != nil {
+		if err := s.typeIn(prompt); err != nil {
 			return err
 		}
 		time.Sleep(forceSettle)
@@ -167,11 +167,33 @@ func (s *Session) forceIn(msgs []string) error {
 		return s.runner.WriteToAgent([]byte("\x1b[200~" + draft + "\x1b[201~"))
 	}
 	s.gate.Sent() // what it couldn't follow went in with the message
-	return s.runner.WriteToAgent(prompt)
+	return s.typeIn(prompt)
 }
 
 // forceSettle lets the agent take one write before the next when pix sets your draft aside.
 var forceSettle = 300 * time.Millisecond
+
+// typeIn pastes text into the agent, then presses Enter once the agent has taken the paste
+// (#305): Claude Code turns a pasted image path into an attachment and drops an Enter that
+// arrives with the paste, leaving the message unsent. Its redraw ([Image #1]) comes in about
+// 25 ms; pasteQuiet without output after it means it's done. An agent that shows nothing, or
+// never settles, still gets its Enter after pasteLimit: the message isn't lost, only logged.
+func (s *Session) typeIn(text string) error {
+	mark := s.runner.Outputs()
+	if err := s.runner.WriteToAgent(Paste(text)); err != nil {
+		return err
+	}
+	if err := s.runner.Settle(mark, pasteQuiet, pasteLimit); err != nil {
+		s.o.log.Printf("pressing Enter after a paste anyway: %v", err)
+		s.keylog("paste not seen: %v", err)
+	}
+	return s.runner.WriteToAgent([]byte{'\r'})
+}
+
+var (
+	pasteQuiet = 50 * time.Millisecond
+	pasteLimit = time.Second
+)
 
 // keylog appends a line to the file DESKPIXIE_PIX_KEYLOG names (unset: nothing), to see what
 // reaches the typing gate and what it makes of it.
@@ -479,7 +501,7 @@ func (s *Session) flushNow() bool {
 		return false
 	}
 	for _, m := range s.queue.Drain() {
-		if s.runner.WriteToAgent(Paste(m)) != nil {
+		if s.typeIn(m) != nil {
 			return false
 		}
 	}

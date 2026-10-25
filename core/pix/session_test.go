@@ -146,10 +146,20 @@ type harness struct {
 
 func newHarness(t *testing.T, tool string, agent Launch) *harness {
 	t.Helper()
+	return newLoggedHarness(t, tool, agent, nil)
+}
+
+func newLoggedHarness(t *testing.T, tool string, agent Launch, log *Log) *harness {
+	t.Helper()
 	d, sock := newFakeDaemon(t, "")
 	inR, inW, outR, outW := pipes(t)
-	s := newSession(sessionOpts{tool: tool, daemonSock: sock, home: t.TempDir(), stdin: inR, stdout: outW, agent: agent, where: "terminal"})
-	s.runner.Tap = func(b []byte) { tapMu.Lock(); tapped[s] = append(tapped[s], b...); tapMu.Unlock() }
+	s := newSession(sessionOpts{tool: tool, daemonSock: sock, home: t.TempDir(), stdin: inR, stdout: outW, agent: agent, where: "terminal", log: log})
+	s.runner.Tap = func(b []byte) {
+		tapMu.Lock()
+		tapped[s] = append(tapped[s], b...)
+		writes[s] = append(writes[s], write{string(b), time.Now()})
+		tapMu.Unlock()
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	if err := s.start(ctx); err != nil {
@@ -1209,10 +1219,75 @@ func (s *Session) typedForTest() string {
 	return string(tapped[s])
 }
 
+// writesForTest is each write pix made to the agent, and when.
+func (s *Session) writesForTest() []write {
+	tapMu.Lock()
+	defer tapMu.Unlock()
+	return append([]write(nil), writes[s]...)
+}
+
+type write struct {
+	b  string
+	at time.Time
+}
+
 var (
 	tapMu  sync.Mutex
 	tapped = map[*Session][]byte{}
+	writes = map[*Session][]write{}
 )
+
+// #305: Claude Code drops an Enter that comes with a pasted image path, so pix presses Enter on
+// its own once the agent has taken the paste: here, an agent that redraws 300 ms after it.
+func TestEnterWaitsUntilTheAgentHasTakenThePaste(t *testing.T) {
+	h := agentHarness(t, "claude", `stty raw -echo; echo ready; head -c 1 >/dev/null; sleep 0.3; printf '[Image #1]'; sleep 30`)
+	shown(t, h, "ready")
+	msg := "look\nAttached: /tmp/x.png"
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: msg})
+	waitEvent(t, h.d.events, "typed", func(m wire.Msg) bool { return m.ID == "1" && m.Status == "typed" })
+	w := h.s.writesForTest()
+	if len(w) != 2 || w[0].b != string(Paste(msg)) || w[1].b != "\r" {
+		t.Fatalf("writes %+v", w)
+	}
+	if gap := w[1].at.Sub(w[0].at); gap < 300*time.Millisecond || gap >= pasteLimit {
+		t.Fatalf("Enter %v after the paste: not after the agent took it", gap)
+	}
+}
+
+// shown waits for the agent to print text.
+func shown(t *testing.T, h *harness, text string) {
+	t.Helper()
+	var all []byte
+	buf := make([]byte, 256)
+	for deadline := time.Now().Add(5 * time.Second); !strings.Contains(string(all), text); {
+		if time.Now().After(deadline) {
+			t.Fatalf("the agent didn't show %q: %q", text, all)
+		}
+		n, err := h.out.Read(buf)
+		all = append(all, buf[:n]...)
+		if err != nil {
+			t.Fatalf("the agent didn't show %q: %v", text, err)
+		}
+	}
+}
+
+// An agent that never shows the paste still gets its Enter, after pasteLimit, and pix logs why.
+func TestEnterGoesAnywayWhenTheAgentShowsNothing(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "pix.log")
+	h := newLoggedHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "stty raw -echo; echo ready; sleep 30"}}, openLog(logPath, 2<<20, "claude"))
+	waitEvent(t, h.d.events, "connected", func(m wire.Msg) bool { return m.Event == "status" })
+	t.Cleanup(func() { h.s.runner.Hangup(); h.s.finish() })
+	shown(t, h, "ready")
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "hello"})
+	waitEvent(t, h.d.events, "typed", func(m wire.Msg) bool { return m.ID == "1" && m.Status == "typed" })
+	w := h.s.writesForTest()
+	if len(w) != 2 || w[1].b != "\r" || w[1].at.Sub(w[0].at) < pasteLimit {
+		t.Fatalf("writes %+v", w)
+	}
+	if b, _ := os.ReadFile(logPath); !strings.Contains(string(b), "pressing Enter after a paste anyway: the agent showed nothing") {
+		t.Fatalf("log %q", b)
+	}
+}
 
 // #189: pix tells the app which build it is; told it's older than the app's, it shows that on
 // its tab title until it reconnects to an app that says otherwise.

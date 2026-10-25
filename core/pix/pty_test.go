@@ -127,3 +127,52 @@ func TestWaitReturnsWhenADescendantKeepsTheTerminal(t *testing.T) {
 		t.Fatal("Wait hangs while a descendant holds the terminal")
 	}
 }
+
+// #305: Settle waits for the agent to show something after a write and then go quiet.
+func TestSettleWaitsForTheAgentToShowAndGoQuiet(t *testing.T) {
+	r := &Runner{}
+	mark := r.Outputs()
+	go func() {
+		for i := 0; i < 3; i++ {
+			time.Sleep(20 * time.Millisecond)
+			r.sawOutput(time.Now())
+		}
+	}()
+	start := time.Now()
+	if err := r.Settle(mark, 50*time.Millisecond, 2*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(start); took < 110*time.Millisecond || r.Outputs() != mark+3 {
+		t.Fatalf("settled after %v and %d outputs: before the agent was done", took, r.Outputs()-mark)
+	}
+}
+
+func TestSettleFailsWhenTheAgentShowsNothing(t *testing.T) {
+	r := &Runner{}
+	r.sawOutput(time.Now()) // before the write: not an answer to it
+	start := time.Now()
+	err := r.Settle(r.Outputs(), 10*time.Millisecond, 100*time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "showed nothing") || time.Since(start) < 100*time.Millisecond {
+		t.Fatalf("err %v after %v", err, time.Since(start))
+	}
+}
+
+func TestSettleFailsWhenTheAgentNeverStops(t *testing.T) {
+	r := &Runner{}
+	mark := r.Outputs()
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			case <-time.After(5 * time.Millisecond):
+				r.sawOutput(time.Now())
+			}
+		}
+	}()
+	if err := r.Settle(mark, 50*time.Millisecond, 200*time.Millisecond); err == nil || !strings.Contains(err.Error(), "didn't settle") {
+		t.Fatalf("err %v", err)
+	}
+}

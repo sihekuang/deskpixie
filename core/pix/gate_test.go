@@ -148,7 +148,7 @@ func TestSanitizeStripsPasteEnd(t *testing.T) {
 }
 
 func TestPaste(t *testing.T) {
-	if got := string(Paste("a\nb")); got != "\x1b[200~a\nb\x1b[201~\r" {
+	if got := string(Paste("a\nb")); got != "\x1b[200~a\nb\x1b[201~" { // Enter goes on its own (#305)
 		t.Fatalf("%q", got)
 	}
 }
