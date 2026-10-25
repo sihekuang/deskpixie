@@ -1494,7 +1494,9 @@ func TestCodexsInterruptFrameWithItsOldBusyFooterKeepsPixiesHold(t *testing.T) {
 	h := turnHarness(t, "codex", Launch{Path: "/bin/sh", Args: []string{"-c",
 		"stty raw -echo; printf '• Working (1s • esc to interrupt)\\r\\n'; head -c 1 >/dev/null; printf '" + frame + "'; sleep 30"}})
 	t.Cleanup(func() { h.s.runner.Hangup(); h.s.finish() })
-	waitEvent(t, h.d.events, "working", func(m wire.Msg) bool { return m.Event == "status" && m.Status == "working" })
+	// The status, not an event: the busy line may come before turnHarness's first status
+	// event, which it then takes.
+	eventually(t, "working", func() bool { return h.s.currentStatus() == "working" })
 	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "check the tests"})
 	waitEvent(t, h.d.events, "waiting", func(m wire.Msg) bool { return m.ID == "1" && m.Status == "waiting" })
 	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "k", Command: "keys", Keys: []string{"Escape"}})
