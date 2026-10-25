@@ -32,8 +32,10 @@ func (OpenSettings) Name() string { return "open_settings" }
 func (OpenSettings) Description() string {
 	return "Open DeskPixie's Settings window, at the setting the user asks about (\"where do I change the " +
 		"microphone\", \"show me the noise filter setting\", \"open settings\"). Pass the setting in a few " +
-		"words as query, or leave it out to just open Settings. It shows the setting and points it out; " +
-		"it changes nothing. Then tell the user which page it is on in one short sentence."
+		"words as query, or leave it out to just open Settings. It only shows the setting and points it out: " +
+		"it changes nothing, so when the user asks to change a setting (turn something on or off, set it, " +
+		"make it louder), hand that off with delegate instead. Then tell the user which page it is on in one " +
+		"short sentence."
 }
 
 func (OpenSettings) Parameters() json.RawMessage {
