@@ -21,8 +21,9 @@ import (
 //
 // A second stop of the same agent before its status was seen to change since the last one
 // (within StopRepeatMs) sends nothing and succeeds: another Esc would open Claude's rewind menu
-// or Codex's backtrack mode. A stop that timed out may still be delivered, so it holds until the
-// status changes, however long. false (no error): it wasn't working by the time the click came, so
+// or Codex's backtrack mode. A stop that timed out may still be delivered, so it holds the next
+// back until the status changes, however long, and that one is refused in words ("Couldn't
+// stop docs: it hasn't answered the last stop yet."). false (no error): it wasn't working by the time the click came, so
 // nothing was sent. An error is a whole sentence for the user ("Couldn't stop docs: it isn't
 // running anymore.").
 func (h *AgentHandle) Interrupt(ctx context.Context, name string) (bool, error) {
@@ -38,10 +39,17 @@ func (h *AgentHandle) Interrupt(ctx context.Context, name string) (bool, error) 
 		return false, nil
 	}
 	now := h.deps.Clock.NowMs()
-	if !h.stops.take(name, now) {
+	switch h.stops.take(name, now) {
+	case stopWait:
 		return true, nil // the stop before it is still on its way
+	case stopWaitTimedOut:
+		// That one may yet land: a second Esc would open a menu. Say so rather than nothing.
+		return false, stopSentence(name, "it hasn't answered the last stop yet")
 	}
 	sent, err := h.interrupt(ctx, a)
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		err = HostError{Kind: HostTimeout, Detail: err.Error()} // the host's send ran out of time
+	}
 	switch {
 	case IsHostError(err, HostTimeout):
 		h.stops.hold(name, now) // its Esc may still land when the session catches up
@@ -98,18 +106,32 @@ type stopMark struct {
 	held    bool // it timed out: it holds until changed, not only StopRepeatMs
 }
 
-// take: a stop of name may go now (and is recorded); false: one went too recently.
-func (g *stopGuard) take(name string, now Millis) bool {
+// stopTake is what take decided.
+type stopTake int
+
+const (
+	stopGo           stopTake = iota // send it (it is recorded)
+	stopWait                         // the last one went just now: nothing to send
+	stopWaitTimedOut                 // the last one timed out and may still land
+)
+
+// take: whether a stop of name may go now.
+func (g *stopGuard) take(name string, now Millis) stopTake {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if m, ok := g.last[name]; ok && !m.changed && (m.held || satSub(now, m.at) < StopRepeatMs) {
-		return false
+	if m, ok := g.last[name]; ok && !m.changed {
+		if m.held {
+			return stopWaitTimedOut
+		}
+		if satSub(now, m.at) < StopRepeatMs {
+			return stopWait
+		}
 	}
 	if g.last == nil {
 		g.last = map[string]stopMark{}
 	}
 	g.last[name] = stopMark{at: now}
-	return true
+	return stopGo
 }
 
 // drop forgets the stop taken at now: it didn't go.
@@ -191,10 +213,6 @@ func stopFailed(name string, err error) error {
 	if errors.Is(err, errCantList) {
 		return errCantList
 	}
-	who := name
-	if name == Coordinator {
-		who = "the coordinator"
-	}
 	var why string
 	var he HostError
 	switch {
@@ -210,6 +228,15 @@ func stopFailed(name string, err error) error {
 		why = he.Detail // pix's own reason, e.g. a startup menu only you should answer (#306)
 	default:
 		return errCantList
+	}
+	return stopSentence(name, why)
+}
+
+// stopSentence is "Couldn't stop <name>: <why>." (the coordinator by its role).
+func stopSentence(name, why string) error {
+	who := name
+	if name == Coordinator {
+		who = "the coordinator"
 	}
 	why = strings.TrimSuffix(strings.TrimSpace(why), ".")
 	return fmt.Errorf("Couldn't stop %s: %s.", who, why)

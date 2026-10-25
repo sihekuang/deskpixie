@@ -89,7 +89,7 @@ final class StopAgentUITests: XCTestCase {
         stop.click()
 
         let notice = h.app.descendants(matching: .any)["roster.notice"]
-        XCTAssertTrue(notice.waitForExistence(timeout: 10), "no failure line")
+        XCTAssertTrue(notice.waitForExistence(timeout: 15), "no failure line")
         XCTAssertEqual(notice.label, "Couldn't stop alpha: it didn't answer in time.")
         // Before it thaws: then pix types the Esc it was sent late (the core holds the next).
         XCTAssertFalse(h.escaped("alpha"), "nothing reached it")

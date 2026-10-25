@@ -3,6 +3,7 @@ package agent_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -329,10 +330,10 @@ func TestAStopThatTimedOutHoldsTheNextUntilTheStatusChanges(t *testing.T) {
 	user.keysErr = nil
 	user.mu.Unlock()
 	r.clock.Advance(10 * StopRepeatMs)
-	// Its Esc may still land when the session catches up: a retry sends no second one.
-	if sent, err := r.h.Interrupt(context.Background(), "focus-claude"); !sent || err != nil {
-		t.Fatal(sent, err)
-	}
+	// Its Esc may still land when the session catches up: a retry sends no second one, and
+	// says why rather than nothing.
+	sent, err = r.h.Interrupt(context.Background(), "focus-claude")
+	wantStopErr(t, sent, err, "Couldn't stop focus-claude: it hasn't answered the last stop yet.")
 	if n := escapes(user.Keys(), "focus-claude"); n != 0 {
 		t.Fatal(user.Keys())
 	}
@@ -385,4 +386,24 @@ func TestStoppingPixiesWorkerTellsTheCoordinator(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestASendThatRunsOutOfTimeIsATimeout(t *testing.T) {
+	for _, cause := range []error{context.DeadlineExceeded, fmt.Errorf("herdr: send keys: %w", context.Canceled)} {
+		r, user := pixRig(t)
+		user.SetStatus("focus-claude", PaneWorking)
+		user.mu.Lock()
+		user.keysErr = cause
+		user.mu.Unlock()
+		sent, err := r.h.Interrupt(context.Background(), "focus-claude")
+		wantStopErr(t, sent, err, "Couldn't stop focus-claude: it didn't answer in time.")
+		user.mu.Lock()
+		user.keysErr = nil
+		user.mu.Unlock()
+		sent, err = r.h.Interrupt(context.Background(), "focus-claude")
+		wantStopErr(t, sent, err, "Couldn't stop focus-claude: it hasn't answered the last stop yet.")
+		if n := escapes(user.Keys(), "focus-claude"); n != 0 {
+			t.Fatal(user.Keys())
+		}
+	}
 }
