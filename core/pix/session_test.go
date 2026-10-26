@@ -1358,18 +1358,45 @@ func TestStopSendsWhatPixiesStopHeld(t *testing.T) {
 	h.s.finish()
 }
 
-// #320: stopping isn't forcing: while you type there, the stopped session's message still
-// waits for you, and your draft is left alone.
+// #320: a question on screen while pix still says working (Codex never says blocked; Claude's
+// dialog shows before its hook): stop doesn't press Esc, which would answer it.
+func TestStopNeverAnswersAQuestion(t *testing.T) {
+	for _, tool := range []string{"claude", "codex"} {
+		h := newHarness(t, tool, Launch{Path: "/bin/sh", Args: []string{"-c", stopsOnEsc}})
+		h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "ls"}})
+		askedQuestion(t, h)
+		h.s.setStatus("working")
+		wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "from pixie"})
+		waitEvent(t, h.d.events, "waiting", func(m wire.Msg) bool { return m.ID == "1" && m.Status == "waiting" })
+		wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "2", Command: "stop"})
+		waitEvent(t, h.d.events, "waiting: blocked", func(m wire.Msg) bool { return m.ID == "2" && m.Status == "waiting" && m.Reason == "blocked" })
+		if got := h.s.typedForTest(); strings.Contains(got, "\x1b") || h.s.queue.Len() != 1 {
+			t.Fatalf("%s: typed %q, %d queued", tool, got, h.s.queue.Len())
+		}
+		h.s.runner.Hangup()
+		h.s.finish()
+	}
+}
+
+// #320: stopping isn't forcing: while you type there the message waits for you, your draft is
+// left alone, and the turn isn't cut for a message that can't go in yet.
 func TestStopNeverTypesOverYourDraft(t *testing.T) {
 	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", stopsOnEsc}})
 	h.s.setStatus("working")
 	h.stdinW.WriteString("my draft")
-	time.Sleep(100 * time.Millisecond)
+	for end := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		if d, _ := h.s.gate.Draft(); d == "my draft" {
+			break
+		}
+		if time.Now().After(end) {
+			t.Fatal("the gate never saw the draft")
+		}
+	}
 	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "from pixie"})
 	waitEvent(t, h.d.events, "waiting: working", func(m wire.Msg) bool { return m.ID == "1" && m.Reason == "working" })
 	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "2", Command: "stop"})
 	waitEvent(t, h.d.events, "waiting: typing", func(m wire.Msg) bool { return m.ID == "2" && m.Status == "waiting" && m.Reason == "typing" })
-	if got := h.s.typedForTest(); !strings.HasSuffix(got, "\x1b") || strings.Contains(got, "from pixie") || h.s.queue.Len() != 1 {
+	if got := h.s.typedForTest(); strings.Contains(got, "\x1b") || strings.Contains(got, "from pixie") || h.s.queue.Len() != 1 || h.s.currentStatus() != "working" {
 		t.Fatalf("typed %q, %d queued", got, h.s.queue.Len())
 	}
 	h.s.runner.Hangup()
@@ -1391,7 +1418,7 @@ func TestStopWaitsWhenTheAgentKeepsWorking(t *testing.T) {
 	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "2", Command: "prompt", Text: "from pixie"})
 	waitEvent(t, h.d.events, "waiting: working", func(m wire.Msg) bool { return m.ID == "2" && m.Reason == "working" })
 	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "3", Command: "stop"})
-	waitEvent(t, h.d.events, "still working", func(m wire.Msg) bool { return m.ID == "3" && m.Status == "waiting" && m.Reason == "working" })
+	waitEvent(t, h.d.events, "still stopping", func(m wire.Msg) bool { return m.ID == "3" && m.Status == "waiting" && m.Reason == "stopping" })
 	if got := h.s.typedForTest(); got != "\x1b" || h.s.queue.Len() != 1 {
 		t.Fatalf("typed %q, %d queued", got, h.s.queue.Len())
 	}

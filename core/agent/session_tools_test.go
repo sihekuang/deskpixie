@@ -424,7 +424,12 @@ func TestStopAndSendSession(t *testing.T) {
 	if v, _ := r.Value.(map[string]any); r.Err != nil || v["status"] != "sent" || len(d.stopped) != 1 {
 		t.Fatalf("stop: %v %v %v", r.Value, r.Err, d.stopped)
 	}
-	d.stopResult = agent.Delivery{Status: "waiting", Reason: "typing"} // stopped, but you're typing there
+	d.stopResult = agent.Delivery{Status: "waiting", Reason: "stopping"} // asked, not stopped yet: don't ask again
+	r = agent.SessionToolForTest(ctx, c, agent.McpCall{Kind: agent.CallStopAndSendSession, Name: "focus-claude"})
+	if why, _ := r.Value.(map[string]any)["why"].(string); !strings.Contains(why, "Don't stop it again") {
+		t.Fatalf("stopping: %v", r.Value)
+	}
+	d.stopResult = agent.Delivery{Status: "waiting", Reason: "typing"} // you're typing there
 	r = agent.SessionToolForTest(ctx, c, agent.McpCall{Kind: agent.CallStopAndSendSession, Name: "focus-claude"})
 	if v, _ := r.Value.(map[string]any); v["status"] != "waiting" || v["reason"] != "typing" {
 		t.Fatalf("typing: %v", r.Value)

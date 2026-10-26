@@ -160,6 +160,8 @@ func WaitingWhy(reason string) string {
 		return "The session is waiting on a question; it gets the message once that's answered."
 	case "typing":
 		return "The person is typing in that session; it gets the message once they send or clear what they typed."
+	case "stopping":
+		return "The session was asked to stop and hasn't yet; it gets the message once it has. Don't stop it again."
 	case "update":
 		return "The session is waiting for the person to answer its update question on its screen; it gets the message once they have. Only the person should answer it."
 	case "trust":

@@ -616,15 +616,34 @@ func (s *Session) runCommand(m wire.Msg) wire.Msg {
 		return wire.Msg{Status: "typed"}
 	case "stop":
 		// "Stop it and send it now" (#320): Esc ends a busy turn, then what waits goes in as any
-		// message would: never past your typing, a question or a menu. Unlike Pixie's stop
-		// button (#309), it holds nothing back, and it lets go of what that stop held.
+		// message would. Never past your typing, a question or a menu, and the turn isn't cut
+		// for a message that would wait for those anyway: an Esc there would answer them.
+		// Unlike Pixie's stop button (#309), it holds nothing back, and it lets go of what that
+		// stop held.
 		s.forgetEsc()
-		if s.queue.Len() > 0 && s.currentStatus() == "working" {
-			if err := s.stopTurn(); err != nil {
-				return wire.Msg{Err: err.Error()}
+		s.release()
+		if s.queue.Len() > 0 || s.hasUnsent() {
+			wait := ""
+			switch {
+			case s.hasUnsent() || s.menuShown() != "":
+				wait = s.waitReason()
+			case s.currentQuestion() != nil:
+				wait = "blocked"
+			case !s.gate.Clear(time.Now()):
+				wait = "typing"
+			case s.currentStatus() == "working":
+				if err := s.stopTurn(); err != nil {
+					return wire.Msg{Err: err.Error()}
+				}
+				if s.currentStatus() == "working" {
+					wait = "stopping" // it gets them once it has
+				}
+			}
+			if wait != "" {
+				s.flushSoon()
+				return wire.Msg{Status: "waiting", Reason: wait}
 			}
 		}
-		s.release()
 		if s.flushNow() {
 			s.keylog("stop: typed")
 			s.delivered()
