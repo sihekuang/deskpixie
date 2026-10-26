@@ -102,7 +102,6 @@ func TestGatedActions(t *testing.T) {
 		{"I'll review it before we publish.", nil},
 		{"Push it once I've reviewed it.", nil},
 		{"Merge after I approve.", nil},
-		{"Hold the push until I say so.", nil},
 		// … while one that waits for something else, or comes before the review, still asks.
 		{"Run the tests before you push.", []string{"push"}},
 		{"Send me a summary before you push.", []string{"push"}},
@@ -129,6 +128,20 @@ func TestGatedActions(t *testing.T) {
 		{"Publish the release when you see my comment is resolved.", []string{"publish"}},
 		{"Push to the branch and merge once I've approved it.", []string{"push"}},
 		{"Push it and open a PR, merge when I approve.", []string{"push"}},
+		{"Hold the push until I say so.", []string{"push"}},
+		{"Keep deploying every hour until I say so.", []string{"deploy"}},
+		{"Keep pushing your fixes until I approve the PR.", []string{"push"}},
+		{"Keep pushing after I approve each one.", []string{"push"}},
+		{"Go ahead and merge it, nothing changed after I approved it.", []string{"merge"}},
+		{"Push it, the tests passed when I checked.", []string{"push"}},
+		{"Deploy it, it looked fine when I looked at staging.", []string{"deploy"}},
+		{"Merge once my review comments are addressed.", []string{"merge"}},
+		{"Push after my review bot passes.", []string{"push"}},
+		{"If you're unsure, ask me before you push.", []string{"push"}},
+		{"If CI fails, check with me before you deploy.", []string{"deploy"}},
+		{"Push after I check in my changes.", []string{"push"}},
+		{"Merge after I have reviewed it.", nil},
+		{"Push after my OK, then merge.", []string{"merge"}},
 	} {
 		if got := GatedActions(tc.text); !slices.Equal(got, tc.want) {
 			t.Errorf("GatedActions(%q) = %q, want %q", tc.text, got, tc.want)

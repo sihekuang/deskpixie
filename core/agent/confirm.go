@@ -545,8 +545,11 @@ func asksWhereThingsStand(words []string) bool {
 // reviewVerbs, reviewNouns and goAheadObjects name the sender's own go-ahead, only in the
 // fixed phrases waitsOnSender reads: a sender or a review elsewhere in the sentence ("I've
 // reviewed it, rebase before you push") isn't what the step waits for.
-var reviewVerbs = map[string]bool{"review": true, "reviewed": true, "approve": true, "approved": true, "check": true,
-	"checked": true, "look": true, "looked": true, "see": true, "seen": true, "sign": true, "signed": true}
+var reviewVerbs = map[string]bool{"review": true, "approve": true, "check": true, "look": true, "see": true, "sign": true}
+
+// reviewedVerbs are a review done, only after "I've": "after I approved it" reports one ("nothing
+// changed after I approved it"), so it waits for nothing.
+var reviewedVerbs = map[string]bool{"reviewed": true, "approved": true, "checked": true, "looked": true, "seen": true, "signed": true}
 
 var reviewNouns = map[string]bool{"ok": true, "okay": true, "review": true, "approval": true, "ahead": true, "off": true}
 
@@ -554,16 +557,22 @@ var reviewNouns = map[string]bool{"ok": true, "okay": true, "review": true, "app
 var goAheadObjects = map[string]bool{"it": true, "that": true, "this": true, "them": true, "these": true, "those": true,
 	"the": true, "changes": true, "change": true, "diff": true, "work": true, "everything": true, "first": true, "at": true, "over": true}
 
-// waitsFor words lead the sender's go-ahead after the step: "push once I've reviewed it".
-var waitsFor = map[string]bool{"after": true, "once": true, "until": true, "when": true}
+// waitsFor words lead the sender's go-ahead after the step: "push once I've reviewed it". Not
+// "until", which says how long to keep at it ("keep deploying until I say so").
+var waitsFor = map[string]bool{"after": true, "once": true, "when": true}
 
 // waitsOnSender: the step at words[i] waits for the sender's own go-ahead, so they're asked
 // again when they give it (#329). Before the step: "have me review it", "let me see", "ask
 // me", "check with me", "wait for my OK", "I'll review it". After it: "once I've reviewed",
-// "after I approve", "after my approval", "until I say so". A step before the review ("push
-// it, then let me review"), or one the wait is further on from ("push and merge once I've
-// approved"), still asks.
+// "after I approve", "after my approval". A step before the review ("push it, then let me
+// review"), one the wait is further on from ("push and merge once I've approved"), one kept at
+// ("keep pushing"), and one in a condition ("if you're unsure, ask me before you push") still
+// ask.
 func waitsOnSender(words []string, i int) bool {
+	if len(words) > 0 && (words[0] == "if" || words[0] == "unless" || len(words) > 1 && words[0] == "in" && words[1] == "case") ||
+		i > 0 && words[i-1] == "keep" {
+		return false
+	}
 	j := i - 1
 	if j >= 0 && (youWords[words[j]] || words[j] == "we") {
 		j--
@@ -603,13 +612,17 @@ func waitsOnSender(words []string, i int) bool {
 		}
 		r := slices.Concat(words[k+1:min(len(words), k+5)], []string{"", "", ""})
 		if r[0] == "i" && r[1] == "have" {
-			r = r[1:]
+			r = append([]string{"i've"}, r[2:]...)
 		}
+		// The phrase ends there: "my review" is a go-ahead, "my review comments" a thing.
+		ends := func(w string) bool { return w == "" || w == "and" || negationEnds[w] }
 		switch {
-		case r[0] == "i" || r[0] == "i've":
-			return reviewVerbs[r[1]] || r[1] == "say" && (r[2] == "so" || r[2] == "go")
+		case r[0] == "i":
+			return reviewVerbs[r[1]] && r[2] != "in" || r[1] == "say" && (r[2] == "so" || r[2] == "go")
+		case r[0] == "i've":
+			return reviewedVerbs[r[1]] && r[2] != "in"
 		case r[0] == "my":
-			return reviewNouns[r[1]] || (r[1] == "go" || r[1] == "sign") && reviewNouns[r[2]]
+			return reviewNouns[r[1]] && ends(r[2]) || (r[1] == "go" || r[1] == "sign") && reviewNouns[r[2]] && ends(r[3])
 		}
 		return false
 	}
