@@ -343,6 +343,9 @@ func (s *Session) answer(id, choice string) wire.Msg {
 	l := &landing{marker: q.marker, detail: q.detail, done: make(chan struct{})}
 	s.landing = l
 	s.mu.Unlock()
+	if string(keys) == "\x1b" {
+		s.stopKey() // Claude's No shows its interrupt and fires no Stop (#322)
+	}
 	if err := s.runner.WriteToAgent(keys); err != nil {
 		s.dropLanding(l)
 		return wire.Msg{Err: err.Error()}

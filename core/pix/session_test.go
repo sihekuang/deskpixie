@@ -686,6 +686,59 @@ func TestNoAtAClaudePermissionIsEscape(t *testing.T) {
 	typed(t, h, 0x1b)
 }
 
+// #322: Pixie's No is an Esc pix types itself: Claude's interrupt then ends the blocked turn.
+func TestNoAtAClaudePermissionEndsTheTurn(t *testing.T) {
+	h := keyHarness(t, "claude")
+	h.s.setStatus("working")
+	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Edit", "tool_input": map[string]any{"file_path": "/x/a.go"}})
+	q := askedQuestion(t, h)
+	h.s.runner.OnOutput([]byte("Edit file a.go\r\nDo you want to make this edit to a.go?"))
+	if err := answer(t, h, q.ID, "no"); err != "" {
+		t.Fatal(err)
+	}
+	h.s.runner.OnOutput([]byte("\r\n" + claudeInterrupted + "\r\n────\r\n"))
+	waitEvent(t, h.d.events, "idle", func(m wire.Msg) bool { return m.Event == "status" && m.Status == "idle" })
+}
+
+// #322: an Esc at idle (closing a menu, clearing a draft) or one before Enter stops nothing:
+// the interrupt Claude draws again as the next prompt starts leaves it working.
+func TestAnEscThatStoppedNothingDoesNotCount(t *testing.T) {
+	redraw := []byte("\x1b[2J\x1b[H" + claudeInterrupted + "\r\n────\r\n❯ \r\n────\r\n")
+	h := keyHarness(t, "claude")
+	h.s.setStatus("idle")
+	h.s.runner.OnInput([]byte{0x1b}) // at idle
+	h.s.Hook("UserPromptSubmit", map[string]any{"prompt": "next"})
+	h.s.runner.OnOutput(redraw)
+	if st := h.s.currentStatus(); st != "working" {
+		t.Fatalf("an Esc at idle: %s", st)
+	}
+	h.s.runner.OnInput([]byte{0x1b}) // working, but Enter follows: a prompt, not a stop
+	h.s.runner.OnInput([]byte("\r"))
+	h.s.runner.OnOutput(redraw)
+	if st := h.s.currentStatus(); st != "working" {
+		t.Fatalf("an Esc before Enter: %s", st)
+	}
+	h.s.runner.OnInput([]byte{0x1b}) // a real stop
+	h.s.runner.OnOutput(redraw)
+	if st := h.s.currentStatus(); st != "idle" {
+		t.Fatalf("the stop: %s", st)
+	}
+}
+
+// #322: what counts as a stop key in a read.
+func TestIsStopKey(t *testing.T) {
+	for in, want := range map[string]bool{
+		"\x1b": true, "\x1b\x1b\x1b": true, "\x1bq": true, "\x03": true, "x\x03": true,
+		"\x1b[27u": true, "\x1b[27;1:1u\x1b[27;1:3u": true, "\x1b[99;5u": true,
+		"\x1b[A": false, "\x1bOA": false, "\x1b[200~text\x1b[201~": false, "\x1b[27;1:3u": false,
+		"\x1b[I": false, "a": false, "\r": false,
+	} {
+		if got := isStopKey([]byte(in)); got != want {
+			t.Errorf("%q: %t", in, got)
+		}
+	}
+}
+
 func TestAClaudeMenuIsAnsweredWithItsDigit(t *testing.T) {
 	h := keyHarness(t, "claude")
 	h.s.Hook("PreToolUse", map[string]any{"tool_name": "AskUserQuestion", "tool_input": map[string]any{"questions": []any{
