@@ -384,7 +384,6 @@ func (c *Conversation) Step(in Input, now time.Time) []Effect {
 	case InInject:
 		if c.IsActive() {
 			c.heard = append(c.heard, strings.ToLower(in.Notice.Text))
-			c.asked = c.asked || sayConfirm.MatchString(in.Notice.Text) || asksQuestion(in.Notice.Text)
 			c.injects = append(c.injects, in.Notice)
 			fx = c.tryInject(now, fx)
 		} else {
@@ -710,6 +709,8 @@ func (c *Conversation) tryInject(now time.Time, fx []Effect) []Effect {
 	if asksQuestion(n.Text) {
 		c.questionAsked = true
 	}
+	// Once said, not when queued: the user's words before it don't answer it.
+	c.asked = c.asked || sayConfirm.MatchString(n.Text) || asksQuestion(n.Text)
 	if c.endAfterNotice != "" {
 		c.ending, c.endWhy = true, c.endAfterNotice // once Pixie has said it
 		c.endAfterNotice = ""

@@ -433,6 +433,24 @@ func TestARelayedQuestionGetsTimeForTheAnswer(t *testing.T) {
 	}
 }
 
+// #337 review: a question that came in while Pixie was talking, and the user cut in before she
+// relayed it, still gets the time: their words before it don't answer it.
+func TestAQuestionQueuedBeforeTheUserCutInStillGetsTheTime(t *testing.T) {
+	c := NewConversation(ConversationConfig{IdleTimeout: 5 * time.Second})
+	c.Step(HotkeyInput(), t0())
+	model(c, evReady, t0())
+	c.Step(MicLiveInput(), t0())
+	model(c, evResponseCreated, t0())
+	model(c, evAudio(frame()), t0())
+	c.Step(InjectInput(Notice{Text: "Coordinator question: The landing session asks: A or B?"}), ms(t0(), 100))
+	model(c, evSpeechStarted, ms(t0(), 200)) // "thanks"
+	model(c, evSpeechStopped, ms(t0(), 400))
+	reply(c, "You're welcome. The landing session asks: A or B?", ms(t0(), 1_200))
+	if fx := ticks(c, ms(t0(), 1_200), 8*time.Second); closes(fx) {
+		t.Fatal("closed before the user could answer")
+	}
+}
+
 // Without a confirm question the user's own silence timeout decides.
 func TestAPlainNoticeKeepsTheSilenceTimeout(t *testing.T) {
 	c := NewConversation(ConversationConfig{IdleTimeout: 3 * time.Second})
