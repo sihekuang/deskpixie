@@ -688,16 +688,26 @@ func TestNoAtAClaudePermissionIsEscape(t *testing.T) {
 
 // #322: Pixie's No is an Esc pix types itself: Claude's interrupt then ends the blocked turn.
 func TestNoAtAClaudePermissionEndsTheTurn(t *testing.T) {
-	h := keyHarness(t, "claude")
+	// An agent that draws nothing: the test alone feeds the screen, as only the PTY reader may.
+	h := agentHarness(t, "claude", `stty raw -echo; cat >/dev/null`)
 	h.s.setStatus("working")
 	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Edit", "tool_input": map[string]any{"file_path": "/x/a.go"}})
 	q := askedQuestion(t, h)
 	h.s.runner.OnOutput([]byte("Edit file a.go\r\nDo you want to make this edit to a.go?"))
-	if err := answer(t, h, q.ID, "no"); err != "" {
-		t.Fatal(err)
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "no", Command: "answer", Text: q.ID, Source: "no"})
+	for end := time.Now().Add(5 * time.Second); !strings.Contains(h.s.typedForTest(), "\x1b"); time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(end) {
+			t.Fatal("pix never typed its Esc")
+		}
 	}
-	h.s.runner.OnOutput([]byte("\r\n" + claudeInterrupted + "\r\n────\r\n"))
-	waitEvent(t, h.d.events, "idle", func(m wire.Msg) bool { return m.Event == "status" && m.Status == "idle" })
+	// What Claude shows then: the dialog gone, its interrupt over the input box.
+	h.s.runner.OnOutput([]byte("\x1b[2J\x1b[H" + claudeInterrupted + "\r\n────\r\n"))
+	if r := waitEvent(t, h.d.events, "answered", func(m wire.Msg) bool { return m.ID == "no" }); r.Err != "" {
+		t.Fatal(r.Err)
+	}
+	if st := h.s.currentStatus(); st != "idle" {
+		t.Fatalf("after No: %s", st)
+	}
 }
 
 // #322: an Esc at idle (closing a menu, clearing a draft) or one before Enter stops nothing:
