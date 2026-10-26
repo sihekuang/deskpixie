@@ -9,6 +9,17 @@
 //	tool     one of its own tools finished: PostToolUse; what pix answered goes to $FAKE_DIR/context
 //	subtool  a tool of one of its subagents finished: PostToolUse with agent_id; pix's answer too
 //	stop     its turn ended: Stop (idle)
+//	ask      it asks you a menu (AskUserQuestion): its PreToolUse, which pix may hold; an
+//	         answer from the hook ends it, else Claude's menu shows and a digit typed answers it
+//	subperm  a subagent's Bash call needs your permission: its dialog shows, and its
+//	         PermissionRequest (with agent_id) runs; allowed by the hook, or a digit typed answers it
+//	redraw   it draws its whole screen again, as after a resize
+//	split    it draws its menu again in two writes, the second 1.5 s after the first: a
+//	         redraw cut between reads, drawn out so pix looks at its first half
+//	shrink   it draws its menu as a smaller pane shows it: the question scrolled off the top,
+//	         its options and footer still there
+//
+// What was answered is a line of $FAKE_DIR/answers ("menu <label>", "subperm <how>").
 //
 // What pix types is appended to $FAKE_DIR/typed as it comes; each prompt pix pastes and sends
 // is a line of $FAKE_DIR/prompts.
@@ -24,6 +35,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"golang.org/x/term"
 )
@@ -32,6 +44,19 @@ var (
 	dir     = os.Getenv("FAKE_DIR")
 	mu      sync.Mutex
 	working bool
+	shown   string // the menu or dialog on screen, waiting for a digit ("": none)
+	shownBy string // what it asks: "menu" or "subperm"
+)
+
+// The menu ask asks, and the subagent's call subperm asks about.
+var (
+	menuInput = map[string]any{"questions": []any{map[string]any{"question": "Push main?", "header": "Push",
+		"multiSelect": false, "options": []any{map[string]any{"label": "Push"}, map[string]any{"label": "Don't push"}}}}}
+	menuScreen = "\x1b[2J\x1b[H☐ Push\r\n\r\nPush main?\r\n\r\n❯ 1. Push\r\n  2. Don't push\r\n  3. Type something.\r\n\r\nEnter to select · ↑/↓ to navigate · Esc to cancel\r\n"
+	lsInput    = map[string]any{"command": "ls -la", "description": "List files"}
+	permScreen = "\x1b[2J\x1b[H────────────────────────────────────────\r\n Bash command\r\n List files\r\n" +
+		"╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\r\n ls -la\r\n╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\r\n Do you want to proceed?\r\n" +
+		" ❯ 1. Yes\r\n   2. Yes, and don't ask again for: ls -la\r\n   3. No\r\n\r\n Esc to cancel\r\n"
 )
 
 func main() {
@@ -65,8 +90,98 @@ func main() {
 			setWorking(false)
 			hook("Stop", map[string]any{"last_assistant_message": "Done for now."})
 			box()
+		case "ask":
+			go ask()
+		case "subperm":
+			go subperm()
+		case "split":
+			at := strings.Index(menuScreen, "❯")
+			fmt.Print(menuScreen[:at])
+			go func() {
+				time.Sleep(1500 * time.Millisecond)
+				fmt.Print(menuScreen[at:])
+			}()
+		case "shrink":
+			fmt.Print("\x1b[2J\x1b[H" + menuScreen[strings.Index(menuScreen, "❯"):])
+		case "redraw":
+			mu.Lock()
+			screen := shown
+			mu.Unlock()
+			if screen == "" {
+				fmt.Print("\x1b[2J\x1b[H")
+				box()
+			} else {
+				fmt.Print(screen)
+			}
 		}
 		appendTo("done", "ok "+step+"\n")
+	}
+}
+
+// ask is AskUserQuestion: its PreToolUse first (pix may hold it, and answer it in its reply);
+// let go without an answer, Claude shows the menu and waits for a key.
+func ask() {
+	out := hook("PreToolUse", map[string]any{"tool_name": "AskUserQuestion", "tool_input": menuInput})
+	var r struct {
+		Specific struct {
+			UpdatedInput struct {
+				Answers map[string]string `json:"answers"`
+			} `json:"updatedInput"`
+		} `json:"hookSpecificOutput"`
+	}
+	if json.Unmarshal([]byte(out), &r) == nil && r.Specific.UpdatedInput.Answers["Push main?"] != "" {
+		answered("menu", r.Specific.UpdatedInput.Answers["Push main?"])
+		return
+	}
+	show("menu", menuScreen)
+	hook("Notification", map[string]any{"notification_type": "permission_prompt", "message": "Claude Code needs your attention"})
+}
+
+// subperm is a subagent's Bash call asking for permission. Its dialog shows once the hook
+// runs (pix may hold it); allowed in the hook's reply, it goes, else it waits for a key.
+func subperm() {
+	reply := make(chan string, 1)
+	go func() {
+		reply <- hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": lsInput,
+			"agent_id": "a0d84cff17c3490ba", "agent_type": "general-purpose"})
+	}()
+	time.Sleep(200 * time.Millisecond) // the hook has started
+	show("subperm", permScreen)
+	out := <-reply
+	mu.Lock()
+	still := shownBy == "subperm"
+	if still && strings.Contains(out, `"allow"`) {
+		shown, shownBy = "", ""
+	}
+	mu.Unlock()
+	switch {
+	case !still: // a key answered it meanwhile
+	case strings.Contains(out, `"allow"`):
+		answered("subperm", "allowed in its hook")
+	default:
+		hook("Notification", map[string]any{"notification_type": "permission_prompt", "message": "Claude needs your permission to use Bash"})
+	}
+}
+
+// show draws a menu or dialog that waits for a key.
+func show(by, screen string) {
+	mu.Lock()
+	shown, shownBy = screen, by
+	mu.Unlock()
+	fmt.Print(screen)
+}
+
+// answered: what was asked is answered; its tool runs and ends with its PostToolUse.
+func answered(by, how string) {
+	appendTo("answers", by+" "+how+"\n")
+	fmt.Print("\x1b[2J\x1b[H")
+	box()
+	switch by {
+	case "menu":
+		hook("PostToolUse", map[string]any{"tool_name": "AskUserQuestion", "tool_input": menuInput})
+	case "subperm":
+		hook("PostToolUse", map[string]any{"tool_name": "Bash", "tool_input": lsInput,
+			"agent_id": "a0d84cff17c3490ba", "agent_type": "general-purpose"})
 	}
 }
 
@@ -83,6 +198,16 @@ func keys() {
 		}
 		b := buf[:n]
 		appendTo("typed", string(b))
+		mu.Lock()
+		by := shownBy
+		mu.Unlock()
+		if by != "" && len(b) == 1 && b[0] >= '1' && b[0] <= '9' { // a digit picks on the menu or dialog
+			mu.Lock()
+			shown, shownBy = "", ""
+			mu.Unlock()
+			go answered(by, "key "+string(b))
+			continue
+		}
 		if string(b) == "\x1b" {
 			if isWorking() {
 				setWorking(false)

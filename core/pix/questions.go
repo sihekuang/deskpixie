@@ -115,6 +115,10 @@ type question struct {
 	marker  string // shown while it waits ("" when it was seen on screen to begin with)
 	detail  string // shown with it: this request's own text, so another dialog doesn't count
 	seen    bool   // its marker and detail showed since it was asked
+	shown   bool   // and both were on the screen at once (a tall dialog's top can scroll off)
+	// markerAt: when its marker was last on the screen, once shown (a smaller pane can scroll
+	// its text off while its options and marker stay).
+	markerAt time.Time
 	// read reads its dialog off the screen; held: its event, not sent yet: it waits for its
 	// dialog to be read (or dialogWait), so DeskPixie gets the dialog as shown. optKeys: what
 	// answers each of the dialog's options (nil: its number).
@@ -129,6 +133,31 @@ type question struct {
 	suggestions any
 	// replyMenu: a held menu's hook reply for an answer, as its agent takes it.
 	replyMenu func(input map[string]any, a menuAnswer) (string, bool)
+	// agent: the subagent whose hook asked it ("": the session's own, #344); tool: the tool it
+	// asks about; use: a permission's tool call (its name and input), as its PostToolUse names
+	// it again.
+	agent, tool, use string
+	// told: its event as DeskPixie last had it (nil: not told yet), to ask it again (#347).
+	told *wire.Msg
+}
+
+// toolUse is the tool call a hook's payload is about: its name and input, as JSON (map keys
+// sorted, so the same call reads the same in every hook).
+func toolUse(p map[string]any) string {
+	b, _ := json.Marshal([]any{p["tool_name"], p["tool_input"]})
+	return string(b)
+}
+
+// endsWith: the PostToolUse hook p is the end of the very tool call q waits on (#344, #347): a
+// permission's call (whichever agent's hook it came in, as a subagent's dialog may come
+// without its agent_id), or the menu tool of the agent that asked it. Any other tool that
+// finishes meanwhile leaves q waiting: a background subagent's, or one the agent ran beside it.
+func (q *question) endsWith(p map[string]any) bool {
+	if q.use != "" {
+		return q.use == toolUse(p)
+	}
+	name, _ := p["tool_name"].(string)
+	return q.kind == "menu" && q.tool != "" && q.tool == name && q.agent == agentOf(p)
 }
 
 // menuAnswer is Pixie's answer to a held menu: an option's label, your own words (own), or
@@ -193,11 +222,21 @@ const dialogWait = 1500 * time.Millisecond
 
 // ask makes q the prompt waiting on you and tells DeskPixie about it with ev. A prompt still
 // waiting is never replaced (its dialog could be the one on screen): the new one is not asked.
+// One that showed and is off the screen since went (#347): the new one takes its place.
 func (s *Session) ask(q *question, ev wire.Msg) bool {
 	s.mu.Lock()
-	if s.q != nil {
+	if s.q != nil && !s.offScreen(s.q) {
 		s.mu.Unlock()
 		return false
+	}
+	if old := s.q; old != nil {
+		s.mu.Unlock()
+		s.dropQuestion(old, "off screen")
+		s.mu.Lock()
+		if s.q != nil {
+			s.mu.Unlock()
+			return false
+		}
 	}
 	s.qseq++
 	q.id = "q" + strconv.Itoa(s.qseq)
@@ -209,37 +248,92 @@ func (s *Session) ask(q *question, ev wire.Msg) bool {
 		time.AfterFunc(dialogWait, func() { s.sendHeld(q, nil) })
 		return true
 	}
+	told := ev
+	q.told = &told
 	s.mu.Unlock()
 	s.client.Send(ev)
 	return true
 }
 
-// await is the reply of held question q's hook: Pixie's answer, or "" once wait passed (its
-// bubble goes and the terminal shows it) or it was answered or withdrawn elsewhere.
-func (s *Session) await(q *question, wait time.Duration) string {
-	t := time.NewTimer(wait)
-	defer t.Stop()
-	select {
-	case r := <-q.hold.reply:
-		return r
-	case <-t.C:
-		s.withdraw(q)
-		return <-q.hold.reply // "", or an answer given just before
+// offScreen: q showed on screen whole, and no prompt of its kind (its marker) has been there
+// for offScreenWait, so it was answered or went (#347). A redraw takes it off for a moment
+// only, and a pane made smaller keeps its options and marker. Under mu.
+func (s *Session) offScreen(q *question) bool {
+	return q.shown && q.marker != "" && !strings.Contains(s.screen, noSpace(q.marker)) &&
+		s.now().Sub(q.markerAt) >= offScreenWait
+}
+
+// sawQuestion notes what screen (without spaces) shows of q, once seen. Under mu.
+func (s *Session) sawQuestion(q *question, screen string) {
+	if q == nil || !q.seen || q.marker == "" {
+		return
+	}
+	q.shown = q.shown || shows(screen, q.marker, q.detail)
+	if q.shown && strings.Contains(screen, noSpace(q.marker)) {
+		q.markerAt = s.now()
 	}
 }
 
-// withdraw takes q back if it still waits, lets its hook go, and tells DeskPixie it's gone.
-func (s *Session) withdraw(q *question) {
+// offScreenWait: how long a question's marker is off the screen before pix takes it for gone,
+// and how far apart its two looks are after another tool ends (a redraw may be under way).
+var offScreenWait = time.Second
+
+// retell asks DeskPixie question id again as it is now, if it still waits (#347): its answer
+// couldn't be typed (its card comes back), or what answers it changed.
+func (s *Session) retell(id string) {
 	s.mu.Lock()
-	mine := s.q == q
-	if mine {
-		s.q = nil
+	q := s.q
+	if q == nil || q.id != id || q.told == nil {
+		s.mu.Unlock()
+		return
 	}
-	told := mine && q.held == nil
+	ev := *q.told
 	s.mu.Unlock()
-	q.hold.give("")
-	if told {
-		s.client.Send(wire.Msg{Kind: wire.KindEvent, Event: "question-gone", ID: q.id})
+	s.o.log.Printf("question %s: asked again", id)
+	s.client.Send(ev)
+}
+
+// await is the reply of held question q's hook h: Pixie's answer, or "" once wait passed (the
+// terminal shows it) or it was answered or withdrawn elsewhere.
+func (s *Session) await(q *question, h *hold, wait time.Duration) string {
+	t := time.NewTimer(wait)
+	defer t.Stop()
+	select {
+	case r := <-h.reply:
+		return r
+	case <-t.C:
+		s.unhold(q)
+		return <-h.reply // "", or an answer given just before
+	}
+}
+
+// unhold lets held question q's hook go once its wait passed: the terminal shows it now, and
+// it still waits on you (#347). Pixie keeps it until it is answered or gone from the session:
+// with its buttons where its keys answer it (as without a hold), else as asked in the terminal.
+func (s *Session) unhold(q *question) {
+	s.mu.Lock()
+	h := q.hold
+	mine := s.q == q
+	keys := q.kind == "permission" || menuTools[s.o.tool].keys
+	changed := false
+	if mine {
+		q.hold = nil
+		if t := q.told; t != nil { // what answers it now: keys only, so no typed answer or chat
+			changed = t.Typed || !keys
+			t.Typed = false
+			if !keys { // asked again without its buttons: answered in its terminal
+				q.options, q.labels = 0, nil
+				t.Keys, t.Details = nil, nil
+			}
+		}
+	}
+	s.mu.Unlock()
+	h.give("")
+	if mine {
+		s.o.log.Printf("question %s: in the terminal now, still waiting", q.id)
+	}
+	if changed {
+		s.retell(q.id)
 	}
 }
 
@@ -270,6 +364,8 @@ func (s *Session) sendHeld(q *question, d *dialog) {
 		ev.Text, ev.Body, ev.Prompt, ev.Keys = d.Summary, d.Body, d.Question, d.Options
 		q.options, q.optKeys, q.labels = len(d.Options), d.Keys, d.Options
 	}
+	told := ev
+	q.told = &told
 	s.mu.Unlock()
 	s.client.Send(ev)
 }
@@ -280,30 +376,56 @@ func (s *Session) currentQuestion() *question {
 	return s.q
 }
 
-// clearQuestion: the prompt was answered (here, or by you) or the session moved on.
-func (s *Session) clearQuestion() {
+// clearQuestion: the prompt was answered (here, or by you) or the session moved on; why says
+// which (the hook or key that showed it), for the log.
+func (s *Session) clearQuestion(why string) { s.dropQuestion(nil, why) }
+
+// dropQuestion is clearQuestion of want only, if it still waits (nil: whichever does).
+func (s *Session) dropQuestion(want *question, why string) {
 	s.mu.Lock()
 	q := s.q
+	if want != nil && q != want {
+		s.mu.Unlock()
+		return
+	}
 	s.q = nil
+	var h *hold
+	if q != nil {
+		h = q.hold
+	}
 	told := q != nil && q.held == nil // a held one was never told
 	s.mu.Unlock()
-	if q != nil && q.hold != nil {
-		q.hold.give("") // answered in the terminal, or the session moved on: its hook lets go
+	if q == nil {
+		return
+	}
+	s.o.log.Printf("question %s gone: %s", q.id, why)
+	if h != nil {
+		h.give("") // answered in the terminal, or the session moved on: its hook lets go
 	}
 	if told {
 		s.client.Send(wire.Msg{Kind: wire.KindEvent, Event: "question-gone", ID: q.id})
 	}
 }
 
-// answer types choice ("yes", "no", or a menu option's number) into prompt id.
+// answer types choice ("yes", "no", or a menu option's number) into prompt id. When it can't
+// and the prompt still waits, it is asked again: Pixie took it as answered (#347).
 func (s *Session) answer(id, choice string) wire.Msg {
+	r := s.answerOnce(id, choice)
+	if r.Err != "" {
+		s.retell(id)
+	}
+	return r
+}
+
+func (s *Session) answerOnce(id, choice string) wire.Msg {
 	s.mu.Lock()
 	q := s.q
 	if q != nil && q.id == id && q.hold != nil {
 		if r, ok := q.hookAnswer(choice); ok {
 			s.q = nil
+			h := q.hold
 			s.mu.Unlock()
-			if !q.hold.give(r) {
+			if !h.give(r) {
 				return wire.Msg{Err: "The question is no longer waiting."}
 			}
 			s.client.Send(wire.Msg{Kind: wire.KindEvent, Event: "question-gone", ID: id})
@@ -335,6 +457,7 @@ func (s *Session) answer(id, choice string) wire.Msg {
 	s.q = nil
 	if q.hold != nil {
 		q.hold.give("") // the keys answer it
+		q.hold = nil    // and its hook has its reply: tried again, keys answer it again
 	}
 	if s.landing != nil {
 		// An answer still checked whose prompt this one followed on screen: it left, so it landed.
@@ -357,6 +480,11 @@ func (s *Session) answer(id, choice string) wire.Msg {
 	case <-l.done:
 	case <-t.C:
 		s.dropLanding(l)
+		s.mu.Lock()
+		if s.q == nil { // still on screen: it still waits
+			s.q = q
+		}
+		s.mu.Unlock()
 		return wire.Msg{Err: "The session didn't take the answer."}
 	}
 	s.client.Send(wire.Msg{Kind: wire.KindEvent, Event: "question-gone", ID: id})
@@ -475,6 +603,7 @@ func (s *Session) noteScreen(vt *screen) {
 	prompt := promptOf(s.o.tool, lines)
 	s.mu.Lock()
 	s.screen, s.prompt = text, prompt
+	s.sawQuestion(s.q, text)
 	if l := s.landing; l != nil && !shows(text, l.marker, l.detail) {
 		s.landing = nil
 		close(l.done)
@@ -544,6 +673,7 @@ func (w *questionWatch) watch(s *Session, out string, vt *screen) {
 		s.mu.Lock()
 		if s.q == q {
 			q.seen = true
+			s.sawQuestion(q, s.screen)
 		}
 		s.mu.Unlock()
 	}

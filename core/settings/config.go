@@ -182,7 +182,8 @@ type AgentSettings struct {
 	// (on by default).
 	MarkForcedSends bool `json:"markForcedSends"`
 	// QuestionWaitSecs (#268): how long a question from a session you started with pix waits
-	// for your answer in Pixie, held in its hook, before the session shows it in its terminal.
+	// for your answer in Pixie, held in its hook, before the session shows it in its terminal
+	// too; it stays in Pixie until answered, and Pixie's buttons then type the answer (#347).
 	// 0 doesn't hold it: Pixie's buttons type the answer, as before.
 	QuestionWaitSecs uint64 `json:"questionWaitSecs"`
 	// Editor (#277): where a file named in Pixie's bubbles opens (richtext.Editors).

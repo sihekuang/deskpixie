@@ -37,8 +37,8 @@ struct UpdatesBubbleView: View {
     var onSendTyped: (String) -> Void = { _ in }
     var onStopTyping: () -> Void = {}
     var onChat: (String) -> Void = { _ in }
-    /// "Open its terminal" on a line that asks without buttons: its pane comes up and the card
-    /// leaves (#286).
+    /// "Open its terminal" on a line that asks without buttons: its pane comes up (#286); the
+    /// card stays until it is answered there (#347).
     var onTerminal: (UpdateLine) -> Void = { _ in }
     /// Hide on a card: the deck closes to the badge, everything still waiting (#286).
     var onCollapse: () -> Void = {}

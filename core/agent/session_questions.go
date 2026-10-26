@@ -17,16 +17,22 @@ import (
 // sessionRequestBase starts the request ids of session prompts, apart from hook request ids.
 const sessionRequestBase RequestID = 1 << 62
 
-// onSessionQuestion asks you session's prompt q; a prompt it asked before is replaced.
+// onSessionQuestion asks you session's prompt q; a prompt it asked before is replaced. Asked
+// again while it waits with its buttons (pix's hook let go of it, #347), it changes in place:
+// it is not told twice.
 func (c *AgentController) onSessionQuestion(session string, q SessionQuestion, now Millis, fx *[]Effect) {
 	if c.shutDown {
 		return
 	}
+	if len(q.Options) > 0 && c.confirms.RefreshSession(session, q.ID, askedAs(q), q.Typed) {
+		return
+	}
 	c.confirms.TakeSession(session, "")
+	delete(c.announced, session)
 	tokens := c.pendingTokens()
 	label := maskPendingTokens(q.Label, tokens)
 	line := Line{Kind: LineQuestion, App: q.App, Session: session, Title: label}
-	pending := Pending{Session: session, Question: q.ID, Label: label}
+	pending := Pending{Session: session, Question: q.ID, Label: label, Asked: askedAs(q)}
 	var input any
 	if q.Input != "" {
 		json.Unmarshal([]byte(q.Input), &input)
@@ -79,6 +85,9 @@ func (c *AgentController) onSessionQuestion(session string, q SessionQuestion, n
 	if q.Kind == "notice" || (q.Kind == "menu" && len(q.Options) == 0) {
 		line.Text, line.Brief = describe("")
 		c.deliver(line, now, fx)
+		if id, ok := c.asking[session]; ok {
+			c.announced[session] = announcedQuestion{question: q.ID, line: id}
+		}
 		return
 	}
 	c.sessionSeq++
@@ -114,6 +123,32 @@ func (c *AgentController) onSessionQuestion(session string, q SessionQuestion, n
 	// lists it with its buttons while it waits (as permissions do, #97).
 	if !c.outbox.HasTokenSince(before, token) {
 		*fx = append(*fx, Effect{Kind: EfAppend, File: OutboxFile, Line: c.outbox.PushHeard(line, now)})
+	}
+}
+
+// askedAs is what tells prompt q from another the session asks under the same id: who asks,
+// what, and its options, as the session sent them (what answers it, Typed, may change).
+func askedAs(q SessionQuestion) string {
+	return strings.Join(append([]string{q.Kind, q.Label, q.Tool, q.Input, q.Text, q.Prompt}, q.Options...), "\x00")
+}
+
+// announcedQuestion is a session's prompt asked without buttons: pix's id for it, and the
+// outbox line that asks it.
+type announcedQuestion struct {
+	question string
+	line     uint64
+}
+
+// dropAnnounced: pix says session's prompt id is gone (answered in its terminal, or the
+// session moved on): its asking line goes with it, if it is still the session's open question.
+func (c *AgentController) dropAnnounced(session, id string, fx *[]Effect) {
+	a, ok := c.announced[session]
+	if !ok || a.question != id {
+		return
+	}
+	delete(c.announced, session)
+	if c.asking[session] == a.line {
+		c.dropAsking(session, fx)
 	}
 }
 

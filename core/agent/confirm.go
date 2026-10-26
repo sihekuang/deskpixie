@@ -51,6 +51,9 @@ type Pending struct {
 	// Details and Typed: a menu's option descriptions, and that it takes a typed answer (#268).
 	Details []string
 	Typed   bool
+	// Asked: the prompt as the session asked it (askedAs), so one asked again is told from
+	// another under the same id (a new pix numbers its own from q1, #347).
+	Asked string
 }
 
 // Decided is one request settled by a transcript.
@@ -100,6 +103,19 @@ func (c *Confirmations) RequestSession(p Pending) (string, bool) {
 	p.Token, p.Deadline = token, ^Millis(0)
 	c.pending[len(c.pending)-1] = p
 	return token, true
+}
+
+// RefreshSession sets whether session's prompt id, asked as asked, still takes a typed answer
+// (#347); true if that prompt waits. Another prompt under the same id isn't it.
+func (c *Confirmations) RefreshSession(session, id, asked string, typed bool) bool {
+	at := slices.IndexFunc(c.pending, func(p Pending) bool {
+		return p.Session == session && session != "" && p.Question == id && p.Asked == asked
+	})
+	if at < 0 {
+		return false
+	}
+	c.pending[at].Typed = typed
+	return true
 }
 
 // TakeSession removes session's prompt with this id ("" any of its prompts); true if there was one.

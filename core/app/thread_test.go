@@ -336,6 +336,26 @@ func TestAllowingRecordsYouAllowed(t *testing.T) {
 	}
 }
 
+// #347: a menu whose session's hook let go of it still waits, but takes no typed answer now.
+func TestARequestThatNoLongerTakesATypedAnswerSaysSo(t *testing.T) {
+	f := &fakeAgent{tray: AgentTray{Enabled: true}}
+	h := newHarness(t, withAgent(f))
+	menu := request(1, "t1", "push?", "Push", "Wait")
+	menu.Request.Typed = true
+	f.hooks.ThreadRequests([]chat.Entry{menu})
+	h.take()
+	again := request(1, "t1", "push?", "Push", "Wait") // a new list: entries of its own
+	again.At = menu.At
+	f.hooks.ThreadRequests([]chat.Entry{again})
+	got := h.entries(nil)
+	if len(got) != 1 || got[0].Request.Typed || got[0].Request.Outcome != "" {
+		t.Fatalf("entries = %+v", got)
+	}
+	if n := len(h.kinds(h.take(), "chat.entry")); n != 1 {
+		t.Fatalf("chat.entry events = %d", n)
+	}
+}
+
 func TestARequestAnsweredElsewhereIsRecordedSo(t *testing.T) {
 	f := &fakeAgent{tray: AgentTray{Enabled: true}}
 	h := newHarness(t, withAgent(f))

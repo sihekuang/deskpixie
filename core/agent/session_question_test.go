@@ -211,6 +211,65 @@ func TestAFailedAnswerSaysToUseTheTerminal(t *testing.T) {
 	wantContains(t, fx, eNotify("Couldn't answer in api-claude: The question is no longer on screen. Answer it in its terminal."))
 }
 
+// #347: a menu asked again while it waits (its hook let go: no typed answer now) changes in
+// place: the same card, not told again.
+func TestAMenuAskedAgainWhileItWaitsChangesInPlace(t *testing.T) {
+	c := ctl()
+	menu := pushMenu
+	menu.Typed = true
+	b := bubbleOf(askSession(c, menu, T0))
+	if len(b) != 1 || !b[0].Typed {
+		t.Fatalf("%+v", b)
+	}
+	menu.Typed = false
+	fx := askSession(c, menu, T0+1)
+	if n := len(effectsOfKind(fx, EfNotify)) + len(effectsOfKind(fx, EfInject)); n != 0 {
+		t.Fatalf("told again: %s", fmtEffects(fx))
+	}
+	if b2 := bubbleOf(fx); len(b2) != 1 || b2[0].Typed || b2[0].Token != b[0].Token || b2[0].ID != b[0].ID {
+		t.Fatalf("%+v", b2)
+	}
+	if c.confirms.TakesTyped(b[0].Token) {
+		t.Fatal("still takes a typed answer")
+	}
+}
+
+// Review of #347: a new pix under the same name numbers its prompts from q1 again. Its q1 is
+// another prompt: it replaces the old card, options and all, and is told.
+func TestAnotherPromptUnderTheSameIDReplacesTheCard(t *testing.T) {
+	c := ctl()
+	askSession(c, pushMenu, T0)
+	old := c.Updates()[0]
+	next := pushMenu
+	next.Text, next.Options = "Which database?", []string{"Postgres", "SQLite", "MySQL"}
+	fx := askSession(c, next, T0+1)
+	wantContains(t, fx, eNotify("deskpixie is asking: Which database? Choose Postgres, SQLite or MySQL."))
+	b := bubbleOf(fx)
+	if len(b) != 1 || b[0].ID == old.ID || strings.Join(b[0].Options, "|") != "Postgres|SQLite|MySQL" {
+		t.Fatalf("%+v", b)
+	}
+	if a := answers(c.Step(ChooseInput(b[0].Token, 3), T0+2)); len(a) != 1 || a[0].Answer != "3" {
+		t.Fatalf("%+v", a)
+	}
+}
+
+// #347: a tap pix couldn't type took the question out of the bubble; pix asks it again, and
+// it is back.
+func TestAQuestionAskedAgainAfterAFailedAnswerIsBack(t *testing.T) {
+	c := ctl()
+	askSession(c, pushMenu, T0)
+	tok := c.Updates()[0].Token
+	c.Step(ChooseInput(tok, 1), T0+1)
+	if len(c.Updates()) != 0 {
+		t.Fatalf("%+v", c.Updates())
+	}
+	c.Step(SessionAnswerFailedInput(sessionName, "The question isn't on screen."), T0+2)
+	b := bubbleOf(askSession(c, pushMenu, T0+3))
+	if len(b) != 1 || b[0].Token == "" || len(b[0].Options) != 2 {
+		t.Fatalf("%+v", b)
+	}
+}
+
 // Review #5: a dialog pix can't answer (its first option isn't a plain Yes) is only announced.
 func TestANoticeIsAnnouncedOnly(t *testing.T) {
 	c := ctl()
@@ -219,6 +278,42 @@ func TestANoticeIsAnnouncedOnly(t *testing.T) {
 	wantContains(t, fx, eNotify("Use ExitPlanMode in api? Answer it in its terminal."))
 	if b := bubbleOf(fx); len(b) != 1 || b[0].Token != "" {
 		t.Fatalf("no buttons: %+v", b)
+	}
+}
+
+// #347: a prompt asked without buttons waits in the bubble until pix says it is gone (answered
+// in its terminal), whatever else the session does meanwhile; a gone that is another prompt's
+// leaves it be.
+func TestAnAnnouncedPromptWaitsUntilPixSaysItIsGone(t *testing.T) {
+	for _, q := range []SessionQuestion{
+		{ID: "q4", Label: "api", Kind: "menu", Text: "Which files?"},
+		{ID: "q6", Label: "api", Kind: "notice", Tool: "ExitPlanMode", Input: `{"plan":"x"}`},
+	} {
+		c := ctl()
+		askSession(c, q, T0)
+		c.Step(PaneInput(PaneEvent{Kind: PaneEventStatus, Agent: sessionName, Status: PaneWorking}), T0+1)
+		if b := bubbleOf(sessionGone(c, "q9", T0+2)); len(c.Updates()) != 1 || b != nil {
+			t.Fatalf("%s: another prompt's gone took it: %+v", q.Kind, c.Updates())
+		}
+		if b := bubbleOf(sessionGone(c, q.ID, T0+3)); len(b) != 0 {
+			t.Fatalf("%s: answered in its terminal, still listed: %+v", q.Kind, b)
+		}
+	}
+}
+
+// #347: a question pix asks again without its buttons (a Codex menu its hook let go of) takes
+// the buttons' place: still in the bubble, now to be answered in its terminal.
+func TestAQuestionAskedAgainWithoutButtonsStillWaits(t *testing.T) {
+	c := ctl()
+	askSession(c, pushMenu, T0)
+	again := pushMenu
+	again.Options = nil
+	b := bubbleOf(askSession(c, again, T0+1))
+	if len(b) != 1 || b[0].Token != "" || !strings.Contains(b[0].Text, "Answer it in its terminal") {
+		t.Fatalf("%+v", b)
+	}
+	if b := bubbleOf(sessionGone(c, pushMenu.ID, T0+2)); len(b) != 0 {
+		t.Fatalf("%+v", b)
 	}
 }
 

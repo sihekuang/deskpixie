@@ -560,6 +560,9 @@ type AgentController struct {
 	// asking: each session's open question, the outbox line id; its next turn or its end
 	// clears it (#286).
 	asking map[string]uint64
+	// announced: each session's prompt asked without buttons (answered in its terminal), by
+	// pix's question id and its asking line: it goes once pix says that prompt is gone (#347).
+	announced map[string]announcedQuestion
 	// lastCard: the reply card the next update may join (#286). heldCards: cards held while
 	// Pixie opens a conversation to say them, shown if it can't; heldSince: when the first was
 	// held, so none waits longer than OpenWaitMs.
@@ -620,6 +623,7 @@ func NewAgentController(settings Settings) *AgentController {
 		numbering:      map[string]string{},
 		jobSessions:    map[JobID][]string{},
 		asking:         map[string]uint64{},
+		announced:      map[string]announcedQuestion{},
 		typed:          map[JobID]bool{},
 		opener:         newOpener(settings.NotifyPerMinute),
 		modes:          map[string]bool{},
@@ -809,6 +813,7 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 			c.onSessionQuestion(ev.Agent, *ev.Question, now, &fx)
 		case ev.Kind == PaneEventQuestionGone && ev.Question != nil:
 			c.confirms.TakeSession(ev.Agent, ev.Question.ID)
+			c.dropAnnounced(ev.Agent, ev.Question.ID, &fx)
 		case ev.Kind == PaneEventTurn:
 			if ev.Turn != nil {
 				c.onSessionTurn(ev.Agent, *ev.Turn, now, &fx)
@@ -844,6 +849,7 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 			delete(c.sessionWorking, ev.Agent)
 			delete(c.pixieTurnEnded, ev.Agent)
 			c.confirms.TakeSession(ev.Agent, "") // a session that closed asks nothing any more
+			delete(c.announced, ev.Agent)
 			c.dropAsking(ev.Agent, &fx)
 			c.workerGone(ev.Agent, now, &fx)
 			c.forgetNumbering(ev.Agent)

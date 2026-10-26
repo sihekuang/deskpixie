@@ -279,6 +279,73 @@ func TestSubagentToolLeavesQueuedForTheSession(t *testing.T) {
 	h.s.finish()
 }
 
+// #344: a background subagent's tool, or the session's own tool run beside the menu, leaves the
+// menu as it is: still held in its hook, still asked in Pixie, still blocked. The menu's own
+// tool ending ends it.
+func TestASubagentToolLeavesTheSessionsQuestion(t *testing.T) {
+	h := holdHarness(t, 5*time.Second)
+	reply := hookAsync(h, "PreToolUse", pushMenu)
+	q := askedQuestion(t, h)
+	h.s.Hook("Notification", map[string]any{"notification_type": "permission_prompt"})
+	h.s.Hook("PostToolUse", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "ls"},
+		"agent_id": "a0d84cff17c3490ba", "agent_type": "general-purpose"})
+	// What Claude Code does when it asks beside another tool call: the session's own Agent call
+	// that started a background subagent ends after the menu went up.
+	h.s.Hook("PostToolUse", map[string]any{"tool_name": "Agent", "tool_input": map[string]any{"run_in_background": true}})
+	select {
+	case r := <-reply:
+		t.Fatalf("the menu's hook let go: %q", r)
+	default:
+	}
+	noQuestionGone(t, h, 200*time.Millisecond)
+	if st := h.s.currentStatus(); st != "blocked" || h.s.currentQuestion() == nil {
+		t.Fatalf("status %s, question %v", st, h.s.currentQuestion())
+	}
+	h.s.Hook("PostToolUse", map[string]any{"tool_name": "AskUserQuestion", "tool_input": pushMenu["tool_input"]})
+	waitEvent(t, h.d.events, "question gone", func(m wire.Msg) bool { return m.Event == "question-gone" && m.ID == q.ID })
+	if st := h.s.currentStatus(); st != "working" {
+		t.Fatalf("after its own tool: %s", st)
+	}
+}
+
+// #344, the foreground case: a subagent's own permission dialog still ends with its tool, told
+// by its agent_id, or by the call itself when its PermissionRequest came without one.
+func TestASubagentsOwnPermissionEndsWithItsTool(t *testing.T) {
+	ls := map[string]any{"command": "ls -la"}
+	for name, asked := range map[string]map[string]any{
+		"its agent": {"tool_name": "Bash", "tool_input": ls, "agent_id": "sub1"},
+		"its call":  {"tool_name": "Bash", "tool_input": ls},
+		"a notice":  {"tool_name": "ExitPlanMode", "tool_input": map[string]any{}, "agent_id": "sub1"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := keyHarness(t, "claude")
+			h.s.Hook("PermissionRequest", asked)
+			q := askedQuestion(t, h)
+			h.s.Hook("Notification", map[string]any{"notification_type": "permission_prompt"})
+			h.s.Hook("PostToolUse", map[string]any{"tool_name": asked["tool_name"], "tool_input": asked["tool_input"], "agent_id": "sub1"})
+			waitEvent(t, h.d.events, "question gone", func(m wire.Msg) bool { return m.Event == "question-gone" && m.ID == q.ID })
+			if st := h.s.currentStatus(); st != "working" {
+				t.Fatalf("status %s", st)
+			}
+		})
+	}
+}
+
+// And the other way round: the session's own tool, or another subagent's, leaves a subagent's
+// dialog waiting.
+func TestAnotherAgentsToolLeavesASubagentsPermission(t *testing.T) {
+	h := keyHarness(t, "claude")
+	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "ls -la"}, "agent_id": "sub1"})
+	askedQuestion(t, h)
+	h.s.Hook("Notification", map[string]any{"notification_type": "permission_prompt"})
+	h.s.Hook("PostToolUse", map[string]any{"tool_name": "Read", "tool_input": map[string]any{"file_path": "/x"}})
+	h.s.Hook("PostToolUse", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "pwd"}, "agent_id": "sub2"})
+	noQuestionGone(t, h, 200*time.Millisecond)
+	if st := h.s.currentStatus(); st != "blocked" || h.s.currentQuestion() == nil {
+		t.Fatalf("status %s, question %v", st, h.s.currentQuestion())
+	}
+}
+
 // #336: after a subagent's tool, stop-and-send still has the message to send: it stops the
 // turn and types it, rather than finding nothing waits and saying it was sent.
 func TestStopAfterASubagentToolStillTypesWhatWaits(t *testing.T) {
@@ -825,8 +892,30 @@ func askBash(t *testing.T, h *harness, command string) wire.Msg {
 	return askedQuestion(t, h)
 }
 
+// Review of #347: a held permission answered by keys the agent didn't take still waits, and
+// a second answer is typed again, not lost on its hook that already had its reply.
+func TestAHeldPermissionTheAgentDidntTakeCanBeAnsweredAgain(t *testing.T) {
+	defer func(w time.Duration) { answerWait = w }(answerWait)
+	answerWait = 300 * time.Millisecond
+	h := screensHarness(t, bashDialog, "", 0) // takes the key, draws nothing
+	h.s.setHold(5 * time.Second)
+	reply := hookAsync(h, "PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "npm test"}})
+	pending(t, h)
+	q := askedQuestion(t, h)
+	if err := answer(t, h, q.ID, "2"); err != "The session didn't take the answer." { // no rules to say it: by keys
+		t.Fatalf("%q", err)
+	}
+	if out := hookReply(t, reply, time.Second); out != nil {
+		t.Fatalf("%v", out)
+	}
+	if err := answer(t, h, q.ID, "yes"); err != "The session didn't take the answer." {
+		t.Fatalf("typed again: %q", err)
+	}
+}
+
 // #268: an answer counts once its prompt left the screen; one the agent didn't take (the
-// prompt stays) is refused, so Pixie says to answer it in the terminal.
+// prompt stays) is refused, so Pixie says so. The prompt still waits (#347): it can be tried
+// again.
 func TestAnAnswerTheAgentDoesntTakeIsRefused(t *testing.T) {
 	defer func(w time.Duration) { answerWait = w }(answerWait)
 	answerWait = 300 * time.Millisecond
@@ -835,8 +924,8 @@ func TestAnAnswerTheAgentDoesntTakeIsRefused(t *testing.T) {
 	if err := answer(t, h, q.ID, "yes"); err != "The session didn't take the answer." {
 		t.Fatalf("%q", err)
 	}
-	if err := answer(t, h, q.ID, "yes"); !strings.Contains(err, "no longer waiting") {
-		t.Fatalf("typed once: %q", err)
+	if err := answer(t, h, q.ID, "no"); err != "The session didn't take the answer." {
+		t.Fatalf("still waiting: %q", err)
 	}
 }
 
@@ -899,11 +988,130 @@ func TestAKeyYouPressWithdrawsTheQuestion(t *testing.T) {
 	}
 }
 
+// #347: an answer pix can't type leaves the question waiting, so it is asked again: Pixie
+// took it as answered, and its card comes back.
+func TestAnAnswerPixCantTypeAsksTheQuestionAgain(t *testing.T) {
+	h := keyHarness(t, "claude")
+	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "npm test"}})
+	q := askedQuestion(t, h)
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "yes", Command: "answer", Text: q.ID, Source: "yes"})
+	var again, reply *wire.Msg
+	waitEvent(t, h.d.events, "the reply and the question again", func(m wire.Msg) bool {
+		switch {
+		case m.ID == "yes":
+			reply = &m
+		case m.Event == "question":
+			again = &m
+		}
+		return reply != nil && again != nil
+	})
+	if !strings.Contains(reply.Err, "isn't on screen") || again.ID != q.ID || again.ToolName != "Bash" {
+		t.Fatalf("%+v, %+v", reply, again)
+	}
+}
+
+// #347: a question that showed and left the screen with no hook or key saying so (denied by
+// a rule, its tool failed) goes once another tool ends; one still on screen stays.
+func TestAQuestionOffTheScreenGoesWithTheNextTool(t *testing.T) {
+	defer func(w time.Duration) { offScreenWait = w }(offScreenWait)
+	offScreenWait = 50 * time.Millisecond
+	// An agent that draws nothing: the test alone feeds the screen, as only the PTY reader may.
+	h := agentHarness(t, "claude", `stty raw -echo; cat >/dev/null`)
+	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "npm test"}})
+	q := askedQuestion(t, h)
+	h.s.runner.OnOutput([]byte("Bash command\r\n npm test\r\nDo you want to proceed?\r\n❯ 1. Yes"))
+	h.s.Hook("PostToolUse", map[string]any{"tool_name": "Read", "tool_input": map[string]any{"file_path": "/x"}})
+	noQuestionGone(t, h, 200*time.Millisecond) // still on screen
+	h.s.runner.OnOutput([]byte("\x1b[2J\x1b[H⏺ Working…\r\n"))
+	h.s.Hook("PostToolUse", map[string]any{"tool_name": "Read", "tool_input": map[string]any{"file_path": "/y"}})
+	waitEvent(t, h.d.events, "question gone", func(m wire.Msg) bool { return m.Event == "question-gone" && m.ID == q.ID })
+}
+
+// Review of #347: a dialog taller than the pane (its command scrolled off the top) was seen go
+// by but never shown whole: it is not taken for gone, whatever tool ends meanwhile.
+func TestADialogNeverShownWholeIsNotOffTheScreen(t *testing.T) {
+	h := agentHarness(t, "claude", `stty raw -echo; cat >/dev/null`)
+	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "npm test"}})
+	askedQuestion(t, h)
+	h.s.mu.Lock()
+	q := h.s.q
+	q.seen = true // went by in the output, its top off the screen since
+	h.s.screen = noSpace("Do you want to proceed?❯ 1. Yes")
+	off := h.s.offScreen(q)
+	q.shown = true
+	h.s.screen = noSpace("⏺ Working…")
+	gone := h.s.offScreen(q)
+	h.s.mu.Unlock()
+	if off || !gone {
+		t.Fatalf("never shown whole: off %v; shown and gone: %v", off, gone)
+	}
+}
+
+// Review of #347: a redraw split across reads takes a question off the screen for a moment. A
+// look that lands there isn't enough: the next, offScreenWait later, sees it back.
+func TestARedrawSplitAcrossReadsLeavesTheQuestion(t *testing.T) {
+	defer func(w time.Duration) { offScreenWait = w }(offScreenWait)
+	offScreenWait = 100 * time.Millisecond
+	dialog := "Bash command\r\n npm test\r\nDo you want to proceed?\r\n❯ 1. Yes\r\n"
+	h := agentHarness(t, "claude", `stty raw -echo; cat >/dev/null`)
+	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "npm test"}})
+	askedQuestion(t, h)
+	h.s.runner.OnOutput([]byte(dialog))
+	time.Sleep(150 * time.Millisecond)
+	h.s.runner.OnOutput([]byte("\x1b[2J\x1b[HBash command\r\n")) // the first half of a redraw
+	h.s.Hook("PostToolUse", map[string]any{"tool_name": "Read", "tool_input": map[string]any{"file_path": "/x"}})
+	time.Sleep(150 * time.Millisecond) // the first look lands on the half frame
+	// The rest of the frame.
+	h.s.runner.OnOutput([]byte(" npm test\r\nDo you want to proceed?\r\n❯ 1. Yes\r\n"))
+	noQuestionGone(t, h, 300*time.Millisecond)
+	if h.s.currentQuestion() == nil {
+		t.Fatal("gone")
+	}
+}
+
+// Review of #347: a pane made smaller after the menu showed whole scrolls its question off the
+// top, but its options and marker stay: it still waits.
+func TestAMenuInASmallerPaneStillWaits(t *testing.T) {
+	defer func(w time.Duration) { offScreenWait = w }(offScreenWait)
+	offScreenWait = 50 * time.Millisecond
+	h := agentHarness(t, "claude", `stty raw -echo; cat >/dev/null`)
+	h.s.Hook("PreToolUse", pushMenu)
+	askedQuestion(t, h)
+	h.s.runner.OnOutput([]byte("Push main?\r\n❯ 1. Push\r\n  2. Don't push\r\nEnter to select\r\n"))
+	h.s.runner.OnOutput([]byte("\x1b[2J\x1b[H❯ 1. Push\r\n  2. Don't push\r\nEnter to select\r\n")) // its top scrolled off
+	h.s.Hook("PostToolUse", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "ls"}, "agent_id": "sub1"})
+	noQuestionGone(t, h, 300*time.Millisecond)
+	if h.s.currentQuestion() == nil {
+		t.Fatal("gone")
+	}
+}
+
+// #347: a new question takes the place of one that left the screen unseen by any hook.
+func TestANewQuestionReplacesOneOffTheScreen(t *testing.T) {
+	defer func(w time.Duration) { offScreenWait = w }(offScreenWait)
+	offScreenWait = 50 * time.Millisecond
+	h := agentHarness(t, "claude", `stty raw -echo; cat >/dev/null`)
+	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "npm test"}})
+	q := askedQuestion(t, h)
+	h.s.runner.OnOutput([]byte("Bash command\r\n npm test\r\nDo you want to proceed?\r\n❯ 1. Yes"))
+	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "npm run build"}})
+	noQuestionGone(t, h, 100*time.Millisecond) // the first is still on screen: the second waits its turn
+	h.s.runner.OnOutput([]byte("\x1b[2J\x1b[H⏺ Working…\r\n"))
+	time.Sleep(100 * time.Millisecond) // off the screen for a while, not a redraw's moment
+	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "npm run lint"}})
+	waitEvent(t, h.d.events, "question gone", func(m wire.Msg) bool { return m.Event == "question-gone" && m.ID == q.ID })
+	if next := askedQuestion(t, h); next.ID == q.ID || !strings.Contains(next.Input, "npm run lint") {
+		t.Fatalf("%+v", next)
+	}
+}
+
 func TestTheSessionMovingOnWithdrawsTheQuestion(t *testing.T) {
 	h := keyHarness(t, "claude")
 	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "ls"}})
 	q := askedQuestion(t, h)
-	h.s.Hook("PostToolUse", map[string]any{"tool_name": "Bash"})
+	h.s.Hook("PostToolUse", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "pwd"}}) // another call (#347)
+	noQuestionGone(t, h, 100*time.Millisecond)
+	h.s.Hook("PostToolUse", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "ls"}})
 	waitEvent(t, h.d.events, "question gone", func(m wire.Msg) bool { return m.Event == "question-gone" && m.ID == q.ID })
 }
 

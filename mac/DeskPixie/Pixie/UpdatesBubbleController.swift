@@ -320,9 +320,7 @@ final class UpdatesBubbleController {
                 self.acted(token: token)
             },
             onTerminal: { [weak self] line in
-                guard let self else { return }
-                self.focus(line)
-                self.acted(line)
+                self?.focus(line) // the card stays until it is answered there (#347)
             },
             onCollapse: { [weak self] in
                 guard let self else { return }

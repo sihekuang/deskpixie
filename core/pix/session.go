@@ -321,8 +321,8 @@ func newSession(o sessionOpts) *Session {
 			s.gate.Keys(b, time.Now())
 			s.keylog("keys %q -> %s", b, s.gate.State())
 			if !onlyReports(b) {
-				s.clearQuestion() // you are answering it yourself
-				s.forgetEsc()     // an interrupt after a key of yours is yours
+				s.clearQuestion("a key of yours") // you are answering it yourself
+				s.forgetEsc()                     // an interrupt after a key of yours is yours
 			}
 			switch {
 			case isStopKey(b):
@@ -343,7 +343,7 @@ func newSession(o sessionOpts) *Session {
 			out := string(b)
 			stoppedNow := stopped.saw(out, codexInterrupted) && s.currentStatus() != "idle"
 			if stoppedNow {
-				s.clearQuestion()
+				s.clearQuestion("interrupted")
 				s.interrupted()
 			}
 			// The frame that shows the interrupt can still hold the old busy footer: that is no
@@ -378,7 +378,7 @@ func newSession(o sessionOpts) *Session {
 					if !s.takeStopKey() { // a redraw: no Esc asked for it
 						break
 					}
-					s.clearQuestion() // at a prompt too: it was dismissed
+					s.clearQuestion("interrupted") // at a prompt too: it was dismissed
 					if s.currentStatus() != "idle" {
 						s.interrupted()
 					}
@@ -402,7 +402,7 @@ func (s *Session) Hook(event string, p map[string]any) string {
 	case "PreToolUse":
 		if tool, ok := menuTools[s.o.tool]; ok && p["tool_name"] == tool.name {
 			text, options, details := menuOf(p["tool_input"])
-			q := &question{kind: "menu", options: len(options), marker: tool.marker, detail: firstRunes(text, 24)}
+			q := &question{kind: "menu", options: len(options), marker: tool.marker, detail: firstRunes(text, 24), agent: agentOf(p), tool: tool.name}
 			wait := s.holdFor()
 			if wait > 0 && len(options) > 0 { // held: Pixie answers it through this hook (#268)
 				q.hold, q.labels, q.replyMenu = newHold(), options, tool.reply
@@ -414,8 +414,8 @@ func (s *Session) Hook(event string, p map[string]any) string {
 			if q.hold != nil {
 				ev.Details, ev.Typed = details, true
 			}
-			if s.ask(q, ev) && q.hold != nil {
-				return s.await(q, wait)
+			if h := q.hold; s.ask(q, ev) && h != nil { // read before ask shares q
+				return s.await(q, h, wait)
 			}
 		}
 		return ""
@@ -425,20 +425,20 @@ func (s *Session) Hook(event string, p map[string]any) string {
 			input, _ := json.Marshal(p["tool_input"])
 			ev := wire.Msg{Source: "permission", ToolName: name, Input: string(input)}
 			q := &question{kind: "permission", marker: claudePermission, detail: claudeDetail(name, p["tool_input"]),
-				read: func(lines []string) (dialog, bool) { return readDialog(lines, claudePermission) }}
+				read: func(lines []string) (dialog, bool) { return readDialog(lines, claudePermission) }, agent: agentOf(p), tool: name, use: toolUse(p)}
 			wait := s.holdFor()
 			if !claudeAnswerable(name) || q.detail == "" {
-				q, ev.Source = &question{kind: "notice"}, "notice" // answered in its terminal only
+				q, ev.Source = &question{kind: "notice", agent: agentOf(p), tool: name, use: toolUse(p)}, "notice" // answered in its terminal only
 			} else if wait > 0 { // held: its dialog shows meanwhile, so you can answer it there too
 				q.hold, q.suggestions = newHold(), p["permission_suggestions"]
 			}
-			if s.ask(q, ev) && q.hold != nil {
-				return s.await(q, wait)
+			if h := q.hold; s.ask(q, ev) && h != nil { // read before ask shares q
+				return s.await(q, h, wait)
 			}
 		}
 		return ""
 	case "UserPromptSubmit":
-		s.clearQuestion()
+		s.clearQuestion(event)
 		defer func() { s.keylog("UserPromptSubmit -> %s", s.gate.State()) }()
 		// A prompt while not working starts a new turn, even if the last one never ended with
 		// a Stop (an API error, an interrupt pix didn't see): its start doesn't carry over.
@@ -472,7 +472,7 @@ func (s *Session) Hook(event string, p map[string]any) string {
 		}
 		return fmt.Sprintf(`{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":%q}}`, askDescription)
 	case "Stop":
-		s.clearQuestion()
+		s.clearQuestion(event)
 		s.dropStopKey() // the turn is over: a later interrupt line isn't that key's (#322)
 		pixie := false
 		if s.o.tool == "codex" { // its notify carries the turn's prompts; there is no prompt hook
@@ -502,7 +502,7 @@ func (s *Session) Hook(event string, p map[string]any) string {
 		s.setStatus("idle")
 		s.flushSoon()
 	case "SessionStart":
-		s.clearQuestion()
+		s.clearQuestion(event)
 		// A resumed conversation has no prompt until you type one: describe it from its transcript.
 		if src, _ := p["source"].(string); src == "resume" && s.currentDesc() == "" {
 			if path, _ := p["transcript_path"].(string); path != "" {
@@ -518,14 +518,22 @@ func (s *Session) Hook(event string, p map[string]any) string {
 		}
 		s.setStatus("blocked")
 	case "PostToolUse":
-		s.clearQuestion()
-		// A tool finished, so nothing waits on you any more (#165).
-		if s.currentStatus() == "blocked" {
-			s.setStatus("working")
+		// The tool a question asked about finished, so nothing waits on you any more (#165).
+		// Another tool finishing leaves it waiting (#344): a background subagent's, or one run
+		// beside the question in the same step.
+		if q := s.currentQuestion(); q == nil || q.endsWith(p) {
+			s.clearQuestion(event)
+			if s.currentStatus() == "blocked" {
+				s.setStatus("working")
+			}
+		} else {
+			// Unless it went in a way no hook tells (denied by a rule, its tool failed): seen,
+			// and off the screen now, it went too.
+			time.AfterFunc(offScreenWait, func() { s.goneIfOffScreen(q) })
 		}
 		// A subagent's tool (agent_id set) would hand what waits to that subagent, not to the
 		// session you talk to (#336): it waits for the session's own next tool, or its stop.
-		if id, _ := p["agent_id"].(string); id != "" {
+		if agentOf(p) != "" {
 			return ""
 		}
 		if msgs := s.queue.Drain(); len(msgs) > 0 {
@@ -537,6 +545,35 @@ func (s *Session) Hook(event string, p map[string]any) string {
 		}
 	}
 	return ""
+}
+
+// goneIfOffScreen clears q if it still waits but showed and is off the screen now, on two
+// looks (#347).
+func (s *Session) goneIfOffScreen(q *question) { s.offScreenLook(q, 2) }
+
+// offScreenLook drops q if it is off the screen on this look and the looks left after it,
+// offScreenWait apart: one look may land in the middle of a redraw.
+func (s *Session) offScreenLook(q *question, looks int) {
+	s.mu.Lock()
+	off := s.q == q && s.offScreen(q)
+	s.mu.Unlock()
+	if !off {
+		return
+	}
+	if looks > 1 {
+		time.AfterFunc(offScreenWait, func() { s.offScreenLook(q, looks-1) })
+		return
+	}
+	s.dropQuestion(q, "off screen")
+	if s.currentStatus() == "blocked" {
+		s.setStatus("working")
+	}
+}
+
+// agentOf is the subagent whose hook p is ("": the session's own).
+func agentOf(p map[string]any) string {
+	id, _ := p["agent_id"].(string)
+	return id
 }
 
 // SetDescription is the agent's set_description (LocalHandler).
@@ -678,7 +715,7 @@ func (s *Session) runCommand(m wire.Msg) wire.Msg {
 		if menu := s.menuShown(); menu != "" { // only you answer it (#306)
 			return wire.Msg{Err: menuWaits(s.o.tool, menu)}
 		}
-		s.clearQuestion() // an Escape from Pixie dismisses the prompt
+		s.clearQuestion("Pixie's keys") // an Escape from Pixie dismisses the prompt
 		for _, k := range m.Keys {
 			var b []byte
 			switch k {

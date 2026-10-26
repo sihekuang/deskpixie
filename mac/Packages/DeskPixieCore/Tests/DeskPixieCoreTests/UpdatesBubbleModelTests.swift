@@ -43,6 +43,24 @@ final class UpdatesBubbleModelTests: XCTestCase {
         XCTAssertEqual(m.lines.map(\.id), [2], "2 was forgotten once dropped; 1 and 3 are still acted on")
     }
 
+    /// #347: a card that asks without buttons (a session asking, a prompt answered only in its
+    /// terminal, a job's question) stays when you open its terminal: that doesn't answer it.
+    func testOpeningItsTerminalLeavesACardThatAsks() {
+        var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
+        let asks = UpdateLine(id: 1, text: "Resize the VM?", kind: "session", at: 1, job: nil, worker: nil,
+                              session: "trader", title: "trader", asking: true)
+        let jobQuestion = UpdateLine(id: 2, text: "Which branch?", kind: "question", at: 2, job: "job_1", worker: nil)
+        m.apply([asks, jobQuestion, question(3, "hawk")], now: 1, pop: .allowed)
+        m.pointerEntered(now: 2)
+        m.act(on: 1)
+        m.act(on: 2)
+        XCTAssertEqual(m.lines.map(\.id), [1, 2, 3])
+        m.apply([asks, jobQuestion, question(3, "hawk")], now: 3, pop: .allowed)
+        XCTAssertEqual(m.lines.map(\.id), [1, 2, 3], "still listed by the core: still shown")
+        m.act(on: 3)
+        XCTAssertEqual(m.lines.map(\.id), [1, 2], "a card with buttons you answered leaves")
+    }
+
     /// #286: Hide closes the deck to the badge; it stays closed until the pointer has left the
     /// region, nothing is dismissed, and a new item may pop it.
     func testCollapsingKeepsTheDeckClosedUntilThePointerHasLeft() {
