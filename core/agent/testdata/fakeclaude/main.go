@@ -5,9 +5,10 @@
 // It takes steps from the FIFO $FAKE_DIR/ctl, one per line, and writes "ok <step>" to
 // $FAKE_DIR/done after each:
 //
-//	work   you typed a prompt of your own: UserPromptSubmit (working)
-//	tool   one of its own tools finished: PostToolUse; what pix answered goes to $FAKE_DIR/context
-//	stop   its turn ended: Stop (idle)
+//	work     you typed a prompt of your own: UserPromptSubmit (working)
+//	tool     one of its own tools finished: PostToolUse; what pix answered goes to $FAKE_DIR/context
+//	subtool  a tool of one of its subagents finished: PostToolUse with agent_id; pix's answer too
+//	stop     its turn ended: Stop (idle)
 //
 // What pix types is appended to $FAKE_DIR/typed as it comes; each prompt pix pastes and sends
 // is a line of $FAKE_DIR/prompts.
@@ -55,6 +56,10 @@ func main() {
 			fmt.Print("⏺ Working on it…\r\n")
 		case "tool":
 			out := hook("PostToolUse", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "go test ./..."}})
+			appendTo("context", out+"\n")
+		case "subtool":
+			out := hook("PostToolUse", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "ls"},
+				"agent_id": "a0d84cff17c3490ba", "agent_type": "general-purpose"})
 			appendTo("context", out+"\n")
 		case "stop":
 			setWorking(false)
