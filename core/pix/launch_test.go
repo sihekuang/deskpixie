@@ -75,19 +75,16 @@ func TestPlanLaunchClaude(t *testing.T) {
 	if hooks["PermissionRequest"] == nil {
 		t.Error("no PermissionRequest hook")
 	}
-	// #268: these two wait for Pixie's answer, so Claude must give them longer than the hold.
+	// #359: no question waits in a hook, so every hook gets the same short timeout.
 	timeout := func(ev string) float64 {
 		e, _ := hooks[ev].([]any)
 		hs, _ := e[0].(map[string]any)["hooks"].([]any)
 		return hs[0].(map[string]any)["timeout"].(float64)
 	}
-	for _, ev := range []string{"PreToolUse", "PermissionRequest"} {
-		if got := timeout(ev); got <= MaxHold.Seconds() {
-			t.Errorf("%s timeout %v, want more than the longest hold %v", ev, got, MaxHold)
+	for _, ev := range hookEvents {
+		if got := timeout(ev); got != 5 {
+			t.Errorf("%s timeout %v", ev, got)
 		}
-	}
-	if got := timeout("Stop"); got != 5 {
-		t.Errorf("Stop timeout %v", got)
 	}
 	// #144: a session idle for a minute gets an idle_prompt Notification; that isn't waiting
 	// on you, so it must not reach pix (it would mark the session blocked and hold messages).
@@ -120,8 +117,8 @@ func TestPlanLaunchCodex(t *testing.T) {
 	// set_description never asks for approval (as for Claude): a session can't stop on it.
 	for _, want := range []string{`tui.notification_method="osc9"`, `tui.notification_condition="always"`,
 		`mcp_servers.pixie.tools.set_description.approval_mode="approve"`,
-		// #268: Codex's questions wait in this hook for Pixie's answer.
-		`hooks.PreToolUse=[{matcher="^request_user_input$",hooks=[{type="command",command="\"/app/pix\" hook PreToolUse",timeout=330}]}]`,
+		// #268: Codex's questions are told to pix in this hook, which returns at once (#359).
+		`hooks.PreToolUse=[{matcher="^request_user_input$",hooks=[{type="command",command="\"/app/pix\" hook PreToolUse",timeout=5}]}]`,
 		// #272: Codex starts MCP servers with a short environment; pix's tool finds pix by these.
 		`mcp_servers.pixie.env_vars=["PIX_SOCK","PIX_SESSION"]`} {
 		if !strings.Contains(joined, want) {

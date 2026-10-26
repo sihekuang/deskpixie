@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
-	"time"
 )
 
 // Instruction is the one line pix adds to the agent's instructions.
@@ -24,6 +23,10 @@ type Launch struct {
 // hookEvents are the Claude hook events pix listens to; PreToolUse only for the question menu
 // and PermissionRequest for the permission dialogs (#105: the prompts a session waits on).
 var hookEvents = []string{"SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "Notification", "PreToolUse", "PermissionRequest"}
+
+// hookTimeout: the seconds an agent gives one of pix's hooks, which only tell pix what happened
+// and return at once (no question waits in one, #359): past hookWait, with room to start.
+const hookTimeout = 5
 
 // hookMatchers narrows an event to these tools, or a Notification to the prompts that wait on
 // you: not idle_prompt, which comes after a minute idle and would hold every message (#144).
@@ -42,12 +45,8 @@ func PlanLaunch(tool string, userArgs []string, self, sock, dir string) (Launch,
 	case "claude":
 		hooks := map[string]any{}
 		for _, ev := range hookEvents {
-			timeout := 5
-			if holds(ev) { // its question may wait for Pixie's answer (#268)
-				timeout = int((MaxHold + 30*time.Second).Seconds())
-			}
 			entry := map[string]any{"hooks": []any{map[string]any{
-				"type": "command", "command": strconv.Quote(self) + " hook " + ev, "timeout": timeout,
+				"type": "command", "command": strconv.Quote(self) + " hook " + ev, "timeout": hookTimeout,
 			}}}
 			if m := hookMatchers[ev]; m != "" {
 				entry["matcher"] = m
@@ -87,10 +86,10 @@ func PlanLaunch(tool string, userArgs []string, self, sock, dir string) (Launch,
 			// text on screen can't fake one. Always: also while you look at the terminal.
 			"-c", `tui.notification_method="osc9"`,
 			"-c", `tui.notification_condition="always"`,
-			// Its questions wait in this hook for Pixie's answer (#268). Codex asks you to trust
-			// it once (its hash is kept in Codex's config); untrusted, it never runs.
+			// Its questions are told to pix by this hook (#268). Codex asks you to trust it once
+			// (its hash is kept in Codex's config); untrusted, it never runs.
 			"-c", fmt.Sprintf(`hooks.PreToolUse=[{matcher="^request_user_input$",hooks=[{type="command",command=%s,timeout=%d}]}]`,
-				strconv.Quote(strconv.Quote(self)+" hook PreToolUse"), int((MaxHold + 30*time.Second).Seconds())),
+				strconv.Quote(strconv.Quote(self)+" hook PreToolUse"), hookTimeout),
 		}
 		return Launch{Path: path, Args: append(args, userArgs...), Env: env}, nil
 	}

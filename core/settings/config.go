@@ -181,11 +181,6 @@ type AgentSettings struct {
 	// and send, or typed while you're typing there) starts with a note in brackets saying so
 	// (on by default).
 	MarkForcedSends bool `json:"markForcedSends"`
-	// QuestionWaitSecs (#268): how long a question from a session you started with pix waits
-	// for your answer in Pixie, held in its hook, before the session shows it in its terminal
-	// too; it stays in Pixie until answered, and Pixie's buttons then type the answer (#347).
-	// 0 doesn't hold it: Pixie's buttons type the answer, as before.
-	QuestionWaitSecs uint64 `json:"questionWaitSecs"`
 	// Editor (#277): where a file named in Pixie's bubbles opens (richtext.Editors).
 	Editor       string         `json:"editor"`
 	ProjectsRoot string         `json:"projectsRoot"`
@@ -226,7 +221,7 @@ func Default() Config {
 		Agent: AgentSettings{
 			Enabled: true, SessionHost: "herdr", Session: "deskpixie", Terminal: "warp",
 			CoordinatorKind: CoordinatorClaude, CoordinatorEffort: "low",
-			Port: 48217, HoldOpenSecs: 180, PermissionTimeoutSecs: 120, NotifyPerMinute: 4, QuestionWaitSecs: 20, Editor: richtext.EditorAuto,
+			Port: 48217, HoldOpenSecs: 180, PermissionTimeoutSecs: 120, NotifyPerMinute: 4, Editor: richtext.EditorAuto,
 			Narration: true, ProjectsRoot: "~/Documents/deskpixie", MarkForcedSends: true,
 			// Handed-off work keeps running when the app quits; the next start adopts it.
 			KeepPanesOnQuit: true,

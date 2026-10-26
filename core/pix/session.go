@@ -127,10 +127,10 @@ type Session struct {
 	posted      []string   // Pixie's messages not yet seen as prompts (normalized)
 	q           *question  // the prompt waiting on you that Pixie may answer (#105)
 	landing     *landing   // an answer typed from Pixie, until its prompt leaves the screen (#268)
+	yourKeys    int        // keys of yours read so far: an answer typed in steps stops at one (#359)
 	screen      string     // what the agent's screen shows now, without spaces (#268)
 	prompt      string     // what its prompt holds, the same way (#306)
 	qseq        int
-	hold        time.Duration // how long a question waits in its hook for Pixie (0: not held, #268)
 	menu        string        // the menu on screen in place of the agent's prompt ("": none, #306)
 	menuAt      time.Time     // when a menu last showed, or Codex first drew its prompt
 	settle      time.Duration // how long after menuAt Codex waits (menuSettle)
@@ -321,6 +321,9 @@ func newSession(o sessionOpts) *Session {
 			s.gate.Keys(b, time.Now())
 			s.keylog("keys %q -> %s", b, s.gate.State())
 			if !onlyReports(b) {
+				s.mu.Lock()
+				s.yourKeys++
+				s.mu.Unlock()
 				s.clearQuestion("a key of yours") // you are answering it yourself
 				s.forgetEsc()                     // an interrupt after a key of yours is yours
 			}
@@ -403,20 +406,8 @@ func (s *Session) Hook(event string, p map[string]any) string {
 		if tool, ok := menuTools[s.o.tool]; ok && p["tool_name"] == tool.name {
 			text, options, details := menuOf(p["tool_input"])
 			q := &question{kind: "menu", options: len(options), marker: tool.marker, detail: firstRunes(text, 24), agent: agentOf(p), tool: tool.name}
-			wait := s.holdFor()
-			if wait > 0 && len(options) > 0 { // held: Pixie answers it through this hook (#268)
-				q.hold, q.labels, q.replyMenu = newHold(), options, tool.reply
-				q.input, _ = p["tool_input"].(map[string]any)
-			} else if !tool.keys { // not answered by keys either: only announced
-				q.options, options = 0, nil
-			}
-			ev := wire.Msg{Source: "menu", Text: text, Keys: options}
-			if q.hold != nil {
-				ev.Details, ev.Typed = details, true
-			}
-			if h := q.hold; s.ask(q, ev) && h != nil { // read before ask shares q
-				return s.await(q, h, wait)
-			}
+			// Its menu shows in the terminal at once; Pixie answers it there as you would (#359).
+			s.ask(q, wire.Msg{Source: "menu", Text: text, Keys: options, Details: details, Typed: len(options) > 0})
 		}
 		return ""
 	case "PermissionRequest":
@@ -426,15 +417,10 @@ func (s *Session) Hook(event string, p map[string]any) string {
 			ev := wire.Msg{Source: "permission", ToolName: name, Input: string(input)}
 			q := &question{kind: "permission", marker: claudePermission, detail: claudeDetail(name, p["tool_input"]),
 				read: func(lines []string) (dialog, bool) { return readDialog(lines, claudePermission) }, agent: agentOf(p), tool: name, use: toolUse(p)}
-			wait := s.holdFor()
 			if !claudeAnswerable(name) || q.detail == "" {
 				q, ev.Source = &question{kind: "notice", agent: agentOf(p), tool: name, use: toolUse(p)}, "notice" // answered in its terminal only
-			} else if wait > 0 { // held: its dialog shows meanwhile, so you can answer it there too
-				q.hold, q.suggestions = newHold(), p["permission_suggestions"]
 			}
-			if h := q.hold; s.ask(q, ev) && h != nil { // read before ask shares q
-				return s.await(q, h, wait)
-			}
+			s.ask(q, ev)
 		}
 		return ""
 	case "UserPromptSubmit":
@@ -1090,7 +1076,6 @@ func (s *Session) start(ctx context.Context) error {
 			changed := s.outdated != reply.Outdated
 			s.outdated = reply.Outdated
 			s.mu.Unlock()
-			s.setHold(time.Duration(reply.DurationMs) * time.Millisecond)
 			if changed {
 				s.title()
 			}
@@ -1105,8 +1090,6 @@ func (s *Session) start(ctx context.Context) error {
 		Resend: s.resend,
 		OnDropped: func() {
 			s.o.log.Printf("lost DeskPixie; reconnecting")
-			s.setHold(0) // nobody would see a question; registering again says how long to hold
-			s.letHeldGo()
 		},
 	}
 	s.o.log.Printf("start in %s (%s)", cwd, strings.TrimSpace(s.o.where+" "+s.o.app))

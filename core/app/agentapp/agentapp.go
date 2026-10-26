@@ -291,7 +291,6 @@ func Build(c Config) *Agent {
 		return names
 	})
 	ph.SetBuild(wire.BuildOf(c.Pix))
-	ph.SetQuestionWait(time.Duration(s.QuestionWaitSecs) * time.Second)
 	if err := ph.Listen(); err != nil {
 		log.Printf("agent: pix: %v", err) // delegation still works without it
 	} else {

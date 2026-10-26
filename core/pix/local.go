@@ -50,9 +50,6 @@ func serveLocalConn(c net.Conn, h LocalHandler) {
 	if err != nil {
 		return
 	}
-	if m.Event == "hook" && holds(m.Status) {
-		c.SetDeadline(time.Now().Add(MaxHold + localDeadline)) // its question may wait for Pixie (#268)
-	}
 	reply := wire.Msg{Kind: wire.KindResult}
 	switch m.Event {
 	case "hook":

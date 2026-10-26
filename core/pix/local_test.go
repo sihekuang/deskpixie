@@ -67,13 +67,13 @@ func TestHookPayloadFromArgument(t *testing.T) {
 	}
 }
 
-// #268: a question's hook waits for Pixie's answer, past the usual deadlines; other hooks don't.
-func TestAHeldHookOutlastsTheUsualDeadlines(t *testing.T) {
+// #359: no hook waits for Pixie's answer: a question's hook keeps the usual deadlines too.
+func TestEveryHookKeepsTheUsualDeadlines(t *testing.T) {
 	defer func(a, b time.Duration) { hookWait, localDeadline = a, b }(hookWait, localDeadline)
 	hookWait, localDeadline = 100*time.Millisecond, 100*time.Millisecond
 	f := &fakeLocal{reply: `{"hookSpecificOutput":{}}`, delay: 300 * time.Millisecond}
 	sock := serveFake(t, f)
-	for ev, want := range map[string]bool{"PermissionRequest": true, "PreToolUse": true, "Stop": false} {
+	for ev, want := range map[string]bool{"PermissionRequest": false, "PreToolUse": false, "Stop": false} {
 		var out bytes.Buffer
 		RunHook(ev, sock, "", strings.NewReader("{}"), &out)
 		if got := out.Len() > 0; got != want {

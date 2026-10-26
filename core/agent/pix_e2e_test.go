@@ -41,11 +41,7 @@ type pixSession struct {
 
 // startPixSession builds pix and fakeclaude, and runs `pix claude` in a PTY against a host of
 // its own.
-func startPixSession(t *testing.T) *pixSession { t.Helper(); return startPixSessionHolding(t, 0) }
-
-// startPixSessionHolding is startPixSession with its questions held in their hooks for wait
-// (agent.questionWaitSecs, #268).
-func startPixSessionHolding(t *testing.T, wait time.Duration) *pixSession {
+func startPixSession(t *testing.T) *pixSession {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("builds pix and runs it in a terminal")
@@ -67,7 +63,6 @@ func startPixSessionHolding(t *testing.T, wait time.Duration) *pixSession {
 	}
 	sock := filepath.Join(bin, "d.sock")
 	host := pixhost.New(sock, func() []string { return nil })
-	host.SetQuestionWait(wait)
 	if err := host.Listen(); err != nil {
 		t.Fatal(err)
 	}

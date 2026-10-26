@@ -702,18 +702,7 @@ func TestStopAndSendSaysTypedOrWhyItStillWaits(t *testing.T) {
 	}
 }
 
-// #268: the app tells each pix how long a question waits in its hook for Pixie's answer.
-func TestRegisteredSaysHowLongAQuestionWaits(t *testing.T) {
-	h, sock := newHost(t)
-	_, before := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/a"})
-	h.SetQuestionWait(20 * time.Second)
-	_, after := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/b"})
-	if before.DurationMs != 0 || after.DurationMs != 20_000 {
-		t.Fatalf("%+v %+v", before, after)
-	}
-}
-
-// #268: a held menu's option descriptions, and that it takes a typed answer, reach the core.
+// #268: a menu's option descriptions, and that it takes a typed answer, reach the core.
 func TestAQuestionCarriesItsDetailsAndTypedAnswer(t *testing.T) {
 	h, sock := newHost(t)
 	events := h.Subscribe()

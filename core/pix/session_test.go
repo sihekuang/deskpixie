@@ -280,11 +280,10 @@ func TestSubagentToolLeavesQueuedForTheSession(t *testing.T) {
 }
 
 // #344: a background subagent's tool, or the session's own tool run beside the menu, leaves the
-// menu as it is: still held in its hook, still asked in Pixie, still blocked. The menu's own
-// tool ending ends it.
+// menu as it is: still asked in Pixie, still blocked. The menu's own tool ending ends it.
 func TestASubagentToolLeavesTheSessionsQuestion(t *testing.T) {
-	h := holdHarness(t, 5*time.Second)
-	reply := hookAsync(h, "PreToolUse", pushMenu)
+	h := keyHarness(t, "claude")
+	h.s.Hook("PreToolUse", pushMenu)
 	q := askedQuestion(t, h)
 	h.s.Hook("Notification", map[string]any{"notification_type": "permission_prompt"})
 	h.s.Hook("PostToolUse", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "ls"},
@@ -292,11 +291,6 @@ func TestASubagentToolLeavesTheSessionsQuestion(t *testing.T) {
 	// What Claude Code does when it asks beside another tool call: the session's own Agent call
 	// that started a background subagent ends after the menu went up.
 	h.s.Hook("PostToolUse", map[string]any{"tool_name": "Agent", "tool_input": map[string]any{"run_in_background": true}})
-	select {
-	case r := <-reply:
-		t.Fatalf("the menu's hook let go: %q", r)
-	default:
-	}
 	noQuestionGone(t, h, 200*time.Millisecond)
 	if st := h.s.currentStatus(); st != "blocked" || h.s.currentQuestion() == nil {
 		t.Fatalf("status %s, question %v", st, h.s.currentQuestion())
@@ -892,21 +886,15 @@ func askBash(t *testing.T, h *harness, command string) wire.Msg {
 	return askedQuestion(t, h)
 }
 
-// Review of #347: a held permission answered by keys the agent didn't take still waits, and
-// a second answer is typed again, not lost on its hook that already had its reply.
-func TestAHeldPermissionTheAgentDidntTakeCanBeAnsweredAgain(t *testing.T) {
+// Review of #347: a permission answered by keys the agent didn't take still waits, and a
+// second answer is typed again.
+func TestAPermissionTheAgentDidntTakeCanBeAnsweredAgain(t *testing.T) {
 	defer func(w time.Duration) { answerWait = w }(answerWait)
 	answerWait = 300 * time.Millisecond
 	h := screensHarness(t, bashDialog, "", 0) // takes the key, draws nothing
-	h.s.setHold(5 * time.Second)
-	reply := hookAsync(h, "PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "npm test"}})
-	pending(t, h)
-	q := askedQuestion(t, h)
-	if err := answer(t, h, q.ID, "2"); err != "The session didn't take the answer." { // no rules to say it: by keys
+	q := askBash(t, h, "npm test")
+	if err := answer(t, h, q.ID, "2"); err != "The session didn't take the answer." {
 		t.Fatalf("%q", err)
-	}
-	if out := hookReply(t, reply, time.Second); out != nil {
-		t.Fatalf("%v", out)
 	}
 	if err := answer(t, h, q.ID, "yes"); err != "The session didn't take the answer." {
 		t.Fatalf("typed again: %q", err)
@@ -961,22 +949,6 @@ func TestADialogDrawnBeforeItsHookCanBeAnswered(t *testing.T) {
 	h := screensHarness(t, bashDialog, "\x1b[2J\x1b[H* Bash(npm test)\r\n", 0)
 	waitScreen(t, h, noSpace("Do you want to proceed?"))
 	q := askBash(t, h, "npm test")
-	if err := answer(t, h, q.ID, "yes"); err != "" {
-		t.Fatal(err)
-	}
-}
-
-// #355 as it happened: the dialog drawn before its hook, the hold passed (the terminal shows it
-// now), and then Pixie's Yes.
-func TestADialogDrawnBeforeItsHeldHookCanBeAnsweredOnceTheHoldPassed(t *testing.T) {
-	h := screensHarness(t, bashDialog, "\x1b[2J\x1b[H* Bash(npm test)\r\n", 0)
-	h.s.setHold(200 * time.Millisecond)
-	waitScreen(t, h, noSpace("Do you want to proceed?"))
-	reply := hookAsync(h, "PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "npm test"}})
-	q := askedQuestion(t, h)
-	if out := hookReply(t, reply, 3*time.Second); out != nil {
-		t.Fatalf("the hold passed: %v", out)
-	}
 	if err := answer(t, h, q.ID, "yes"); err != "" {
 		t.Fatal(err)
 	}
