@@ -587,8 +587,8 @@ func waitsOnSender(words []string, i int) bool {
 	if at := slices.Index(rest, "then"); at >= 0 {
 		rest = rest[:at]
 	}
-	ends := len(rest) <= 2 && !slices.ContainsFunc(rest, func(w string) bool { return !goAheadObjects[w] })
-	if j >= 0 && words[j] == "before" && ends {
+	stepEnds := len(rest) <= 2 && !slices.ContainsFunc(rest, func(w string) bool { return !goAheadObjects[w] })
+	if j >= 0 && words[j] == "before" && stepEnds {
 		t := words[:j]
 		for n := 0; n < 4 && len(t) > 0 && goAheadObjects[t[len(t)-1]]; n++ {
 			t = t[:len(t)-1]
@@ -629,9 +629,9 @@ func waitsOnSender(words []string, i int) bool {
 		ends := func(w string) bool { return w == "" || w == "and" || negationEnds[w] }
 		switch {
 		case r[0] == "i":
-			return reviewVerbs[r[1]] && r[2] != "in" || r[1] == "say" && (r[2] == "so" || r[2] == "go")
+			return reviewVerbs[r[1]] && r[2] != "in" && r[2] != "up" || r[1] == "say" && (r[2] == "so" || r[2] == "go")
 		case r[0] == "i've":
-			return reviewedVerbs[r[1]] && r[2] != "in"
+			return reviewedVerbs[r[1]] && r[2] != "in" && r[2] != "up"
 		case r[0] == "my":
 			return reviewNouns[r[1]] && ends(r[2]) || (r[1] == "go" || r[1] == "sign") && reviewNouns[r[2]] && ends(r[3])
 		}

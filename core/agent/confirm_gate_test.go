@@ -156,6 +156,7 @@ func TestGatedActions(t *testing.T) {
 		{"Ask me before you deploy to prod, staging is fine.", []string{"deploy"}},
 		{"Ask me before you push to main, other branches are fine.", []string{"push"}},
 		{"Have me review the changes before pushing them.", nil},
+		{"Deploy it once I sign up for the account.", []string{"deploy"}},
 	} {
 		if got := GatedActions(tc.text); !slices.Equal(got, tc.want) {
 			t.Errorf("GatedActions(%q) = %q, want %q", tc.text, got, tc.want)
