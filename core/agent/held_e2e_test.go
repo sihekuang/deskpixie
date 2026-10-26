@@ -55,11 +55,11 @@ func (v *speakingVoice) HoldOpen(on bool) {
 	defer v.mu.Unlock()
 	v.step(voice.HoldOpenInput(on))
 }
-func (v *speakingVoice) WithdrawHeld(session string) {
+func (v *speakingVoice) WithdrawHeld(session string, upTo uint64) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.withdrawn++
-	v.step(voice.WithdrawHeldInput(session))
+	v.step(voice.WithdrawHeldInput(session, upTo))
 }
 
 func (v *speakingVoice) withdrawals() int {
@@ -141,5 +141,36 @@ func TestASubagentsToolLeavesTheMessageForStopAndSend(t *testing.T) {
 	p.waitFor("typed into the session", func() bool { return len(p.prompts()) == 1 })
 	if got := p.prompts()[0]; !strings.HasSuffix(got, msg) || !strings.Contains(p.read("typed"), "\x1b") {
 		t.Fatalf("prompt %q, typed %q", got, p.read("typed"))
+	}
+}
+
+// #343 review end to end: one message goes in with the session's next step, then another to
+// the same session waits. Only the first one's notice goes unsaid; the second is still told.
+func TestOnlyTheMessageThatWentInIsNotSaidToWait(t *testing.T) {
+	p := startPixSession(t)
+	v := newSpeakingVoice()
+	h, _ := pixRuntime(t, p, config(false), v)
+	h.Voice(VoiceSignal{Kind: voice.SigOpened})
+	delegate(t, &rtRig{h: h}, "ask the bug fixing session how it's going")
+	settle()
+
+	p.step("work")
+	if r := sessionCall(t, h, McpCall{Kind: CallMessageSession, Name: p.addr, Text: "first question"}); r["status"] != "waiting" {
+		t.Fatalf("first: %v", r)
+	}
+	p.step("tool") // takes the first
+	if r := sessionCall(t, h, McpCall{Kind: CallMessageSession, Name: p.addr, Text: "second question"}); r["status"] != "waiting" {
+		t.Fatalf("second: %v", r)
+	}
+	p.waitFor("the first notice withdrawn", func() bool { return v.withdrawals() > 0 })
+	settle()
+	waits := 0
+	for _, s := range v.finish() {
+		if strings.Contains(s, "hasn't got your message yet") {
+			waits++
+		}
+	}
+	if waits != 1 {
+		t.Fatalf("want only the second message told as waiting, said %q", v.said)
 	}
 }

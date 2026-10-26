@@ -120,12 +120,17 @@ func stopPix(cmd *exec.Cmd) {
 }
 
 // pixEnv is the test's environment without anything that would make pix think it is nested,
-// report to the real app, use the real home, or leave its folder in the real temp folder.
+// report to the real app, use the real home or app data (any DESKPIXIE_ switch), or leave its
+// folder in the real temp folder.
 func pixEnv(extra ...string) []string {
 	var env []string
 	for _, kv := range os.Environ() {
-		switch k, _, _ := strings.Cut(kv, "="); k {
-		case "PIX_SESSION", "PIX_SOCK", "PIXIE_AGENT_TOKEN", "PATH", "HOME", "DESKPIXIE_SUPPORT_DIR", "DESKPIXIE_PIX_SOCK",
+		k, _, _ := strings.Cut(kv, "=")
+		if strings.HasPrefix(k, "DESKPIXIE_") { // the test sets the ones it needs (no keylog, …)
+			continue
+		}
+		switch k {
+		case "PIX_SESSION", "PIX_SOCK", "PIXIE_AGENT_TOKEN", "PATH", "HOME",
 			"TERMINAL_EMULATOR", "TERM_PROGRAM", "__CFBundleIdentifier", "TERM", "TMPDIR":
 			continue
 		}

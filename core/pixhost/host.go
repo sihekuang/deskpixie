@@ -317,7 +317,7 @@ func (h *Host) onMsg(s *session, m wire.Msg) bool {
 			h.mu.Lock()
 			s.waiting = 0
 			h.mu.Unlock()
-			h.broadcast(agent.PaneEvent{Kind: agent.PaneEventDelivered, Agent: s.addr}) // a notice saying it waits goes (#339)
+			h.broadcast(agent.PaneEvent{Kind: agent.PaneEventDelivered, Agent: s.addr, Seq: m.Seq}) // a notice saying it waits goes (#339)
 		case "exited":
 			h.remove(s)
 			return true
@@ -508,7 +508,7 @@ func (h *Host) PromptDelivery(ctx context.Context, name, text string) (agent.Del
 	if r.Status == "waiting" {
 		h.changed()
 	}
-	return agent.Delivery{Status: r.Status, Reason: r.Reason, Outdated: outdated}, nil
+	return agent.Delivery{Status: r.Status, Reason: r.Reason, Outdated: outdated, Seq: r.Seq}, nil
 }
 
 // Flush has pix type session name's waiting messages now, past its typing gate (#187).
@@ -526,7 +526,7 @@ func (h *Host) Flush(ctx context.Context, name, note string) (agent.Delivery, er
 		outdated = h.outdated(s)
 	}
 	h.mu.Unlock()
-	return agent.Delivery{Status: r.Status, Reason: r.Reason, Outdated: outdated}, nil
+	return agent.Delivery{Status: r.Status, Reason: r.Reason, Outdated: outdated, Seq: r.Seq}, nil
 }
 
 // StopAndSend has pix stop session name's busy turn and type what waits (#320).
@@ -544,7 +544,7 @@ func (h *Host) StopAndSend(ctx context.Context, name, note string) (agent.Delive
 		outdated = h.outdated(s)
 	}
 	h.mu.Unlock()
-	return agent.Delivery{Status: r.Status, Reason: r.Reason, Outdated: outdated}, nil
+	return agent.Delivery{Status: r.Status, Reason: r.Reason, Outdated: outdated, Seq: r.Seq}, nil
 }
 
 func (h *Host) SendKeys(ctx context.Context, name string, keys []string) error {

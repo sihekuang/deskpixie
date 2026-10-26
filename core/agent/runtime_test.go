@@ -1111,12 +1111,12 @@ func TestADeliveredSessionWithdrawsItsHeldNoticeFromTheVoiceLoop(t *testing.T) {
 		settle()
 		r.h.Input(SessionWaitingInput("repo-claude", "landing page", "working"))
 		settle()
-		if hasCall(r.voice.Calls(), agenttest.WithdrawHeldCall("repo-claude")) {
+		if hasCall(r.voice.Calls(), agenttest.WithdrawHeldCall("repo-claude", 0)) {
 			t.Fatal("withdrawn before it was delivered")
 		}
 		r.h.Input(PaneInput(PaneEvent{Kind: PaneEventDelivered, Agent: "repo-claude"}))
 		settle()
-		if !hasCall(r.voice.Calls(), agenttest.WithdrawHeldCall("repo-claude")) {
+		if !hasCall(r.voice.Calls(), agenttest.WithdrawHeldCall("repo-claude", 0)) {
 			t.Fatal(r.voice.Calls())
 		}
 	})

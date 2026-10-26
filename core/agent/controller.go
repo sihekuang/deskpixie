@@ -199,6 +199,8 @@ type Input struct {
 	Name       string
 	Worktree   string
 	Reason     string
+	// Seq (InSessionSent, InLateSessionSent): Delivery.Seq (#339).
+	Seq uint64
 	// Keep (InRestored): the coordinator was kept running over the quit (agent.keepPanesOnQuit).
 	Keep bool
 	// Typed (InDelegate): the request was typed in the text box (#221).
@@ -347,6 +349,10 @@ func LateSessionSentInput(job JobID, name, description, why, errText string) Inp
 func SessionWaitingInput(name, description, reason string) Input {
 	return Input{Kind: InSessionSent, Name: name, Text: description, Message: reason}
 }
+
+// WithSeq is in with the message number pix gave (Delivery.Seq, #339): waiting, that message's;
+// sent, every one up to it went in. 0 (a pix too old to number them) is today's behaviour.
+func (in Input) WithSeq(seq uint64) Input { in.Seq = seq; return in }
 func WorkerScreenInput(name, text string) Input {
 	return Input{Kind: InWorkerScreen, Name: name, Text: text}
 }
@@ -393,7 +399,7 @@ const (
 	EfLine             // Outbox: a reply line for the chat thread (#302)
 	EfDelivered        // Value ([]uint64): outbox lines you heard or saw, read in the chat thread (#302)
 	EfChatEnded        // Job: a typed job ended with no line to say so (Stop): its live step goes (#302)
-	EfWithdrawHeld     // Name: that session has its message now: Pixie drops any notice still waiting to say it doesn't (#339)
+	EfWithdrawHeld     // Name, Seq: that session has its messages up to Seq (0: all) now: Pixie drops any notice still waiting to say they don't (#339)
 )
 
 // Effect is one thing the caller must do, in order. Err set (non-empty) is the Err branch of
@@ -414,6 +420,7 @@ type Effect struct {
 	Value    any
 	Err      string
 	Name     string
+	Seq      uint64 // EfWithdrawHeld
 	Tab      TabLabel
 	Agent    string
 	Manual   bool
@@ -538,8 +545,11 @@ type AgentController struct {
 	// go to the text box while it shows that job (#241).
 	typedTo map[string]JobID
 	// heldNoticed: the sessions Pixie was handed a notice for saying their message still waits,
-	// until they have it (#339).
-	heldNoticed map[string]bool
+	// with the highest such message's number (0: not known), until they have it (#339).
+	heldNoticed map[string]uint64
+	// deliveredUpTo: each session's messages numbered up to this are known to have gone in
+	// (#339), whichever pix says so first: the delivery or the reply that it waits.
+	deliveredUpTo map[string]uint64
 	// jobSessions: the sessions each job was passed to, in order (#261).
 	jobSessions map[JobID][]string
 	// asking: each session's open question, the outbox line id; its next turn or its end
@@ -600,7 +610,8 @@ func NewAgentController(settings Settings) *AgentController {
 		sessionWorking: map[string]bool{},
 		pixieTurnEnded: map[string]Millis{},
 		typedTo:        map[string]JobID{},
-		heldNoticed:    map[string]bool{},
+		heldNoticed:    map[string]uint64{},
+		deliveredUpTo:  map[string]uint64{},
 		jobSessions:    map[JobID][]string{},
 		asking:         map[string]uint64{},
 		typed:          map[JobID]bool{},
@@ -817,7 +828,7 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 				}
 			}
 		case ev.Kind == PaneEventDelivered:
-			c.heldDelivered(ev.Agent, &fx)
+			c.heldDelivered(ev.Agent, ev.Seq, &fx)
 		case ev.Kind == PaneEventQuestion || ev.Kind == PaneEventQuestionGone:
 		case ev.Kind == PaneEventStatus:
 			c.sessionStatus(ev.Agent, ev.Status, now)
@@ -837,15 +848,17 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 			c.onSubmit(in.Message, now, &fx)
 		}
 	case InSessionSent:
-		if in.Message == "" {
-			c.heldDelivered(in.Name, &fx)
+		waiting := c.stillWaits(in.Name, in.Message, in.Seq)
+		if waiting == "" {
+			c.heldDelivered(in.Name, in.Seq, &fx)
 		}
-		c.onSessionSent(in.Name, in.Text, in.Message, now, &fx)
+		c.onSessionSent(in.Name, in.Text, waiting, in.Seq, now, &fx)
 	case InLateSessionSent:
-		if in.Message == "" && in.Reason == "" {
-			c.heldDelivered(in.Name, &fx)
+		waiting := c.stillWaits(in.Name, in.Message, in.Seq)
+		if waiting == "" && in.Reason == "" {
+			c.heldDelivered(in.Name, in.Seq, &fx)
 		}
-		c.onLateSessionSent(in.Job, in.Name, in.Text, in.Message, in.Reason, now, &fx)
+		c.onLateSessionSent(in.Job, in.Name, in.Text, waiting, in.Reason, in.Seq, now, &fx)
 	case InStop:
 		if in.Agent == Coordinator {
 			c.onStop(in.Message, now, &fx)
@@ -1018,20 +1031,31 @@ func (c *AgentController) openInFlight() []JobID {
 func (c *AgentController) voiceOpened(fx *[]Effect) {
 	c.voiceOpen = true
 	c.router.ConversationOpened()
-	var digest []Line
+	var digest, held []Line
 	for _, l := range c.outbox.Undelivered() {
-		if l.Token == nil || c.confirms.IsPendingToken(*l.Token) {
-			digest = append(digest, Line{Text: l.Text, Kind: l.Kind, Token: l.Token, Job: l.Job, Worker: l.Worker, Session: l.Session})
+		line := Line{Text: l.Text, Kind: l.Kind, Token: l.Token, Job: l.Job, Worker: l.Worker, Session: l.Session, Held: l.Held, HeldSeq: l.HeldSeq}
+		switch {
+		case l.Held != "":
+			held = append(held, line)
+		case l.Token == nil || c.confirms.IsPendingToken(*l.Token):
+			digest = append(digest, line)
 		}
 	}
 	before := c.outbox.undelivered()
-	notice, records := c.outbox.Replay(c.confirms.IsPendingToken)
-	for _, line := range records {
+	// A line saying a message still waits goes as a notice of its own (#339), so it can still
+	// go unsaid if the session gets the message before Pixie says it.
+	records := c.outbox.MarkDeliveredWhere(func(l OutboxLine) bool { return l.Held != "" })
+	notice, rest := c.outbox.Replay(c.confirms.IsPendingToken)
+	for _, line := range append(records, rest...) {
 		*fx = append(*fx, Effect{Kind: EfAppend, File: OutboxFile, Line: line})
 	}
 	c.heard(before, fx)
 	if notice != nil {
 		n := c.remember(*notice, digest)
+		*fx = append(*fx, Effect{Kind: EfInject, Notice: n})
+	}
+	for _, l := range held {
+		n := c.remember(Notice{Text: "Coordinator replies while you were away:\n- " + l.Kind.Prefix() + l.Text}, []Line{l})
 		*fx = append(*fx, Effect{Kind: EfInject, Notice: n})
 	}
 }
@@ -1885,19 +1909,19 @@ func (c *AgentController) resumeJob(job JobID, now Millis, fx *[]Effect) {
 // onSessionSent: the request in flight went to one of your sessions (#177). Pixie says so now
 // rather than after the coordinator writes its reply; it stays the coordinator's job until then.
 // With several requests in flight, which one it was isn't known: the reply tells.
-func (c *AgentController) onSessionSent(name, description, waiting string, now Millis, fx *[]Effect) {
+func (c *AgentController) onSessionSent(name, description, waiting string, seq uint64, now Millis, fx *[]Effect) {
 	refs := unique(c.inbox.InFlightRefs())
 	if len(refs) != 1 || !c.jobs.IsOpen(refs[0]) {
 		return
 	}
-	c.tellSessionSent(refs[0], name, description, waiting, now, fx)
+	c.tellSessionSent(refs[0], name, description, waiting, seq, now, fx)
 }
 
 // onLateSessionSent tells a session tool done after you confirmed late (#246) on the request
 // that asked for it, or as a line of its own once that request is over.
-func (c *AgentController) onLateSessionSent(job JobID, name, description, waiting, errText string, now Millis, fx *[]Effect) {
+func (c *AgentController) onLateSessionSent(job JobID, name, description, waiting, errText string, seq uint64, now Millis, fx *[]Effect) {
 	if errText == "" && job != "" && c.jobs.IsOpen(job) {
-		c.tellSessionSent(job, name, description, waiting, now, fx)
+		c.tellSessionSent(job, name, description, waiting, seq, now, fx)
 		return
 	}
 	text, _, _ := sessionSentText(description, waiting)
@@ -1908,7 +1932,11 @@ func (c *AgentController) onLateSessionSent(job JobID, name, description, waitin
 		}
 		text = "Couldn't reach " + session + ": " + errText
 	}
-	c.deliver(NewLine(LineInfo, maskPendingTokens(text, c.pendingTokens())), now, fx)
+	line := NewLine(LineInfo, maskPendingTokens(text, c.pendingTokens()))
+	if errText == "" && waiting != "" {
+		line.Held, line.HeldSeq = name, seq
+	}
+	c.deliver(line, now, fx)
 }
 
 // sessionSentText says a message reached a session described description, or why it waits.
@@ -1959,7 +1987,7 @@ func sessionSentText(description, waiting string) (text, brief, title string) {
 }
 
 // tellSessionSent puts a message's delivery on job, whose answer the session's reply now is.
-func (c *AgentController) tellSessionSent(job JobID, name, description, waiting string, now Millis, fx *[]Effect) {
+func (c *AgentController) tellSessionSent(job JobID, name, description, waiting string, seq uint64, now Millis, fx *[]Effect) {
 	if name != "" && !slices.Contains(c.jobSessions[job], name) {
 		c.jobSessions[job] = append(c.jobSessions[job], name)
 	}
@@ -1986,23 +2014,40 @@ func (c *AgentController) tellSessionSent(job JobID, name, description, waiting 
 	line := NewJobLine(LineReply, text, job)
 	line.Title, line.Brief = maskPendingTokens(title, tokens), brief
 	if waiting != "" && name != "" {
-		line.Held = name
+		line.Held, line.HeldSeq = name, seq
 	}
 	c.deliverOpening(line, now, fx)
 }
 
-// heldDelivered: session name has the messages that waited for it (#339). A notice saying one
+// stillWaits is why message seq to session name waits ("" if it doesn't): a reply says it
+// waits, unless pix already said it went in (its delivery stepped first, #339).
+func (c *AgentController) stillWaits(name, waiting string, seq uint64) string {
+	if waiting != "" && seq > 0 && seq <= c.deliveredUpTo[name] {
+		return ""
+	}
+	return waiting
+}
+
+// heldDelivered: session name has the messages that waited for it, every one numbered up to
+// upTo (0: all of them, from a pix too old to number them, #339). A notice saying one of those
 // still waits that Pixie hasn't said yet is dropped, and so is one kept for later in the
-// outbox: said after the fact, it would have you ask for it to be stopped and sent again.
-func (c *AgentController) heldDelivered(name string, fx *[]Effect) {
+// outbox: said after the fact, it would have you ask for it to be stopped and sent again. A
+// later message's notice stays.
+func (c *AgentController) heldDelivered(name string, upTo uint64, fx *[]Effect) {
 	if name == "" {
 		return
 	}
-	if c.heldNoticed[name] {
-		delete(c.heldNoticed, name)
-		*fx = append(*fx, Effect{Kind: EfWithdrawHeld, Name: name})
+	if upTo > 0 {
+		c.deliveredUpTo[name] = max(c.deliveredUpTo[name], upTo)
 	}
-	for _, r := range c.outbox.MarkDeliveredWhere(func(l OutboxLine) bool { return l.Held == name }) {
+	covered := func(seq uint64) bool { return upTo == 0 || seq == 0 || seq <= upTo }
+	if seq, ok := c.heldNoticed[name]; ok {
+		if covered(seq) {
+			delete(c.heldNoticed, name)
+		}
+		*fx = append(*fx, Effect{Kind: EfWithdrawHeld, Name: name, Seq: upTo})
+	}
+	for _, r := range c.outbox.MarkDeliveredWhere(func(l OutboxLine) bool { return l.Held == name && covered(l.HeldSeq) }) {
 		*fx = append(*fx, Effect{Kind: EfAppend, File: OutboxFile, Line: r})
 	}
 }
@@ -2248,8 +2293,8 @@ func (c *AgentController) deliver(line Line, now Millis, fx *[]Effect) bool {
 func (c *AgentController) remember(n Notice, lines []Line) Notice {
 	n.Sessions = sessionsOf(lines)
 	if len(lines) == 1 && lines[0].Held != "" { // only its own notice can go unsaid (#339)
-		n.Held = lines[0].Held
-		c.heldNoticed[n.Held] = true
+		n.Held, n.HeldSeq = lines[0].Held, lines[0].HeldSeq
+		c.heldNoticed[n.Held] = max(c.heldNoticed[n.Held], n.HeldSeq)
 	}
 	c.injected = append(c.injected, injectedNotice{n.Text, lines})
 	if len(c.injected) > 64 {

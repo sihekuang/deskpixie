@@ -1347,9 +1347,9 @@ func (h *AgentHandle) runSessionTool(call McpCall) McpReply {
 	if (call.Kind == CallMessageSession || call.Kind == CallFlushSession || call.Kind == CallStopAndSendSession) && r.Err == nil {
 		v, _ := r.Value.(map[string]any)
 		if reason, _ := v["reason"].(string); v["status"] == "waiting" {
-			h.Input(SessionWaitingInput(call.Name, h.sessionDescription(call.Name), reason))
+			h.Input(SessionWaitingInput(call.Name, h.sessionDescription(call.Name), reason).WithSeq(r.Seq))
 		} else {
-			h.Input(SessionSentInput(call.Name, h.sessionDescription(call.Name)))
+			h.Input(SessionSentInput(call.Name, h.sessionDescription(call.Name)).WithSeq(r.Seq))
 		}
 	}
 	return r
@@ -1370,7 +1370,7 @@ func (h *AgentHandle) runLateSessionTool(call McpCall, job JobID) {
 	} else if v, _ := r.Value.(map[string]any); v["status"] == "waiting" {
 		why, _ = v["reason"].(string)
 	}
-	h.Input(LateSessionSentInput(job, call.Name, h.sessionDescription(call.Name), why, errText))
+	h.Input(LateSessionSentInput(job, call.Name, h.sessionDescription(call.Name), why, errText).WithSeq(r.Seq))
 }
 
 // await marks key waiting on a late confirm (on) or done (off); false if it already waited.
@@ -2016,7 +2016,7 @@ func (h *AgentHandle) apply(e Effect) {
 		d.Voice.HoldOpen(e.Hold)
 	case EfWithdrawHeld:
 		if w, ok := d.Voice.(HeldWithdrawer); ok {
-			w.WithdrawHeld(e.Name)
+			w.WithdrawHeld(e.Name, e.Seq)
 		}
 	case EfReply:
 		if d.Replies != nil {

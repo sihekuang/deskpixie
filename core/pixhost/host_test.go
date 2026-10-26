@@ -813,13 +813,21 @@ func TestDeliveredBecomesAPaneEvent(t *testing.T) {
 	h, sock := newHost(t)
 	events := h.Subscribe()
 	p, r := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api"})
-	wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "delivered"})
+	wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "delivered", Seq: 4})
 	select {
 	case ev := <-events:
-		if ev.Kind != agent.PaneEventDelivered || ev.Agent != r.Address {
+		if ev.Kind != agent.PaneEventDelivered || ev.Agent != r.Address || ev.Seq != 4 {
 			t.Fatalf("%+v", ev)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("no event")
+	}
+	// A prompt's result carries its number too (#343 review).
+	go func() {
+		m, _ := p.dec.Next()
+		wire.Encode(p.c, wire.Msg{Kind: wire.KindResult, ID: m.ID, Status: "waiting", Reason: "working", Seq: 5})
+	}()
+	if d, err := h.PromptDelivery(context.Background(), r.Address, "hi"); err != nil || d.Seq != 5 {
+		t.Fatalf("%+v %v", d, err)
 	}
 }

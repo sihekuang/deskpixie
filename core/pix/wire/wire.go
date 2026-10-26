@@ -75,6 +75,9 @@ type Msg struct {
 	// not the build of the pix this app ships.
 	Build    string `json:"build,omitempty"`
 	Outdated bool   `json:"outdated,omitempty"`
+	// Seq (#339): a prompt result's message number, or the last one queued (flush, stop,
+	// waiting); typed, and the delivered event: every message up to it has reached the agent.
+	Seq uint64 `json:"seq,omitempty"`
 }
 
 // BuildOf is the build of the binary at path (symlinks followed): the start of its SHA-256,

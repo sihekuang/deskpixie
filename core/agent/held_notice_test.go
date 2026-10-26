@@ -117,3 +117,101 @@ func TestOutboxLineKeepsHeld(t *testing.T) {
 		t.Fatalf("an older record: %+v %v", l, err)
 	}
 }
+
+func eHeldSeqInject(text, session string, seq uint64) Effect {
+	return Effect{Kind: EfInject, Notice: Notice{Text: text, Held: session, HeldSeq: seq}}
+}
+
+func deliveredUpTo(session string, seq uint64) Input {
+	return PaneInput(PaneEvent{Kind: PaneEventDelivered, Agent: session, Seq: seq})
+}
+
+// #343 review, 1: A waits, its delivery comes after B's waiting reply. Only A's notice goes:
+// the withdrawal names A's number, and B's notice (and outbox line) stay.
+func TestADeliveryWithdrawsOnlyTheMessagesItCovers(t *testing.T) {
+	c := workingOnJob1()
+	openVoice(c)
+	wantEffects(t, visible(c.Step(SessionWaitingInput("repo-claude", landing, "working").WithSeq(1), T0)), eHeldSeqInject(heldBusy, "repo-claude", 1))
+	wantEffects(t, visible(c.Step(SessionWaitingInput("repo-claude", landing, "working").WithSeq(2), T0+100)), eHeldSeqInject(heldBusy, "repo-claude", 2))
+	wantEffects(t, visible(c.Step(deliveredUpTo("repo-claude", 1), T0+200)), Effect{Kind: EfWithdrawHeld, Name: "repo-claude", Seq: 1})
+	wantEffects(t, visible(c.Step(deliveredUpTo("repo-claude", 2), T0+300)), Effect{Kind: EfWithdrawHeld, Name: "repo-claude", Seq: 2})
+	wantNone(t, visible(c.Step(deliveredUpTo("repo-claude", 2), T0+400)), "nothing held any more")
+
+	// With no conversation open, the outbox keeps B's line.
+	c = workingOnJob1()
+	c.Step(SessionWaitingInput("repo-claude", landing, "working").WithSeq(1), T0)
+	c.Step(SessionWaitingInput("repo-claude", landing, "typing").WithSeq(2), T0+100)
+	c.Step(deliveredUpTo("repo-claude", 1), T0+200)
+	var left []uint64
+	for _, l := range c.outbox.Undelivered() {
+		if l.Held == "repo-claude" {
+			left = append(left, l.HeldSeq)
+		}
+	}
+	if len(left) != 1 || left[0] != 2 {
+		t.Fatalf("held lines left: %v", left)
+	}
+}
+
+// #343 review, 2: the delivery steps before the reply that its message waits. That message
+// went in already: Pixie says it was passed on, and no waiting notice is queued at all.
+func TestAWaitingReplyAfterItsDeliveryIsPassedOn(t *testing.T) {
+	c := workingOnJob1()
+	openVoice(c)
+	wantNone(t, visible(c.Step(deliveredUpTo("repo-claude", 3), T0)), "nothing held yet")
+	wantEffects(t, visible(c.Step(SessionWaitingInput("repo-claude", landing, "working").WithSeq(3), T0+100)), handedOff)
+	if c.heldNoticed["repo-claude"] != 0 || len(c.heldNoticed) != 0 {
+		t.Fatalf("held noticed: %v", c.heldNoticed)
+	}
+	// A later message still waits as it says.
+	wantEffects(t, visible(c.Step(SessionWaitingInput("repo-claude", landing, "working").WithSeq(4), T0+200)), eHeldSeqInject(heldBusy, "repo-claude", 4))
+}
+
+// An older pix numbers nothing: a delivery covers every held notice, as before, and a newer
+// pix's numbered notice goes with a delivery from a pix that didn't number it.
+func TestUnnumberedDeliveriesCoverEverything(t *testing.T) {
+	c := workingOnJob1()
+	openVoice(c)
+	c.Step(SessionWaitingInput("repo-claude", landing, "working"), T0)
+	wantEffects(t, visible(c.Step(delivered("repo-claude"), T0+100)), eWithdrawHeld("repo-claude"))
+	c.Step(SessionWaitingInput("repo-claude", landing, "working").WithSeq(5), T0+200)
+	wantEffects(t, visible(c.Step(delivered("repo-claude"), T0+300)), eWithdrawHeld("repo-claude"))
+	wantNone(t, visible(c.Step(delivered("repo-claude"), T0+400)))
+}
+
+// #343 review, 3: a waiting line kept for the next conversation is replayed as a notice of its
+// own, still tied to its session and number, so the delivery can withdraw it; the rest of the
+// digest goes as before.
+func TestAReplayedHeldLineCanStillBeWithdrawn(t *testing.T) {
+	c := workingOnJob1()
+	c.Step(SessionWaitingInput("repo-claude", landing, "working").WithSeq(7), T0)
+	c.deliver(NewLine(LineInfo, "Coordinator: the build is green"), T0+50, &[]Effect{})
+	var injects []Effect
+	for _, e := range c.Step(voiceOpened(), T0+100) {
+		if e.Kind == EfInject {
+			injects = append(injects, e)
+		}
+	}
+	if len(injects) != 2 || strings.Contains(injects[0].Notice.Text, "hasn't got") || injects[0].Notice.Held != "" ||
+		injects[1].Notice.Held != "repo-claude" || injects[1].Notice.HeldSeq != 7 || !strings.Contains(injects[1].Notice.Text, "hasn't got your message yet") {
+		t.Fatalf("replayed %+v", injects)
+	}
+	wantEffects(t, visible(c.Step(deliveredUpTo("repo-claude", 7), T0+200)), Effect{Kind: EfWithdrawHeld, Name: "repo-claude", Seq: 7})
+	// Handed back unsaid when the conversation closes, it is still the session's line.
+	c = workingOnJob1()
+	c.Step(SessionWaitingInput("repo-claude", landing, "working").WithSeq(8), T0)
+	var replayed Notice
+	for _, e := range c.Step(voiceOpened(), T0+100) {
+		if e.Kind == EfInject {
+			replayed = e.Notice
+		}
+	}
+	c.Step(voiceClosed(replayed), T0+200)
+	if !heldInOutbox(c, "repo-claude") {
+		t.Fatalf("not back in the outbox as the session's: %+v", c.outbox.Undelivered())
+	}
+	c.Step(deliveredUpTo("repo-claude", 8), T0+300)
+	if heldInOutbox(c, "repo-claude") {
+		t.Fatalf("still undelivered: %+v", c.outbox.Undelivered())
+	}
+}

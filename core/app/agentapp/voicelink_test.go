@@ -1,6 +1,7 @@
 package agentapp
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/sihekuang/deskpixie/core/agent"
@@ -23,20 +24,22 @@ type withdrawingVoice struct {
 	withdrawn []string
 }
 
-func (v *withdrawingVoice) WithdrawHeld(s string) { v.withdrawn = append(v.withdrawn, s) }
+func (v *withdrawingVoice) WithdrawHeld(s string, upTo uint64) {
+	v.withdrawn = append(v.withdrawn, fmt.Sprint(s, "≤", upTo))
+}
 
 // #339: the link passes a withdrawal on to a voice loop that can take it; with none attached,
 // or one that can't, it does nothing.
 func TestVoiceLinkPassesAWithdrawalOn(t *testing.T) {
 	var l VoiceLink
-	l.WithdrawHeld("repo-claude") // nothing attached yet
+	l.WithdrawHeld("repo-claude", 3) // nothing attached yet
 	v := &withdrawingVoice{}
 	l.attach(v)
-	l.WithdrawHeld("repo-claude")
-	if len(v.withdrawn) != 1 || v.withdrawn[0] != "repo-claude" {
+	l.WithdrawHeld("repo-claude", 3)
+	if len(v.withdrawn) != 1 || v.withdrawn[0] != "repo-claude≤3" {
 		t.Fatalf("%q", v.withdrawn)
 	}
 	var other VoiceLink
 	other.attach(plainVoice{})
-	other.WithdrawHeld("repo-claude")
+	other.WithdrawHeld("repo-claude", 3)
 }

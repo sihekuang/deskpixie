@@ -77,7 +77,7 @@ const (
 	InMicLive                // the mic is actually on (the permission prompt may have shown first)
 	InOpen                   // start a conversation if none is under way (unlike InHotkey, never ends one)
 	InHandOffDone            // the hand-off's delegate call finished; Notice (Text "" = nothing to say)
-	InWithdrawHeld           // Held: that session has its message now; its queued "still waits" notices go (#339)
+	InWithdrawHeld           // Held, HeldUpTo: that session has its messages up to that number now; their queued "still waits" notices go (#339)
 )
 
 // Input is one stimulus for Conversation.Step. Build it with the *Input constructors.
@@ -92,6 +92,7 @@ type Input struct {
 	Notice       Notice  // InInject
 	Hold         bool    // InHoldOpen
 	Held         string  // InWithdrawHeld
+	HeldUpTo     uint64  // InWithdrawHeld: 0 for all of them
 }
 
 func HotkeyInput() Input        { return Input{Kind: InHotkey} }
@@ -112,9 +113,12 @@ func HoldOpenInput(on bool) Input       { return Input{Kind: InHoldOpen, Hold: o
 func MicLiveInput() Input               { return Input{Kind: InMicLive} }
 func OpenInput() Input                  { return Input{Kind: InOpen} }
 
-// WithdrawHeldInput: session has the message a queued notice says still waits (#339); the
-// notice, not said yet, would tell you something no longer true.
-func WithdrawHeldInput(session string) Input { return Input{Kind: InWithdrawHeld, Held: session} }
+// WithdrawHeldInput: session has its messages numbered up to upTo (0: all of them, a pix too
+// old to number them) that queued notices say still wait (#339); not said yet, they would tell
+// you something no longer true. A later message's notice stays.
+func WithdrawHeldInput(session string, upTo uint64) Input {
+	return Input{Kind: InWithdrawHeld, Held: session, HeldUpTo: upTo}
+}
 
 // HandOffDoneInput: the hand-off (EfHandOff) finished; Pixie says n (if any) once it's quiet.
 func HandOffDoneInput(n Notice) Input { return Input{Kind: InHandOffDone, Notice: n} }
@@ -397,7 +401,9 @@ func (c *Conversation) Step(in Input, now time.Time) []Effect {
 		}
 	case InWithdrawHeld:
 		if in.Held != "" {
-			c.injects = slices.DeleteFunc(c.injects, func(n Notice) bool { return n.Held == in.Held })
+			c.injects = slices.DeleteFunc(c.injects, func(n Notice) bool {
+				return n.Held == in.Held && (in.HeldUpTo == 0 || n.HeldSeq == 0 || n.HeldSeq <= in.HeldUpTo)
+			})
 		}
 	case InMicLive:
 		if c.IsActive() && !c.micLive {

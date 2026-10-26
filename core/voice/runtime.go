@@ -137,6 +137,7 @@ type control struct {
 	on     bool
 	levels int
 	held   string
+	upTo   uint64
 }
 
 // playbackQueue is the Go side of playback: samples waiting for Swift to pull, plus what
@@ -423,10 +424,10 @@ func (r *Runtime) Inject(n Notice) { r.control(control{kind: ctlInject, notice: 
 // HoldOpen: while on, the silence timeout is the hold timeout and Pixie rests in delegating.
 func (r *Runtime) HoldOpen(on bool) { r.control(control{kind: ctlHoldOpen, on: on}) }
 
-// WithdrawHeld: session has the message a notice still waiting to be said says it doesn't
-// (#339): that notice is dropped.
-func (r *Runtime) WithdrawHeld(session string) {
-	r.control(control{kind: ctlWithdrawHeld, held: session})
+// WithdrawHeld: session has its messages up to upTo (0: all) that a notice still waiting to be
+// said says it doesn't (#339): that notice is dropped.
+func (r *Runtime) WithdrawHeld(session string, upTo uint64) {
+	r.control(control{kind: ctlWithdrawHeld, held: session, upTo: upTo})
 }
 
 // SetMouthLevels: the active pack changed; its mouth level count.
@@ -633,7 +634,7 @@ func (r *Runtime) onControl(c control) {
 	case ctlOpen:
 		r.input(OpenInput())
 	case ctlWithdrawHeld:
-		r.input(WithdrawHeldInput(c.held))
+		r.input(WithdrawHeldInput(c.held, c.upTo))
 	}
 }
 
