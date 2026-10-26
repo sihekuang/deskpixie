@@ -115,6 +115,9 @@ func (j Jobs) Invoke(ctx context.Context, raw json.RawMessage) voice.ToolOutcome
 			// stopped (#332), as the session's stop button does.
 			if name, ok := j.H.SentTo(textArg(args, "job_id")); ok {
 				sent, err := j.H.Interrupt(ctx, name)
+				if err == nil {
+					j.H.SentStopped(name) // stopped, or done already: not Pixie's turn any more
+				}
 				switch {
 				case err != nil:
 					return toolError(err)

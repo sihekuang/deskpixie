@@ -524,6 +524,9 @@ type AgentController struct {
 	// in until that turn ends, is stopped or the session closes (#332): what a cancel of the
 	// job, closed by then, stops.
 	sentTurn map[string]sentTurn
+	// sessionWorking: your sessions last seen working, so a hand-off reported after its turn
+	// started still knows it did (#332).
+	sessionWorking map[string]bool
 	// typedTo: the typed job last handed to each of your sessions; that session's told turns
 	// go to the text box while it shows that job (#241).
 	typedTo map[string]JobID
@@ -572,24 +575,25 @@ type AgentController struct {
 
 func NewAgentController(settings Settings) *AgentController {
 	return &AgentController{
-		router:      NewRouter(settings.NotifyPerMinute),
-		confirms:    NewConfirmations(settings.PermissionTimeoutMs),
-		narrator:    NewNarrator(NarrateIntervalMs),
-		updates:     NewUpdatesWith(settings.UpdateQuietMs),
-		settings:    settings,
-		jobs:        NewJobTable(),
-		inbox:       NewInbox(),
-		outbox:      NewOutbox(),
-		memories:    NewMemoryLog(),
-		workers:     NewWorkers(),
-		handedOff:   map[JobID]bool{},
-		sentTurn:    map[string]sentTurn{},
-		typedTo:     map[string]JobID{},
-		jobSessions: map[JobID][]string{},
-		asking:      map[string]uint64{},
-		typed:       map[JobID]bool{},
-		opener:      newOpener(settings.NotifyPerMinute),
-		modes:       map[string]bool{},
+		router:         NewRouter(settings.NotifyPerMinute),
+		confirms:       NewConfirmations(settings.PermissionTimeoutMs),
+		narrator:       NewNarrator(NarrateIntervalMs),
+		updates:        NewUpdatesWith(settings.UpdateQuietMs),
+		settings:       settings,
+		jobs:           NewJobTable(),
+		inbox:          NewInbox(),
+		outbox:         NewOutbox(),
+		memories:       NewMemoryLog(),
+		workers:        NewWorkers(),
+		handedOff:      map[JobID]bool{},
+		sentTurn:       map[string]sentTurn{},
+		sessionWorking: map[string]bool{},
+		typedTo:        map[string]JobID{},
+		jobSessions:    map[JobID][]string{},
+		asking:         map[string]uint64{},
+		typed:          map[JobID]bool{},
+		opener:         newOpener(settings.NotifyPerMinute),
+		modes:          map[string]bool{},
 	}
 }
 
@@ -661,6 +665,7 @@ const SentIdleGraceMs Millis = 3000
 // sessionStatus keeps sentTurn to the turn still running: a stop, Esc in its terminal or any
 // other end without a reported turn leaves the session idle.
 func (c *AgentController) sessionStatus(name string, st PaneStatus, now Millis) {
+	c.sessionWorking[name] = st == PaneWorking
 	t, ok := c.sentTurn[name]
 	switch {
 	case !ok:
@@ -698,6 +703,10 @@ func (c *AgentController) SentTo(raw string) (string, bool) {
 	}
 	return name, name != ""
 }
+
+// SentStopped: the turn Pixie typed into session was stopped (#332); a later cancel doesn't
+// mean it.
+func (c *AgentController) SentStopped(session string) { delete(c.sentTurn, session) }
 
 // Step applies one input and returns the effects to carry out, in order.
 func (c *AgentController) Step(in Input, now Millis) []Effect {
@@ -792,7 +801,8 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 			c.sessionStatus(ev.Agent, ev.Status, now)
 			c.onWorkerStatus(ev.Agent, ev.Status, now, &fx)
 		default:
-			delete(c.sentTurn, ev.Agent)         // its name may be another session's next
+			delete(c.sentTurn, ev.Agent) // its name may be another session's next
+			delete(c.sessionWorking, ev.Agent)
 			c.confirms.TakeSession(ev.Agent, "") // a session that closed asks nothing any more
 			c.dropAsking(ev.Agent, &fx)
 			c.workerGone(ev.Agent, now, &fx)
@@ -1931,7 +1941,7 @@ func (c *AgentController) tellSessionSent(job JobID, name, description, waiting 
 	}
 	text, brief, title := sessionSentText(description, waiting)
 	if name != "" && waiting == "" {
-		c.sentTurn[name] = sentTurn{job: job, at: now}
+		c.sentTurn[name] = sentTurn{job: job, at: now, working: c.sessionWorking[name]}
 	} else if name != "" {
 		delete(c.sentTurn, name) // a held message isn't its turn: a stop wouldn't stop it
 	}

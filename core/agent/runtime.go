@@ -536,6 +536,13 @@ func (h *AgentHandle) SentTo(jobID string) (string, bool) {
 	return h.ctl.SentTo(jobID)
 }
 
+// SentStopped: the turn Pixie typed into session was stopped (AgentController.SentStopped).
+func (h *AgentHandle) SentStopped(session string) {
+	h.ctlMu.Lock()
+	defer h.ctlMu.Unlock()
+	h.ctl.SentStopped(session)
+}
+
 // stopAnswer is a cancel of the job that just asked, as its answer: the user may only have meant
 // stop waiting (Oct 18: "you can stop now" killed a test run).
 const stopAnswer = "stop (they said it in reply to this question: work out whether they meant stop waiting or stop the work, and ask them if you can't tell)"

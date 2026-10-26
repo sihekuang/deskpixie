@@ -98,3 +98,25 @@ func TestWithJobsOpenACancelWithoutAnIDStopsNoSession(t *testing.T) {
 		t.Fatal("named, it still means its session", name, ok)
 	}
 }
+
+// #332 review: its turn was seen working before the hand-off was reported (Claude's prompt hook,
+// pix's 300 ms settle): an idle within the grace is still its stop.
+func TestAStopRightAfterAHandOffReportedLateEndsIt(t *testing.T) {
+	c := typedOnJob1()
+	c.Step(paneStatus("repo-claude", PaneWorking), T0+4)
+	c.Step(SessionSentInput("repo-claude", landing), T0+5)
+	stop(c, `<spoken ref="job_000000000001" status="done">Passed it on.</spoken>`, T0+10)
+	c.Step(paneStatus("repo-claude", PaneIdle), T0+2000) // Esc in its terminal
+	c.Step(paneStatus("repo-claude", PaneWorking), T0+60_000)
+	if name, ok := c.SentTo(""); ok {
+		t.Fatalf("the user's own turn: %q", name)
+	}
+}
+
+func TestAStopOfItLeavesNothingToStop(t *testing.T) {
+	c := sentAndClosed(t)
+	c.SentStopped("repo-claude")
+	if name, ok := c.SentTo(""); ok {
+		t.Fatalf("%q", name)
+	}
+}
