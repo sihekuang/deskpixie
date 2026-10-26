@@ -58,6 +58,9 @@ terminal and type to you directly.
     `flush_session` types what waits for that session now, even if pix thinks they're typing
     there. For a new message they want in at once, `message_session` with `"force": true`
     does the same. Only when they ask; a busy session still gets it with its next step.
+  - When a message waits because the session is busy (`"reason": "working"`) and the person
+    says to stop it and send it now, `stop_and_send_session` stops its turn (like Esc) and
+    types what waits. Only on their say-so: the work in progress is cut short.
   - `"outdated": true` (in `list_sessions`, or a reply about a session) means that session runs
     an older pix than the app, so newer things may not work there. Tell the person once, in
     passing, that restarting it with pix and `--resume` updates it (`update` says how).

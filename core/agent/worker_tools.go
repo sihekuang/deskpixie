@@ -347,7 +347,7 @@ func ParseToolCall(role Role, name string, args any) (McpCall, error) {
 		}
 		force, _ := obj["force"].(bool)
 		return McpCall{Kind: CallMessageSession, Name: n, Text: t, Force: force}, nil
-	case "interrupt_session", "close_session", "flush_session":
+	case "interrupt_session", "close_session", "flush_session", "stop_and_send_session":
 		n, err := needName("name")
 		if err != nil {
 			return McpCall{}, err
@@ -357,6 +357,9 @@ func ParseToolCall(role Role, name string, args any) (McpCall, error) {
 		}
 		if name == "flush_session" {
 			return McpCall{Kind: CallFlushSession, Name: n}, nil
+		}
+		if name == "stop_and_send_session" {
+			return McpCall{Kind: CallStopAndSendSession, Name: n}, nil
 		}
 		return McpCall{Kind: CallInterruptSession, Name: n}, nil
 	case "describe_session":

@@ -208,6 +208,7 @@ func TestParseSessionTools(t *testing.T) {
 		{"describe_session", map[string]any{"name": "focus-claude", "text": " login\nbug "}, agent.McpCall{Kind: agent.CallDescribeSession, Name: "focus-claude", Text: "login bug"}},
 		{"describe_session", map[string]any{"name": "focus-claude"}, agent.McpCall{Kind: agent.CallDescribeSession, Name: "focus-claude"}},
 		{"flush_session", map[string]any{"name": "focus-claude"}, agent.McpCall{Kind: agent.CallFlushSession, Name: "focus-claude"}},
+		{"stop_and_send_session", map[string]any{"name": "focus-claude"}, agent.McpCall{Kind: agent.CallStopAndSendSession, Name: "focus-claude"}},
 		{"message_session", map[string]any{"name": "focus-claude", "text": "hi", "force": true}, agent.McpCall{Kind: agent.CallMessageSession, Name: "focus-claude", Text: "hi", Force: true}},
 	}
 	for _, c := range cases {
@@ -313,6 +314,14 @@ type deliveringFake struct {
 	// flush_session (#187)
 	flushResult agent.Delivery
 	flushed     []string
+	// stop_and_send_session (#320)
+	stopResult agent.Delivery
+	stopped    []string
+}
+
+func (d *deliveringFake) StopAndSend(ctx context.Context, name string) (agent.Delivery, error) {
+	d.stopped = append(d.stopped, name)
+	return d.stopResult, nil
 }
 
 func (d *deliveringFake) PromptDelivery(ctx context.Context, name, text string) (agent.Delivery, error) {
@@ -392,6 +401,42 @@ func TestFlushSessionAndForcedMessages(t *testing.T) {
 	r = agent.SessionToolForTest(ctx, c, agent.McpCall{Kind: agent.CallFlushSession, Name: "focus-claude"})
 	if v, _ := r.Value.(map[string]any); v["status"] != "waiting" || v["reason"] != "working" {
 		t.Fatalf("flush while working: %v", r.Value)
+	}
+}
+
+// #320: stop_and_send_session stops a busy session and sends what waits, on its own: message
+// and flush never stop a session; a session host that can't stop says to restart it.
+func TestStopAndSendSession(t *testing.T) {
+	_, user, primary := newSessionHarness(t)
+	d := &deliveringFake{userFake: user, delivery: agent.Delivery{Status: "waiting", Reason: "working"},
+		flushResult: agent.Delivery{Status: "waiting", Reason: "working"}, stopResult: agent.Delivery{Status: "typed"}}
+	c := agent.NewCompositeHost(primary, d)
+	ctx := context.Background()
+	agent.SessionToolForTest(ctx, c, agent.McpCall{Kind: agent.CallMessageSession, Name: "focus-claude", Text: "hi", Force: true})
+	r := agent.SessionToolForTest(ctx, c, agent.McpCall{Kind: agent.CallFlushSession, Name: "focus-claude"})
+	if v, _ := r.Value.(map[string]any); v["reason"] != "working" || len(d.stopped) != 0 {
+		t.Fatalf("force stopped it: %v %v", r.Value, d.stopped)
+	}
+	if why, _ := r.Value.(map[string]any)["why"].(string); !strings.Contains(why, "stop_and_send_session") {
+		t.Fatalf("why: %q", why)
+	}
+	r = agent.SessionToolForTest(ctx, c, agent.McpCall{Kind: agent.CallStopAndSendSession, Name: "focus-claude"})
+	if v, _ := r.Value.(map[string]any); r.Err != nil || v["status"] != "sent" || len(d.stopped) != 1 {
+		t.Fatalf("stop: %v %v %v", r.Value, r.Err, d.stopped)
+	}
+	d.stopResult = agent.Delivery{Status: "waiting", Reason: "stopping"} // asked, not stopped yet: don't ask again
+	r = agent.SessionToolForTest(ctx, c, agent.McpCall{Kind: agent.CallStopAndSendSession, Name: "focus-claude"})
+	if why, _ := r.Value.(map[string]any)["why"].(string); !strings.Contains(why, "Don't stop it again") {
+		t.Fatalf("stopping: %v", r.Value)
+	}
+	d.stopResult = agent.Delivery{Status: "waiting", Reason: "typing"} // you're typing there
+	r = agent.SessionToolForTest(ctx, c, agent.McpCall{Kind: agent.CallStopAndSendSession, Name: "focus-claude"})
+	if v, _ := r.Value.(map[string]any); v["status"] != "waiting" || v["reason"] != "typing" {
+		t.Fatalf("typing: %v", r.Value)
+	}
+	plain := agent.NewCompositeHost(primary, user) // can't stop
+	if r := agent.SessionToolForTest(ctx, plain, agent.McpCall{Kind: agent.CallStopAndSendSession, Name: "focus-claude"}); r.Err == nil || !strings.Contains(r.Err.Error(), "restart it") {
+		t.Fatalf("no stopper: %v %v", r.Value, r.Err)
 	}
 }
 

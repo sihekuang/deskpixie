@@ -11,7 +11,7 @@ import (
 
 // SessionTools are the coordinator's tools for the sessions you start yourself with pix
 // (#89). They are available whether or not workers are on.
-var SessionTools = [7]string{"list_sessions", "message_session", "flush_session", "interrupt_session", "close_session", "describe_session", "set_session_verbatim"}
+var SessionTools = [8]string{"list_sessions", "message_session", "flush_session", "stop_and_send_session", "interrupt_session", "close_session", "describe_session", "set_session_verbatim"}
 
 // IsSessionTool reports whether name is one of SessionTools.
 func IsSessionTool(name string) bool { return slices.Contains(SessionTools[:], name) }
@@ -37,6 +37,11 @@ func SessionCatalog() []map[string]any {
 		{
 			"name":        "flush_session",
 			"description": "Send a session's waiting messages in now, when the user says to send it anyway (\"push it through\", \"it's stuck\"): pix types them even if it thinks the user is typing there, setting the user's unsent text aside and putting it back. A busy session still gets them with its next step.",
+			"inputSchema": objectSchema(stringProps(name), "name"),
+		},
+		{
+			"name":        "stop_and_send_session",
+			"description": "Stop a busy session's current turn (like Esc) so its waiting messages go in now, only when the user says to stop it and send (\"stop it and send it\"). The work in progress is cut short. If they're typing there or a question is on screen, the messages still wait for that.",
 			"inputSchema": objectSchema(stringProps(name), "name"),
 		},
 		{
@@ -124,7 +129,13 @@ type Flusher interface {
 	Flush(ctx context.Context, name string) (Delivery, error)
 }
 
-// deliveryReply is message_session's or flush_session's reply for d.
+// StopSender stops a session's busy turn so its waiting messages go in now (#320): "typed", or
+// still "waiting" with why (it didn't stop in time, a question, or you're typing there).
+type StopSender interface {
+	StopAndSend(ctx context.Context, name string) (Delivery, error)
+}
+
+// deliveryReply is message_session's, flush_session's or stop_and_send_session's reply for d.
 func deliveryReply(name string, d Delivery) McpReply {
 	v := map[string]any{"name": name, "status": "sent"}
 	if d.Status == "waiting" {
@@ -144,11 +155,13 @@ const OutdatedUpdate = "This session runs an older pix than the app: newer thing
 func WaitingWhy(reason string) string {
 	switch reason {
 	case "working":
-		return "The session is busy; it gets the message with its next step, or when it stops."
+		return "The session is busy; it gets the message with its next step, or when it stops. If the person wants it now, stop_and_send_session can stop it and send."
 	case "blocked":
 		return "The session is waiting on a question; it gets the message once that's answered."
 	case "typing":
 		return "The person is typing in that session; it gets the message once they send or clear what they typed."
+	case "stopping":
+		return "The session was asked to stop and hasn't yet; it gets the message once it has. Don't stop it again."
 	case "update":
 		return "The session is waiting for the person to answer its update question on its screen; it gets the message once they have. Only the person should answer it."
 	case "trust":
@@ -174,7 +187,7 @@ type VerbatimSetter interface {
 
 func isSessionCall(k McpCallKind) bool {
 	switch k {
-	case CallListSessions, CallMessageSession, CallFlushSession, CallInterruptSession, CallCloseSession, CallDescribeSession, CallSetSessionVerbatim:
+	case CallListSessions, CallMessageSession, CallFlushSession, CallStopAndSendSession, CallInterruptSession, CallCloseSession, CallDescribeSession, CallSetSessionVerbatim:
 		return true
 	}
 	return false
@@ -242,6 +255,16 @@ func sessionTool(ctx context.Context, host SessionHost, call McpCall, mask func(
 		d, ferr := f.Flush(ctx, call.Name)
 		if ferr != nil {
 			return McpReply{Err: ferr}
+		}
+		return deliveryReply(call.Name, d)
+	case CallStopAndSendSession:
+		st, ok := sec.(StopSender)
+		if !ok {
+			return McpReply{Err: errors.New("This session's pix can't stop it to send; restart it to update pix.")}
+		}
+		d, serr := st.StopAndSend(ctx, call.Name)
+		if serr != nil {
+			return McpReply{Err: serr}
 		}
 		return deliveryReply(call.Name, d)
 	case CallInterruptSession:

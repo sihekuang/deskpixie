@@ -661,6 +661,7 @@ const (
 	CallSetSessionVerbatim
 	CallFlushSession
 	CallCreateProject
+	CallStopAndSendSession // #320
 )
 
 // McpCall is one pixie MCP tool call, arguments checked and cleaned. Only the fields of its

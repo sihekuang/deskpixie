@@ -1823,9 +1823,11 @@ func sessionSentText(description, waiting string) (text, brief, title string) {
 	if waiting != "" {
 		// #183: pix holds it; say so, and why.
 		why := map[string]string{
-			"working": "it's busy, and gets it with its next step or when it stops",
+			"working": "it's busy, and gets it with its next step or when it stops. Say if you want it stopped and sent now",
 			"blocked": "it's waiting on a question, and gets it once that's answered",
 			"typing":  "you're typing there, and it gets it once you send or clear that",
+			// #320: asked to stop, not stopped yet.
+			"stopping": "it's stopping, and gets it once it has",
 			// #306: a menu only you should answer.
 			"update":   "it's waiting for you to answer its update question, and gets it once you have",
 			"trust":    "it's waiting for you to say whether to trust its folder, and gets it once you have",
@@ -1842,6 +1844,7 @@ func sessionSentText(description, waiting string) (text, brief, title string) {
 			"working":  "Message held: it's busy.",
 			"blocked":  "Message held: it's waiting on a question.",
 			"typing":   "Message held: you're typing there.",
+			"stopping": "Message held: it's stopping.",
 			"update":   "Message held: it's asking you about an update.",
 			"trust":    "Message held: it's asking you to trust its folder.",
 			"hooks":    "Message held: it's asking you to trust its hooks.",
