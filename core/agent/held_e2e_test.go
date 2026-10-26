@@ -174,3 +174,40 @@ func TestOnlyTheMessageThatWentInIsNotSaidToWait(t *testing.T) {
 		t.Fatalf("want only the second message told as waiting, said %q", v.said)
 	}
 }
+
+// #343 re-review end to end: a message goes in, the session's terminal tab is closed and pix
+// started again under the same name. Its first message, numbered 1 again, still waits as it
+// says: the old pix's numbers don't pass it on.
+func TestANewPixsFirstMessageIsStillSaidToWait(t *testing.T) {
+	p := startPixSession(t)
+	v := newSpeakingVoice()
+	h, _ := pixRuntime(t, p, config(false), v)
+	h.Voice(VoiceSignal{Kind: voice.SigOpened})
+	delegate(t, &rtRig{h: h}, "ask the bug fixing session how it's going")
+	settle()
+
+	p.step("work")
+	if r := sessionCall(t, h, McpCall{Kind: CallMessageSession, Name: p.addr, Text: "first question"}); r["status"] != "waiting" {
+		t.Fatalf("first: %v", r)
+	}
+	p.step("tool") // takes it
+	p.waitFor("the first notice withdrawn", func() bool { return v.withdrawals() > 0 })
+	settle()
+
+	p.restart()
+	settle()
+	p.step("work")
+	if r := sessionCall(t, h, McpCall{Kind: CallMessageSession, Name: p.addr, Text: "second question"}); r["status"] != "waiting" {
+		t.Fatalf("second: %v", r)
+	}
+	settle()
+	waits := 0
+	for _, s := range v.finish() {
+		if strings.Contains(s, "hasn't got your message yet") {
+			waits++
+		}
+	}
+	if waits != 1 {
+		t.Fatalf("want the new pix's message told as waiting, said %q", v.said)
+	}
+}

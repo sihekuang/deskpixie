@@ -34,3 +34,16 @@ func TestTheQueueNumbersMessagesAndWhatWentIn(t *testing.T) {
 		t.Fatalf("all of them went: %d", n)
 	}
 }
+
+// #343 re-review, 2: the first message is held out by a menu and the second goes in. Nothing
+// went in up to any number yet, so the delivery says 0 (none), never more.
+func TestAHeldFirstMessageDeliversNone(t *testing.T) {
+	var q Queue
+	q.Push("a")
+	q.Drain() // a is typed, a menu holds it
+	q.Push("b")
+	q.Drain() // b goes in with the next step
+	if n := q.Delivered(true); n != 0 {
+		t.Fatalf("a never went in: %d", n)
+	}
+}

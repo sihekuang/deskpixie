@@ -316,8 +316,9 @@ func (h *Host) onMsg(s *session, m wire.Msg) bool {
 		case "delivered":
 			h.mu.Lock()
 			s.waiting = 0
+			run := s.hello.Run
 			h.mu.Unlock()
-			h.broadcast(agent.PaneEvent{Kind: agent.PaneEventDelivered, Agent: s.addr, Seq: m.Seq}) // a notice saying it waits goes (#339)
+			h.broadcast(agent.PaneEvent{Kind: agent.PaneEventDelivered, Agent: s.addr, Seq: m.Seq, Run: run}) // a notice saying it waits goes (#339)
 		case "exited":
 			h.remove(s)
 			return true
@@ -497,9 +498,9 @@ func (h *Host) PromptDelivery(ctx context.Context, name, text string) (agent.Del
 		return agent.Delivery{}, err
 	}
 	h.mu.Lock()
-	outdated := false
+	outdated, run := false, ""
 	if s := h.sessions[name]; s != nil {
-		outdated = h.outdated(s)
+		outdated, run = h.outdated(s), s.hello.Run
 		if r.Status == "waiting" {
 			s.waiting++
 		}
@@ -508,7 +509,7 @@ func (h *Host) PromptDelivery(ctx context.Context, name, text string) (agent.Del
 	if r.Status == "waiting" {
 		h.changed()
 	}
-	return agent.Delivery{Status: r.Status, Reason: r.Reason, Outdated: outdated, Seq: r.Seq}, nil
+	return agent.Delivery{Status: r.Status, Reason: r.Reason, Outdated: outdated, Seq: r.Seq, Run: run}, nil
 }
 
 // Flush has pix type session name's waiting messages now, past its typing gate (#187).
@@ -521,12 +522,12 @@ func (h *Host) Flush(ctx context.Context, name, note string) (agent.Delivery, er
 		return agent.Delivery{}, err
 	}
 	h.mu.Lock()
-	outdated := false
+	outdated, run := false, ""
 	if s := h.sessions[name]; s != nil {
-		outdated = h.outdated(s)
+		outdated, run = h.outdated(s), s.hello.Run
 	}
 	h.mu.Unlock()
-	return agent.Delivery{Status: r.Status, Reason: r.Reason, Outdated: outdated, Seq: r.Seq}, nil
+	return agent.Delivery{Status: r.Status, Reason: r.Reason, Outdated: outdated, Seq: r.Seq, Run: run}, nil
 }
 
 // StopAndSend has pix stop session name's busy turn and type what waits (#320).
@@ -539,12 +540,12 @@ func (h *Host) StopAndSend(ctx context.Context, name, note string) (agent.Delive
 		return agent.Delivery{}, err
 	}
 	h.mu.Lock()
-	outdated := false
+	outdated, run := false, ""
 	if s := h.sessions[name]; s != nil {
-		outdated = h.outdated(s)
+		outdated, run = h.outdated(s), s.hello.Run
 	}
 	h.mu.Unlock()
-	return agent.Delivery{Status: r.Status, Reason: r.Reason, Outdated: outdated, Seq: r.Seq}, nil
+	return agent.Delivery{Status: r.Status, Reason: r.Reason, Outdated: outdated, Seq: r.Seq, Run: run}, nil
 }
 
 func (h *Host) SendKeys(ctx context.Context, name string, keys []string) error {

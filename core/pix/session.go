@@ -2,6 +2,7 @@ package pix
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1043,7 +1044,8 @@ func (s *Session) start(ctx context.Context) error {
 	s.client = &Client{
 		Sock: s.o.daemonSock,
 		Hello: wire.Msg{Kind: wire.KindRegister, Tool: s.o.tool, Cwd: cwd, GitRoot: gitRoot(cwd),
-			Where: s.o.where, App: s.o.app, Description: s.o.description, Build: wire.SelfBuild()},
+			Where: s.o.where, App: s.o.app, Description: s.o.description, Build: wire.SelfBuild(),
+			Run: rand.Text()},
 		OnCommand: s.command,
 		OnRegistered: func(reply wire.Msg) {
 			s.o.log.Printf("registered with DeskPixie as %s (outdated %v)", reply.Address, reply.Outdated)

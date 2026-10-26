@@ -1347,9 +1347,9 @@ func (h *AgentHandle) runSessionTool(call McpCall) McpReply {
 	if (call.Kind == CallMessageSession || call.Kind == CallFlushSession || call.Kind == CallStopAndSendSession) && r.Err == nil {
 		v, _ := r.Value.(map[string]any)
 		if reason, _ := v["reason"].(string); v["status"] == "waiting" {
-			h.Input(SessionWaitingInput(call.Name, h.sessionDescription(call.Name), reason).WithSeq(r.Seq))
+			h.Input(SessionWaitingInput(call.Name, h.sessionDescription(call.Name), reason).WithSeq(r.Seq, r.Run))
 		} else {
-			h.Input(SessionSentInput(call.Name, h.sessionDescription(call.Name)).WithSeq(r.Seq))
+			h.Input(SessionSentInput(call.Name, h.sessionDescription(call.Name)).WithSeq(r.Seq, r.Run))
 		}
 	}
 	return r
@@ -1370,7 +1370,7 @@ func (h *AgentHandle) runLateSessionTool(call McpCall, job JobID) {
 	} else if v, _ := r.Value.(map[string]any); v["status"] == "waiting" {
 		why, _ = v["reason"].(string)
 	}
-	h.Input(LateSessionSentInput(job, call.Name, h.sessionDescription(call.Name), why, errText).WithSeq(r.Seq))
+	h.Input(LateSessionSentInput(job, call.Name, h.sessionDescription(call.Name), why, errText).WithSeq(r.Seq, r.Run))
 }
 
 // await marks key waiting on a late confirm (on) or done (off); false if it already waited.

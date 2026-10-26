@@ -328,7 +328,8 @@ type PaneEvent struct {
 	Question *SessionQuestion // PaneEventQuestion(Gone) only (a pointer: PaneEvent stays comparable)
 	Turn     *SessionTurn     // PaneEventTurn only
 	Outdated *SessionOutdated // PaneEventOutdated only
-	Seq      uint64           // PaneEventDelivered: every message numbered up to it went in (0: a pix too old to say, #339)
+	Seq      uint64           // PaneEventDelivered: every message numbered up to it went in (#339)
+	Run      string           // PaneEventDelivered: the pix numbering Seq belongs to (Delivery.Run)
 }
 
 // SessionOutdated is a session you started with an older pix than the app's (#191).
@@ -696,8 +697,10 @@ type McpCall struct {
 type McpReply struct {
 	Value any
 	Err   error
-	// Seq: a session tool's delivery number (Delivery.Seq, #339), for the app; never sent.
+	// Seq and Run: a session tool's delivery number and its numbering (Delivery.Seq and Run,
+	// #339), for the app; never sent.
 	Seq uint64
+	Run string
 }
 
 // Decision is a PermissionRequest answer.

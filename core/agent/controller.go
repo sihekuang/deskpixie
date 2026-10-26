@@ -199,8 +199,9 @@ type Input struct {
 	Name       string
 	Worktree   string
 	Reason     string
-	// Seq (InSessionSent, InLateSessionSent): Delivery.Seq (#339).
+	// Seq and Run (InSessionSent, InLateSessionSent): Delivery.Seq and Run (#339).
 	Seq uint64
+	Run string
 	// Keep (InRestored): the coordinator was kept running over the quit (agent.keepPanesOnQuit).
 	Keep bool
 	// Typed (InDelegate): the request was typed in the text box (#221).
@@ -350,9 +351,10 @@ func SessionWaitingInput(name, description, reason string) Input {
 	return Input{Kind: InSessionSent, Name: name, Text: description, Message: reason}
 }
 
-// WithSeq is in with the message number pix gave (Delivery.Seq, #339): waiting, that message's;
-// sent, every one up to it went in. 0 (a pix too old to number them) is today's behaviour.
-func (in Input) WithSeq(seq uint64) Input { in.Seq = seq; return in }
+// WithSeq is in with the message number pix gave and its numbering (Delivery.Seq and Run,
+// #339): waiting, that message's; sent, every one up to it went in. With no run (a pix too old
+// to number them) it is today's behaviour.
+func (in Input) WithSeq(seq uint64, run string) Input { in.Seq, in.Run = seq, run; return in }
 func WorkerScreenInput(name, text string) Input {
 	return Input{Kind: InWorkerScreen, Name: name, Text: text}
 }
@@ -550,6 +552,9 @@ type AgentController struct {
 	// deliveredUpTo: each session's messages numbered up to this are known to have gone in
 	// (#339), whichever pix says so first: the delivery or the reply that it waits.
 	deliveredUpTo map[string]uint64
+	// numbering: the pix run each session's numbers in heldNoticed and deliveredUpTo belong
+	// to. A new pix under the name starts again at 1, so they go with the old one (#339).
+	numbering map[string]string
 	// jobSessions: the sessions each job was passed to, in order (#261).
 	jobSessions map[JobID][]string
 	// asking: each session's open question, the outbox line id; its next turn or its end
@@ -612,6 +617,7 @@ func NewAgentController(settings Settings) *AgentController {
 		typedTo:        map[string]JobID{},
 		heldNoticed:    map[string]uint64{},
 		deliveredUpTo:  map[string]uint64{},
+		numbering:      map[string]string{},
 		jobSessions:    map[JobID][]string{},
 		asking:         map[string]uint64{},
 		typed:          map[JobID]bool{},
@@ -828,7 +834,7 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 				}
 			}
 		case ev.Kind == PaneEventDelivered:
-			c.heldDelivered(ev.Agent, ev.Seq, &fx)
+			c.heldDelivered(ev.Agent, ev.Seq, ev.Run, &fx)
 		case ev.Kind == PaneEventQuestion || ev.Kind == PaneEventQuestionGone:
 		case ev.Kind == PaneEventStatus:
 			c.sessionStatus(ev.Agent, ev.Status, now)
@@ -840,6 +846,7 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 			c.confirms.TakeSession(ev.Agent, "") // a session that closed asks nothing any more
 			c.dropAsking(ev.Agent, &fx)
 			c.workerGone(ev.Agent, now, &fx)
+			c.forgetNumbering(ev.Agent)
 		}
 	case InMode:
 		c.onMode(in.Agent, in.Mode, now, &fx)
@@ -848,15 +855,15 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 			c.onSubmit(in.Message, now, &fx)
 		}
 	case InSessionSent:
-		waiting := c.stillWaits(in.Name, in.Message, in.Seq)
+		waiting := c.stillWaits(in.Name, in.Message, in.Seq, in.Run)
 		if waiting == "" {
-			c.heldDelivered(in.Name, in.Seq, &fx)
+			c.heldDelivered(in.Name, in.Seq, in.Run, &fx)
 		}
 		c.onSessionSent(in.Name, in.Text, waiting, in.Seq, now, &fx)
 	case InLateSessionSent:
-		waiting := c.stillWaits(in.Name, in.Message, in.Seq)
+		waiting := c.stillWaits(in.Name, in.Message, in.Seq, in.Run)
 		if waiting == "" && in.Reason == "" {
-			c.heldDelivered(in.Name, in.Seq, &fx)
+			c.heldDelivered(in.Name, in.Seq, in.Run, &fx)
 		}
 		c.onLateSessionSent(in.Job, in.Name, in.Text, waiting, in.Reason, in.Seq, now, &fx)
 	case InStop:
@@ -2021,20 +2028,46 @@ func (c *AgentController) tellSessionSent(job JobID, name, description, waiting 
 
 // stillWaits is why message seq to session name waits ("" if it doesn't): a reply says it
 // waits, unless pix already said it went in (its delivery stepped first, #339).
-func (c *AgentController) stillWaits(name, waiting string, seq uint64) string {
+func (c *AgentController) stillWaits(name, waiting string, seq uint64, run string) string {
+	c.renumbered(name, run)
 	if waiting != "" && seq > 0 && seq <= c.deliveredUpTo[name] {
 		return ""
 	}
 	return waiting
 }
 
+// renumbered: session name's pix numbers its messages as run ("": a pix too old to number
+// them, which changes nothing). Another run than the one before is a new pix under the name,
+// numbering from 1 again, so what the old one's numbers said goes (#339).
+func (c *AgentController) renumbered(name, run string) {
+	if run == "" || c.numbering[name] == run {
+		return
+	}
+	if _, known := c.numbering[name]; known {
+		c.forgetNumbering(name)
+	}
+	c.numbering[name] = run
+}
+
+// forgetNumbering drops what session name's message numbers said: its pix is gone, and the
+// next one under the name numbers from 1 (#339).
+func (c *AgentController) forgetNumbering(name string) {
+	delete(c.numbering, name)
+	delete(c.deliveredUpTo, name)
+	delete(c.heldNoticed, name)
+}
+
 // heldDelivered: session name has the messages that waited for it, every one numbered up to
-// upTo (0: all of them, from a pix too old to number them, #339). A notice saying one of those
-// still waits that Pixie hasn't said yet is dropped, and so is one kept for later in the
-// outbox: said after the fact, it would have you ask for it to be stopped and sent again. A
-// later message's notice stays.
-func (c *AgentController) heldDelivered(name string, upTo uint64, fx *[]Effect) {
+// upTo in run (#339); with no run, from a pix too old to number them, all of them. A notice
+// saying one of those still waits that Pixie hasn't said yet is dropped, and so is one kept
+// for later in the outbox: said after the fact, it would have you ask for it to be stopped and
+// sent again. A later message's notice stays, and a numbering pix's 0 (none in yet) drops none.
+func (c *AgentController) heldDelivered(name string, upTo uint64, run string, fx *[]Effect) {
 	if name == "" {
+		return
+	}
+	c.renumbered(name, run)
+	if run != "" && upTo == 0 {
 		return
 	}
 	if upTo > 0 {

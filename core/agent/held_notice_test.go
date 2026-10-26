@@ -123,7 +123,7 @@ func eHeldSeqInject(text, session string, seq uint64) Effect {
 }
 
 func deliveredUpTo(session string, seq uint64) Input {
-	return PaneInput(PaneEvent{Kind: PaneEventDelivered, Agent: session, Seq: seq})
+	return PaneInput(PaneEvent{Kind: PaneEventDelivered, Agent: session, Seq: seq, Run: "r1"})
 }
 
 // #343 review, 1: A waits, its delivery comes after B's waiting reply. Only A's notice goes:
@@ -131,16 +131,16 @@ func deliveredUpTo(session string, seq uint64) Input {
 func TestADeliveryWithdrawsOnlyTheMessagesItCovers(t *testing.T) {
 	c := workingOnJob1()
 	openVoice(c)
-	wantEffects(t, visible(c.Step(SessionWaitingInput("repo-claude", landing, "working").WithSeq(1), T0)), eHeldSeqInject(heldBusy, "repo-claude", 1))
-	wantEffects(t, visible(c.Step(SessionWaitingInput("repo-claude", landing, "working").WithSeq(2), T0+100)), eHeldSeqInject(heldBusy, "repo-claude", 2))
+	wantEffects(t, visible(c.Step(SessionWaitingInput("repo-claude", landing, "working").WithSeq(1, "r1"), T0)), eHeldSeqInject(heldBusy, "repo-claude", 1))
+	wantEffects(t, visible(c.Step(SessionWaitingInput("repo-claude", landing, "working").WithSeq(2, "r1"), T0+100)), eHeldSeqInject(heldBusy, "repo-claude", 2))
 	wantEffects(t, visible(c.Step(deliveredUpTo("repo-claude", 1), T0+200)), Effect{Kind: EfWithdrawHeld, Name: "repo-claude", Seq: 1})
 	wantEffects(t, visible(c.Step(deliveredUpTo("repo-claude", 2), T0+300)), Effect{Kind: EfWithdrawHeld, Name: "repo-claude", Seq: 2})
 	wantNone(t, visible(c.Step(deliveredUpTo("repo-claude", 2), T0+400)), "nothing held any more")
 
 	// With no conversation open, the outbox keeps B's line.
 	c = workingOnJob1()
-	c.Step(SessionWaitingInput("repo-claude", landing, "working").WithSeq(1), T0)
-	c.Step(SessionWaitingInput("repo-claude", landing, "typing").WithSeq(2), T0+100)
+	c.Step(SessionWaitingInput("repo-claude", landing, "working").WithSeq(1, "r1"), T0)
+	c.Step(SessionWaitingInput("repo-claude", landing, "typing").WithSeq(2, "r1"), T0+100)
 	c.Step(deliveredUpTo("repo-claude", 1), T0+200)
 	var left []uint64
 	for _, l := range c.outbox.Undelivered() {
@@ -159,12 +159,12 @@ func TestAWaitingReplyAfterItsDeliveryIsPassedOn(t *testing.T) {
 	c := workingOnJob1()
 	openVoice(c)
 	wantNone(t, visible(c.Step(deliveredUpTo("repo-claude", 3), T0)), "nothing held yet")
-	wantEffects(t, visible(c.Step(SessionWaitingInput("repo-claude", landing, "working").WithSeq(3), T0+100)), handedOff)
+	wantEffects(t, visible(c.Step(SessionWaitingInput("repo-claude", landing, "working").WithSeq(3, "r1"), T0+100)), handedOff)
 	if c.heldNoticed["repo-claude"] != 0 || len(c.heldNoticed) != 0 {
 		t.Fatalf("held noticed: %v", c.heldNoticed)
 	}
 	// A later message still waits as it says.
-	wantEffects(t, visible(c.Step(SessionWaitingInput("repo-claude", landing, "working").WithSeq(4), T0+200)), eHeldSeqInject(heldBusy, "repo-claude", 4))
+	wantEffects(t, visible(c.Step(SessionWaitingInput("repo-claude", landing, "working").WithSeq(4, "r1"), T0+200)), eHeldSeqInject(heldBusy, "repo-claude", 4))
 }
 
 // An older pix numbers nothing: a delivery covers every held notice, as before, and a newer
@@ -174,7 +174,7 @@ func TestUnnumberedDeliveriesCoverEverything(t *testing.T) {
 	openVoice(c)
 	c.Step(SessionWaitingInput("repo-claude", landing, "working"), T0)
 	wantEffects(t, visible(c.Step(delivered("repo-claude"), T0+100)), eWithdrawHeld("repo-claude"))
-	c.Step(SessionWaitingInput("repo-claude", landing, "working").WithSeq(5), T0+200)
+	c.Step(SessionWaitingInput("repo-claude", landing, "working").WithSeq(5, "r1"), T0+200)
 	wantEffects(t, visible(c.Step(delivered("repo-claude"), T0+300)), eWithdrawHeld("repo-claude"))
 	wantNone(t, visible(c.Step(delivered("repo-claude"), T0+400)))
 }
@@ -184,7 +184,7 @@ func TestUnnumberedDeliveriesCoverEverything(t *testing.T) {
 // digest goes as before.
 func TestAReplayedHeldLineCanStillBeWithdrawn(t *testing.T) {
 	c := workingOnJob1()
-	c.Step(SessionWaitingInput("repo-claude", landing, "working").WithSeq(7), T0)
+	c.Step(SessionWaitingInput("repo-claude", landing, "working").WithSeq(7, "r1"), T0)
 	c.deliver(NewLine(LineInfo, "Coordinator: the build is green"), T0+50, &[]Effect{})
 	var injects []Effect
 	for _, e := range c.Step(voiceOpened(), T0+100) {
@@ -199,7 +199,7 @@ func TestAReplayedHeldLineCanStillBeWithdrawn(t *testing.T) {
 	wantEffects(t, visible(c.Step(deliveredUpTo("repo-claude", 7), T0+200)), Effect{Kind: EfWithdrawHeld, Name: "repo-claude", Seq: 7})
 	// Handed back unsaid when the conversation closes, it is still the session's line.
 	c = workingOnJob1()
-	c.Step(SessionWaitingInput("repo-claude", landing, "working").WithSeq(8), T0)
+	c.Step(SessionWaitingInput("repo-claude", landing, "working").WithSeq(8, "r1"), T0)
 	var replayed Notice
 	for _, e := range c.Step(voiceOpened(), T0+100) {
 		if e.Kind == EfInject {
@@ -214,4 +214,45 @@ func TestAReplayedHeldLineCanStillBeWithdrawn(t *testing.T) {
 	if heldInOutbox(c, "repo-claude") {
 		t.Fatalf("still undelivered: %+v", c.outbox.Undelivered())
 	}
+}
+
+func deliveredIn(session string, seq uint64, run string) Input {
+	return PaneInput(PaneEvent{Kind: PaneEventDelivered, Agent: session, Seq: seq, Run: run})
+}
+
+// #343 re-review, 1: a new pix under a session's name numbers from 1 again. What the old
+// one's numbers said goes with it, when it exits and when the new one simply turns up.
+func TestANewPixUnderTheNameNumbersAfresh(t *testing.T) {
+	for _, exits := range []bool{true, false} {
+		c := workingOnJob1()
+		openVoice(c)
+		c.Step(SessionWaitingInput("repo-claude", landing, "working").WithSeq(3, "r1"), T0)
+		wantEffects(t, visible(c.Step(deliveredIn("repo-claude", 3, "r1"), T0+100)), Effect{Kind: EfWithdrawHeld, Name: "repo-claude", Seq: 3})
+		if exits {
+			c.Step(PaneInput(PaneEvent{Kind: PaneEventExited, Agent: "repo-claude"}), T0+200)
+		}
+		wantContains(t, visible(c.Step(SessionWaitingInput("repo-claude", landing, "working").WithSeq(1, "r2"), T0+300)),
+			eHeldSeqInject(heldBusy, "repo-claude", 1), "the new pix's first message still waits")
+		wantEffects(t, visible(c.Step(deliveredIn("repo-claude", 1, "r2"), T0+400)), Effect{Kind: EfWithdrawHeld, Name: "repo-claude", Seq: 1})
+	}
+	// The old pix's notice, still unsaid, isn't withdrawn by the new one's numbers.
+	c := workingOnJob1()
+	openVoice(c)
+	c.Step(SessionWaitingInput("repo-claude", landing, "working").WithSeq(3, "r1"), T0)
+	wantNone(t, visible(c.Step(deliveredIn("repo-claude", 5, "r2"), T0+100)), "another pix's numbers")
+}
+
+// #343 re-review, 2: a numbering pix's 0 is "none in yet" (one waits behind a menu while a
+// later one went in), not "all of them": no notice goes, and the real number still works.
+func TestANumberingPixsZeroDeliversNothing(t *testing.T) {
+	c := workingOnJob1()
+	openVoice(c)
+	c.Step(SessionWaitingInput("repo-claude", landing, "working").WithSeq(1, "r1"), T0)
+	wantNone(t, visible(c.Step(deliveredIn("repo-claude", 0, "r1"), T0+100)), "a delivery of none")
+	wantNotContains(t, visible(c.Step(SessionSentInput("repo-claude", landing).WithSeq(0, "r1"), T0+200)),
+		Effect{Kind: EfWithdrawHeld, Name: "repo-claude"}, "a typed reply with none in")
+	if c.heldNoticed["repo-claude"] != 1 {
+		t.Fatalf("held noticed: %v", c.heldNoticed)
+	}
+	wantEffects(t, visible(c.Step(deliveredIn("repo-claude", 1, "r1"), T0+300)), Effect{Kind: EfWithdrawHeld, Name: "repo-claude", Seq: 1})
 }

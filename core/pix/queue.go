@@ -63,7 +63,8 @@ func (q *Queue) Last() uint64 {
 
 // Delivered is the highest number every message up to which has reached the agent: all pushed
 // but those still queued. held: some are out of the queue but not delivered (a menu stopped
-// them), so it says no more than last time.
+// them), so it says no more than last time. 0 is none yet: pix registers with a Run, so DeskPixie
+// doesn't take it for "all of them" as from a pix too old to number its messages (#343).
 func (q *Queue) Delivered(held bool) uint64 {
 	q.mu.Lock()
 	defer q.mu.Unlock()
