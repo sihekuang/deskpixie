@@ -2187,6 +2187,9 @@ func (c *AgentController) answer(jobID JobID, text string, now Millis, fx *[]Eff
 	case jobID != "" && c.jobs.IsOpen(jobID) && waiting(jobID):
 		id = jobID
 	// Any other id is ignored: voice models copy example ids or make them up (Oct 18).
+	case c.asked.menu != 0 && c.menuAsked() != nil:
+		c.answerMenu(*c.menuAsked(), text, now, fx)
+		return
 	case c.asked.session != "":
 		*fx = append(*fx, Effect{Kind: EfTellSession, Name: c.asked.session, Text: strings.TrimSpace(text)},
 			Effect{Kind: EfAnswerResult, Name: c.asked.session})
@@ -2447,17 +2450,20 @@ func short(task string) string {
 }
 
 // asker is who asked the question Pixie relayed last (#161): a job, or a session whose turn
-// ended on a question. Two asked at once (several questions in one Stop) are no one: which to
+// ended on a question, or a session's menu. Two asked at once (several questions in one Stop) are no one: which to
 // answer is the user's to say.
 type asker struct {
 	job     JobID
 	session string
-	at      Millis
-	tie     bool
+	// menu: the request id of a session's menu (#330), answered by what's said back; never its
+	// confirm word, which comes round again for another request.
+	menu RequestID
+	at   Millis
+	tie  bool
 }
 
 func (c *AgentController) askedBy(a asker) {
-	if prev := c.asked; prev.at == a.at && (prev.job != "" || prev.session != "" || prev.tie) && prev != a {
+	if prev := c.asked; prev.at == a.at && (prev.job != "" || prev.session != "" || prev.menu != 0 || prev.tie) && prev != a {
 		a = asker{tie: true, at: a.at}
 	}
 	c.asked = a
