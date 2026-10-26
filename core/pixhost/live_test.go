@@ -21,7 +21,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -107,7 +106,7 @@ func TestLivePixWrapsClaude(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		cmd.Process.Signal(syscall.SIGKILL)
+		stopPix(cmd)
 		if t.Failed() {
 			b, _ := os.ReadFile(screen.Name())
 			if len(b) > 4000 {
@@ -238,7 +237,7 @@ func TestLivePixWrapsCodex(t *testing.T) {
 	}
 	tty.Close()
 	t.Cleanup(func() {
-		cmd.Process.Signal(syscall.SIGKILL)
+		stopPix(cmd)
 		if t.Failed() {
 			b, _ := os.ReadFile(screen.Name())
 			if len(b) > 3000 {

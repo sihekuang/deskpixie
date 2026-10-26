@@ -42,17 +42,33 @@ func buildPix(t *testing.T, dir string) {
 	}
 }
 
-// cleanEnv is the test's environment without anything that would make pix think it is nested.
+// cleanEnv is the test's environment without anything that would make pix think it is nested,
+// report to the real app or use its app data (any DESKPIXIE_ switch), or leave its folder in the
+// real temp folder (#346).
 func cleanEnv(extra ...string) []string {
 	var env []string
 	for _, kv := range os.Environ() {
 		if k, _, _ := strings.Cut(kv, "="); k == "PIX_SESSION" || k == "PIXIE_AGENT_TOKEN" || k == "PIX_SOCK" || k == "PATH" || k == "HOME" ||
-			k == "TERMINAL_EMULATOR" || k == "TERM_PROGRAM" || k == "__CFBundleIdentifier" {
+			k == "TERMINAL_EMULATOR" || k == "TERM_PROGRAM" || k == "__CFBundleIdentifier" || k == "TMPDIR" || strings.HasPrefix(k, "DESKPIXIE_") {
 			continue
 		}
 		env = append(env, kv)
 	}
 	return append(env, extra...)
+}
+
+// stopPix ends pix as a closed terminal tab would (SIGTERM), so it removes its own folder; only
+// a pix that doesn't end by then is killed.
+func stopPix(cmd *exec.Cmd) {
+	done := make(chan struct{})
+	go func() { cmd.Wait(); close(done) }()
+	cmd.Process.Signal(syscall.SIGTERM)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		cmd.Process.Kill()
+		<-done
+	}
 }
 
 func waitFor(t *testing.T, what string, limit time.Duration, f func() bool) {
@@ -102,13 +118,13 @@ func TestEndToEnd(t *testing.T) {
 	// WebStorm's terminal, as read from WebStorm 2026.2.3: its terminal plugin sets
 	// TERMINAL_EMULATOR, the shell inherits the app's bundle id, and TERM_PROGRAM is whatever
 	// WebStorm itself was started from.
-	cmd.Env = cleanEnv("PATH="+bin+":/usr/bin:/bin", "HOME="+bin, "DESKPIXIE_PIX_SOCK="+sock,
+	cmd.Env = cleanEnv("PATH="+bin+":/usr/bin:/bin", "HOME="+bin, "TMPDIR="+bin, "DESKPIXIE_PIX_SOCK="+sock,
 		"TERMINAL_EMULATOR=JetBrains-JediTerm", "__CFBundleIdentifier=com.jetbrains.WebStorm", "TERM_PROGRAM=WarpTerminal")
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stdout
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { cmd.Process.Signal(syscall.SIGKILL) })
+	t.Cleanup(func() { stopPix(cmd) })
 	tty.Close()
 	lines := make(chan string, 100)
 	go func() {
