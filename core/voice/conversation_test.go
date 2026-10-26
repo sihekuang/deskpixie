@@ -757,3 +757,41 @@ func TestAnInjectNamesItsSessionsWhenItGoesOutNotWhenQueued(t *testing.T) {
 	eq(t, tick(c, true, ms(now, 500)),
 		Effect{Kind: EfInject, Text: "Session update: fruit is done.", Sessions: []string{"fruit-claude"}}, pixie(StateThinking))
 }
+
+// #339: a notice saying a session's message still waits is dropped while queued once the
+// session has it; the others, another session's included, still go out in order.
+func TestAWithdrawnHeldNoticeIsNeverSaid(t *testing.T) {
+	now := t0()
+	c := listening(now)
+	c.Step(InjectInput(notice("first")), now)
+	held := "Coordinator reply: Your session on fruit hasn't got your message yet."
+	empty(t, c.Step(InjectInput(Notice{Text: held, Held: "fruit-claude"}), now), "the first is being answered")
+	c.Step(InjectInput(Notice{Text: "Coordinator reply: Your session on api hasn't got your message yet.", Held: "api-claude"}), now)
+	c.Step(InjectInput(notice("Coordinator reply: Passed on to your session on fruit.")), now)
+	empty(t, c.Step(WithdrawHeldInput("fruit-claude"), now), "a withdrawal says nothing")
+	empty(t, c.Step(WithdrawHeldInput(""), now), "no session: nothing to withdraw")
+	var said []string
+	for i := int64(1); i <= 3; i++ {
+		model(c, evResponseCreated, ms(now, i*100))
+		model(c, evResponseDone, ms(now, i*100+10))
+		for _, e := range tick(c, true, ms(now, i*100+20)) {
+			if e.Kind == EfInject {
+				said = append(said, e.Text)
+			}
+		}
+	}
+	want := []string{"Coordinator reply: Your session on api hasn't got your message yet.", "Coordinator reply: Passed on to your session on fruit."}
+	if len(said) != len(want) || said[0] != want[0] || said[1] != want[1] {
+		t.Fatalf("said %q, want %q", said, want)
+	}
+}
+
+// Already said, a held notice is past withdrawing; and with no conversation open there is
+// nothing queued to drop.
+func TestWithdrawingAHeldNoticeAlreadySaidOrClosedDoesNothing(t *testing.T) {
+	now := t0()
+	c := listening(now)
+	eq(t, c.Step(InjectInput(Notice{Text: "held", Held: "fruit-claude"}), now), injectFx("held"), pixie(StateThinking))
+	empty(t, c.Step(WithdrawHeldInput("fruit-claude"), now))
+	empty(t, newConv().Step(WithdrawHeldInput("fruit-claude"), now))
+}

@@ -534,9 +534,11 @@ const (
 	CallInject VoiceCallKind = iota
 	CallHoldOpen
 	CallOpen
+	CallWithdrawHeld
 )
 
-// VoiceCall is one recorded VoiceLink call: Inject(Text), HoldOpen(On) or Open.
+// VoiceCall is one recorded VoiceLink call: Inject(Text), HoldOpen(On), Open or
+// WithdrawHeld(Text: the session).
 type VoiceCall struct {
 	Kind VoiceCallKind
 	Text string
@@ -546,6 +548,9 @@ type VoiceCall struct {
 func InjectCall(text string) VoiceCall { return VoiceCall{Kind: CallInject, Text: text} }
 func HoldOpenCall(on bool) VoiceCall   { return VoiceCall{Kind: CallHoldOpen, On: on} }
 func OpenCall() VoiceCall              { return VoiceCall{Kind: CallOpen} }
+func WithdrawHeldCall(session string) VoiceCall {
+	return VoiceCall{Kind: CallWithdrawHeld, Text: session}
+}
 
 // RecordingVoiceLink records injects, holds and opens; IsOpen answers what SetOpen set; Open
 // answers true unless SetBusy(true).
@@ -592,6 +597,12 @@ func (v *RecordingVoiceLink) IsOpen() bool {
 func (v *RecordingVoiceLink) Inject(n agent.Notice) {
 	v.mu.Lock()
 	v.calls = append(v.calls, InjectCall(n.Text))
+	v.mu.Unlock()
+}
+
+func (v *RecordingVoiceLink) WithdrawHeld(session string) {
+	v.mu.Lock()
+	v.calls = append(v.calls, WithdrawHeldCall(session))
 	v.mu.Unlock()
 }
 

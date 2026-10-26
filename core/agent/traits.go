@@ -130,6 +130,12 @@ type VoiceLink interface {
 	Open() bool
 }
 
+// HeldWithdrawer is a VoiceLink that can drop a notice it hasn't said yet that says a
+// session's message still waits, once the session has it (#339).
+type HeldWithdrawer interface {
+	WithdrawHeld(session string)
+}
+
 type Notifier interface {
 	Chime()
 	Notify(title, body string)

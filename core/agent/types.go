@@ -314,6 +314,9 @@ const (
 	// PaneEventOutdated: a session you started with pix registered on an older pix than the
 	// app's (Outdated set, #191). Once per session per app run.
 	PaneEventOutdated
+	// PaneEventDelivered: the messages that waited for one of your pix sessions reached it
+	// (#183, #339).
+	PaneEventDelivered
 )
 
 // PaneEvent is a status change (Status set), an exit of a named agent, a prompt one of your

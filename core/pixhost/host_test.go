@@ -806,3 +806,20 @@ func TestAnOutdatedSessionIsReportedOnce(t *testing.T) {
 		t.Fatalf("told again after a reconnect: %+v", got)
 	}
 }
+
+// #339: pix reporting what waited delivered reaches the controller, so a notice saying it still
+// waits can go unsaid.
+func TestDeliveredBecomesAPaneEvent(t *testing.T) {
+	h, sock := newHost(t)
+	events := h.Subscribe()
+	p, r := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api"})
+	wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "delivered"})
+	select {
+	case ev := <-events:
+		if ev.Kind != agent.PaneEventDelivered || ev.Agent != r.Address {
+			t.Fatalf("%+v", ev)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no event")
+	}
+}

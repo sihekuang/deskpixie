@@ -390,6 +390,7 @@ const (
 	EfLine             // Outbox: a reply line for the chat thread (#302)
 	EfDelivered        // Value ([]uint64): outbox lines you heard or saw, read in the chat thread (#302)
 	EfChatEnded        // Job: a typed job ended with no line to say so (Stop): its live step goes (#302)
+	EfWithdrawHeld     // Name: that session has its message now: Pixie drops any notice still waiting to say it doesn't (#339)
 )
 
 // Effect is one thing the caller must do, in order. Err set (non-empty) is the Err branch of
@@ -533,6 +534,9 @@ type AgentController struct {
 	// typedTo: the typed job last handed to each of your sessions; that session's told turns
 	// go to the text box while it shows that job (#241).
 	typedTo map[string]JobID
+	// heldNoticed: the sessions Pixie was handed a notice for saying their message still waits,
+	// until they have it (#339).
+	heldNoticed map[string]bool
 	// jobSessions: the sessions each job was passed to, in order (#261).
 	jobSessions map[JobID][]string
 	// asking: each session's open question, the outbox line id; its next turn or its end
@@ -593,6 +597,7 @@ func NewAgentController(settings Settings) *AgentController {
 		sessionWorking: map[string]bool{},
 		pixieTurnEnded: map[string]Millis{},
 		typedTo:        map[string]JobID{},
+		heldNoticed:    map[string]bool{},
 		jobSessions:    map[JobID][]string{},
 		asking:         map[string]uint64{},
 		typed:          map[JobID]bool{},
@@ -808,6 +813,8 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 					}
 				}
 			}
+		case ev.Kind == PaneEventDelivered:
+			c.heldDelivered(ev.Agent, &fx)
 		case ev.Kind == PaneEventQuestion || ev.Kind == PaneEventQuestionGone:
 		case ev.Kind == PaneEventStatus:
 			c.sessionStatus(ev.Agent, ev.Status, now)
@@ -827,8 +834,14 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 			c.onSubmit(in.Message, now, &fx)
 		}
 	case InSessionSent:
+		if in.Message == "" {
+			c.heldDelivered(in.Name, &fx)
+		}
 		c.onSessionSent(in.Name, in.Text, in.Message, now, &fx)
 	case InLateSessionSent:
+		if in.Message == "" && in.Reason == "" {
+			c.heldDelivered(in.Name, &fx)
+		}
 		c.onLateSessionSent(in.Job, in.Name, in.Text, in.Message, in.Reason, now, &fx)
 	case InStop:
 		if in.Agent == Coordinator {
@@ -1969,7 +1982,26 @@ func (c *AgentController) tellSessionSent(job JobID, name, description, waiting 
 	c.saveJob(job, fx)
 	line := NewJobLine(LineReply, text, job)
 	line.Title, line.Brief = maskPendingTokens(title, tokens), brief
+	if waiting != "" && name != "" {
+		line.Held = name
+	}
 	c.deliverOpening(line, now, fx)
+}
+
+// heldDelivered: session name has the messages that waited for it (#339). A notice saying one
+// still waits that Pixie hasn't said yet is dropped, and so is one kept for later in the
+// outbox: said after the fact, it would have you ask for it to be stopped and sent again.
+func (c *AgentController) heldDelivered(name string, fx *[]Effect) {
+	if name == "" {
+		return
+	}
+	if c.heldNoticed[name] {
+		delete(c.heldNoticed, name)
+		*fx = append(*fx, Effect{Kind: EfWithdrawHeld, Name: name})
+	}
+	for _, r := range c.outbox.MarkDeliveredWhere(func(l OutboxLine) bool { return l.Held == name }) {
+		*fx = append(*fx, Effect{Kind: EfAppend, File: OutboxFile, Line: r})
+	}
 }
 
 func (c *AgentController) onPostTool(toolName string, toolInput any, now Millis, fx *[]Effect) {
@@ -2208,9 +2240,14 @@ func (c *AgentController) deliver(line Line, now Millis, fx *[]Effect) bool {
 }
 
 // remember keeps the lines a notice carries (to route them again if it bounces), and returns it
-// naming the sessions they are about (#261).
+// naming the sessions they are about (#261) and, for a line saying a message still waits, its
+// session (#339).
 func (c *AgentController) remember(n Notice, lines []Line) Notice {
 	n.Sessions = sessionsOf(lines)
+	if len(lines) == 1 && lines[0].Held != "" { // only its own notice can go unsaid (#339)
+		n.Held = lines[0].Held
+		c.heldNoticed[n.Held] = true
+	}
 	c.injected = append(c.injected, injectedNotice{n.Text, lines})
 	if len(c.injected) > 64 {
 		c.injected = c.injected[1:]

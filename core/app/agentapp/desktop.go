@@ -279,6 +279,15 @@ func (l *VoiceLink) Inject(n agent.Notice) {
 	}
 }
 
+// WithdrawHeld drops a notice not said yet that says session's message still waits (#339).
+func (l *VoiceLink) WithdrawHeld(session string) {
+	if v := l.voice.Load(); v != nil {
+		if w, ok := (*v).(agent.HeldWithdrawer); ok {
+			w.WithdrawHeld(session)
+		}
+	}
+}
+
 func (l *VoiceLink) Open() bool {
 	if v := l.voice.Load(); v != nil {
 		return (*v).Open()

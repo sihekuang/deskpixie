@@ -2000,6 +2000,10 @@ func (h *AgentHandle) apply(e Effect) {
 		}
 	case EfHoldOpen:
 		d.Voice.HoldOpen(e.Hold)
+	case EfWithdrawHeld:
+		if w, ok := d.Voice.(HeldWithdrawer); ok {
+			w.WithdrawHeld(e.Name)
+		}
 	case EfReply:
 		if d.Replies != nil {
 			d.Replies.Reply(*e.Reply)

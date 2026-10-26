@@ -67,16 +67,17 @@ func (p Phase) String() string {
 type InputKind int
 
 const (
-	InHotkey      InputKind = iota
-	InModel                 // Event: something the voice session reported
-	InToolDone              // CallID finished; End = it asked to end the conversation
-	InTick                  // PlaybackIdle; sent about 30 times a second by the runtime
-	InFailed                // Failure
-	InInject                // Notice: say something about it once nobody is talking
-	InHoldOpen              // Hold: while on, the silence timeout is the hold timeout and Pixie rests in delegating
-	InMicLive               // the mic is actually on (the permission prompt may have shown first)
-	InOpen                  // start a conversation if none is under way (unlike InHotkey, never ends one)
-	InHandOffDone           // the hand-off's delegate call finished; Notice (Text "" = nothing to say)
+	InHotkey       InputKind = iota
+	InModel                  // Event: something the voice session reported
+	InToolDone               // CallID finished; End = it asked to end the conversation
+	InTick                   // PlaybackIdle; sent about 30 times a second by the runtime
+	InFailed                 // Failure
+	InInject                 // Notice: say something about it once nobody is talking
+	InHoldOpen               // Hold: while on, the silence timeout is the hold timeout and Pixie rests in delegating
+	InMicLive                // the mic is actually on (the permission prompt may have shown first)
+	InOpen                   // start a conversation if none is under way (unlike InHotkey, never ends one)
+	InHandOffDone            // the hand-off's delegate call finished; Notice (Text "" = nothing to say)
+	InWithdrawHeld           // Held: that session has its message now; its queued "still waits" notices go (#339)
 )
 
 // Input is one stimulus for Conversation.Step. Build it with the *Input constructors.
@@ -90,6 +91,7 @@ type Input struct {
 	Failure      Failure // InFailed
 	Notice       Notice  // InInject
 	Hold         bool    // InHoldOpen
+	Held         string  // InWithdrawHeld
 }
 
 func HotkeyInput() Input        { return Input{Kind: InHotkey} }
@@ -109,6 +111,10 @@ func InjectInput(n Notice) Input        { return Input{Kind: InInject, Notice: n
 func HoldOpenInput(on bool) Input       { return Input{Kind: InHoldOpen, Hold: on} }
 func MicLiveInput() Input               { return Input{Kind: InMicLive} }
 func OpenInput() Input                  { return Input{Kind: InOpen} }
+
+// WithdrawHeldInput: session has the message a queued notice says still waits (#339); the
+// notice, not said yet, would tell you something no longer true.
+func WithdrawHeldInput(session string) Input { return Input{Kind: InWithdrawHeld, Held: session} }
 
 // HandOffDoneInput: the hand-off (EfHandOff) finished; Pixie says n (if any) once it's quiet.
 func HandOffDoneInput(n Notice) Input { return Input{Kind: InHandOffDone, Notice: n} }
@@ -388,6 +394,10 @@ func (c *Conversation) Step(in Input, now time.Time) []Effect {
 			fx = c.tryInject(now, fx)
 		} else {
 			fx = append(fx, Effect{Kind: EfSignal, Signal: VoiceSignal{Kind: SigClosed, Undelivered: []Notice{in.Notice}}})
+		}
+	case InWithdrawHeld:
+		if in.Held != "" {
+			c.injects = slices.DeleteFunc(c.injects, func(n Notice) bool { return n.Held == in.Held })
 		}
 	case InMicLive:
 		if c.IsActive() && !c.micLive {

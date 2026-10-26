@@ -317,7 +317,7 @@ func (h *Host) onMsg(s *session, m wire.Msg) bool {
 			h.mu.Lock()
 			s.waiting = 0
 			h.mu.Unlock()
-			h.changed()
+			h.broadcast(agent.PaneEvent{Kind: agent.PaneEventDelivered, Agent: s.addr}) // a notice saying it waits goes (#339)
 		case "exited":
 			h.remove(s)
 			return true

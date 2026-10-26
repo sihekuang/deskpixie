@@ -87,6 +87,9 @@ type Line struct {
 	Title, Brief string
 	// Note: shown small under the line in the bubble, never said (a dialog's command, #105).
 	Note string
+	// Held: the session whose message the line says still waits (#183). Once it has it, the
+	// line goes unsaid if it hasn't been yet (#339).
+	Held string
 }
 
 func NewLine(kind LineKind, text string) Line { return Line{Text: text, Kind: kind} }
