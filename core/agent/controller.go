@@ -520,6 +520,9 @@ type AgentController struct {
 	// handedOff: jobs whose request the coordinator passed to one of your sessions, which Pixie
 	// has already told you (#177); true while it has done nothing else since.
 	handedOff map[JobID]bool
+	// sentTurn: the job each of your sessions is on a turn for, from the request Pixie typed
+	// in until that turn ends (#332): what a cancel of the job, closed by then, stops.
+	sentTurn map[string]JobID
 	// typedTo: the typed job last handed to each of your sessions; that session's told turns
 	// go to the text box while it shows that job (#241).
 	typedTo map[string]JobID
@@ -579,6 +582,7 @@ func NewAgentController(settings Settings) *AgentController {
 		memories:    NewMemoryLog(),
 		workers:     NewWorkers(),
 		handedOff:   map[JobID]bool{},
+		sentTurn:    map[string]JobID{},
 		typedTo:     map[string]JobID{},
 		jobSessions: map[JobID][]string{},
 		asking:      map[string]uint64{},
@@ -639,6 +643,31 @@ func (c *AgentController) ResolveCancel(id string) (JobID, error) {
 		return open[0], nil
 	}
 	return "", fmt.Errorf("Several jobs are open (%s). Which one?", joinIDs(open))
+}
+
+// SentTo is the session a cancel of a job that is already closed means (#332): the job raw
+// (with none named, the one Pixie typed into a session last) passed its request to one of your
+// sessions, which is still on that turn. "Stop that" just after a hand-off stops the session.
+func (c *AgentController) SentTo(raw string) (string, bool) {
+	var want JobID
+	if raw = strings.TrimSpace(raw); raw != "" {
+		j, ok := ParseJobID(raw)
+		if !ok {
+			return "", false
+		}
+		want = j
+	}
+	name, newest := "", Millis(0)
+	for session, id := range c.sentTurn {
+		j, ok := c.jobs.Get(id)
+		if !ok || c.jobs.IsOpen(id) || want != "" && id != want {
+			continue
+		}
+		if name == "" || j.Updated > newest || j.Updated == newest && session < name {
+			name, newest = session, j.Updated
+		}
+	}
+	return name, name != ""
 }
 
 // Step applies one input and returns the effects to carry out, in order.
@@ -1870,6 +1899,11 @@ func (c *AgentController) tellSessionSent(job JobID, name, description, waiting 
 		delete(c.typedTo, name) // its answer is for this request now, not an earlier typed one
 	}
 	text, brief, title := sessionSentText(description, waiting)
+	if name != "" && waiting == "" {
+		c.sentTurn[name] = job
+	} else if name != "" {
+		delete(c.sentTurn, name) // a held message isn't its turn: a stop wouldn't stop it
+	}
 	c.handedOff[job] = true
 	tokens := c.pendingTokens()
 	text = maskPendingTokens(text, tokens) // kept masked too: a typed job's box shows it again (#231)
@@ -1948,6 +1982,7 @@ const MaxSessionDetailBytes = 2 << 10
 // agent-settable too.
 func (c *AgentController) onSessionTurn(name string, t SessionTurn, now Millis, fx *[]Effect) {
 	c.dropAsking(name, fx)
+	delete(c.sentTurn, name)
 	if c.shutDown {
 		return
 	}

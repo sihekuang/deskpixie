@@ -529,6 +529,13 @@ func (h *AgentHandle) Cancel(jobID string) (JobID, error) {
 	return id, nil
 }
 
+// SentTo: the session a cancel of an already closed job means (#332; AgentController.SentTo).
+func (h *AgentHandle) SentTo(jobID string) (string, bool) {
+	h.ctlMu.Lock()
+	defer h.ctlMu.Unlock()
+	return h.ctl.SentTo(jobID)
+}
+
 // stopAnswer is a cancel of the job that just asked, as its answer: the user may only have meant
 // stop waiting (Oct 18: "you can stop now" killed a test run).
 const stopAnswer = "stop (they said it in reply to this question: work out whether they meant stop waiting or stop the work, and ask them if you can't tell)"
