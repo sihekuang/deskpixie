@@ -542,46 +542,76 @@ func asksWhereThingsStand(words []string) bool {
 	return whWords[words[0]] && len(words) > 1 && stateQuestions[words[1]]
 }
 
-// senderWords and reviewWords together name the sender's own go-ahead: "have me review it",
-// "my OK", "once I've approved".
-var senderWords = map[string]bool{"me": true, "my": true, "us": true, "our": true, "i": true, "we": true, "i've": true, "we've": true, "i'm": true, "i'll": true, "we'll": true}
+// reviewVerbs, reviewNouns and goAheadObjects name the sender's own go-ahead, only in the
+// fixed phrases waitsOnSender reads: a sender or a review elsewhere in the sentence ("I've
+// reviewed it, rebase before you push") isn't what the step waits for.
+var reviewVerbs = map[string]bool{"review": true, "reviewed": true, "approve": true, "approved": true, "check": true,
+	"checked": true, "look": true, "looked": true, "see": true, "seen": true, "sign": true, "signed": true}
 
-var reviewWords = map[string]bool{"review": true, "reviewed": true, "approve": true, "approved": true, "approval": true,
-	"ok": true, "okay": true, "see": true, "seen": true, "look": true, "check": true, "checked": true, "sign": true,
-	"signed": true, "confirm": true, "confirmed": true, "say": true, "permission": true}
+var reviewNouns = map[string]bool{"ok": true, "okay": true, "review": true, "approval": true, "ahead": true, "off": true}
 
-// waitsFor lead the sender's go-ahead after the step: "push once I've reviewed it".
+// goAheadObjects may follow the review before "before": "have me review the changes first".
+var goAheadObjects = map[string]bool{"it": true, "that": true, "this": true, "them": true, "these": true, "those": true,
+	"the": true, "changes": true, "change": true, "diff": true, "work": true, "everything": true, "first": true, "at": true, "over": true}
+
+// waitsFor words lead the sender's go-ahead after the step: "push once I've reviewed it".
 var waitsFor = map[string]bool{"after": true, "once": true, "until": true, "when": true}
 
 // waitsOnSender: the step at words[i] waits for the sender's own go-ahead, so they're asked
-// again when they give it (#329): "have me review it before you push", "merge after I
-// approve". A step before the review ("push it, then let me review") still asks.
+// again when they give it (#329). Before the step: "have me review it", "let me see", "ask
+// me", "check with me", "wait for my OK", "I'll review it". After it: "once I've reviewed",
+// "after I approve", "after my approval", "until I say so". A step before the review ("push
+// it, then let me review"), or one the wait is further on from ("push and merge once I've
+// approved"), still asks.
 func waitsOnSender(words []string, i int) bool {
-	goAhead := func(span []string) bool {
-		return slices.ContainsFunc(span, func(w string) bool { return senderWords[w] }) &&
-			slices.ContainsFunc(span, func(w string) bool { return reviewWords[w] })
-	}
 	j := i - 1
 	if j >= 0 && (youWords[words[j]] || words[j] == "we") {
 		j--
 	}
 	if j >= 0 && words[j] == "before" {
-		start := j
-		for start > 0 && !negationEnds[words[start-1]] {
-			start--
+		t := words[:j]
+		for n := 0; n < 4 && len(t) > 0 && goAheadObjects[t[len(t)-1]]; n++ {
+			t = t[:len(t)-1]
 		}
-		if goAhead(words[start:j]) {
+		ends := func(ok ...func(string) bool) bool {
+			if len(t) < len(ok) {
+				return false
+			}
+			for k, f := range ok {
+				if !f(t[len(t)-len(ok)+k]) {
+					return false
+				}
+			}
+			return true
+		}
+		is := func(set ...string) func(string) bool {
+			return func(w string) bool { return slices.Contains(set, w) }
+		}
+		me, verb, noun := is("me", "us"), func(w string) bool { return reviewVerbs[w] }, func(w string) bool { return reviewNouns[w] }
+		if ends(is("have", "let"), me, verb) || ends(is("ask"), me) || ends(is("check"), is("with"), me) ||
+			ends(is("wait"), is("for"), is("my", "our"), noun) || ends(is("wait"), is("for"), is("my", "our"), is("go", "sign"), noun) ||
+			ends(is("i'll", "we'll"), verb) {
 			return true
 		}
 	}
-	for k := i + 1; k < len(words) && !negationEnds[words[k]]; k++ {
-		if waitsFor[words[k]] {
-			end := k + 1
-			for end < len(words) && !negationEnds[words[end]] {
-				end++
-			}
-			return goAhead(words[k+1 : end])
+	for k := i + 1; k < len(words) && !negationEnds[words[k]] && words[k] != "and"; k++ {
+		if _, step := gatedForms[words[k]]; step {
+			return false
 		}
+		if !waitsFor[words[k]] {
+			continue
+		}
+		r := slices.Concat(words[k+1:min(len(words), k+5)], []string{"", "", ""})
+		if r[0] == "i" && r[1] == "have" {
+			r = r[1:]
+		}
+		switch {
+		case r[0] == "i" || r[0] == "i've":
+			return reviewVerbs[r[1]] || r[1] == "say" && (r[2] == "so" || r[2] == "go")
+		case r[0] == "my":
+			return reviewNouns[r[1]] || (r[1] == "go" || r[1] == "sign") && reviewNouns[r[2]]
+		}
+		return false
 	}
 	return false
 }

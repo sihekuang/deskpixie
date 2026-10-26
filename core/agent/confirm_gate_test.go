@@ -111,6 +111,24 @@ func TestGatedActions(t *testing.T) {
 		{"Push after the tests pass.", []string{"push"}},
 		{"Have me review it before you push, then merge.", []string{"merge"}},
 		{"Merge, then push once I've reviewed it.", []string{"merge"}},
+		{"Let me look at it first before you push.", nil},
+		{"Merge after my approval.", nil},
+		// … and the sender or a review named elsewhere in the sentence isn't the wait.
+		{"I've reviewed it, rebase before you push.", []string{"push"}},
+		{"I've checked it, squash the commits before you push.", []string{"push"}},
+		{"We've seen the diff, squash it before you merge.", []string{"merge"}},
+		{"OK I think it's good, run lint before you push.", []string{"push"}},
+		{"We need to see green CI before you deploy.", []string{"deploy"}},
+		{"Let our CI check it before you push.", []string{"push"}},
+		{"Skip my review before you push.", []string{"push"}},
+		{"Push when you're done, I'll look at it tomorrow.", []string{"push"}},
+		{"Push it once the tests pass and I'll check it later.", []string{"push"}},
+		{"Deploy when ready and send me the URL so I can check it.", []string{"deploy"}},
+		{"Push it when we see green CI.", []string{"push"}},
+		{"Keep deploying every hour until I say stop.", []string{"deploy"}},
+		{"Publish the release when you see my comment is resolved.", []string{"publish"}},
+		{"Push to the branch and merge once I've approved it.", []string{"push"}},
+		{"Push it and open a PR, merge when I approve.", []string{"push"}},
 	} {
 		if got := GatedActions(tc.text); !slices.Equal(got, tc.want) {
 			t.Errorf("GatedActions(%q) = %q, want %q", tc.text, got, tc.want)
