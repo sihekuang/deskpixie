@@ -211,6 +211,23 @@ public struct ChatTerminalTarget: Equatable, Sendable {
     }
 }
 
+/// The stop button beside a working responder's name (#309): `agent.interrupt {name}` with its
+/// roster name; the core decides what that calls.
+public struct ChatStopTarget: Equatable, Sendable {
+    /// The roster name: "coordinator", a worker's or a session's address.
+    public var name: String
+    /// "Stop api-server": the tooltip and VoiceOver name.
+    public var label: String
+    /// Its stop call is on its way: the button waits.
+    public var stopping: Bool
+
+    public init(name: String, label: String, stopping: Bool = false) {
+        self.name = name
+        self.label = label
+        self.stopping = stopping
+    }
+}
+
 /// The `chat.*` dp_calls the chat window uses (Go `core/app/thread.go`). Blocking: callers run
 /// them off the main thread.
 public protocol ChatClient: Sendable {
@@ -233,6 +250,9 @@ public protocol ChatClient: Sendable {
     func typedAnswer(token: String, text: String) throws
     /// Stops what Pixie is working on.
     func stop() throws
+    /// `agent.interrupt {name, surface: "chat"}`: interrupts the turn of the agent with this
+    /// roster name (#309); a failure comes back to the chat window only.
+    func interrupt(name: String) throws
     /// `chat.recipients`: who a message can go to on its own now.
     func recipients() throws -> [ChatRecipient]
 }

@@ -238,6 +238,12 @@ type Worker struct {
 	busyRead bool
 	// startWaitAt: when a worker still not ready since it came up is treated as idle.
 	startWaitAt optMs
+	// stopped: the user stopped its turn (#309): its queue waits until the coordinator sends it
+	// something new, or the user does (in its terminal: it works again).
+	stopped bool
+	// resumeAfterIdle: stopped, and not yet seen idle since: a Working before that Idle is the
+	// stopped turn's own (an event queued before the Esc took), not a new one.
+	resumeAfterIdle bool
 }
 
 func newWorker(plan WorkerPlan) *Worker { return &Worker{Plan: plan} }
@@ -369,7 +375,32 @@ func (ws *Workers) Remove(name string) (*Worker, bool) {
 func (ws *Workers) Push(name, text string) {
 	if w := ws.live[name]; w != nil {
 		w.queue = append(w.queue, text)
+		w.stopped = false
 	}
+}
+
+// Interrupted: the user stopped the worker's turn (#309; Esc, which fires no Stop). The turn is
+// over now and needs no forwarding: no grace, no delivery check. Its queue is held (see
+// stopped). False: no such worker up.
+func (ws *Workers) Interrupted(name string) bool {
+	w := ws.live[name]
+	if w == nil || !w.IsUp() || w.StopRequested {
+		return false
+	}
+	w.stopped = true
+	w.inTurn = false
+	w.worked = false
+	w.reported = true
+	w.resumable = false
+	w.resumeAfterIdle = true // once it is idle, the user typing in its terminal is a new turn
+	w.awaitingStop = false
+	w.idleWaitAt = optMs{}
+	w.graceAt = optMs{}
+	w.lastSaid = nil
+	w.ScreenPending = false
+	w.retryAt = optMs{}
+	w.delivered()
+	return true
 }
 
 // TakeSend returns everything queued, as one prompt, if the worker is up, idle and not being
@@ -377,7 +408,7 @@ func (ws *Workers) Push(name, text string) {
 // checked WorkerDeliveryMs from now (see DueDeliveries).
 func (ws *Workers) TakeSend(name string, now Millis) (string, bool) {
 	w := ws.live[name]
-	if w == nil || !w.IsUp() || !w.ready || w.StopRequested || len(w.queue) == 0 {
+	if w == nil || !w.IsUp() || !w.ready || w.StopRequested || w.stopped || len(w.queue) == 0 {
 		return "", false
 	}
 	w.ready = false
@@ -465,6 +496,9 @@ func statusOf(w *Worker, status PaneStatus, now Millis) {
 	case status == PaneIdle || status == PaneDone:
 		// A held Idle/Done is replaced by this one.
 		w.unhold()
+		if w.resumeAfterIdle {
+			w.resumeAfterIdle, w.resumable = false, true
+		}
 		if w.awaitingStop {
 			// Herdr's Idle can beat the Stop hook of the same turn: wait for the Stop, or for a
 			// while if it is lost.
@@ -537,6 +571,7 @@ func arrivedBusy(w *Worker, now Millis) {
 // reopen: the worker went on after its turn ended: that is a new turn.
 func reopen(w *Worker) {
 	w.resumable = false
+	w.stopped = false
 	w.inTurn = true
 	w.ScreenPending = false
 	w.awaitingStop = w.Plan.Kind == Claude

@@ -209,6 +209,8 @@ final class EngineCoordinator {
     func showChat(at entryID: String? = nil) {
         guard configured, let chatModel else { return }
         if chatWindow == nil {
+            // The roster as it is now: its events only come on a change (the stop buttons, #309).
+            if let view = roster?.model.view { chatModel().applyRoster(view) }
             chatWindow = ChatWindowController(model: chatModel(), engine: engine, worker: worker,
                                               presence: chatPresence,
                                               attachments: { [weak self] in self?.roster?.attachmentUI })
@@ -582,6 +584,11 @@ final class EngineCoordinator {
             bubble?.apply(lines: lines)
         case .agents(let view):
             roster?.apply(view: view)
+            ChatHub.shared?.applyRoster(view)
+        case .stopFailed(_, let surface, let text):
+            // Only where the click came from: a roster stop leaves the chat's error line alone.
+            if StopSurface.roster.shows(surface) { roster?.stopFailed(text) }
+            if StopSurface.chat.shows(surface) { ChatHub.shared?.stopFailed(text) }
         case .chatLine(let line):
             roster?.apply(chatLine: line)
         case .replyCard(let card):

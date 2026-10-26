@@ -12,6 +12,9 @@ import (
 type Message struct {
 	Text string
 	Refs []JobID
+	// Request: it hands the coordinator a new job (its "New request from the user"), which a
+	// stop cancels (#309).
+	Request bool
 }
 
 // MessageForJob is `<text>\n[ref <job>]`.
@@ -31,6 +34,8 @@ type Prompt struct {
 type Inbox struct {
 	queue    []Message
 	inFlight []Message
+	// riders go out with the next prompt, in front, but never make one of their own (#309).
+	riders []Message
 	// ready: the coordinator is idle (or done) and nothing has been sent since.
 	ready bool
 }
@@ -39,12 +44,15 @@ func NewInbox() *Inbox { return &Inbox{} }
 
 // Clone is a deep copy (Rust derives Clone).
 func (i *Inbox) Clone() *Inbox {
-	return &Inbox{queue: slices.Clone(i.queue), inFlight: slices.Clone(i.inFlight), ready: i.ready}
+	return &Inbox{queue: slices.Clone(i.queue), inFlight: slices.Clone(i.inFlight), riders: slices.Clone(i.riders), ready: i.ready}
 }
 
 func (i *Inbox) Push(msg Message) { i.queue = append(i.queue, msg) }
 
 func (i *Inbox) HasQueued() bool { return len(i.queue) > 0 }
+
+// PushRider queues a message for the coordinator's next turn without starting one.
+func (i *Inbox) PushRider(msg Message) { i.riders = append(i.riders, msg) }
 
 // OnStatus takes the coordinator's latest status. Idle/Done make it ready; Working/Blocked don't.
 func (i *Inbox) OnStatus(status PaneStatus) {
@@ -63,8 +71,8 @@ func (i *Inbox) TakePrompt() (Prompt, bool) {
 		return Prompt{}, false
 	}
 	i.ready = false
-	sent := i.queue
-	i.queue = nil
+	sent := append(i.riders, i.queue...)
+	i.queue, i.riders = nil, nil
 	texts := make([]string, len(sent))
 	var refs []JobID
 	for k, m := range sent {
@@ -91,6 +99,24 @@ func (i *Inbox) Queued(job JobID) bool {
 
 func (i *Inbox) Carries(job JobID) bool {
 	return slices.ContainsFunc(i.inFlight, func(m Message) bool { return m.refersTo(job) })
+}
+
+// InFlightRequests are the jobs whose own request is in flight.
+func (i *Inbox) InFlightRequests() []JobID {
+	var out []JobID
+	for _, m := range i.inFlight {
+		if m.Request {
+			out = append(out, m.Refs...)
+		}
+	}
+	return out
+}
+
+// DropRiders drops the riders about job; true if any were dropped.
+func (i *Inbox) DropRiders(job JobID) bool {
+	before := len(i.riders)
+	i.riders = slices.DeleteFunc(i.riders, func(m Message) bool { return m.refersTo(job) })
+	return len(i.riders) != before
 }
 
 // FinishTurn: the coordinator finished a turn (its Stop hook fired). Readiness is left to the
@@ -139,5 +165,6 @@ func (i *Inbox) RequeueInFlightExcept(job JobID) {
 func (i *Inbox) DropQueued(job JobID) bool {
 	before := len(i.queue)
 	i.queue = slices.DeleteFunc(i.queue, func(m Message) bool { return m.refersTo(job) })
+	i.riders = slices.DeleteFunc(i.riders, func(m Message) bool { return m.refersTo(job) })
 	return len(i.queue) != before
 }

@@ -226,3 +226,35 @@ func TestQueuedMessagesForAJobCanBeDropped(t *testing.T) {
 	i.OnStatus(PaneIdle)
 	wantRefs(t, takeRefs(t, i), job(2))
 }
+
+// #309: a rider goes out in front of the next prompt but never makes one of its own.
+func TestARiderWaitsForTheNextPromptAndGoesInFront(t *testing.T) {
+	i := NewInbox()
+	i.OnStatus(PaneIdle)
+	i.PushRider(MessageForJob(JobID("job_1"), "note"))
+	if i.HasQueued() {
+		t.Fatal("a rider alone queues nothing")
+	}
+	if _, ok := i.TakePrompt(); ok {
+		t.Fatal("no prompt of its own")
+	}
+	req := MessageForJob(JobID("job_2"), "New request from the user: b")
+	req.Request = true
+	i.Push(req)
+	i.Push(MessageForJob(JobID("job_4"), "New request from the user: looks like one, isn't"))
+	p, ok := i.TakePrompt()
+	if !ok || p.Text != "note\n[ref job_1]\n\nNew request from the user: b\n[ref job_2]\n\nNew request from the user: looks like one, isn't\n[ref job_4]" {
+		t.Fatal(p, ok)
+	}
+	if got := i.InFlightRequests(); len(got) != 1 || got[0] != "job_2" {
+		t.Fatal("only job_2's request is in flight: a request is marked, not read from its words", got)
+	}
+	i.PushRider(MessageForJob(JobID("job_3"), "note"))
+	i.DropQueued(JobID("job_3"))
+	i.FinishTurn()
+	i.OnStatus(PaneIdle)
+	i.Push(Message{Text: "x"})
+	if p, _ := i.TakePrompt(); p.Text != "x" {
+		t.Fatal("a dropped job's rider goes too", p.Text)
+	}
+}

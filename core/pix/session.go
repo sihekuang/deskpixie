@@ -104,6 +104,14 @@ type Session struct {
 	startAt     time.Time     // when the agent started
 	hookPrompts bool          // a hook said what prompt the agent took (submitted)
 
+	// escAt: when Pixie last pressed Esc (its stop button or the coordinator's interrupt_session,
+	// #309). The next interrupt is Pixie's while it is set: a key of yours, a prompt, or that
+	// interrupt clears it, and it lapses after pixieEscWindow.
+	escAt time.Time
+	// stopped: Pixie's stop ended the turn: what waits stays queued (still counted) until you
+	// type your next prompt here or Pixie sends a new message (#309).
+	stopped bool
+
 	turnStart     time.Time        // when this turn went working (zero: none seen)
 	turnFromPixie bool             // a prompt of this turn was Pixie's
 	now           func() time.Time // the clock (tests replace it, under mu)
@@ -249,6 +257,7 @@ func newSession(o sessionOpts) *Session {
 			s.keylog("keys %q -> %s", b, s.gate.State())
 			if !onlyReports(b) {
 				s.clearQuestion() // you are answering it yourself
+				s.forgetEsc()     // an interrupt after a key of yours is yours
 			}
 		}}
 	// Only the PTY reader goroutine touches these.
@@ -260,11 +269,15 @@ func newSession(o sessionOpts) *Session {
 	case "codex":
 		s.runner.OnOutput = func(b []byte) {
 			out := string(b)
-			if stopped.saw(out, codexInterrupted) && s.currentStatus() != "idle" {
+			stoppedNow := stopped.saw(out, codexInterrupted) && s.currentStatus() != "idle"
+			if stoppedNow {
 				s.clearQuestion()
 				s.interrupted()
 			}
-			if watch.saw(out, codexBusy) && s.currentStatus() != "working" {
+			// The frame that shows the interrupt can still hold the old busy footer: that is no
+			// new turn (and must not lift a hold, #309).
+			if watch.saw(out, codexBusy) && !stoppedNow && s.currentStatus() != "working" {
+				s.release() // Codex has no prompt hook: a new turn is one you typed
 				s.setStatus("working")
 			}
 			for _, msg := range notes.messages(out) {
@@ -355,8 +368,10 @@ func (s *Session) Hook(event string, p map[string]any) string {
 		prompt, _ := p["prompt"].(string)
 		s.submitted(prompt) // a message a menu stopped, sent from the terminal (#306)
 		pixie := s.fromPixie(prompt)
+		s.forgetEsc() // a prompt began a turn: a later interrupt isn't that Esc's
 		if !pixie {
 			s.gate.Sent() // your prompt went in (#185)
+			s.release()   // it gets what waits with its next tool, or when it stops
 		}
 		s.mu.Lock()
 		s.turnFromPixie = s.turnFromPixie || pixie
@@ -394,6 +409,7 @@ func (s *Session) Hook(event string, p map[string]any) string {
 			}
 		}
 		s.endTurn(p, pixie)
+		s.release()      // a turn ran after a stop: one you started
 		s.gate.Started() // a turn ran, so your line was sent (a fast Codex turn shows no busy marker)
 		s.mu.Lock()
 		s.afterStop = true
@@ -478,6 +494,7 @@ func (s *Session) runCommand(m wire.Msg) wire.Msg {
 		if err := s.queue.Push(text); err != nil {
 			return wire.Msg{Err: err.Error()}
 		}
+		s.release() // a new message: what waited after a stop goes with it
 		s.title()
 		// Typed at once, or waiting and why (#183, #306).
 		if s.flushNow() {
@@ -500,6 +517,7 @@ func (s *Session) runCommand(m wire.Msg) wire.Msg {
 		if m := s.menuHold(); m != "" && s.queue.Len() > 0 { // nor a menu only you should answer (#306)
 			return wire.Msg{Status: "waiting", Reason: m}
 		}
+		s.release()
 		s.flushMu.Lock()
 		msgs := s.queue.Drain()
 		if err := s.forceIn(msgs); err != nil {
@@ -527,6 +545,9 @@ func (s *Session) runCommand(m wire.Msg) wire.Msg {
 			switch k {
 			case "Escape":
 				b = []byte{0x1b}
+				s.mu.Lock()
+				s.escAt = s.now()
+				s.mu.Unlock()
 			case "Enter":
 				b = []byte{'\r'}
 			default:
@@ -551,7 +572,7 @@ func (s *Session) runCommand(m wire.Msg) wire.Msg {
 func (s *Session) flushNow() bool {
 	s.flushMu.Lock()
 	defer s.flushMu.Unlock()
-	if s.queue.Len() == 0 || s.currentStatus() != "idle" || s.hasUnsent() || s.menuHold() != "" || !s.gate.Clear(time.Now()) {
+	if s.queue.Len() == 0 || s.currentStatus() != "idle" || s.hasUnsent() || s.menuHold() != "" || s.held() || !s.gate.Clear(time.Now()) {
 		return false
 	}
 	// One prompt, one wait for the agent to take it (#305): a wait per message could outlast the
@@ -601,7 +622,7 @@ func (s *Session) flushSoon() {
 	go func() {
 		defer func() { s.mu.Lock(); s.flushing = false; s.mu.Unlock() }()
 		since, logAt := time.Now(), time.Now().Add(s.holdLog)
-		for s.queue.Len() > 0 || s.hasUnsent() {
+		for (s.queue.Len() > 0 || s.hasUnsent()) && !s.held() {
 			if s.hasUnsent() { // a menu stopped it (#306)
 				s.flushMu.Lock()
 				sent := s.finishUnsent()
@@ -622,14 +643,48 @@ func (s *Session) flushSoon() {
 	}()
 }
 
+// pixieEscWindow: the longest after Pixie's Esc that an interrupt still counts as its stop (a
+// slow tool can take a while to give way).
+const pixieEscWindow = 30 * time.Second
+
 // interrupted: Claude shows an interrupt (Esc) and fires no Stop: the turn is over, unannounced.
+// After your own Esc what waits is typed, as after any turn. After Pixie's Esc (#309) it is
+// held: a stop means stop, so it waits for your next prompt or a new message from Pixie. That
+// holds for the coordinator's interrupt_session too, by intent: the coordinator follows its
+// interrupt with the message it means.
 func (s *Session) interrupted() {
 	s.mu.Lock()
 	s.afterStop = true
 	s.turnStart, s.turnFromPixie = time.Time{}, false
+	pixie := !s.escAt.IsZero() && s.now().Sub(s.escAt) < pixieEscWindow
+	s.escAt = time.Time{}
+	if pixie {
+		s.stopped = true
+	}
 	s.mu.Unlock()
 	s.setStatus("idle")
 	s.flushSoon()
+}
+
+// forgetEsc: an interrupt from now on isn't Pixie's Esc's.
+func (s *Session) forgetEsc() {
+	s.mu.Lock()
+	s.escAt = time.Time{}
+	s.mu.Unlock()
+}
+
+// held: Pixie's stop holds what waits (see interrupted).
+func (s *Session) held() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.stopped
+}
+
+// release ends the hold after Pixie's stop, if there is one.
+func (s *Session) release() {
+	s.mu.Lock()
+	s.stopped = false
+	s.mu.Unlock()
 }
 
 // MaxTurnReplyBytes caps the reply a turn event carries (#114).

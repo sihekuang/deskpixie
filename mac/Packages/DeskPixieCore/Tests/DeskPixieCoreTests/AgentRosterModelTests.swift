@@ -93,4 +93,73 @@ final class AgentRosterModelTests: XCTestCase {
         XCTAssertEqual(got.map(\.name), ["web-claude", "fruit-claude"])
         XCTAssertEqual(AgentRosterModel.buttons(for: [], in: view), [])
     }
+
+    // MARK: The stop button (#309)
+
+    func testTheStopButtonShowsOnlyWhereTheCoreOffersIt() throws {
+        let json = #"""
+        {"agents":[{"name":"coordinator","label":"Coordinator","status":"working","kind":"coordinator","reachable":true,"stoppable":true},
+                   {"name":"docs-writer","label":"docs-writer","status":"idle","kind":"worker","reachable":true}],
+         "yours":[{"name":"api","label":"api-server","detail":"terminal","status":"working","kind":"session","reachable":true,"stoppable":true}],
+         "agent_count":1,"your_count":1,"busy":true}
+        """#
+        let v = try JSONDecoder().decode(RosterView.self, from: Data(json.utf8))
+        XCTAssertEqual(v.agents.map(AgentRosterModel.showsStop), [true, false], "stoppable left out means no")
+        XCTAssertTrue(AgentRosterModel.showsStop(v.yours[0]))
+        XCTAssertEqual(AgentRosterModel.stopLabel(v.yours[0]), "Stop api-server")
+        XCTAssertEqual(AgentRosterModel.stopLabel(v.agents[0]), "Stop Coordinator")
+    }
+
+    func testAStopsNoticeGoesWhenTheListCloses() {
+        var m = AgentRosterModel()
+        m.open = true
+        m.stopFailed("Couldn't stop docs-writer: it isn't running anymore.")
+        m.apply(view(agents: [row("coordinator", kind: "coordinator"), row("a")], yours: []))
+        XCTAssertNotNil(m.notice, "a new roster keeps it while the list is open")
+        m.open = false
+        XCTAssertNil(m.notice)
+    }
+
+    func testAStopsNoticeIsSetOnlyWhileTheListIsOpen() {
+        var m = AgentRosterModel()
+        m.stopFailed("Couldn't stop docs-writer: it isn't running anymore.")
+        XCTAssertTrue(m.beginStop("docs-writer"))
+        m.endStop("docs-writer", .failure(DeskPixieEngineError.refused("The coordinator is off.")))
+        XCTAssertNil(m.notice, "no stale line the next time it opens")
+        m.open = true
+        XCTAssertNil(m.notice)
+    }
+
+    func testARowsStopWaitsForItsCall() {
+        var m = AgentRosterModel()
+        XCTAssertTrue(m.beginStop("docs-writer"))
+        XCTAssertFalse(m.beginStop("docs-writer"), "a second click while the first is on its way")
+        XCTAssertTrue(m.beginStop("api"), "another row's is its own")
+        XCTAssertEqual(m.stopping, ["docs-writer", "api"])
+        m.endStop("docs-writer", .success(()))
+        XCTAssertTrue(m.beginStop("docs-writer"))
+    }
+
+    func testAFailedStopShowsOnlyWhereItsClickCameFrom() throws {
+        XCTAssertTrue(StopSurface.roster.shows(.roster))
+        XCTAssertFalse(StopSurface.chat.shows(.roster), "a roster stop leaves the chat alone")
+        XCTAssertFalse(StopSurface.roster.shows(.chat))
+        XCTAssertTrue(StopSurface.chat.shows(nil), "an older core that doesn't say: both")
+        let args = try JSONSerialization.jsonObject(with: JSONEncoder().encode(InterruptArgs(name: "a", surface: .chat))) as? [String: String]
+        XCTAssertEqual(args, ["name": "a", "surface": "chat"])
+    }
+
+    func testAFailedStopCallReadsInTheCoresWordsOrTryAgain() {
+        var m = AgentRosterModel()
+        m.open = true
+        _ = m.beginStop("a")
+        m.endStop("a", .failure(DeskPixieEngineError.refused("The coordinator is off.")))
+        XCTAssertEqual(m.notice, "The coordinator is off.")
+        _ = m.beginStop("a")
+        m.endStop("a", .failure(DeskPixieEngineError.callFailed("unknown method agent.interrupt")))
+        XCTAssertEqual(m.notice, "Couldn't reach Pixie. Try again.", "never the core's internals")
+        m.stopFailed("Couldn't stop a: it didn't answer in time.")
+        XCTAssertEqual(m.notice, "Couldn't stop a: it didn't answer in time.")
+        XCTAssertEqual(AgentRosterModel.stopFailure(DeskPixieEngineError.notInitialized), "Couldn't reach Pixie. Try again.")
+    }
 }

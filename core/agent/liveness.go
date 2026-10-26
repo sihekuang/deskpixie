@@ -18,6 +18,10 @@ const (
 // unbackedNudge is what the coordinator is told about a working job with nothing behind it.
 const unbackedNudge = "This job shows as working, but no worker is running for it and you haven't replied about it. Reply now with its result, a question for the user, or that it failed. If you handed it to a session, reply done: sessions don't report back, and the person hears its answer from Pixie."
 
+// stoppedNudge is unbackedNudge for a job whose turn the user stopped (#309): one sentence,
+// in place of the note that it was stopped.
+const stoppedNudge = "The user stopped your turn while you were on this; reply with what you have, or that it stopped."
+
 // questionExpiredNote tells the coordinator a question's job was closed.
 const questionExpiredNote = "The user didn't answer your question within 30 minutes, so the app closed this job. Drop it; no reply is needed."
 
@@ -74,7 +78,11 @@ func (c *AgentController) tickLiveness(now Millis, fx *[]Effect) {
 			case w.nudgedAt == 0 && satSub(now, w.since) >= UnbackedNudgeMs:
 				*fx = append(*fx, logEffect(fmt.Sprintf("job %s: nothing running for it, nudging the coordinator", j.ID)))
 				w.nudgedAt, w.since = now, 0
-				c.inbox.Push(MessageForJob(j.ID, unbackedNudge))
+				nudge := unbackedNudge
+				if c.inbox.DropRiders(j.ID) {
+					nudge = stoppedNudge
+				}
+				c.inbox.Push(MessageForJob(j.ID, nudge))
 				c.flush(now, fx)
 			case w.nudgedAt != 0 && satSub(now, w.since) >= UnbackedFailMs:
 				delete(c.watch, j.ID)

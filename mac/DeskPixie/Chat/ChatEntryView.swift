@@ -50,6 +50,11 @@ struct ChatActions {
     /// The option counts from 1.
     let choose: (String, Int) -> Void
     let reply: (ChatEntry) -> Void
+    /// The stop button by a working responder's name (#309), on its newest entry; and who
+    /// said an entry with its status now (the model's roster).
+    var stopTarget: (ChatEntry) -> ChatStopTarget? = { _ in nil }
+    var liveWho: (ChatEntry) -> ChatWho = { $0.who }
+    var stop: (ChatStopTarget) -> Void = { _ in }
 }
 
 /// One message in the thread, drawn by who said it (spec §4.1): your bubble on the right,
@@ -123,6 +128,9 @@ struct ChatEntryView: View {
                 if let target = ChatThreadModel.terminalTarget(for: entry) {
                     TerminalButton(target: target) { actions.focus(target) }
                 }
+                if let stop = actions.stopTarget(entry) {
+                    StopButton(target: stop) { actions.stop(stop) }
+                }
             }
             RichMessage(text: entry.text, sessions: entry.sessions, font: Self.font, selectable: true)
             if !entry.sessions.isEmpty {
@@ -139,7 +147,8 @@ struct ChatEntryView: View {
     /// which points the box at the session.
     private var session: some View {
         VStack(alignment: .leading, spacing: 4) {
-            ChatWhoHeader(who: entry.who, terminal: ChatThreadModel.terminalTarget(for: entry), onTerminal: actions.focus)
+            ChatWhoHeader(who: actions.liveWho(entry), terminal: ChatThreadModel.terminalTarget(for: entry), onTerminal: actions.focus,
+                          stop: actions.stopTarget(entry), onStop: actions.stop)
             RichMessage(text: entry.text, sessions: entry.sessions, font: Self.font, selectable: true)
             if ChatThreadModel.offersSessionReply(entry) {
                 Button("Reply…") { actions.reply(entry) }
@@ -202,12 +211,15 @@ struct ChatLiveView: View {
     }
 }
 
-/// The dot and the name, then the terminal button when there is one, then the rest.
+/// The dot and the name, then the terminal button when there is one, the stop button while it
+/// works, then the rest.
 struct ChatWhoHeader: View {
     let who: ChatWho
     var size: CGFloat = 12
     var terminal: ChatTerminalTarget?
     var onTerminal: (ChatTerminalTarget) -> Void = { _ in }
+    var stop: ChatStopTarget?
+    var onStop: (ChatStopTarget) -> Void = { _ in }
 
     var body: some View {
         let name = ChatThreadModel.displayName(who)
@@ -220,6 +232,9 @@ struct ChatWhoHeader: View {
             }
             if let terminal {
                 TerminalButton(target: terminal) { onTerminal(terminal) }
+            }
+            if let stop {
+                StopButton(target: stop) { onStop(stop) }
             }
             Text(rest.trimmingCharacters(in: .whitespaces))
                 .lineLimit(1)
@@ -248,6 +263,28 @@ struct TerminalButton: View {
         .help(target.label)
         .accessibilityLabel(target.label)
         .accessibilityIdentifier("chat.entry.terminal")
+    }
+}
+
+/// The small square stop button after the terminal button, while the responder works (#309):
+/// interrupts its turn, as Esc in its terminal does. No confirmation.
+struct StopButton: View {
+    let target: ChatStopTarget
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "stop.fill")
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(ChatColors.link)
+                .frame(width: 18, height: 16)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .disabled(target.stopping) // its call is on its way: one Esc per click (#309)
+        .help(target.label)
+        .accessibilityLabel(target.label)
+        .accessibilityIdentifier("chat.entry.stop")
     }
 }
 

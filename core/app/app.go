@@ -259,6 +259,9 @@ func New(d Deps) (*App, error) {
 				a.emit("agents", map[string]any{"roster": view})
 				a.emit("chat.recipients", map[string]any{"recipients": recipientsOf(view)})
 			},
+			StopFailed: func(name, surface, text string) {
+				a.emit("agent.stopFailed", map[string]any{"name": name, "surface": surface, "text": text})
+			},
 			ShowPane:        func(job, worker string) { a.emit("showPane", map[string]any{"job": job, "worker": worker}) },
 			Focus:           func(plan any) { a.emit("focusPlan", map[string]any{"plan": plan}) },
 			Chat:            func(line any) { a.emit("chat.line", fieldsOf(line)) },
@@ -1439,6 +1442,23 @@ func (a *App) Register(r Registrar) {
 			a.agent.FocusSession(in.Name)
 		}
 		return struct{}{}, nil
+	})
+	r.Register("agent.interrupt", func(args json.RawMessage) (any, error) {
+		var in struct {
+			Name string `json:"name"`
+			// Surface is where the button was, "roster" or "chat": its failure shows there.
+			Surface string `json:"surface"`
+		}
+		if err := decodeArgs("agent.interrupt", args, &in); err != nil {
+			return nil, err
+		}
+		if a.agent == nil {
+			return nil, &chat.Refusal{Text: errNoCoordinator.Error()}
+		}
+		if err := a.agent.Interrupt(in.Name, in.Surface); err != nil {
+			return nil, &chat.Refusal{Text: err.Error()}
+		}
+		return map[string]any{"sent": true}, nil
 	})
 	r.Register("agent.reportFocusOutcome", func(args json.RawMessage) (any, error) {
 		var in struct {

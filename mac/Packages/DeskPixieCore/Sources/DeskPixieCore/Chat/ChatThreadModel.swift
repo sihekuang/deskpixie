@@ -41,6 +41,14 @@ public final class ChatThreadModel {
     public private(set) var recipients: [ChatRecipient] = []
     /// The list has come at least once.
     public private(set) var recipientsKnown = false
+    /// The roster as the core last sent it (`agents`): who is working now, for the stop button
+    /// and the status in the newest header of each responder (#309).
+    public private(set) var roster: RosterView = .empty
+    /// The responders whose stop call is on its way: their button waits (a second Esc would
+    /// open a menu in the agent, #309).
+    public private(set) var stopping: Set<String> = []
+    /// The `error` a stop set, so that a stop that works clears only its own.
+    private var stopError: String?
     /// The core refused the last send, in its words (one recipient per message); the draft
     /// stays. Any other failure is `error`. Editing the text or the target clears it.
     public private(set) var refusal: String?
@@ -110,6 +118,11 @@ public final class ChatThreadModel {
     private func setRecipients(_ rs: [ChatRecipient]) {
         recipients = rs
         recipientsKnown = true
+    }
+
+    /// `agents`: the roster now.
+    public func applyRoster(_ v: RosterView) {
+        roster = v
     }
 
     /// Puts the page before the oldest entry shown in front of it.
@@ -335,6 +348,29 @@ public final class ChatThreadModel {
         await call("chat.stop") { try client.stop() }
     }
 
+    /// The stop button by a working responder (#309). The row and the header change once the
+    /// core's roster says it stopped; a refusal is shown in the core's words.
+    public func stop(_ target: ChatStopTarget) async {
+        let client = client, name = target.name
+        guard stopping.insert(name).inserted else { return }
+        let result = await Task.detached { Result { try client.interrupt(name: name) } }.value
+        stopping.remove(name)
+        switch result {
+        case .success:
+            if let mine = stopError, error == mine { error = nil }
+            stopError = nil
+        case .failure(let err):
+            Self.log.error("agent.interrupt: \(String(describing: err), privacy: .public)")
+            stopFailed(AgentRosterModel.stopFailure(err))
+        }
+    }
+
+    /// A stop that didn't work, in words to show (its call, or `agent.stopFailed`).
+    public func stopFailed(_ text: String) {
+        error = text
+        stopError = text
+    }
+
     /// Empties the thread. The core's `chat.reset` that follows reloads it.
     public func clear() async {
         let client = client
@@ -427,6 +463,38 @@ public final class ChatThreadModel {
         default:
             return nil
         }
+    }
+
+    /// Who answers to an entry's stop button: its roster name. The coordinator's, or a
+    /// session's or worker's address; Pixie, you and an entry with no address have none.
+    private static func responder(_ e: ChatEntry) -> String? {
+        switch e.who.kind {
+        case "coordinator": return "coordinator"
+        case "session": return e.who.name.isEmpty ? nil : e.who.name
+        default: return nil
+        }
+    }
+
+    /// The roster's row for this responder, when this entry is its newest in the thread: older
+    /// entries keep the status they were written with and never get a stop button.
+    private func liveRow(_ e: ChatEntry) -> RosterRow? {
+        guard let name = Self.responder(e), entries.last(where: { Self.responder($0) == name })?.id == e.id else { return nil }
+        return (roster.agents + roster.yours).first { $0.name == name }
+    }
+
+    /// The stop button by the name (#309): on a responder's newest entry, while the core says
+    /// it can be stopped (working, and reachable).
+    public func stopTarget(for e: ChatEntry) -> ChatStopTarget? {
+        guard let row = liveRow(e), AgentRosterModel.showsStop(row) else { return nil }
+        return ChatStopTarget(name: row.name, label: "Stop \(Self.name(of: e.who))", stopping: stopping.contains(row.name))
+    }
+
+    /// Who said it, for the header: on a responder's newest entry, with its status now (a
+    /// stopped session reads idle again); otherwise as it was written.
+    public func liveWho(_ e: ChatEntry) -> ChatWho {
+        var w = e.who
+        if w.kind == "session", let row = liveRow(e) { w.status = row.status }
+        return w
     }
 
     /// A pill in the needs strip.

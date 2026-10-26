@@ -17,7 +17,8 @@ final class UITestApp {
     /// the tests that need herdr, the coordinator and a model run too.
     static var live: Bool { ProcessInfo.processInfo.environment["DESKPIXIE_UITEST_LIVE"] == "1" }
     /// `DESKPIXIE_UITEST_SESSIONS=1` (`TEST_RUNNER_DESKPIXIE_UITEST_SESSIONS`): the tests with
-    /// sessions of yours connected to the app, stand-ins for claude (`ChatSessionsUITests`).
+    /// sessions of yours connected to the app, stand-ins for claude (`ChatSessionsUITests`,
+    /// `StopAgentUITests`).
     static var withSessions: Bool { ProcessInfo.processInfo.environment["DESKPIXIE_UITEST_SESSIONS"] == "1" }
 
     /// A short path under /tmp: the core keeps its pix socket under the data folder, and a long
@@ -109,7 +110,8 @@ final class UITestApp {
 
     /// A session of yours, as `pix --description <description> claude` in a terminal would start
     /// one: the app's own pix, in a pty (`script`), on this run's data folder and home, with a
-    /// stand-in claude that does nothing but end the turns `endTurn` gives it. Nothing reaches the user's own pix:
+    /// stand-in claude that does nothing but start and end the turns `startTurn` and `endTurn`
+    /// give it, and take an Esc as claude does (`escaped`). Nothing reaches the user's own pix:
     /// no PIX_* from this process, and the socket is this data folder's. It runs apart from this
     /// test runner (its parent is launchd), as in a terminal the app can't name: the terminal
     /// button then says "could not find the terminal of session process …" rather than bring
@@ -121,14 +123,35 @@ final class UITestApp {
         let pix = Self.builtApp.appendingPathComponent("Contents/Helpers/pix").path
         if !fm.fileExists(atPath: claude.path) {
             try fm.createDirectory(at: bin, withIntermediateDirectories: true)
-            // A turn ends as claude's Stop hook ends one: each JSON file put in $TURNS goes to
-            // `pix hook Stop` (what pix's settings tell claude to run). It stops with its pix.
+            // A turn starts and ends as claude's hooks do: each JSON file put in $TURNS goes to
+            // `pix hook <event>` (what pix's settings tell claude to run), the event named by the
+            // file's name up to its first "-". A lone Esc typed into it (pix interrupting it) is
+            // noted in $TURNS.esc and answered with what claude shows then, which ends the turn
+            // for pix; an Esc that a "[" or "O" follows within 0.1 s starts an escape sequence
+            // (a bracketed paste, a key), not an interrupt. It stops with its pix.
             let script = """
             #!/bin/sh
+            stty -icanon -echo min 1 time 0 2>/dev/null
+            (
+              while kill -0 $PPID 2>/dev/null; do
+                c=$(dd bs=1 count=1 2>/dev/null | od -An -tx1 | tr -d ' \\n')
+                [ -n "$c" ] || sleep 0.2
+                if [ "$c" = "1b" ]; then
+                  stty min 0 time 1 2>/dev/null
+                  n=$(dd bs=1 count=1 2>/dev/null | od -An -tx1 | tr -d ' \\n')
+                  stty min 1 time 0 2>/dev/null
+                  if [ "$n" != "5b" ] && [ "$n" != "4f" ]; then
+                    touch "$TURNS.esc"
+                    printf 'What should Claude do instead?\\r\\n'
+                  fi
+                fi
+              done
+            ) <&0 & # a job in the background reads /dev/null unless told otherwise
             while kill -0 $PPID 2>/dev/null; do
               for f in "$TURNS"/*.json; do
                 [ -e "$f" ] || continue
-                "\(pix)" hook Stop < "$f"
+                ev=$(basename "$f")
+                "\(pix)" hook "${ev%%-*}" < "$f"
                 rm -f "$f"
               done
               sleep 0.3
@@ -175,6 +198,25 @@ final class UITestApp {
         Self.end(s)
     }
 
+    /// Freezes (SIGSTOP) or thaws (SIGCONT) the session `description`'s pix: frozen, it stays
+    /// listed as it was, but answers nothing. The pid of the pix it froze; nil if none was found.
+    @discardableResult
+    func signalPix(_ description: String, _ signal: Int32) -> pid_t? {
+        guard let s = sessions[description] else { return nil }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+        p.arguments = ["-P", String(s.pid), "-x", "pix"]
+        let out = Pipe()
+        p.standardOutput = out
+        p.standardError = FileHandle.nullDevice
+        guard (try? p.run()) != nil else { return nil }
+        let said = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        p.waitUntilExit()
+        guard let pid = pid_t(said.split(separator: "\n").first ?? ""), pid > 1 else { return nil }
+        kill(pid, signal)
+        return pid
+    }
+
     /// SIGTERM to script, then waits up to 10 s for it to go (launchd reaps it).
     private static func end(_ s: Session) {
         kill(s.pid, SIGTERM)
@@ -186,11 +228,27 @@ final class UITestApp {
     /// The session `description` finishes a turn with this reply, as claude's Stop hook would
     /// report it to pix.
     func endTurn(_ description: String, reply: String) throws {
+        try hook(description, ["hook_event_name": "Stop", "last_assistant_message": reply])
+    }
+
+    /// The session `description` takes this prompt and works on it, as claude's
+    /// UserPromptSubmit hook would report it to pix, until `endTurn` or an Esc.
+    func startTurn(_ description: String, prompt: String) throws {
+        try hook(description, ["hook_event_name": "UserPromptSubmit", "prompt": prompt])
+    }
+
+    /// The session `description` was sent an Esc since it started.
+    func escaped(_ description: String) -> Bool {
+        FileManager.default.fileExists(atPath: root.appendingPathComponent("turns-\(description).esc").path)
+    }
+
+    private func hook(_ description: String, _ payload: [String: String]) throws {
         let turns = root.appendingPathComponent("turns-\(description)", isDirectory: true)
-        let data = try JSONSerialization.data(withJSONObject: ["hook_event_name": "Stop", "last_assistant_message": reply])
+        let data = try JSONSerialization.data(withJSONObject: payload)
         let tmp = turns.appendingPathComponent(".turn")
         try data.write(to: tmp)
-        try FileManager.default.moveItem(at: tmp, to: turns.appendingPathComponent("\(UUID().uuidString).json"))
+        let event = payload["hook_event_name"] ?? "Stop"
+        try FileManager.default.moveItem(at: tmp, to: turns.appendingPathComponent("\(event)-\(UUID().uuidString).json"))
     }
 
     // MARK: The app

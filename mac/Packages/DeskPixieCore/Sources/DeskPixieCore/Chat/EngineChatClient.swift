@@ -85,4 +85,8 @@ public struct EngineChatClient: ChatClient, Sendable {
     public func stop() throws {
         _ = try engine.call("chat.stop")
     }
+
+    public func interrupt(name: String) throws {
+        _ = try engine.call("agent.interrupt", InterruptArgs(name: name, surface: .chat))
+    }
 }
