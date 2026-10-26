@@ -120,3 +120,18 @@ func TestAStopOfItLeavesNothingToStop(t *testing.T) {
 		t.Fatalf("%q", name)
 	}
 }
+
+// #332 review: a quick turn of Pixie's, over before its hand-off was reported, is no turn to stop.
+func TestATurnOverBeforeItsHandOffWasReportedIsntStopped(t *testing.T) {
+	c := typedOnJob1()
+	c.Step(paneStatus("repo-claude", PaneWorking), T0+4)
+	c.Step(PaneInput(PaneEvent{Kind: PaneEventTurn, Agent: "repo-claude", Turn: &SessionTurn{Label: "repo",
+		Reply: "Which one?", FromPixie: true}}), T0+5)
+	c.Step(paneStatus("repo-claude", PaneIdle), T0+5)
+	c.Step(SessionSentInput("repo-claude", landing), T0+6)
+	stop(c, `<spoken ref="job_000000000001" status="done">Passed it on.</spoken>`, T0+10)
+	c.Step(paneStatus("repo-claude", PaneWorking), T0+60_000) // the user's own
+	if name, ok := c.SentTo(""); ok {
+		t.Fatalf("%q", name)
+	}
+}
