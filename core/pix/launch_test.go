@@ -2,10 +2,12 @@ package pix
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func envOf(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
@@ -121,7 +123,8 @@ func TestPlanLaunchCodex(t *testing.T) {
 	for _, want := range []string{`tui.notification_method="osc9"`, `tui.notification_condition="always"`,
 		`mcp_servers.pixie.tools.set_description.approval_mode="approve"`,
 		// #268: Codex's questions wait in this hook for Pixie's answer.
-		`hooks.PreToolUse=[{matcher="^request_user_input$",hooks=[{type="command",command="\"/app/pix\" hook PreToolUse",timeout=330}]}]`,
+		fmt.Sprintf(`hooks.PreToolUse=[{matcher="^request_user_input$",hooks=[{type="command",command="\"/app/pix\" hook PreToolUse",timeout=%d}]}]`,
+			int((MaxHold + 30*time.Second).Seconds())),
 		// #272: Codex starts MCP servers with a short environment; pix's tool finds pix by these.
 		`mcp_servers.pixie.env_vars=["PIX_SOCK","PIX_SESSION"]`} {
 		if !strings.Contains(joined, want) {

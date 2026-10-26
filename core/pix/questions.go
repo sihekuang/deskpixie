@@ -197,8 +197,10 @@ func (h *hold) give(r string) (given bool) {
 }
 
 // MaxHold is the longest a question waits in its hook for Pixie (#268); DeskPixie's setting
-// stays within it, and the hooks that hold are given longer.
-const MaxHold = 5 * time.Minute
+// stays within it, and the hooks that hold are given longer. Neither Claude Code nor Codex caps
+// a hook's timeout, so it is long enough to mean until answered (#357): a held hook is only a
+// process waiting on pix, and a key in the terminal or the session moving on lets it go.
+const MaxHold = 24 * time.Hour
 
 // permissionHold: how long a Claude permission waits in its hook for Pixie, when questions are
 // held at all (#357). A menu is drawn only once its hook lets go, so it waits as set; a
