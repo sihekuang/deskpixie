@@ -542,6 +542,50 @@ func asksWhereThingsStand(words []string) bool {
 	return whWords[words[0]] && len(words) > 1 && stateQuestions[words[1]]
 }
 
+// senderWords and reviewWords together name the sender's own go-ahead: "have me review it",
+// "my OK", "once I've approved".
+var senderWords = map[string]bool{"me": true, "my": true, "us": true, "our": true, "i": true, "we": true, "i've": true, "we've": true, "i'm": true, "i'll": true, "we'll": true}
+
+var reviewWords = map[string]bool{"review": true, "reviewed": true, "approve": true, "approved": true, "approval": true,
+	"ok": true, "okay": true, "see": true, "seen": true, "look": true, "check": true, "checked": true, "sign": true,
+	"signed": true, "confirm": true, "confirmed": true, "say": true, "permission": true}
+
+// waitsFor lead the sender's go-ahead after the step: "push once I've reviewed it".
+var waitsFor = map[string]bool{"after": true, "once": true, "until": true, "when": true}
+
+// waitsOnSender: the step at words[i] waits for the sender's own go-ahead, so they're asked
+// again when they give it (#329): "have me review it before you push", "merge after I
+// approve". A step before the review ("push it, then let me review") still asks.
+func waitsOnSender(words []string, i int) bool {
+	goAhead := func(span []string) bool {
+		return slices.ContainsFunc(span, func(w string) bool { return senderWords[w] }) &&
+			slices.ContainsFunc(span, func(w string) bool { return reviewWords[w] })
+	}
+	j := i - 1
+	if j >= 0 && (youWords[words[j]] || words[j] == "we") {
+		j--
+	}
+	if j >= 0 && words[j] == "before" {
+		start := j
+		for start > 0 && !negationEnds[words[start-1]] {
+			start--
+		}
+		if goAhead(words[start:j]) {
+			return true
+		}
+	}
+	for k := i + 1; k < len(words) && !negationEnds[words[k]]; k++ {
+		if waitsFor[words[k]] {
+			end := k + 1
+			for end < len(words) && !negationEnds[words[end]] {
+				end++
+			}
+			return goAhead(words[k+1 : end])
+		}
+	}
+	return false
+}
+
 // GatedActions are the hard-to-undo steps text asks for, by their base verb, in the order first
 // named ("push", "merge"): none for an ordinary message (#152), including one that only forbids
 // a step ("don't push anything") or asks whether it happened ("has anything been pushed?").
@@ -587,7 +631,7 @@ func GatedActions(text string) []string {
 				strings.HasSuffix(w, "ing") && underWay[subject] ||
 				leadIns[prev] && strings.HasSuffix(w, "ing") && mine && !yours
 			if base, ok := gatedForms[w]; ok && !negated && !reported && !slices.Contains(out, base) &&
-				!(base == "push" && pushIsntCode(words, i)) {
+				!(base == "push" && pushIsntCode(words, i)) && !waitsOnSender(words, i) {
 				out = append(out, base)
 			}
 		}

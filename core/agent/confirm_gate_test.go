@@ -93,6 +93,24 @@ func TestGatedActions(t *testing.T) {
 		{"Keep pushing up the changes.", []string{"push"}},
 		{"Push back if you think the design is wrong.", []string{"push"}},
 		{"Push the older bubble down when a new one comes in.", []string{"push"}},
+		// #329: a step that waits for the sender's own review asks for nothing yet: they're
+		// asked again when they give the go-ahead.
+		{"Based on the analysis we have, update the landing page to really show our strength against other players. Have me review it before you push that.", nil},
+		{"Let me see it before you merge.", nil},
+		{"Wait for my OK before pushing.", nil},
+		{"Check with me before you deploy.", nil},
+		{"I'll review it before we publish.", nil},
+		{"Push it once I've reviewed it.", nil},
+		{"Merge after I approve.", nil},
+		{"Hold the push until I say so.", nil},
+		// … while one that waits for something else, or comes before the review, still asks.
+		{"Run the tests before you push.", []string{"push"}},
+		{"Send me a summary before you push.", []string{"push"}},
+		{"I want you to fix it before you push.", []string{"push"}},
+		{"Push it, then let me review.", []string{"push"}},
+		{"Push after the tests pass.", []string{"push"}},
+		{"Have me review it before you push, then merge.", []string{"merge"}},
+		{"Merge, then push once I've reviewed it.", []string{"merge"}},
 	} {
 		if got := GatedActions(tc.text); !slices.Equal(got, tc.want) {
 			t.Errorf("GatedActions(%q) = %q, want %q", tc.text, got, tc.want)
