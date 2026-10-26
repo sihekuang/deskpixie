@@ -200,6 +200,11 @@ func (h *hold) give(r string) (given bool) {
 // stays within it, and the hooks that hold are given longer.
 const MaxHold = 5 * time.Minute
 
+// permissionHold: how long a Claude permission waits in its hook for Pixie, when questions are
+// held at all (#357). A menu is drawn only once its hook lets go, so it waits as set; a
+// permission's dialog shows meanwhile and a key there answers it, so it waits until answered.
+var permissionHold = MaxHold
+
 // holds: the hooks whose question may wait for Pixie's answer.
 func holds(event string) bool { return event == "PreToolUse" || event == "PermissionRequest" }
 

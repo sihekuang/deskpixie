@@ -141,9 +141,9 @@ func TestASessionsMenuAnsweredWhileHeld(t *testing.T) {
 	p.gone(h, "menu Push")
 }
 
-// The foreground case of #344: a subagent's own permission dialog waits through its hook
-// letting go and a redraw; Allow types its Yes, and the subagent's tool ending clears it and
-// the blocked status.
+// The foreground case of #344: a subagent's own permission dialog waits through the menus'
+// hold running out (a permission stays held, #357) and a redraw; Allow goes through its hook,
+// and the subagent's tool ending clears it and the blocked status.
 func TestASubagentsPermissionStaysUntilYouAllowIt(t *testing.T) {
 	p, h := questionRig(t)
 	p.step("work")
@@ -154,12 +154,26 @@ func TestASubagentsPermissionStaysUntilYouAllowIt(t *testing.T) {
 	}
 	time.Sleep(heldFor + 500*time.Millisecond)
 	p.waitFor("blocked on the dialog", func() bool { return p.status() == PaneBlocked })
-	p.stillAsked(h, item, "the hold ran out")
+	p.stillAsked(h, item, "the menus' hold ran out")
 	p.step("redraw")
 	p.stillAsked(h, item, "a redraw")
 	time.Sleep(1500 * time.Millisecond)
 	p.stillAsked(h, item, "a while longer")
 	h.Decide(item.Token, true)
-	p.gone(h, "subperm key 1")
+	p.gone(h, "subperm allowed in its hook")
 	p.waitFor("working again", func() bool { return p.status() == PaneWorking })
+}
+
+// #357: a held permission answered in its terminal instead: its key answers it, and it leaves
+// Pixie (that the key lets its hook go: TestAPermissionAnsweredInTheTerminalLetsItsHookGo).
+func TestAHeldPermissionAnsweredInItsTerminalLeavesPixie(t *testing.T) {
+	p, h := questionRig(t)
+	p.step("work")
+	p.step("subperm")
+	item := p.asked(h)
+	time.Sleep(heldFor + 500*time.Millisecond)
+	p.waitFor("blocked on the dialog", func() bool { return p.status() == PaneBlocked })
+	p.stillAsked(h, item, "the menus' hold ran out")
+	p.typeKeys("1")
+	p.gone(h, "subperm key 1")
 }

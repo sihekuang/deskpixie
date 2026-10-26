@@ -138,7 +138,9 @@ func ask() {
 }
 
 // subperm is a subagent's Bash call asking for permission. Its dialog shows once the hook
-// runs (pix may hold it); allowed in the hook's reply, it goes, else it waits for a key.
+// runs (pix may hold it), and its Notification comes while the hook still waits (Claude Code
+// 2.1.310: some seconds after, #357). Allowed in the hook's reply, it goes, else it waits for
+// a key.
 func subperm() {
 	reply := make(chan string, 1)
 	go func() {
@@ -147,7 +149,18 @@ func subperm() {
 	}()
 	time.Sleep(200 * time.Millisecond) // the hook has started
 	show("subperm", permScreen)
-	out := <-reply
+	notify := func() {
+		hook("Notification", map[string]any{"notification_type": "permission_prompt", "message": "Claude needs your permission to use Bash"})
+	}
+	var out string
+	notified := false
+	select {
+	case out = <-reply:
+	case <-time.After(300 * time.Millisecond):
+		notify()
+		notified = true
+		out = <-reply
+	}
 	mu.Lock()
 	still := shownBy == "subperm"
 	if still && strings.Contains(out, `"allow"`) {
@@ -158,8 +171,8 @@ func subperm() {
 	case !still: // a key answered it meanwhile
 	case strings.Contains(out, `"allow"`):
 		answered("subperm", "allowed in its hook")
-	default:
-		hook("Notification", map[string]any{"notification_type": "permission_prompt", "message": "Claude needs your permission to use Bash"})
+	case !notified:
+		notify()
 	}
 }
 

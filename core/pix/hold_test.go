@@ -227,10 +227,30 @@ func TestAPermissionAnsweredInTheTerminalLetsItsHookGo(t *testing.T) {
 	waitEvent(t, h.d.events, "question gone", func(m wire.Msg) bool { return m.Event == "question-gone" && m.ID == q.ID })
 }
 
+// #357: a permission stays held past the menus' wait: its dialog shows the whole time, and
+// Pixie's Yes still goes through its hook.
+func TestAPermissionIsHeldPastTheMenusWait(t *testing.T) {
+	h := holdHarness(t, 200*time.Millisecond)
+	reply, q := heldBash(t, h)
+	select {
+	case r := <-reply:
+		t.Fatalf("let go after the menus' wait: %q", r)
+	case <-time.After(800 * time.Millisecond):
+	}
+	if err := answer(t, h, q.ID, "yes"); err != "" {
+		t.Fatal(err)
+	}
+	if d := decision(t, hookReply(t, reply, time.Second)); d["behavior"] != "allow" {
+		t.Fatalf("%v", d)
+	}
+}
+
 // A held permission nobody answers in Pixie stays there too (#347): its dialog shows in the
-// terminal the whole time, and Pixie's Yes is typed into it.
+// terminal the whole time, and once its hold passed, Pixie's Yes is typed into it.
 func TestAHeldPermissionNobodyAnswersStillWaits(t *testing.T) {
-	h := holdHarness(t, 300*time.Millisecond)
+	defer func(d time.Duration) { permissionHold = d }(permissionHold)
+	permissionHold = 300 * time.Millisecond
+	h := holdHarness(t, 5*time.Second)
 	reply, q := heldBash(t, h)
 	if out := hookReply(t, reply, 2*time.Second); out != nil {
 		t.Fatalf("%v", out)

@@ -431,6 +431,7 @@ func (s *Session) Hook(event string, p map[string]any) string {
 				q, ev.Source = &question{kind: "notice", agent: agentOf(p), tool: name, use: toolUse(p)}, "notice" // answered in its terminal only
 			} else if wait > 0 { // held: its dialog shows meanwhile, so you can answer it there too
 				q.hold, q.suggestions = newHold(), p["permission_suggestions"]
+				wait = permissionHold // so not only for the menus' wait (#357)
 			}
 			if h := q.hold; s.ask(q, ev) && h != nil { // read before ask shares q
 				return s.await(q, h, wait)
