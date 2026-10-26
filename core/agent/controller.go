@@ -2187,8 +2187,8 @@ func (c *AgentController) answer(jobID JobID, text string, now Millis, fx *[]Eff
 	case jobID != "" && c.jobs.IsOpen(jobID) && waiting(jobID):
 		id = jobID
 	// Any other id is ignored: voice models copy example ids or make them up (Oct 18).
-	case c.asked.menu != "" && c.confirms.IsPendingToken(c.asked.menu):
-		c.answerMenu(c.asked.menu, text, now, fx)
+	case c.asked.menu != 0 && c.menuAsked() != nil:
+		c.answerMenu(*c.menuAsked(), text, now, fx)
 		return
 	case c.asked.session != "":
 		*fx = append(*fx, Effect{Kind: EfTellSession, Name: c.asked.session, Text: strings.TrimSpace(text)},
@@ -2455,14 +2455,15 @@ func short(task string) string {
 type asker struct {
 	job     JobID
 	session string
-	// menu: the confirm word of a session's menu (#330), answered by what's said back.
-	menu string
+	// menu: the request id of a session's menu (#330), answered by what's said back; never its
+	// confirm word, which comes round again for another request.
+	menu RequestID
 	at   Millis
 	tie  bool
 }
 
 func (c *AgentController) askedBy(a asker) {
-	if prev := c.asked; prev.at == a.at && (prev.job != "" || prev.session != "" || prev.tie) && prev != a {
+	if prev := c.asked; prev.at == a.at && (prev.job != "" || prev.session != "" || prev.menu != 0 || prev.tie) && prev != a {
 		a = asker{tie: true, at: a.at}
 	}
 	c.asked = a

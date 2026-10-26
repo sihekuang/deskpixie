@@ -136,3 +136,75 @@ func TestAMenuAnsweredInTheBubbleTakesNoSpokenAnswer(t *testing.T) {
 		t.Fatalf("%+v", a)
 	}
 }
+
+// #330 review: a menu answered by a tap leaves nothing to answer, even once its confirm word
+// comes round again for a permission prompt: the menu is known by its request id.
+func TestATappedMenusWordReusedLaterIsntAnsweredByVoice(t *testing.T) {
+	c := ctl()
+	token := bubbleOf(askSession(c, dbChoice, T0))[0].Token
+	c.Step(ChooseInput(token, 1), T0+1)
+	for k := range len(Tokens) - 1 {
+		askPush(c, uint64(100+k), T0+2) // the other eleven words
+	}
+	codex := SessionQuestion{ID: "q9", Label: "web", App: "dev.warp.Warp-Stable", Kind: "permission",
+		Text: "run make release", Options: []string{"Yes", "No"}, Prompt: "Allow?"}
+	b := bubbleOf(askSession(c, codex, T0+3))
+	if b[len(b)-1].Token != token {
+		t.Fatalf("the word came round: %+v", b[len(b)-1])
+	}
+	fx := c.Step(AnswerInput("", "No"), T0+4)
+	if len(answers(fx)) != 0 {
+		t.Fatalf("a permission dialog is never answered this way: %+v", answers(fx))
+	}
+}
+
+func TestAMenuChoiceReadsOptionsAsSaid(t *testing.T) {
+	for _, tc := range []struct {
+		options []string
+		said    string
+		want    int
+	}{
+		{[]string{"Yes", "No"}, "Yes", 1},
+		{[]string{"Yes", "No"}, "Yes please", 1},
+		{[]string{"Option A", "Option B"}, "Option B", 2},
+		{[]string{"Option A", "Option B"}, "B", 2},
+		{[]string{"Yes, proceed", "No, stop"}, "Yes, proceed", 1},
+		{[]string{"Go ahead", "Wait"}, "Go ahead", 1},
+		{[]string{"The first approach", "The second approach"}, "The second approach", 2},
+		// Ruled out: nothing is picked.
+		{[]string{"Postgres", "SQLite", "MySQL"}, "anything but SQLite", 0},
+		{[]string{"Postgres", "SQLite", "MySQL"}, "avoid MySQL", 0},
+		{[]string{"Postgres", "SQLite", "MySQL"}, "other than Postgres", 0},
+		{[]string{"Postgres", "SQLite", "MySQL"}, "skip Postgres", 0},
+		{[]string{"Postgres", "SQLite", "MySQL"}, "Postgres, except on CI", 0},
+	} {
+		got, ok := MenuChoice(tc.options, tc.said)
+		if !ok {
+			got = 0
+		}
+		if got != tc.want {
+			t.Errorf("MenuChoice(%q, %q) = %d, want %d", tc.options, tc.said, got, tc.want)
+		}
+	}
+}
+
+func TestAMenuAndAJobAskedTogetherAreNoOnesAnswer(t *testing.T) {
+	c := ctl()
+	c.askedBy(asker{job: "job_000000000001", at: T0})
+	c.askedBy(asker{menu: 7, at: T0})
+	if !c.asked.tie {
+		t.Fatal("job then menu", c.asked)
+	}
+	c.asked = asker{}
+	c.askedBy(asker{menu: 7, at: T0})
+	c.askedBy(asker{job: "job_000000000001", at: T0})
+	if !c.asked.tie {
+		t.Fatal("menu then job", c.asked)
+	}
+}
+
+func TestOrListOfNothingIsEmpty(t *testing.T) {
+	if got := orList(nil); got != "" {
+		t.Fatal(got)
+	}
+}

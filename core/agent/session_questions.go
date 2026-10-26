@@ -106,7 +106,7 @@ func (c *AgentController) onSessionQuestion(session string, q SessionQuestion, n
 		line.Note = mask(q.Body)
 	}
 	if pending.Menu {
-		c.askedBy(asker{menu: token, at: now})
+		c.askedBy(asker{menu: pending.ID, at: now})
 	}
 	before := c.outbox.Len()
 	c.deliverOpening(line, now, fx)
@@ -158,9 +158,7 @@ func (c *AgentController) onChatAbout(token string, now Millis, fx *[]Effect) {
 // option it names (MenuChoice), else your words typed in when the menu takes them. An option or
 // words that push, merge, publish or deploy are still picked in the bubble, as is any answer
 // to a menu that takes no words and names none of its options; the menu then still waits.
-func (c *AgentController) answerMenu(token, text string, now Millis, fx *[]Effect) {
-	at := slices.IndexFunc(c.confirms.Pending(), func(p Pending) bool { return p.Token == token })
-	p := c.confirms.Pending()[at]
+func (c *AgentController) answerMenu(p Pending, text string, now Millis, fx *[]Effect) {
 	text = strings.TrimSpace(text)
 	answer, said := "", text
 	if n, ok := MenuChoice(p.Options, text); ok {
@@ -178,10 +176,21 @@ func (c *AgentController) answerMenu(token, text string, now Millis, fx *[]Effec
 			Err: fmt.Sprintf("That one asks it to %s: pick it in the bubble.", spokenList(actions))})
 		return
 	}
-	c.confirms.take(token)
+	c.confirms.take(p.Token)
 	c.asked = asker{}
 	c.answerSession(p, answer, now, fx)
 	*fx = append(*fx, Effect{Kind: EfAnswerResult, Name: p.Session})
+}
+
+// menuAsked: the session menu Pixie relayed last, still waiting (nil none): by its request id,
+// which no other request gets.
+func (c *AgentController) menuAsked() *Pending {
+	at := slices.IndexFunc(c.confirms.Pending(), func(p Pending) bool { return p.ID == c.asked.menu && p.Menu })
+	if at < 0 {
+		return nil
+	}
+	p := c.confirms.Pending()[at]
+	return &p
 }
 
 // menuFillers lead or end an answer without naming anything: "let's go with Postgres, please".
@@ -192,9 +201,12 @@ var menuFillers = map[string]bool{"yes": true, "yeah": true, "ok": true, "okay":
 var ordinals = map[string]int{"1": 1, "one": 1, "first": 1, "2": 2, "two": 2, "second": 2, "3": 3, "three": 3, "third": 3,
 	"4": 4, "four": 4, "fourth": 4, "5": 5, "five": 5, "fifth": 5}
 
-// menuNegators make an answer say what not to pick: "not Postgres".
+// menuNegators make an answer say what not to pick: "not Postgres", "anything but SQLite",
+// "other than Postgres".
 var menuNegators = map[string]bool{"not": true, "no": true, "dont": true, "never": true, "without": true, "nor": true,
-	"isnt": true, "doesnt": true, "wont": true, "cant": true, "shouldnt": true, "wouldnt": true, "didnt": true}
+	"isnt": true, "doesnt": true, "wont": true, "cant": true, "shouldnt": true, "wouldnt": true, "didnt": true,
+	"but": true, "avoid": true, "other": true, "than": true, "skip": true, "except": true, "instead": true,
+	"rather": true, "besides": true, "exclude": true, "excluding": true, "apart": true}
 
 // menuWords: text folded for matching: lower case, no apostrophes, only letters and digits.
 func menuWords(text string) []string {
@@ -206,19 +218,12 @@ func menuWords(text string) []string {
 // place ("the second one", "option 3", "the last one"), or the only one named in it, with no
 // "not" besides ("let's go with Postgres"). false when it names none, several or one it rules out.
 func MenuChoice(options []string, answer string) (int, bool) {
-	words := menuWords(answer)
-	for _, w := range words {
-		if !menuFillers[w] {
-			break
-		}
-		words = words[1:]
-	}
-	for len(words) > 1 && (menuFillers[words[len(words)-1]] || words[len(words)-1] == "one") {
-		words = words[:len(words)-1]
-	}
+	raw := menuWords(answer)
+	words := stripFillers(raw)
 	said := strings.Join(words, " ")
 	for k, o := range options {
-		if strings.Join(menuWords(o), " ") == said {
+		ow := menuWords(o)
+		if strings.Join(ow, " ") == strings.Join(raw, " ") || strings.Join(stripFillers(ow), " ") == said {
 			return k + 1, true
 		}
 	}
@@ -232,7 +237,7 @@ func MenuChoice(options []string, answer string) (int, bool) {
 	}
 	found := 0
 	for k, o := range options {
-		if ow := strings.Join(menuWords(o), " "); ow != "" && strings.Contains(" "+said+" ", " "+ow+" ") {
+		if ow := strings.Join(menuWords(o), " "); ow != "" && strings.Contains(" "+strings.Join(raw, " ")+" ", " "+ow+" ") {
 			if found != 0 {
 				return 0, false
 			}
@@ -243,12 +248,24 @@ func MenuChoice(options []string, answer string) (int, bool) {
 		return 0, false
 	}
 	own := menuWords(options[found-1])
-	for _, w := range words {
+	for _, w := range raw {
 		if menuNegators[w] && !slices.Contains(own, w) {
 			return 0, false
 		}
 	}
 	return found, true
+}
+
+// stripFillers drops the fillers at the end, then at the start, keeping one word at least:
+// "yes please" is "yes", "option A" is "a", "the second one" is "second".
+func stripFillers(words []string) []string {
+	for len(words) > 1 && (menuFillers[words[len(words)-1]] || words[len(words)-1] == "one") {
+		words = words[:len(words)-1]
+	}
+	for len(words) > 1 && menuFillers[words[0]] {
+		words = words[1:]
+	}
+	return words
 }
 
 // RecentTapMs: a tap this soon after one settled its token is the same click, doubled.
@@ -293,8 +310,8 @@ func (c *AgentController) answerSession(p Pending, answer string, now Millis, fx
 
 // orList is "A", "A or B", "A, B or C".
 func orList(items []string) string {
-	if len(items) == 1 {
-		return items[0]
+	if len(items) < 2 {
+		return strings.Join(items, "")
 	}
 	return strings.Join(items[:len(items)-1], ", ") + " or " + items[len(items)-1]
 }
