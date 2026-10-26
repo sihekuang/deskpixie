@@ -50,7 +50,9 @@ struct AgentRosterView: View {
             if model.open && !below { list }
             if showsCard && !below {
                 // Your words sit on the reply on show, not on the deck's tallest card (#334).
-                earlierBubble.offset(y: deckSlack)
+                // In front of the deck it now sits over, so its links still take clicks.
+                earlierBubble.offset(y: deckSlack).zIndex(1)
+                    .animation(DeckPager<Int, EmptyView>.slide, value: deckSlack)
                 card.onPreferenceChange(DeckSlack.self) { new in
                     MainActor.assumeIsolated { deckSlack = new }
                 }
@@ -101,8 +103,10 @@ struct AgentRosterView: View {
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
-            // As wide as the reply card under it, not the deck its neighbours peek into (#334).
-            .frame(width: QuickChatCard.width - 2 * DeckPager<Int, EmptyView>.peek, alignment: .leading)
+            // As wide as the reply card under it, not the deck its neighbours peek into (#334);
+            // "Earlier replies" alone is the card's full width.
+            .frame(width: chat.showsEarlierOnly ? QuickChatCard.width : QuickChatCard.width - 2 * DeckPager<Int, EmptyView>.peek,
+                   alignment: .leading)
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.separator))
             .opacity(earlierPhase == .fading ? 0 : 1)
