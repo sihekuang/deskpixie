@@ -542,6 +542,104 @@ func asksWhereThingsStand(words []string) bool {
 	return whWords[words[0]] && len(words) > 1 && stateQuestions[words[1]]
 }
 
+// reviewVerbs, reviewNouns and goAheadObjects name the sender's own go-ahead, only in the
+// fixed phrases waitsOnSender reads: a sender or a review elsewhere in the sentence ("I've
+// reviewed it, rebase before you push") isn't what the step waits for.
+var reviewVerbs = map[string]bool{"review": true, "approve": true, "check": true, "look": true, "see": true, "sign": true}
+
+// reviewedVerbs are a review done, only after "I've": "after I approved it" reports one ("nothing
+// changed after I approved it"), so it waits for nothing.
+var reviewedVerbs = map[string]bool{"reviewed": true, "approved": true, "checked": true, "looked": true, "seen": true, "signed": true}
+
+var reviewNouns = map[string]bool{"ok": true, "okay": true, "review": true, "approval": true, "ahead": true, "off": true}
+
+// goAheadObjects may follow the review before "before": "have me review the changes first".
+var goAheadObjects = map[string]bool{"it": true, "that": true, "this": true, "them": true, "these": true, "those": true,
+	"the": true, "changes": true, "change": true, "diff": true, "work": true, "everything": true, "first": true, "at": true, "over": true}
+
+// waitsFor words lead the sender's go-ahead after the step: "push once I've reviewed it". Not
+// "until", which says how long to keep at it ("keep deploying until I say so").
+var waitsFor = map[string]bool{"after": true, "once": true, "when": true}
+
+// waitsOnSender: the step at words[i] waits for the sender's own go-ahead, so they're asked
+// again when they give it (#329). Before the step: "have me review it", "let me see", "ask
+// me", "check with me", "wait for my OK", "I'll review it". After it: "once I've reviewed",
+// "after I approve", "after my approval". A step before the review ("push it, then let me
+// review"), one the wait is further on from ("push and merge once I've approved"), one kept at
+// ("keep pushing"), and one in a condition ("if you're unsure, ask me before you push") still
+// ask.
+func waitsOnSender(words []string, i int) bool {
+	// A condition anywhere in the clause ("ask me before you push unless it's a typo fix")
+	// lets the step go ahead unasked when it doesn't hold.
+	clause := " " + strings.Join(words, " ") + " "
+	conditional := strings.Contains(clause, " if ") || strings.Contains(clause, " unless ") ||
+		strings.Contains(clause, " in case ") || strings.Contains(clause, " in doubt ")
+	if conditional || i > 0 && words[i-1] == "keep" {
+		return false
+	}
+	j := i - 1
+	if j >= 0 && (youWords[words[j]] || words[j] == "we") {
+		j--
+	}
+	// The step ends the clause, or a "then" follows it: "ask me before you push to main, other
+	// branches are fine" only waits for part of it.
+	rest := words[i+1:]
+	if at := slices.Index(rest, "then"); at >= 0 {
+		rest = rest[:at]
+	}
+	stepEnds := len(rest) <= 2 && !slices.ContainsFunc(rest, func(w string) bool { return !goAheadObjects[w] })
+	if j >= 0 && words[j] == "before" && stepEnds {
+		t := words[:j]
+		for n := 0; n < 4 && len(t) > 0 && goAheadObjects[t[len(t)-1]]; n++ {
+			t = t[:len(t)-1]
+		}
+		ends := func(ok ...func(string) bool) bool {
+			if len(t) < len(ok) {
+				return false
+			}
+			for k, f := range ok {
+				if !f(t[len(t)-len(ok)+k]) {
+					return false
+				}
+			}
+			return true
+		}
+		is := func(set ...string) func(string) bool {
+			return func(w string) bool { return slices.Contains(set, w) }
+		}
+		me, verb, noun := is("me", "us"), func(w string) bool { return reviewVerbs[w] }, func(w string) bool { return reviewNouns[w] }
+		if ends(is("have", "let"), me, verb) || ends(is("ask"), me) || ends(is("check"), is("with"), me) ||
+			ends(is("wait"), is("for"), is("my", "our"), noun) || ends(is("wait"), is("for"), is("my", "our"), is("go", "sign"), noun) ||
+			ends(is("i'll", "we'll"), verb) {
+			return true
+		}
+	}
+	// The wait comes right after the step and what it sends: "push it once", "merge the
+	// changes after"; "push it, it works when I check" waits for nothing.
+	k := i + 1
+	for n := 0; n < 2 && k < len(words) && goAheadObjects[words[k]]; n++ {
+		k++
+	}
+	if k < len(words) && waitsFor[words[k]] {
+		r := slices.Concat(words[k+1:min(len(words), k+5)], []string{"", "", ""})
+		if r[0] == "i" && r[1] == "have" {
+			r = append([]string{"i've"}, r[2:]...)
+		}
+		// The phrase ends there: "my review" is a go-ahead, "my review comments" a thing.
+		ends := func(w string) bool { return w == "" || w == "and" || negationEnds[w] }
+		switch {
+		case r[0] == "i":
+			return reviewVerbs[r[1]] && r[2] != "in" && r[2] != "up" || r[1] == "say" && (r[2] == "so" || r[2] == "go")
+		case r[0] == "i've":
+			return reviewedVerbs[r[1]] && r[2] != "in" && r[2] != "up"
+		case r[0] == "my":
+			return reviewNouns[r[1]] && ends(r[2]) || (r[1] == "go" || r[1] == "sign") && reviewNouns[r[2]] && ends(r[3])
+		}
+		return false
+	}
+	return false
+}
+
 // GatedActions are the hard-to-undo steps text asks for, by their base verb, in the order first
 // named ("push", "merge"): none for an ordinary message (#152), including one that only forbids
 // a step ("don't push anything") or asks whether it happened ("has anything been pushed?").
@@ -587,7 +685,7 @@ func GatedActions(text string) []string {
 				strings.HasSuffix(w, "ing") && underWay[subject] ||
 				leadIns[prev] && strings.HasSuffix(w, "ing") && mine && !yours
 			if base, ok := gatedForms[w]; ok && !negated && !reported && !slices.Contains(out, base) &&
-				!(base == "push" && pushIsntCode(words, i)) {
+				!(base == "push" && pushIsntCode(words, i)) && !waitsOnSender(words, i) {
 				out = append(out, base)
 			}
 		}

@@ -79,7 +79,7 @@ func TestDenyInTheBubbleTypesNo(t *testing.T) {
 func TestAMenuOffersItsOptionsInTheBubble(t *testing.T) {
 	c := ctl()
 	fx := askSession(c, pushMenu, T0)
-	wantContains(t, fx, eNotify("deskpixie is asking: Push main to origin? Pick Push or Don't push in the bubble."))
+	wantContains(t, fx, eNotify("deskpixie is asking: Push main to origin? Choose Push or Don't push."))
 	b := bubbleOf(fx)
 	if len(b) != 1 || b[0].Token == "" || strings.Join(b[0].Options, "|") != "Push|Don't push" {
 		t.Fatalf("%+v", b)

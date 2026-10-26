@@ -58,6 +58,18 @@ struct DeckPager<ID: Hashable, Page: View>: View {
         shown.flatMap { ids.firstIndex(of: $0) } ?? selected.flatMap { ids.firstIndex(of: $0) } ?? max(0, ids.count - 1)
     }
     private var tallest: CGFloat? { heights.values.max() }
+    /// The space the card in the middle leaves in the deck (its tallest card's height less its
+    /// own), at the deck's place `at` (fractional mid-swipe: between the two cards' spaces, as
+    /// they slide): what sits next to the deck moves in by this to stay against the card (#334).
+    private func slack(at: CGFloat) -> CGFloat {
+        guard let tallest, !ids.isEmpty else { return 0 }
+        func space(_ i: Int) -> CGFloat {
+            let id = ids[min(max(0, i), ids.count - 1)]
+            return heights[id].map { max(0, tallest - $0) } ?? 0
+        }
+        let lo = Int(at.rounded(.down))
+        return space(lo) + (space(lo + 1) - space(lo)) * (at - CGFloat(lo))
+    }
 
     var body: some View {
         let at = CGFloat(index) - drag / stride
@@ -80,6 +92,7 @@ struct DeckPager<ID: Hashable, Page: View>: View {
         .frame(width: width, height: tallest, alignment: bottomAligned ? .bottomLeading : .topLeading)
         .clipped()
         .contentShape(Rectangle())
+        .preference(key: DeckSlack.self, value: slack(at: at))
         .background(SwipeCatcher { phase, dx, dy in feed(phase, dx: dx, dy: dy) })
         .onPreferenceChange(PageHeights.self) { new in
             MainActor.assumeIsolated {
@@ -185,6 +198,12 @@ private struct SwipeCatcher: NSViewRepresentable {
             return onEvent(phase, event.scrollingDeltaX, event.scrollingDeltaY)
         }
     }
+}
+
+/// The space the deck's middle card leaves (#334): the deck is as tall as its tallest card.
+struct DeckSlack: PreferenceKey {
+    static var defaultValue: CGFloat { 0 }
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
 
 /// Each card's own height: the deck is as tall as the tallest.
