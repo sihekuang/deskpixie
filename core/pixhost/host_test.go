@@ -674,6 +674,34 @@ func TestFlushSaysTypedOrWhyItStillWaits(t *testing.T) {
 	}
 }
 
+// #320: StopAndSend asks pix to stop the turn and type what waits; an older pix that doesn't
+// know stop says so plainly.
+func TestStopAndSendSaysTypedOrWhyItStillWaits(t *testing.T) {
+	h, sock := newHost(t)
+	p, r := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api"})
+	stop := func(res wire.Msg) (agent.Delivery, error) {
+		t.Helper()
+		go func() {
+			m, _ := p.dec.Next()
+			if m.Command != "stop" {
+				t.Errorf("command %q", m.Command)
+			}
+			res.Kind, res.ID = wire.KindResult, m.ID
+			wire.Encode(p.c, res)
+		}()
+		return h.StopAndSend(context.Background(), r.Address)
+	}
+	if d, err := stop(wire.Msg{Status: "typed"}); err != nil || d.Status != "typed" {
+		t.Fatalf("%+v %v", d, err)
+	}
+	if d, err := stop(wire.Msg{Status: "waiting", Reason: "typing"}); err != nil || d != (agent.Delivery{Status: "waiting", Reason: "typing"}) {
+		t.Fatalf("%+v %v", d, err)
+	}
+	if _, err := stop(wire.Msg{Err: "unknown command stop"}); err == nil || !strings.Contains(err.Error(), "restart it") {
+		t.Fatalf("old pix: %v", err)
+	}
+}
+
 // #268: the app tells each pix how long a question waits in its hook for Pixie's answer.
 func TestRegisteredSaysHowLongAQuestionWaits(t *testing.T) {
 	h, sock := newHost(t)

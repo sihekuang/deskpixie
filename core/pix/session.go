@@ -239,6 +239,23 @@ func (s *Session) forceIn(msgs []string) error {
 	return typeIn()
 }
 
+// stopTurn presses Esc in a working agent and waits up to InterruptWait for pix to see the
+// interrupt on screen (#320). Still working after that, the caller says the message waits.
+func (s *Session) stopTurn() error {
+	s.stopKey() // the interrupt it brings counts (#322)
+	if err := s.runner.WriteToAgent([]byte{0x1b}); err != nil {
+		return err
+	}
+	for end := time.Now().Add(InterruptWait); s.currentStatus() == "working" && time.Now().Before(end); {
+		time.Sleep(50 * time.Millisecond)
+	}
+	return nil
+}
+
+// InterruptWait is how long pix waits for a stopped agent to show it (#320), well inside the
+// app's limit on one command.
+var InterruptWait = 3 * time.Second
+
 // forceSettle lets the agent take one write before the next when pix sets your draft aside.
 var forceSettle = 300 * time.Millisecond
 
@@ -597,6 +614,27 @@ func (s *Session) runCommand(m wire.Msg) wire.Msg {
 			s.delivered()
 		}
 		return wire.Msg{Status: "typed"}
+	case "stop":
+		// "Stop it and send it now" (#320): Esc ends a busy turn, then what waits goes in as any
+		// message would: never past your typing, a question or a menu. Unlike Pixie's stop
+		// button (#309), it holds nothing back, and it lets go of what that stop held.
+		s.forgetEsc()
+		if s.queue.Len() > 0 && s.currentStatus() == "working" {
+			if err := s.stopTurn(); err != nil {
+				return wire.Msg{Err: err.Error()}
+			}
+		}
+		s.release()
+		if s.flushNow() {
+			s.keylog("stop: typed")
+			s.delivered()
+			return wire.Msg{Status: "typed"}
+		}
+		if s.queue.Len() == 0 && !s.hasUnsent() { // nothing waits, or the stop's own flush typed it
+			return wire.Msg{Status: "typed"}
+		}
+		s.flushSoon()
+		return wire.Msg{Status: "waiting", Reason: s.waitReason()}
 	case "keys":
 		if menu := s.menuShown(); menu != "" { // only you answer it (#306)
 			return wire.Msg{Err: menuWaits(s.o.tool, menu)}

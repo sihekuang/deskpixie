@@ -1823,7 +1823,7 @@ func sessionSentText(description, waiting string) (text, brief, title string) {
 	if waiting != "" {
 		// #183: pix holds it; say so, and why.
 		why := map[string]string{
-			"working": "it's busy, and gets it with its next step or when it stops",
+			"working": "it's busy, and gets it with its next step or when it stops. Say if you want it stopped and sent now",
 			"blocked": "it's waiting on a question, and gets it once that's answered",
 			"typing":  "you're typing there, and it gets it once you send or clear that",
 			// #306: a menu only you should answer.

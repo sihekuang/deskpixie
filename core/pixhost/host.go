@@ -528,6 +528,25 @@ func (h *Host) Flush(ctx context.Context, name string) (agent.Delivery, error) {
 	h.mu.Unlock()
 	return agent.Delivery{Status: r.Status, Reason: r.Reason, Outdated: outdated}, nil
 }
+
+// StopAndSend has pix stop session name's busy turn and type what waits (#320).
+func (h *Host) StopAndSend(ctx context.Context, name string) (agent.Delivery, error) {
+	r, err := h.commandResult(ctx, name, wire.Msg{Command: "stop"})
+	if he, ok := err.(agent.HostError); ok && he.Detail == "unknown command stop" { // a pix from before #320
+		return agent.Delivery{}, errors.New("This session's pix can't stop it to send; restart it to update pix.")
+	}
+	if err != nil {
+		return agent.Delivery{}, err
+	}
+	h.mu.Lock()
+	outdated := false
+	if s := h.sessions[name]; s != nil {
+		outdated = h.outdated(s)
+	}
+	h.mu.Unlock()
+	return agent.Delivery{Status: r.Status, Reason: r.Reason, Outdated: outdated}, nil
+}
+
 func (h *Host) SendKeys(ctx context.Context, name string, keys []string) error {
 	return h.command(ctx, name, wire.Msg{Command: "keys", Keys: keys})
 }

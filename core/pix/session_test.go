@@ -1315,6 +1315,90 @@ func TestFlushTypesWhatWaitsDespiteTheGate(t *testing.T) {
 	h.s.finish()
 }
 
+// stopsOnEsc is an agent that reads until an Esc, then shows Claude Code's interrupt over its
+// input box (#320, #322).
+const stopsOnEsc = `stty raw -echo; while [ "$(dd bs=1 count=1 2>/dev/null)" != "$(printf '\033')" ]; do :; done; ` +
+	`printf '\033[1m⎿  Interrupted · What should Claude do instead?\033[0m\r\n────\r\n❯ \r\n────\r\n'; sleep 30`
+
+// #320: "stop it and send it now": stop presses Esc in a busy agent, waits for it to show it
+// stopped, and types what waits.
+func TestStopEndsABusyTurnThenTypesWhatWaits(t *testing.T) {
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", stopsOnEsc}})
+	h.s.setStatus("working")
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "from pixie"})
+	waitEvent(t, h.d.events, "waiting: working", func(m wire.Msg) bool { return m.ID == "1" && m.Reason == "working" })
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "2", Command: "stop"})
+	waitEvent(t, h.d.events, "typed", func(m wire.Msg) bool { return m.ID == "2" && m.Status == "typed" })
+	got := h.s.typedForTest()
+	if !strings.HasPrefix(got, "\x1b") || !strings.Contains(got, "\x1b[200~from pixie\x1b[201~") || h.s.queue.Len() != 0 {
+		t.Fatalf("typed %q, %d still queued", got, h.s.queue.Len())
+	}
+	h.s.runner.Hangup()
+	h.s.finish()
+}
+
+// #320: after Pixie's stop button (#309) held what waits, stop-and-send lets it go; and a
+// stop button pressed just before doesn't make this stop hold it.
+func TestStopSendsWhatPixiesStopHeld(t *testing.T) {
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", stopsOnEsc}})
+	h.s.setStatus("working")
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "from pixie"})
+	waitEvent(t, h.d.events, "waiting: working", func(m wire.Msg) bool { return m.ID == "1" && m.Reason == "working" })
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "2", Command: "keys", Keys: []string{"Escape"}}) // the stop button
+	waitEvent(t, h.d.events, "idle", func(m wire.Msg) bool { return m.Event == "status" && m.Status == "idle" })
+	if !h.s.held() || h.s.queue.Len() != 1 {
+		t.Fatalf("not held: %t %d", h.s.held(), h.s.queue.Len())
+	}
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "3", Command: "stop"})
+	waitEvent(t, h.d.events, "typed", func(m wire.Msg) bool { return m.ID == "3" && m.Status == "typed" })
+	if got := h.s.typedForTest(); !strings.HasSuffix(got, "\x1b[200~from pixie\x1b[201~\r") || h.s.held() {
+		t.Fatalf("typed %q, held %t", got, h.s.held())
+	}
+	h.s.runner.Hangup()
+	h.s.finish()
+}
+
+// #320: stopping isn't forcing: while you type there, the stopped session's message still
+// waits for you, and your draft is left alone.
+func TestStopNeverTypesOverYourDraft(t *testing.T) {
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", stopsOnEsc}})
+	h.s.setStatus("working")
+	h.stdinW.WriteString("my draft")
+	time.Sleep(100 * time.Millisecond)
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "from pixie"})
+	waitEvent(t, h.d.events, "waiting: working", func(m wire.Msg) bool { return m.ID == "1" && m.Reason == "working" })
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "2", Command: "stop"})
+	waitEvent(t, h.d.events, "waiting: typing", func(m wire.Msg) bool { return m.ID == "2" && m.Status == "waiting" && m.Reason == "typing" })
+	if got := h.s.typedForTest(); !strings.HasSuffix(got, "\x1b") || strings.Contains(got, "from pixie") || h.s.queue.Len() != 1 {
+		t.Fatalf("typed %q, %d queued", got, h.s.queue.Len())
+	}
+	h.s.runner.Hangup()
+	h.s.finish()
+}
+
+// #320: an agent that doesn't stop in time keeps the message, and says it's busy; with
+// nothing waiting there's nothing to stop.
+func TestStopWaitsWhenTheAgentKeepsWorking(t *testing.T) {
+	defer func(w time.Duration) { InterruptWait = w }(InterruptWait)
+	InterruptWait = 200 * time.Millisecond
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}})
+	h.s.setStatus("working")
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "stop"})
+	waitEvent(t, h.d.events, "nothing waits", func(m wire.Msg) bool { return m.ID == "1" && m.Status == "typed" })
+	if got := h.s.typedForTest(); got != "" {
+		t.Fatalf("stopped with nothing waiting: %q", got)
+	}
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "2", Command: "prompt", Text: "from pixie"})
+	waitEvent(t, h.d.events, "waiting: working", func(m wire.Msg) bool { return m.ID == "2" && m.Reason == "working" })
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "3", Command: "stop"})
+	waitEvent(t, h.d.events, "still working", func(m wire.Msg) bool { return m.ID == "3" && m.Status == "waiting" && m.Reason == "working" })
+	if got := h.s.typedForTest(); got != "\x1b" || h.s.queue.Len() != 1 {
+		t.Fatalf("typed %q, %d queued", got, h.s.queue.Len())
+	}
+	h.s.runner.Hangup()
+	h.s.finish()
+}
+
 // #187: a forced message doesn't take your draft with it. Codex: pix deletes what you typed,
 // sends the message, and types your draft back.
 func TestFlushSetsYourDraftAsideAndPutsItBack(t *testing.T) {
