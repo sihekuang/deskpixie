@@ -32,6 +32,8 @@ public enum SettingsSection: String, Codable, Sendable, CaseIterable {
     case workers = "Workers"
     case notifications = "Notifications"
     case advanced = "Advanced"
+    /// No settings: which versions are running (#295).
+    case about = "About"
 }
 
 /// Where one of the window's other rows sits (Go `ExtraView`): its page and group. The row's

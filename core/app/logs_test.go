@@ -63,7 +63,7 @@ func TestLogsExportZipsEveryLog(t *testing.T) {
 	if strings.Join(names, ",") != "about.txt,deskpixie.log,metrics.log,pix.log,voice.log" {
 		t.Fatal(names)
 	}
-	for _, want := range []string{"DeskPixie 0.10.0 (42)", "macOS 15.6", "Log size: 2 MB"} {
+	for _, want := range []string{"DeskPixie 0.10.0 (42)", "Core dev", "macOS 15.6", "Log size: 2 MB"} {
 		if !strings.Contains(about, want) {
 			t.Fatalf("about.txt lacks %q:\n%s", want, about)
 		}

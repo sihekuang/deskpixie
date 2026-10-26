@@ -31,6 +31,7 @@ var Extras = []Extra{
 	{"pix", SectionSessions, "Sessions you start with pix", "pix command", "Start Claude Code or Codex with `pix claude` or `pix codex` in any terminal (WebStorm, iTerm, …) and Pixie can see, message and interrupt that session. Quitting DeskPixie never ends it.", "", AllPlatforms},
 	{"openFile", SectionAdvanced, "Files", "Settings file", "settings.json holds every setting.", "Open Settings File", AllPlatforms},
 	{"exportLogs", SectionAdvanced, "Files", "Logs", "Saves the app's log, pix's log, the voice log and metrics in one zip to share. It can include what you said to Pixie.", "Export Logs…", AllPlatforms},
+	{"about", SectionAbout, "Versions", "Versions", "About this DeskPixie: the versions of the app, its core and pix. Copy them into a bug report.", "Copy", AllPlatforms},
 }
 
 // ExtraView places an extra row for the window: its page and group.

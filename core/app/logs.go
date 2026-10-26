@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/sihekuang/deskpixie/core/buildinfo"
 	"github.com/sihekuang/deskpixie/core/logfile"
 	"github.com/sihekuang/deskpixie/core/pix"
 	"github.com/sihekuang/deskpixie/core/voice"
@@ -54,8 +55,8 @@ func (a *App) registerLogs(r Registrar) {
 		if in.Path == "" {
 			return nil, errors.New("Choose where to save the logs.")
 		}
-		about := fmt.Sprintf("DeskPixie %s\n%s\nExported %s\nLog size: %d MB\n",
-			in.App, in.OS, time.Now().Format(time.RFC3339), a.LogMaxBytes()>>20)
+		about := fmt.Sprintf("DeskPixie %s\nCore %s\n%s\nExported %s\nLog size: %d MB\n",
+			in.App, buildinfo.String(), in.OS, time.Now().Format(time.RFC3339), a.LogMaxBytes()>>20)
 		if err := logfile.Export(in.Path, a.logFiles(), about); err != nil {
 			return nil, fmt.Errorf("Couldn't save the logs: %v", err)
 		}

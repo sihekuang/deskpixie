@@ -44,6 +44,7 @@ public enum SettingsLayout {
         Tab(section: .workers, title: "Workers", symbol: "person.2", tint: .indigo),
         Tab(section: .notifications, title: "Notifications", symbol: "bell.badge", tint: .red),
         Tab(section: .advanced, title: "Advanced", symbol: "gearshape.2", tint: .gray),
+        Tab(section: .about, title: "About", symbol: "info.circle", tint: .blue),
     ]
 
     /// The sidebar index of `section`'s page.
@@ -479,6 +480,8 @@ public enum SettingsLayout {
         case secret(id: SettingsSecretID, label: String, help: String)
         /// The pix command row (#89): install state, Install / Uninstall, the PATH line, Copy Aliases.
         case pix(help: String)
+        /// The About page's versions (#295): `AboutInfo`'s rows, its note and Copy.
+        case about(help: String)
 
         /// The row's id, as the core's search names it (Go `settings.Extras`, path `extra:<id>`).
         public var id: String {
@@ -486,6 +489,7 @@ public enum SettingsLayout {
             case .button(_, _, _, let action): return action.rawValue
             case .secret(let id, _, _): return "key.\(id.rawValue)"
             case .pix: return "pix"
+            case .about: return "about"
             }
         }
 
@@ -497,13 +501,14 @@ public enum SettingsLayout {
             switch self {
             case .button(let label, _, _, _), .secret(_, let label, _): return label
             case .pix: return "pix command"
+            case .about: return "Versions"
             }
         }
 
         /// The row's help, as the core's search has it.
         public var help: String {
             switch self {
-            case .button(_, let help, _, _), .secret(_, _, let help), .pix(let help): return help
+            case .button(_, let help, _, _), .secret(_, _, let help), .pix(let help), .about(let help): return help
             }
         }
     }
@@ -534,6 +539,7 @@ public enum SettingsLayout {
         .button(label: "Logs",
                 help: "Saves the app's log, pix's log, the voice log and metrics in one zip to share. It can include what you said to Pixie.",
                 title: "Export Logs…", action: .exportLogs),
+        .about(help: "About this DeskPixie: the versions of the app, its core and pix. Copy them into a bug report."),
     ]
 
     /// The extra row with `id`; nil for one this app doesn't draw.

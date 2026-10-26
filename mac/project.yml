@@ -81,7 +81,7 @@ targets:
           echo "Go core: $(command -v go) ($(go version))"
           cd "$SRCROOT/../core"
           unset GOFLAGS
-          make build-dylib
+          VERSION="$MARKETING_VERSION" make build-dylib
           VERSION="$MARKETING_VERSION" make build-pix
         outputFiles:
           - "$(SRCROOT)/../core/build/libdeskpixie.dylib"

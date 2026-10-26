@@ -11,6 +11,7 @@ struct SettingsWindowView: View {
     static let frameName = "DeskPixieSettingsWindow"
 
     let model: SettingsModel
+    let about: AboutModel
 
     @AppStorage(SettingsWindowView.tabKey) private var tab = 0
     @State private var observers = WindowObservers()
@@ -28,7 +29,7 @@ struct SettingsWindowView: View {
                 }
                 .frame(width: 200)
 
-            SettingsDetailView(model: model, tab: SettingsLayout.tabs[selectedIndex])
+            SettingsDetailView(model: model, about: about, tab: SettingsLayout.tabs[selectedIndex])
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(
                     VisualEffectBackground(material: .sidebar, blendingMode: .behindWindow)
@@ -197,6 +198,7 @@ private struct SettingsSidebarRow: View {
 /// The selected page: its header, then the tab's rows, scrolling when taller than the window.
 private struct SettingsDetailView: View {
     let model: SettingsModel
+    let about: AboutModel
     let tab: SettingsLayout.Tab
 
     /// The row being pointed out, for a moment after it was revealed.
@@ -213,7 +215,7 @@ private struct SettingsDetailView: View {
                             .fontWeight(.semibold)
                             .accessibilityAddTraits(.isHeader)
                     }
-                    SettingsTabView(model: model, section: tab.section, highlighted: highlighted)
+                    SettingsTabView(model: model, about: about, section: tab.section, highlighted: highlighted)
                 }
                 .padding(.horizontal, 24)
                 .padding(.vertical, 20)
@@ -289,6 +291,8 @@ private final class WindowObservers {
 /// the warning (or notice) line and the Restart bar.
 struct SettingsTabView: View {
     let model: SettingsModel
+    /// The About page's versions (#295), read each time the page opens.
+    let about: AboutModel
     /// The pix command row (#89); the login shell's PATH is read once, when Settings opens.
     @State private var pix = PixCommandModel(installer: .forThisApp(path: PixInstaller.loginShellPath()))
     /// Restart Coordinator… was clicked: ask first (#179).
@@ -317,6 +321,12 @@ struct SettingsTabView: View {
                 SettingsStrip(symbol: nil, text: restart, buttonTitle: "Restart",
                               buttonHelp: "Restarts DeskPixie to apply the changes.") { model.restart() }
             }
+        }
+        .task(id: section) {
+            guard section == .about else { return }
+            let app = SystemPermissions.appVersion, os = Self.osVersion
+            let pix = PixInstaller.forThisApp(path: "").bundled.path
+            await about.load { AboutArgs(app: app, os: os, pix: pix, path: PixInstaller.loginShellPath()) }
         }
         .alert(CoordinatorRestart.title, isPresented: $confirmRestart) {
             Button(CoordinatorRestart.confirm, role: .destructive) { model.restartCoordinator() }
@@ -416,6 +426,12 @@ struct SettingsTabView: View {
         }
     }
 
+    /// E.g. "macOS 15.1.0", for the log export and the About page.
+    static var osVersion: String {
+        let v = ProcessInfo.processInfo.operatingSystemVersion
+        return "macOS \(v.majorVersion).\(v.minorVersion).\(v.patchVersion)"
+    }
+
     /// Export Logs… (#225): where to save, then the core writes the zip; it is shown in Finder.
     private func exportLogs() {
         let panel = NSSavePanel()
@@ -424,9 +440,7 @@ struct SettingsTabView: View {
         panel.allowedContentTypes = [.zip]
         panel.directoryURL = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        let v = ProcessInfo.processInfo.operatingSystemVersion
-        let os = "macOS \(v.majorVersion).\(v.minorVersion).\(v.patchVersion)"
-        if model.exportLogs(to: url.path, app: SystemPermissions.appVersion, os: os) {
+        if model.exportLogs(to: url.path, app: SystemPermissions.appVersion, os: Self.osVersion) {
             NSWorkspace.shared.activateFileViewerSelecting([url])
         }
     }
@@ -485,6 +499,36 @@ struct SettingsTabView: View {
                         .font(.callout)
                 }
             }
+        case .about(let help):
+            if let info = about.info {
+                ForEach(Array(info.rows.enumerated()), id: \.offset) { i, r in
+                    // The first row is the one a search for "version" points out.
+                    valueRow(label: r.label, value: r.value, id: i == 0 ? extra.path : "\(extra.path).\(i)")
+                }
+                row(label: "", id: "\(extra.path).copy") {
+                    Button("Copy") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(info.text, forType: .string)
+                    }
+                    .help("Copies these versions, to paste into a bug report.")
+                } note: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        if let note = info.note {
+                            NoteText(text: note, isError: info.warning)
+                        }
+                        if let error = about.error {
+                            NoteText(text: error, isError: true)
+                        }
+                    }
+                }
+            } else {
+                row(label: extra.label, id: extra.path) {
+                    Text(about.error ?? "Reading…")
+                        .foregroundStyle(about.error == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.red))
+                } note: {
+                    NoteText(text: help, isError: false)
+                }
+            }
         case .secret(let id, let label, let help):
             row(label: SettingsLayout.labelText(label), id: extra.path) {
                 HStack(spacing: 6) {
@@ -515,6 +559,26 @@ struct SettingsTabView: View {
                 }
             }
         }
+    }
+
+    /// A label and a value that can be selected, with no note under it (the About page).
+    private func valueRow(label: String, value: String, id: String) -> some View {
+        GridRow {
+            Text(label)
+                .padding(.horizontal, 4)
+                .background(
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .fill(Color.accentColor.opacity(highlighted == id ? 0.3 : 0))
+                )
+                .gridColumnAlignment(.trailing)
+                .accessibilityHidden(true)
+            Text(value)
+                .textSelection(.enabled)
+                .gridColumnAlignment(.leading)
+                .accessibilityLabel("\(label): \(value)")
+        }
+        .id(id)
+        .padding(.top, 6)
     }
 
     @ViewBuilder
