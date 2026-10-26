@@ -181,6 +181,16 @@ func TestAMenuChoiceReadsOptionsAsSaid(t *testing.T) {
 		{[]string{"3 retries", "5 retries", "1 retry"}, "one", 3},
 		{[]string{"3 retries", "5 retries", "1 retry"}, "the second one", 2},
 		{[]string{"2 workers", "4 workers"}, "6", 0},
+		// "option N" is a place, whatever numbers the options have.
+		{[]string{"Use 2 workers", "Use 1 worker", "Auto"}, "option one", 1},
+		{[]string{"Use 2 workers", "Use 1 worker", "Auto"}, "number one", 1},
+		{[]string{"Use 2 workers", "Use 1 worker", "Auto"}, "option 2", 2},
+		{[]string{"Python 3", "Go", "Rust"}, "option 3", 3},
+		{[]string{"Python 3", "Go", "Rust"}, "option three", 3},
+		{[]string{"SQLite", "Any one is fine"}, "option one", 1},
+		{[]string{"SQLite", "Any one is fine"}, "one", 1},
+		{[]string{"Python 3", "Go", "Rust"}, "option 4", 0},
+		{[]string{"New", "Existing"}, "the new one", 1},
 		// Ruled out: nothing is picked.
 		{[]string{"Postgres", "SQLite", "MySQL"}, "anything but SQLite", 0},
 		{[]string{"Postgres", "SQLite", "MySQL"}, "avoid MySQL", 0},

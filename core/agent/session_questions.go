@@ -199,7 +199,8 @@ var menuFillers = map[string]bool{"yes": true, "yeah": true, "ok": true, "okay":
 	"please": true, "thanks": true, "i": true, "want": true, "id": true, "like": true}
 
 // numberWords are read as their digits, in what's said and in the options alike: "two" is "2".
-var numberWords = map[string]string{"one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6",
+// Not "one", as often a pronoun ("any one is fine") as a number: number reads it where it is one.
+var numberWords = map[string]string{"two": "2", "three": "3", "four": "4", "five": "5", "six": "6",
 	"seven": "7", "eight": "8", "nine": "9", "ten": "10"}
 
 // ordinals are an option's place: "the second one".
@@ -229,11 +230,30 @@ func isNumber(w string) bool {
 	return w != "" && strings.IndexFunc(w, func(r rune) bool { return !unicode.IsDigit(r) }) < 0
 }
 
+// number is w as a number said: its digits, or "1" for "one"; "" when it isn't one.
+func number(w string) string {
+	if w == "one" {
+		return "1"
+	}
+	if isNumber(w) {
+		return w
+	}
+	return ""
+}
+
 // MenuChoice is the option (from 1) an answer picks: one said as it reads ("SQLite"), by its
 // place ("the second one", "option 3", "the last one"), or the only one named in it, with no
 // "not" besides ("let's go with Postgres"). false when it names none, several or one it rules out.
 func MenuChoice(options []string, answer string) (int, bool) {
 	raw := menuWords(answer)
+	// "option 2", "number one": a place, whatever numbers the options have.
+	for k := 0; k+1 < len(raw); k++ {
+		if raw[k] == "option" || raw[k] == "number" || raw[k] == "choice" {
+			if n, err := strconv.Atoi(number(raw[k+1])); err == nil {
+				return n, n >= 1 && n <= len(options) && len(raw) <= k+3
+			}
+		}
+	}
 	words := stripFillers(raw)
 	// Word for word first, then with fillers left out on both sides: "yes please" is the
 	// option "Yes please" before it is "Yes".
@@ -256,16 +276,16 @@ func MenuChoice(options []string, answer string) (int, bool) {
 		// A number is a place ("option 2"), unless the options have numbers of their own:
 		// then "two" names "2 workers", never the second option.
 		numbered := slices.ContainsFunc(options, func(o string) bool { return slices.ContainsFunc(menuWords(o), isNumber) })
-		if isNumber(w) && !numbered {
-			if n, err := strconv.Atoi(w); err == nil && n >= 1 && n <= len(options) {
+		if d := number(w); d != "" && !numbered {
+			if n, err := strconv.Atoi(d); err == nil && n >= 1 && n <= len(options) {
 				return n, true
 			}
 			return 0, false
 		}
-		if isNumber(w) {
+		if d := number(w); d != "" {
 			found := 0
 			for k, o := range options {
-				if slices.Contains(menuWords(o), w) {
+				if ow := menuWords(o); slices.Contains(ow, d) || d == "1" && slices.Contains(ow, "one") {
 					if found != 0 {
 						return 0, false
 					}
@@ -297,11 +317,11 @@ func MenuChoice(options []string, answer string) (int, bool) {
 }
 
 // stripFillers drops the fillers at the end, then at the start, keeping one word at least:
-// "yes please" is "yes", "option A" is "a", "the second one" is "second", "option one" is "1".
+// "yes please" is "yes", "option A" is "a", "the second one" is "second".
 func stripFillers(words []string) []string {
 	for n := len(words); n > 1; n = len(words) {
 		last, prev := words[n-1], words[n-2]
-		if !menuFillers[last] && !(last == "1" && (ordinals[prev] > 0 || prev == "last")) {
+		if !menuFillers[last] && !(last == "one" && (ordinals[prev] > 0 || prev == "last" || prev == "new" || prev == "other")) {
 			break
 		}
 		words = words[:n-1]
