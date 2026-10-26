@@ -547,12 +547,21 @@ func (s *Session) Hook(event string, p map[string]any) string {
 	return ""
 }
 
-// goneIfOffScreen clears q if it still waits but showed and is off the screen now (#347).
-func (s *Session) goneIfOffScreen(q *question) {
+// goneIfOffScreen clears q if it still waits but showed and is off the screen now, on two
+// looks (#347).
+func (s *Session) goneIfOffScreen(q *question) { s.offScreenLook(q, 2) }
+
+// offScreenLook drops q if it is off the screen on this look and the looks left after it,
+// offScreenWait apart: one look may land in the middle of a redraw.
+func (s *Session) offScreenLook(q *question, looks int) {
 	s.mu.Lock()
-	gone := s.q == q && s.offScreen(q)
+	off := s.q == q && s.offScreen(q)
 	s.mu.Unlock()
-	if !gone {
+	if !off {
+		return
+	}
+	if looks > 1 {
+		time.AfterFunc(offScreenWait, func() { s.offScreenLook(q, looks-1) })
 		return
 	}
 	s.dropQuestion(q, "off screen")

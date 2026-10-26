@@ -234,6 +234,25 @@ func TestAMenuAskedAgainWhileItWaitsChangesInPlace(t *testing.T) {
 	}
 }
 
+// Review of #347: a new pix under the same name numbers its prompts from q1 again. Its q1 is
+// another prompt: it replaces the old card, options and all, and is told.
+func TestAnotherPromptUnderTheSameIDReplacesTheCard(t *testing.T) {
+	c := ctl()
+	askSession(c, pushMenu, T0)
+	old := c.Updates()[0]
+	next := pushMenu
+	next.Text, next.Options = "Which database?", []string{"Postgres", "SQLite", "MySQL"}
+	fx := askSession(c, next, T0+1)
+	wantContains(t, fx, eNotify("deskpixie is asking: Which database? Choose Postgres, SQLite or MySQL."))
+	b := bubbleOf(fx)
+	if len(b) != 1 || b[0].ID == old.ID || strings.Join(b[0].Options, "|") != "Postgres|SQLite|MySQL" {
+		t.Fatalf("%+v", b)
+	}
+	if a := answers(c.Step(ChooseInput(b[0].Token, 3), T0+2)); len(a) != 1 || a[0].Answer != "3" {
+		t.Fatalf("%+v", a)
+	}
+}
+
 // #347: a tap pix couldn't type took the question out of the bubble; pix asks it again, and
 // it is back.
 func TestAQuestionAskedAgainAfterAFailedAnswerIsBack(t *testing.T) {

@@ -98,6 +98,15 @@ func TestASessionsMenuStaysUntilYouTapAnOption(t *testing.T) {
 	}
 	p.step("redraw")
 	p.stillAsked(h, item, "a redraw")
+	p.step("split") // a redraw cut between reads: pix's first look lands on its first half
+	p.step("subtool")
+	time.Sleep(2500 * time.Millisecond)
+	p.stillAsked(h, item, "a redraw split across reads")
+	p.step("shrink") // the pane made smaller: its question scrolled off, its options still there
+	p.step("subtool")
+	time.Sleep(2500 * time.Millisecond)
+	p.stillAsked(h, item, "a smaller pane")
+	p.step("redraw")
 	h.UpdatesSeen([]uint64{item.ID})
 	p.stillAsked(h, item, "the bubble seen")
 	time.Sleep(1500 * time.Millisecond) // past pix's look whether it left the screen

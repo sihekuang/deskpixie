@@ -24,7 +24,7 @@ func (c *AgentController) onSessionQuestion(session string, q SessionQuestion, n
 	if c.shutDown {
 		return
 	}
-	if len(q.Options) > 0 && c.confirms.RefreshSession(session, q.ID, q.Typed) {
+	if len(q.Options) > 0 && c.confirms.RefreshSession(session, q.ID, askedAs(q), q.Typed) {
 		return
 	}
 	c.confirms.TakeSession(session, "")
@@ -32,7 +32,7 @@ func (c *AgentController) onSessionQuestion(session string, q SessionQuestion, n
 	tokens := c.pendingTokens()
 	label := maskPendingTokens(q.Label, tokens)
 	line := Line{Kind: LineQuestion, App: q.App, Session: session, Title: label}
-	pending := Pending{Session: session, Question: q.ID, Label: label}
+	pending := Pending{Session: session, Question: q.ID, Label: label, Asked: askedAs(q)}
 	var input any
 	if q.Input != "" {
 		json.Unmarshal([]byte(q.Input), &input)
@@ -124,6 +124,12 @@ func (c *AgentController) onSessionQuestion(session string, q SessionQuestion, n
 	if !c.outbox.HasTokenSince(before, token) {
 		*fx = append(*fx, Effect{Kind: EfAppend, File: OutboxFile, Line: c.outbox.PushHeard(line, now)})
 	}
+}
+
+// askedAs is what tells prompt q from another the session asks under the same id: who asks,
+// what, and its options, as the session sent them (what answers it, Typed, may change).
+func askedAs(q SessionQuestion) string {
+	return strings.Join(append([]string{q.Kind, q.Label, q.Tool, q.Input, q.Text, q.Prompt}, q.Options...), "\x00")
 }
 
 // announcedQuestion is a session's prompt asked without buttons: pix's id for it, and the

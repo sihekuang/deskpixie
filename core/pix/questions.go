@@ -116,6 +116,9 @@ type question struct {
 	detail  string // shown with it: this request's own text, so another dialog doesn't count
 	seen    bool   // its marker and detail showed since it was asked
 	shown   bool   // and both were on the screen at once (a tall dialog's top can scroll off)
+	// markerAt: when its marker was last on the screen, once shown (a smaller pane can scroll
+	// its text off while its options and marker stay).
+	markerAt time.Time
 	// read reads its dialog off the screen; held: its event, not sent yet: it waits for its
 	// dialog to be read (or dialogWait), so DeskPixie gets the dialog as shown. optKeys: what
 	// answers each of the dialog's options (nil: its number).
@@ -252,14 +255,27 @@ func (s *Session) ask(q *question, ev wire.Msg) bool {
 	return true
 }
 
-// offScreen: q showed on screen, whole, and is no longer there, so it was answered or went (#347).
-// Under mu.
+// offScreen: q showed on screen whole, and no prompt of its kind (its marker) has been there
+// for offScreenWait, so it was answered or went (#347). A redraw takes it off for a moment
+// only, and a pane made smaller keeps its options and marker. Under mu.
 func (s *Session) offScreen(q *question) bool {
-	return q.shown && q.marker != "" && !shows(s.screen, q.marker, q.detail)
+	return q.shown && q.marker != "" && !strings.Contains(s.screen, noSpace(q.marker)) &&
+		s.now().Sub(q.markerAt) >= offScreenWait
 }
 
-// offScreenWait: how long after another tool ends pix looks again whether a question it
-// leaves is still on screen (a redraw may be under way when the tool ends).
+// sawQuestion notes what screen (without spaces) shows of q, once seen. Under mu.
+func (s *Session) sawQuestion(q *question, screen string) {
+	if q == nil || !q.seen || q.marker == "" {
+		return
+	}
+	q.shown = q.shown || shows(screen, q.marker, q.detail)
+	if q.shown && strings.Contains(screen, noSpace(q.marker)) {
+		q.markerAt = s.now()
+	}
+}
+
+// offScreenWait: how long a question's marker is off the screen before pix takes it for gone,
+// and how far apart its two looks are after another tool ends (a redraw may be under way).
 var offScreenWait = time.Second
 
 // retell asks DeskPixie question id again as it is now, if it still waits (#347): its answer
@@ -587,9 +603,7 @@ func (s *Session) noteScreen(vt *screen) {
 	prompt := promptOf(s.o.tool, lines)
 	s.mu.Lock()
 	s.screen, s.prompt = text, prompt
-	if q := s.q; q != nil && q.seen && q.marker != "" && shows(text, q.marker, q.detail) {
-		q.shown = true
-	}
+	s.sawQuestion(s.q, text)
 	if l := s.landing; l != nil && !shows(text, l.marker, l.detail) {
 		s.landing = nil
 		close(l.done)
@@ -659,7 +673,7 @@ func (w *questionWatch) watch(s *Session, out string, vt *screen) {
 		s.mu.Lock()
 		if s.q == q {
 			q.seen = true
-			q.shown = shows(s.screen, q.marker, q.detail)
+			s.sawQuestion(q, s.screen)
 		}
 		s.mu.Unlock()
 	}

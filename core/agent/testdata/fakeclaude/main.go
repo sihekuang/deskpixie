@@ -14,6 +14,10 @@
 //	subperm  a subagent's Bash call needs your permission: its dialog shows, and its
 //	         PermissionRequest (with agent_id) runs; allowed by the hook, or a digit typed answers it
 //	redraw   it draws its whole screen again, as after a resize
+//	split    it draws its menu again in two writes, the second 1.5 s after the first: a
+//	         redraw cut between reads, drawn out so pix looks at its first half
+//	shrink   it draws its menu as a smaller pane shows it: the question scrolled off the top,
+//	         its options and footer still there
 //
 // What was answered is a line of $FAKE_DIR/answers ("menu <label>", "subperm <how>").
 //
@@ -90,6 +94,15 @@ func main() {
 			go ask()
 		case "subperm":
 			go subperm()
+		case "split":
+			at := strings.Index(menuScreen, "❯")
+			fmt.Print(menuScreen[:at])
+			go func() {
+				time.Sleep(1500 * time.Millisecond)
+				fmt.Print(menuScreen[at:])
+			}()
+		case "shrink":
+			fmt.Print("\x1b[2J\x1b[H" + menuScreen[strings.Index(menuScreen, "❯"):])
 		case "redraw":
 			mu.Lock()
 			screen := shown

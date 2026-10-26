@@ -1047,8 +1047,49 @@ func TestADialogNeverShownWholeIsNotOffTheScreen(t *testing.T) {
 	}
 }
 
+// Review of #347: a redraw split across reads takes a question off the screen for a moment. A
+// look that lands there isn't enough: the next, offScreenWait later, sees it back.
+func TestARedrawSplitAcrossReadsLeavesTheQuestion(t *testing.T) {
+	defer func(w time.Duration) { offScreenWait = w }(offScreenWait)
+	offScreenWait = 100 * time.Millisecond
+	dialog := "Bash command\r\n npm test\r\nDo you want to proceed?\r\n❯ 1. Yes\r\n"
+	h := agentHarness(t, "claude", `stty raw -echo; cat >/dev/null`)
+	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "npm test"}})
+	askedQuestion(t, h)
+	h.s.runner.OnOutput([]byte(dialog))
+	time.Sleep(150 * time.Millisecond)
+	h.s.runner.OnOutput([]byte("\x1b[2J\x1b[HBash command\r\n")) // the first half of a redraw
+	h.s.Hook("PostToolUse", map[string]any{"tool_name": "Read", "tool_input": map[string]any{"file_path": "/x"}})
+	time.Sleep(150 * time.Millisecond) // the first look lands on the half frame
+	// The rest of the frame.
+	h.s.runner.OnOutput([]byte(" npm test\r\nDo you want to proceed?\r\n❯ 1. Yes\r\n"))
+	noQuestionGone(t, h, 300*time.Millisecond)
+	if h.s.currentQuestion() == nil {
+		t.Fatal("gone")
+	}
+}
+
+// Review of #347: a pane made smaller after the menu showed whole scrolls its question off the
+// top, but its options and marker stay: it still waits.
+func TestAMenuInASmallerPaneStillWaits(t *testing.T) {
+	defer func(w time.Duration) { offScreenWait = w }(offScreenWait)
+	offScreenWait = 50 * time.Millisecond
+	h := agentHarness(t, "claude", `stty raw -echo; cat >/dev/null`)
+	h.s.Hook("PreToolUse", pushMenu)
+	askedQuestion(t, h)
+	h.s.runner.OnOutput([]byte("Push main?\r\n❯ 1. Push\r\n  2. Don't push\r\nEnter to select\r\n"))
+	h.s.runner.OnOutput([]byte("\x1b[2J\x1b[H❯ 1. Push\r\n  2. Don't push\r\nEnter to select\r\n")) // its top scrolled off
+	h.s.Hook("PostToolUse", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "ls"}, "agent_id": "sub1"})
+	noQuestionGone(t, h, 300*time.Millisecond)
+	if h.s.currentQuestion() == nil {
+		t.Fatal("gone")
+	}
+}
+
 // #347: a new question takes the place of one that left the screen unseen by any hook.
 func TestANewQuestionReplacesOneOffTheScreen(t *testing.T) {
+	defer func(w time.Duration) { offScreenWait = w }(offScreenWait)
+	offScreenWait = 50 * time.Millisecond
 	h := agentHarness(t, "claude", `stty raw -echo; cat >/dev/null`)
 	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "npm test"}})
 	q := askedQuestion(t, h)
@@ -1056,6 +1097,7 @@ func TestANewQuestionReplacesOneOffTheScreen(t *testing.T) {
 	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "npm run build"}})
 	noQuestionGone(t, h, 100*time.Millisecond) // the first is still on screen: the second waits its turn
 	h.s.runner.OnOutput([]byte("\x1b[2J\x1b[H⏺ Working…\r\n"))
+	time.Sleep(100 * time.Millisecond) // off the screen for a while, not a redraw's moment
 	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "npm run lint"}})
 	waitEvent(t, h.d.events, "question gone", func(m wire.Msg) bool { return m.Event == "question-gone" && m.ID == q.ID })
 	if next := askedQuestion(t, h); next.ID == q.ID || !strings.Contains(next.Input, "npm run lint") {
