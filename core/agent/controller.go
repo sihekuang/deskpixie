@@ -2187,6 +2187,9 @@ func (c *AgentController) answer(jobID JobID, text string, now Millis, fx *[]Eff
 	case jobID != "" && c.jobs.IsOpen(jobID) && waiting(jobID):
 		id = jobID
 	// Any other id is ignored: voice models copy example ids or make them up (Oct 18).
+	case c.asked.menu != "" && c.confirms.IsPendingToken(c.asked.menu):
+		c.answerMenu(c.asked.menu, text, now, fx)
+		return
 	case c.asked.session != "":
 		*fx = append(*fx, Effect{Kind: EfTellSession, Name: c.asked.session, Text: strings.TrimSpace(text)},
 			Effect{Kind: EfAnswerResult, Name: c.asked.session})
@@ -2447,13 +2450,15 @@ func short(task string) string {
 }
 
 // asker is who asked the question Pixie relayed last (#161): a job, or a session whose turn
-// ended on a question. Two asked at once (several questions in one Stop) are no one: which to
+// ended on a question, or a session's menu. Two asked at once (several questions in one Stop) are no one: which to
 // answer is the user's to say.
 type asker struct {
 	job     JobID
 	session string
-	at      Millis
-	tie     bool
+	// menu: the confirm word of a session's menu (#330), answered by what's said back.
+	menu string
+	at   Millis
+	tie  bool
 }
 
 func (c *AgentController) askedBy(a asker) {

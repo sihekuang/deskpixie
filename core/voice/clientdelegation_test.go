@@ -368,6 +368,8 @@ func TestClientDelegationAnswersASessionsQuestion(t *testing.T) {
 		"Session update: deskpixie: hand-off is asking: should I rebuild it and open the PR?":     true,
 		"Coordinator replies while you were away:\n- Session update: api is asking: ship it?":     true,
 		"Session update: deskpixie is asking: Which file? Pick 1 or 2 in the bubble.":             false,
+		"Session update: deskpixie is asking: Which file? Choose 1 or 2.":                         true, // #330
+		"Coordinator question: deskpixie is asking: Which file? Choose 1 or 2.":                   true,
 		"Session update: deskpixie: hand-off is done: the suite passed.":                          false,
 		"Session update: deskpixie: Run make release. Say confirm hawk, or choose in the bubble.": false,
 	} {

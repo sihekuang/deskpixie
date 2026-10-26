@@ -3,8 +3,10 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // Prompts your pix sessions wait on (#105): shown in Pixie too, with a confirm word (or Allow
@@ -42,7 +44,7 @@ func (c *AgentController) onSessionQuestion(session string, q SessionQuestion, n
 	describe := func(token string) (string, string) {
 		switch {
 		case q.Kind == "menu" && len(q.Options) > 0:
-			return fmt.Sprintf("%s is asking: %s Pick %s in the bubble.", label, mask(q.Text), orList(q.Options)),
+			return fmt.Sprintf("%s is asking: %s Choose %s.", label, mask(q.Text), orList(q.Options)),
 				upperFirst(mask(q.Text))
 		case q.Kind == "menu":
 			return fmt.Sprintf("%s is asking: %s Answer it in its terminal.", label, mask(q.Text)),
@@ -103,6 +105,9 @@ func (c *AgentController) onSessionQuestion(session string, q SessionQuestion, n
 	if q.Kind == "permission" && len(q.Options) > 0 {
 		line.Note = mask(q.Body)
 	}
+	if pending.Menu {
+		c.askedBy(asker{menu: token, at: now})
+	}
 	before := c.outbox.Len()
 	c.deliverOpening(line, now, fx)
 	// Said in a conversation, it never reached the outbox: keep it there as heard, so the bubble
@@ -147,6 +152,103 @@ func (c *AgentController) onChatAbout(token string, now Millis, fx *[]Effect) {
 	p, _ := c.confirms.take(token)
 	c.noteTap(token, now)
 	c.answerSession(p, "chat", now, fx)
+}
+
+// answerMenu: what you said back to the session menu with token, asked last (#330): the
+// option it names (MenuChoice), else your words typed in when the menu takes them. An option or
+// words that push, merge, publish or deploy are still picked in the bubble, as is any answer
+// to a menu that takes no words and names none of its options; the menu then still waits.
+func (c *AgentController) answerMenu(token, text string, now Millis, fx *[]Effect) {
+	at := slices.IndexFunc(c.confirms.Pending(), func(p Pending) bool { return p.Token == token })
+	p := c.confirms.Pending()[at]
+	text = strings.TrimSpace(text)
+	answer, said := "", text
+	if n, ok := MenuChoice(p.Options, text); ok {
+		answer, said = strconv.Itoa(n), p.Options[n-1]
+	} else if p.Typed && text != "" {
+		answer = "text:" + text
+	}
+	switch actions := GatedActions(said); {
+	case answer == "":
+		*fx = append(*fx, Effect{Kind: EfAnswerResult,
+			Err: fmt.Sprintf("That isn't one of its options: say %s, or pick it in the bubble.", orList(p.Options))})
+		return
+	case len(actions) > 0:
+		*fx = append(*fx, Effect{Kind: EfAnswerResult,
+			Err: fmt.Sprintf("That one asks it to %s: pick it in the bubble.", spokenList(actions))})
+		return
+	}
+	c.confirms.take(token)
+	c.asked = asker{}
+	c.answerSession(p, answer, now, fx)
+	*fx = append(*fx, Effect{Kind: EfAnswerResult, Name: p.Session})
+}
+
+// menuFillers lead or end an answer without naming anything: "let's go with Postgres, please".
+var menuFillers = map[string]bool{"yes": true, "yeah": true, "ok": true, "okay": true, "um": true, "uh": true, "so": true,
+	"lets": true, "go": true, "with": true, "pick": true, "choose": true, "the": true, "option": true, "number": true,
+	"please": true, "thanks": true, "i": true, "want": true, "id": true, "like": true}
+
+var ordinals = map[string]int{"1": 1, "one": 1, "first": 1, "2": 2, "two": 2, "second": 2, "3": 3, "three": 3, "third": 3,
+	"4": 4, "four": 4, "fourth": 4, "5": 5, "five": 5, "fifth": 5}
+
+// menuNegators make an answer say what not to pick: "not Postgres".
+var menuNegators = map[string]bool{"not": true, "no": true, "dont": true, "never": true, "without": true, "nor": true,
+	"isnt": true, "doesnt": true, "wont": true, "cant": true, "shouldnt": true, "wouldnt": true, "didnt": true}
+
+// menuWords: text folded for matching: lower case, no apostrophes, only letters and digits.
+func menuWords(text string) []string {
+	text = strings.NewReplacer("'", "", "’", "").Replace(strings.ToLower(text))
+	return strings.FieldsFunc(text, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsNumber(r) })
+}
+
+// MenuChoice is the option (from 1) an answer picks: one said as it reads ("SQLite"), by its
+// place ("the second one", "option 3", "the last one"), or the only one named in it, with no
+// "not" besides ("let's go with Postgres"). false when it names none, several or one it rules out.
+func MenuChoice(options []string, answer string) (int, bool) {
+	words := menuWords(answer)
+	for _, w := range words {
+		if !menuFillers[w] {
+			break
+		}
+		words = words[1:]
+	}
+	for len(words) > 1 && (menuFillers[words[len(words)-1]] || words[len(words)-1] == "one") {
+		words = words[:len(words)-1]
+	}
+	said := strings.Join(words, " ")
+	for k, o := range options {
+		if strings.Join(menuWords(o), " ") == said {
+			return k + 1, true
+		}
+	}
+	if len(words) == 1 {
+		if n := ordinals[words[0]]; n >= 1 && n <= len(options) {
+			return n, true
+		}
+		if words[0] == "last" && len(options) > 0 {
+			return len(options), true
+		}
+	}
+	found := 0
+	for k, o := range options {
+		if ow := strings.Join(menuWords(o), " "); ow != "" && strings.Contains(" "+said+" ", " "+ow+" ") {
+			if found != 0 {
+				return 0, false
+			}
+			found = k + 1
+		}
+	}
+	if found == 0 {
+		return 0, false
+	}
+	own := menuWords(options[found-1])
+	for _, w := range words {
+		if menuNegators[w] && !slices.Contains(own, w) {
+			return 0, false
+		}
+	}
+	return found, true
 }
 
 // RecentTapMs: a tap this soon after one settled its token is the same click, doubled.
