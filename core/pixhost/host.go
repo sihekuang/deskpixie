@@ -60,7 +60,6 @@ type Host struct {
 	l        net.Listener
 	sessions map[string]*session // by address
 	build    string              // the build of the pix this app ships (SetBuild)
-	wait     time.Duration       // how long a question waits in its hook for Pixie (SetQuestionWait)
 	subs     []chan agent.PaneEvent
 	changes  chan struct{}
 	seq      atomic.Uint64
@@ -109,14 +108,6 @@ func (h *Host) Listen() error {
 		}
 	}()
 	return nil
-}
-
-// SetQuestionWait sets how long a session's question waits in its hook for Pixie's answer
-// (agent.questionWaitSecs, #268); each pix learns it when it registers. 0 holds none.
-func (h *Host) SetQuestionWait(d time.Duration) {
-	h.mu.Lock()
-	h.wait = d
-	h.mu.Unlock()
 }
 
 // SetBuild sets the build of the pix this app ships (wire.BuildOf; #189): a pix of another
@@ -173,13 +164,12 @@ func (h *Host) serve(c net.Conn) {
 	tell := outdated && !s.toldOld
 	s.toldOld = s.toldOld || outdated
 	old := agent.SessionOutdated{Label: s.label(), Tool: s.hello.Tool, App: s.hello.App}
-	wait := h.wait
 	h.mu.Unlock()
 	if tell {
 		h.broadcast(agent.PaneEvent{Kind: agent.PaneEventOutdated, Agent: s.addr, Outdated: &old})
 	}
 	s.wmu.Lock()
-	err = wire.Encode(c, wire.Msg{Kind: wire.KindRegistered, Address: s.addr, Outdated: outdated, DurationMs: wait.Milliseconds()})
+	err = wire.Encode(c, wire.Msg{Kind: wire.KindRegistered, Address: s.addr, Outdated: outdated})
 	s.wmu.Unlock()
 	if err == nil {
 		for {

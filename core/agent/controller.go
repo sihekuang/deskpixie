@@ -426,8 +426,8 @@ type Effect struct {
 	Tab      TabLabel
 	Agent    string
 	Manual   bool
-	// Answer (EfAnswerSession): "yes", "no", a menu option's number, or (a menu held in its
-	// hook, #268) "text:" and the typed answer, or "chat".
+	// Answer (EfAnswerSession): "yes", "no", a menu option's number, or (a menu that takes
+	// them, #268) "text:" and the typed answer, or "chat".
 	Answer string
 	// Update (EfNotify): the bubble line the notification is about, nil when none (#199): a
 	// click on the notification does what a click on the line does.

@@ -12,14 +12,11 @@ import (
 // #347 end to end (the real pix, fakeclaude standing in for Claude Code): a question a session
 // waits on stays in Pixie's bubble and in the chat window's requests until it is answered, by
 // a tap or in the session's own terminal, whatever happens meanwhile: a background subagent's
-// tool (#344) or another of its own, its hook's wait running out, a redraw, the bubble seen.
-
-// heldFor is how long the session's hook holds a question for Pixie (agent.questionWaitSecs):
-// short, so the test sees it run out.
-const heldFor = time.Second
+// tool (#344) or another of its own, a redraw, the bubble seen. Its hook only tells pix: the
+// terminal shows it at once, and Pixie answers it there by keys (#359).
 
 func questionRig(t *testing.T) (*pixSession, *AgentHandle) {
-	p := startPixSessionHolding(t, heldFor)
+	p := startPixSession(t)
 	h, _ := pixRuntime(t, p, config(false), nil)
 	return p, h
 }
@@ -64,33 +61,22 @@ func (p *pixSession) gone(h *AgentHandle, want string) {
 }
 
 // The maintainer's case: a menu goes up while a background subagent works. It waits through
-// the subagent's tools, its hook letting go (the terminal shows it), a redraw and the bubble
-// being seen, and a tap on an option answers it in the session.
+// the subagent's tools, a redraw and the bubble being seen, and a tap on an option answers it
+// in the session.
 func TestASessionsMenuStaysUntilYouTapAnOption(t *testing.T) {
 	p, h := questionRig(t)
 	p.step("work")
 	p.step("ask")
 	item := p.asked(h)
-	if strings.Join(item.Options, "|") != "Push|Don't push" {
+	if strings.Join(item.Options, "|") != "Push|Don't push" || !item.Typed ||
+		!agentapp.RequestEntries(h.Updates(), RosterView{})[0].Request.Typed {
 		t.Fatalf("%+v", item)
 	}
-	p.step("subtool")
-	p.stillAsked(h, item, "a subagent's tool, while held")
-	p.step("tool") // a tool of its own it ran beside the menu, ending after it went up
-	p.stillAsked(h, item, "its own other tool, while held")
-	time.Sleep(heldFor + 500*time.Millisecond) // its hook lets go: Claude shows the menu
 	p.waitFor("blocked on the menu", func() bool { return p.status() == PaneBlocked })
-	p.stillAsked(h, item, "the hold ran out")
-	// Its keys answer it now: a pick, but no typed answer or chat, which only the hook took.
-	if !item.Typed {
-		t.Fatalf("held, it took a typed answer: %+v", item)
-	}
-	p.waitFor("no typed answer offered", func() bool {
-		items := h.Updates()
-		return len(items) == 1 && !items[0].Typed && !agentapp.RequestEntries(items, RosterView{})[0].Request.Typed
-	})
-	h.TypedAnswer(item.Token, "push it later") // from a card shown before: it stays
-	p.stillAsked(h, item, "a typed answer it can't take")
+	p.step("subtool")
+	p.stillAsked(h, item, "a subagent's tool")
+	p.step("tool") // a tool of its own it ran beside the menu, ending after it went up
+	p.stillAsked(h, item, "its own other tool")
 	p.step("subtool")
 	p.stillAsked(h, item, "a subagent's tool, at the menu")
 	if st := p.status(); st != PaneBlocked {
@@ -122,28 +108,38 @@ func TestASessionsMenuAnsweredInItsTerminalLeavesPixie(t *testing.T) {
 	p.step("work")
 	p.step("ask")
 	item := p.asked(h)
-	time.Sleep(heldFor + 500*time.Millisecond)
 	p.waitFor("blocked on the menu", func() bool { return p.status() == PaneBlocked })
-	p.stillAsked(h, item, "the hold ran out")
+	p.stillAsked(h, item, "the menu shown")
 	p.typeKeys("1")
 	p.gone(h, "menu key 1")
 }
 
-// Answered in Pixie while still held: the hook takes the answer, nothing is typed.
-func TestASessionsMenuAnsweredWhileHeld(t *testing.T) {
+// #359: your own words typed in the bubble go in the menu's "Type something.", and Enter sends
+// them, as you would in the terminal.
+func TestASessionsMenuTakesYourOwnWords(t *testing.T) {
 	p, h := questionRig(t)
 	p.step("work")
 	p.step("ask")
 	item := p.asked(h)
 	p.step("subtool")
 	p.stillAsked(h, item, "a subagent's tool")
-	h.Choose(item.Token, 1)
-	p.gone(h, "menu Push")
+	h.TypedAnswer(item.Token, "push it later")
+	p.gone(h, "menu own push it later")
+	p.waitFor("working again", func() bool { return p.status() == PaneWorking })
 }
 
-// The foreground case of #344: a subagent's own permission dialog waits through its hook
-// letting go and a redraw; Allow types its Yes, and the subagent's tool ending clears it and
-// the blocked status.
+// #359: "Chat about this" in the bubble picks the menu's own.
+func TestASessionsMenuChatAboutThis(t *testing.T) {
+	p, h := questionRig(t)
+	p.step("work")
+	p.step("ask")
+	item := p.asked(h)
+	h.ChatAbout(item.Token)
+	p.gone(h, "menu chat")
+}
+
+// The foreground case of #344: a subagent's own permission dialog waits through a redraw; Allow
+// types its Yes, and the subagent's tool ending clears it and the blocked status.
 func TestASubagentsPermissionStaysUntilYouAllowIt(t *testing.T) {
 	p, h := questionRig(t)
 	p.step("work")
@@ -152,9 +148,8 @@ func TestASubagentsPermissionStaysUntilYouAllowIt(t *testing.T) {
 	if len(item.Options) != 3 || item.Options[0] != "Yes" { // its dialog, as shown
 		t.Fatalf("%+v", item)
 	}
-	time.Sleep(heldFor + 500*time.Millisecond)
 	p.waitFor("blocked on the dialog", func() bool { return p.status() == PaneBlocked })
-	p.stillAsked(h, item, "the hold ran out")
+	p.stillAsked(h, item, "the dialog shown")
 	p.step("redraw")
 	p.stillAsked(h, item, "a redraw")
 	time.Sleep(1500 * time.Millisecond)

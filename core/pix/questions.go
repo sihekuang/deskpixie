@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/sihekuang/deskpixie/core/pix/wire"
@@ -125,14 +124,6 @@ type question struct {
 	read    func([]string) (dialog, bool)
 	held    *wire.Msg
 	optKeys []string
-	// hold: its hook waits for Pixie's answer, sent as the hook's reply (#268). labels: the
-	// options Pixie shows; input: the menu's tool input; suggestions: a permission's rules.
-	hold        *hold
-	labels      []string
-	input       map[string]any
-	suggestions any
-	// replyMenu: a held menu's hook reply for an answer, as its agent takes it.
-	replyMenu func(input map[string]any, a menuAnswer) (string, bool)
 	// agent: the subagent whose hook asked it ("": the session's own, #344); tool: the tool it
 	// asks about; use: a permission's tool call (its name and input), as its PostToolUse names
 	// it again.
@@ -160,61 +151,71 @@ func (q *question) endsWith(p map[string]any) bool {
 	return q.kind == "menu" && q.tool != "" && q.tool == name && q.agent == agentOf(p)
 }
 
-// menuAnswer is Pixie's answer to a held menu: an option's label, your own words (own), or
-// that you want to talk it over first (chat).
-type menuAnswer struct {
-	label     string
-	own, chat bool
-}
-
-// menuTool is an agent's question tool, as pix holds it (#268): its name in the hook's payload,
-// the marker its menu shows on screen, whether pix can answer that menu by keys when it isn't
-// held, and the hook reply that answers it. Another agent's is another entry.
+// menuTool is an agent's question tool (#268): its name in the hook's payload, the marker its
+// menu shows on screen, and the keys that answer its menu of n options as you would in its
+// terminal (#359): with your own words, or saying you want to talk it over first (chat; nil:
+// it can't be). An option is its digit, which picks it in either agent's menu. Another
+// agent's is another entry.
 type menuTool struct {
 	name   string
 	marker string
-	keys   bool
-	reply  func(input map[string]any, a menuAnswer) (string, bool)
+	own    func(n int, text string) []step
+	chat   func(n int) []step
 }
 
 var menuTools = map[string]menuTool{
-	"claude": {name: "AskUserQuestion", marker: claudeMenu, keys: true, reply: claudeMenuReply},
-	"codex":  {name: "request_user_input", marker: codexMenu, reply: codexMenuReply},
+	"claude": {name: "AskUserQuestion", marker: claudeMenu, own: claudeOwn, chat: claudeChat},
+	"codex":  {name: "request_user_input", marker: codexMenu, own: codexOwn, chat: codexChat},
 }
 
-// hold is a question held in its hook (#268): the hook returns its reply, "" to let it go.
-type hold struct {
-	once  sync.Once
-	reply chan string
+// step is keys typed into a question, and what the screen (without spaces) shows once the
+// agent took them ("": nothing to wait for), before the next step is typed.
+type step struct {
+	keys  []byte
+	shows string
 }
 
-func newHold() *hold { return &hold{reply: make(chan string, 1)} }
-
-// give hands the hook its reply; false when it already had one.
-func (h *hold) give(r string) (given bool) {
-	h.once.Do(func() { h.reply <- r; given = true })
-	return given
+// claudeOwn: Claude Code 2.1.310 numbers "Type something." after a menu's options: its digit
+// moves there and opens it for your words, drawn in its place, which Enter sends.
+func claudeOwn(n int, text string) []step {
+	digit := strconv.Itoa(n + 1)
+	return []step{{[]byte(digit), noSpace("❯ " + digit + ". Type something.")},
+		{[]byte(text), noSpace("❯ "+digit+". ") + drawn(text)}, {[]byte("\r"), ""}}
 }
 
-// MaxHold is the longest a question waits in its hook for Pixie (#268); DeskPixie's setting
-// stays within it, and the hooks that hold are given longer.
-const MaxHold = 5 * time.Minute
-
-// holds: the hooks whose question may wait for Pixie's answer.
-func holds(event string) bool { return event == "PreToolUse" || event == "PermissionRequest" }
-
-// setHold: how long a question waits in its hook for Pixie's answer, never past MaxHold (the
-// hook's own deadlines are set from it).
-func (s *Session) setHold(d time.Duration) {
-	s.mu.Lock()
-	s.hold = min(max(d, 0), MaxHold)
-	s.mu.Unlock()
+// claudeChat: "Chat about this" comes after "Type something."; its digit picks it. A digit
+// goes to 9 only.
+func claudeChat(n int) []step {
+	if n+2 > 9 {
+		return nil
+	}
+	return []step{{[]byte(strconv.Itoa(n + 2)), ""}}
 }
 
-func (s *Session) holdFor() time.Duration {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.hold
+// codexOwn: Codex 0.164 adds "None of the above" after a menu's options, its digit picking it
+// as it is: Down moves there from the first option, Tab opens its notes for your words, and
+// Enter sends both.
+func codexOwn(n int, text string) []step {
+	other := strconv.Itoa(n + 1)
+	return []step{{[]byte(strings.Repeat("\x1b[B", n)), noSpace("› " + other + ". None of the above")},
+		{[]byte("\t"), noSpace("› Add notes")}, {[]byte(text), "›" + drawn(text)}, {[]byte("\r"), ""}}
+}
+
+// drawn is how the screen (without spaces) shows the start of text: the runes it draws (none
+// of width 0, such as combining marks and joiners), as far as a line surely holds them.
+func drawn(text string) string {
+	shown := strings.Map(func(r rune) rune {
+		if runeWidth(r) == 0 {
+			return -1
+		}
+		return r
+	}, text)
+	return noSpace(firstRunes(shown, 24))
+}
+
+// codexChat: Codex's menu has no way to talk it over, so its note says you want to.
+func codexChat(n int) []step {
+	return codexOwn(n, "I'd like to talk this over before answering. Ask me what to clarify; don't ask the question again until I have.")
 }
 
 // dialogWait: how long a Claude permission waits for its dialog before it is asked without it.
@@ -300,63 +301,6 @@ func (s *Session) retell(id string) {
 	s.client.Send(ev)
 }
 
-// await is the reply of held question q's hook h: Pixie's answer, or "" once wait passed (the
-// terminal shows it) or it was answered or withdrawn elsewhere.
-func (s *Session) await(q *question, h *hold, wait time.Duration) string {
-	t := time.NewTimer(wait)
-	defer t.Stop()
-	select {
-	case r := <-h.reply:
-		return r
-	case <-t.C:
-		s.unhold(q)
-		return <-h.reply // "", or an answer given just before
-	}
-}
-
-// unhold lets held question q's hook go once its wait passed: the terminal shows it now, and
-// it still waits on you (#347). Pixie keeps it until it is answered or gone from the session:
-// with its buttons where its keys answer it (as without a hold), else as asked in the terminal.
-func (s *Session) unhold(q *question) {
-	s.mu.Lock()
-	h := q.hold
-	mine := s.q == q
-	keys := q.kind == "permission" || menuTools[s.o.tool].keys
-	changed := false
-	if mine {
-		q.hold = nil
-		if t := q.told; t != nil { // what answers it now: keys only, so no typed answer or chat
-			changed = t.Typed || !keys
-			t.Typed = false
-			if !keys { // asked again without its buttons: answered in its terminal
-				q.options, q.labels = 0, nil
-				t.Keys, t.Details = nil, nil
-			}
-		}
-	}
-	s.mu.Unlock()
-	h.give("")
-	if mine {
-		s.o.log.Printf("question %s: in the terminal now, still waiting", q.id)
-	}
-	if changed {
-		s.retell(q.id)
-	}
-}
-
-// letHeldGo lets a held question's hook go at once: DeskPixie is gone, so nobody answers it there.
-func (s *Session) letHeldGo() {
-	s.mu.Lock()
-	q := s.q
-	if q == nil || q.hold == nil {
-		s.mu.Unlock()
-		return
-	}
-	s.q = nil
-	s.mu.Unlock()
-	q.hold.give("")
-}
-
 // sendHeld asks q's held event, with its dialog d as shown when it was read (nil: not read):
 // Claude's summary, the box's text, the question and every option, a number answering each.
 func (s *Session) sendHeld(q *question, d *dialog) {
@@ -369,7 +313,7 @@ func (s *Session) sendHeld(q *question, d *dialog) {
 	q.held = nil
 	if d != nil {
 		ev.Text, ev.Body, ev.Prompt, ev.Keys = d.Summary, d.Body, d.Question, d.Options
-		q.options, q.optKeys, q.labels = len(d.Options), d.Keys, d.Options
+		q.options, q.optKeys = len(d.Options), d.Keys
 	}
 	told := ev
 	q.told = &told
@@ -396,19 +340,12 @@ func (s *Session) dropQuestion(want *question, why string) {
 		return
 	}
 	s.q = nil
-	var h *hold
-	if q != nil {
-		h = q.hold
-	}
 	told := q != nil && q.held == nil // a held one was never told
 	s.mu.Unlock()
 	if q == nil {
 		return
 	}
 	s.o.log.Printf("question %s gone: %s", q.id, why)
-	if h != nil {
-		h.give("") // answered in the terminal, or the session moved on: its hook lets go
-	}
 	if told {
 		s.client.Send(wire.Msg{Kind: wire.KindEvent, Event: "question-gone", ID: q.id})
 	}
@@ -427,23 +364,6 @@ func (s *Session) answer(id, choice string) wire.Msg {
 func (s *Session) answerOnce(id, choice string) wire.Msg {
 	s.mu.Lock()
 	q := s.q
-	if q != nil && q.id == id && q.hold != nil {
-		if r, ok := q.hookAnswer(choice); ok {
-			s.q = nil
-			h := q.hold
-			s.mu.Unlock()
-			if !h.give(r) {
-				return wire.Msg{Err: "The question is no longer waiting."}
-			}
-			s.client.Send(wire.Msg{Kind: wire.KindEvent, Event: "question-gone", ID: id})
-			return wire.Msg{}
-		}
-		if q.kind == "menu" {
-			s.mu.Unlock()
-			return wire.Msg{Err: "That isn't one of its answers."}
-		}
-		// A permission option its hook can't say: typed into its dialog, which shows meanwhile.
-	}
 	switch {
 	case q == nil || q.id != id:
 		s.mu.Unlock()
@@ -456,29 +376,50 @@ func (s *Session) answerOnce(id, choice string) wire.Msg {
 		s.mu.Unlock()
 		return wire.Msg{Err: "The question isn't on screen."}
 	}
-	keys, ok := q.keys(s.o.tool, choice)
+	steps, ok := q.steps(s.o.tool, choice)
 	if !ok {
 		s.mu.Unlock()
 		return wire.Msg{Err: "That isn't one of its answers."}
 	}
 	s.q = nil
-	if q.hold != nil {
-		q.hold.give("") // the keys answer it
-		q.hold = nil    // and its hook has its reply: tried again, keys answer it again
-	}
 	if s.landing != nil {
 		// An answer still checked whose prompt this one followed on screen: it left, so it landed.
 		close(s.landing.done)
 	}
 	l := &landing{marker: q.marker, detail: q.detail, done: make(chan struct{})}
 	s.landing = l
+	keys := s.yourKeys
 	s.mu.Unlock()
-	if string(keys) == "\x1b" {
-		s.stopKey() // Claude's No shows its interrupt and fires no Stop (#322)
-	}
-	if err := s.runner.WriteToAgent(keys); err != nil {
+	// still: the agent didn't take it, and it still waits (its card comes back, #347). After
+	// some of its steps the menu isn't as it was, so it is finished in the terminal.
+	still := func(typed int) wire.Msg {
 		s.dropLanding(l)
-		return wire.Msg{Err: err.Error()}
+		if len(steps) > 1 && typed > 0 {
+			return s.leftHalfway(q, keys)
+		}
+		s.mu.Lock()
+		if s.q == nil {
+			s.q = q
+		}
+		s.mu.Unlock()
+		return wire.Msg{Err: "The session didn't take the answer."}
+	}
+	for i, st := range steps {
+		// Each step after the first goes into the menu as the last one left it: still on the
+		// screen, and with no key of yours since (you'd be answering it yourself).
+		if i > 0 && !s.untouched(q, keys) {
+			return still(i)
+		}
+		if string(st.keys) == "\x1b" {
+			s.stopKey() // Claude's No shows its interrupt and fires no Stop (#322)
+		}
+		if err := s.runner.WriteToAgent(st.keys); err != nil {
+			s.dropLanding(l)
+			return wire.Msg{Err: err.Error()}
+		}
+		if st.shows != "" && !s.screenShows(st.shows, stepWait) {
+			return still(i + 1)
+		}
 	}
 	// It counts once the prompt left the screen: keys the agent didn't take leave it there (#268).
 	t := time.NewTimer(answerWait)
@@ -486,105 +427,57 @@ func (s *Session) answerOnce(id, choice string) wire.Msg {
 	select {
 	case <-l.done:
 	case <-t.C:
-		s.dropLanding(l)
-		s.mu.Lock()
-		if s.q == nil { // still on screen: it still waits
-			s.q = q
-		}
-		s.mu.Unlock()
-		return wire.Msg{Err: "The session didn't take the answer."}
+		return still(len(steps))
 	}
 	s.client.Send(wire.Msg{Kind: wire.KindEvent, Event: "question-gone", ID: id})
 	return wire.Msg{}
 }
 
-// hookAnswer is the reply of held question q's hook that answers it with choice: a menu's
-// option, a typed answer ("text:…") or "chat" goes back in its tool input's answers; a
-// permission's Yes, No, and "don't ask again" (with the rules Claude suggested) are its
-// decision. False for anything else.
-func (q *question) hookAnswer(choice string) (string, bool) {
-	label := choice
-	if n, err := strconv.Atoi(choice); err == nil {
-		if n < 1 || n > len(q.labels) {
-			return "", false
+// untouched: question q is on the screen and you pressed no key since keys were counted.
+func (s *Session) untouched(q *question, keys int) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.yourKeys == keys && shows(s.screen, q.marker, q.detail)
+}
+
+// leftHalfway: an answer typed in steps stopped part-way, so q's menu is no longer as Pixie
+// asked it (its field open, its pick moved). A key of yours meanwhile: you are answering it.
+// Else it still waits, asked again without its buttons: you finish it in its terminal.
+func (s *Session) leftHalfway(q *question, keys int) wire.Msg {
+	s.mu.Lock()
+	yours := s.yourKeys != keys
+	if !yours && s.q == nil {
+		s.q = q
+		q.options, q.optKeys = 0, nil
+		if t := q.told; t != nil {
+			t.Keys, t.Details, t.Typed = nil, nil, false
 		}
-		label = q.labels[n-1]
 	}
-	if q.kind == "menu" {
-		if typed, ok := strings.CutPrefix(choice, "text:"); ok && strings.TrimSpace(typed) != "" {
-			return q.replyMenu(q.input, menuAnswer{label: strings.TrimSpace(typed), own: true})
+	s.mu.Unlock()
+	if yours {
+		s.o.log.Printf("question %s gone: a key of yours, while Pixie answered", q.id)
+		s.client.Send(wire.Msg{Kind: wire.KindEvent, Event: "question-gone", ID: q.id})
+		return wire.Msg{Err: "You're answering it in its terminal."}
+	}
+	return wire.Msg{Err: "The session didn't take all of the answer: finish it in its terminal."}
+}
+
+// stepWait: how long one step of an answer has to show on the screen.
+var stepWait = time.Second
+
+// screenShows waits up to d for the screen (without spaces) to show text.
+func (s *Session) screenShows(text string, d time.Duration) bool {
+	for end := s.now().Add(d); ; time.Sleep(20 * time.Millisecond) {
+		s.mu.Lock()
+		shown := strings.Contains(s.screen, text)
+		s.mu.Unlock()
+		if shown {
+			return true
 		}
-		if choice == "chat" {
-			return q.replyMenu(q.input, menuAnswer{chat: true})
+		if s.now().After(end) {
+			return false
 		}
-		if _, err := strconv.Atoi(choice); err != nil {
-			return "", false
-		}
-		return q.replyMenu(q.input, menuAnswer{label: label})
 	}
-	switch {
-	case label == "yes" || label == "Yes":
-		return permissionReply(map[string]any{"behavior": "allow"})
-	case label == "no" || strings.HasPrefix(label, "No"):
-		return permissionReply(map[string]any{"behavior": "deny", "message": "The user said no in Pixie."})
-	case strings.Contains(label, "don't ask again") && q.suggestions != nil:
-		return permissionReply(map[string]any{"behavior": "allow", "updatedPermissions": q.suggestions})
-	}
-	return "", false
-}
-
-// claudeMenuReply answers AskUserQuestion in its input's answers; "Chat about this" as its
-// terminal's: an answer with a note, not a refusal (a deny reads as a hook error).
-func claudeMenuReply(input map[string]any, a menuAnswer) (string, bool) {
-	if a.chat {
-		return menuReply(input, "Chat about this", "The user wants to talk this over before answering. Ask them what to clarify.")
-	}
-	return menuReply(input, a.label, "")
-}
-
-// codexMenuReply answers request_user_input: Codex's hook can't change the tool's input, so the
-// answer is its refusal's reason, which Codex reads as the tool's result.
-func codexMenuReply(input map[string]any, a menuAnswer) (string, bool) {
-	text, _, _ := menuOf(input)
-	var reason string
-	switch {
-	case a.chat:
-		reason = fmt.Sprintf("The user wants to talk this over before answering %q. Ask them what to clarify; don't ask the question again until they have.", text)
-	case a.own:
-		reason = fmt.Sprintf("The user answered in Pixie: %q -> %q (their own answer, not one of the options). Continue with that answer; don't ask it again.", text, a.label)
-	default:
-		reason = fmt.Sprintf("The user answered in Pixie: %q -> %q. Continue with that answer; don't ask it again.", text, a.label)
-	}
-	return hookOutput(map[string]any{"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason})
-}
-
-// menuReply answers AskUserQuestion's one question with label (and notes, if any): its input as
-// it came, plus answers.
-func menuReply(input map[string]any, label, notes string) (string, bool) {
-	qs, _ := input["questions"].([]any)
-	if len(qs) == 0 {
-		return "", false
-	}
-	first, _ := qs[0].(map[string]any)
-	text, _ := first["question"].(string)
-	in := map[string]any{}
-	for k, v := range input {
-		in[k] = v
-	}
-	in["answers"] = map[string]any{text: label}
-	if notes != "" {
-		in["annotations"] = map[string]any{text: map[string]any{"notes": notes}}
-	}
-	return hookOutput(map[string]any{"hookEventName": "PreToolUse", "permissionDecision": "allow", "updatedInput": in})
-}
-
-func permissionReply(decision map[string]any) (string, bool) {
-	return hookOutput(map[string]any{"hookEventName": "PermissionRequest", "decision": decision})
-}
-
-func hookOutput(specific map[string]any) (string, bool) {
-	b, err := json.Marshal(map[string]any{"hookSpecificOutput": specific})
-	return string(b), err == nil
 }
 
 // answerWait: how long an answer typed from Pixie has to take its prompt off the screen.
@@ -649,6 +542,25 @@ func (q *question) keys(tool, choice string) ([]byte, bool) {
 		}
 	}
 	return nil, false
+}
+
+// steps are what answers q with choice as you would in its terminal (#359): its keys, or a
+// menu's answer in your own words ("text:…", on one line) or "chat", as its agent's menu takes
+// them.
+func (q *question) steps(tool, choice string) ([]step, bool) {
+	if q.kind == "menu" && q.options > 0 {
+		t := menuTools[tool]
+		if typed, ok := strings.CutPrefix(choice, "text:"); ok {
+			typed = strings.Join(strings.Fields(typed), " ")
+			return t.own(q.options, typed), typed != ""
+		}
+		if choice == "chat" {
+			chat := t.chat(q.options)
+			return chat, chat != nil
+		}
+	}
+	keys, ok := q.keys(tool, choice)
+	return []step{{keys: keys}}, ok
 }
 
 // questionWatch notes when the waiting prompt shows on screen: its marker and its detail, both

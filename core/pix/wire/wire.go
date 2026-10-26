@@ -56,8 +56,7 @@ type Msg struct {
 	ExitCode    int    `json:"exitCode,omitempty"`
 	ToolName    string `json:"toolName,omitempty"`
 	Input       string `json:"input,omitempty"`
-	// DurationMs: a turn's length (turn), or how long a question waits in its hook for Pixie's
-	// answer (registered, #268; 0 holds none).
+	// DurationMs: a turn's length (turn).
 	DurationMs int64 `json:"durationMs,omitempty"`
 	// Prompt and Body (question, #105): a dialog's own question and what its box shows.
 	Prompt  string `json:"prompt,omitempty"`

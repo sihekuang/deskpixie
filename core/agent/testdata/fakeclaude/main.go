@@ -9,10 +9,11 @@
 //	tool     one of its own tools finished: PostToolUse; what pix answered goes to $FAKE_DIR/context
 //	subtool  a tool of one of its subagents finished: PostToolUse with agent_id; pix's answer too
 //	stop     its turn ended: Stop (idle)
-//	ask      it asks you a menu (AskUserQuestion): its PreToolUse, which pix may hold; an
-//	         answer from the hook ends it, else Claude's menu shows and a digit typed answers it
-//	subperm  a subagent's Bash call needs your permission: its dialog shows, and its
-//	         PermissionRequest (with agent_id) runs; allowed by the hook, or a digit typed answers it
+//	ask      it asks you a menu (AskUserQuestion): its PreToolUse, then Claude's menu, which a
+//	         digit answers: an option, "Type something." (then your words and Enter), or "Chat
+//	         about this"
+//	subperm  a subagent's Bash call needs your permission: its PermissionRequest (with agent_id)
+//	         runs as its dialog shows, which a digit answers
 //	redraw   it draws its whole screen again, as after a resize
 //	split    it draws its menu again in two writes, the second 1.5 s after the first: a
 //	         redraw cut between reads, drawn out so pix looks at its first half
@@ -46,13 +47,16 @@ var (
 	working bool
 	shown   string // the menu or dialog on screen, waiting for a digit ("": none)
 	shownBy string // what it asks: "menu" or "subperm"
+	// own: the menu's "Type something." is open, with the words typed into it so far.
+	own *strings.Builder
 )
 
 // The menu ask asks, and the subagent's call subperm asks about.
 var (
 	menuInput = map[string]any{"questions": []any{map[string]any{"question": "Push main?", "header": "Push",
 		"multiSelect": false, "options": []any{map[string]any{"label": "Push"}, map[string]any{"label": "Don't push"}}}}}
-	menuScreen = "\x1b[2J\x1b[H☐ Push\r\n\r\nPush main?\r\n\r\n❯ 1. Push\r\n  2. Don't push\r\n  3. Type something.\r\n\r\nEnter to select · ↑/↓ to navigate · Esc to cancel\r\n"
+	menuScreen = "\x1b[2J\x1b[H☐ Push\r\n\r\nPush main?\r\n\r\n❯ 1. Push\r\n  2. Don't push\r\n  3. Type something.\r\n" +
+		"────────\r\n  4. Chat about this\r\n\r\nEnter to select · ↑/↓ to navigate · Esc to cancel\r\n"
 	lsInput    = map[string]any{"command": "ls -la", "description": "List files"}
 	permScreen = "\x1b[2J\x1b[H────────────────────────────────────────\r\n Bash command\r\n List files\r\n" +
 		"╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\r\n ls -la\r\n╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\r\n Do you want to proceed?\r\n" +
@@ -118,49 +122,29 @@ func main() {
 	}
 }
 
-// ask is AskUserQuestion: its PreToolUse first (pix may hold it, and answer it in its reply);
-// let go without an answer, Claude shows the menu and waits for a key.
+// ask is AskUserQuestion: its PreToolUse, then Claude's menu, which waits for a key.
 func ask() {
-	out := hook("PreToolUse", map[string]any{"tool_name": "AskUserQuestion", "tool_input": menuInput})
-	var r struct {
-		Specific struct {
-			UpdatedInput struct {
-				Answers map[string]string `json:"answers"`
-			} `json:"updatedInput"`
-		} `json:"hookSpecificOutput"`
-	}
-	if json.Unmarshal([]byte(out), &r) == nil && r.Specific.UpdatedInput.Answers["Push main?"] != "" {
-		answered("menu", r.Specific.UpdatedInput.Answers["Push main?"])
-		return
-	}
+	hook("PreToolUse", map[string]any{"tool_name": "AskUserQuestion", "tool_input": menuInput})
 	show("menu", menuScreen)
 	hook("Notification", map[string]any{"notification_type": "permission_prompt", "message": "Claude Code needs your attention"})
 }
 
-// subperm is a subagent's Bash call asking for permission. Its dialog shows once the hook
-// runs (pix may hold it); allowed in the hook's reply, it goes, else it waits for a key.
+// subperm is a subagent's Bash call asking for permission: its dialog shows while its hook
+// runs, and its Notification follows (Claude Code 2.1.310). A key answers it.
 func subperm() {
-	reply := make(chan string, 1)
-	go func() {
-		reply <- hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": lsInput,
-			"agent_id": "a0d84cff17c3490ba", "agent_type": "general-purpose"})
-	}()
+	go hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": lsInput,
+		"agent_id": "a0d84cff17c3490ba", "agent_type": "general-purpose"})
 	time.Sleep(200 * time.Millisecond) // the hook has started
 	show("subperm", permScreen)
-	out := <-reply
-	mu.Lock()
-	still := shownBy == "subperm"
-	if still && strings.Contains(out, `"allow"`) {
-		shown, shownBy = "", ""
+	hook("Notification", map[string]any{"notification_type": "permission_prompt", "message": "Claude needs your permission to use Bash"})
+}
+
+// ownScreen is the menu with "Type something." open, holding words.
+func ownScreen(words string) string {
+	if words == "" {
+		words = "Type something."
 	}
-	mu.Unlock()
-	switch {
-	case !still: // a key answered it meanwhile
-	case strings.Contains(out, `"allow"`):
-		answered("subperm", "allowed in its hook")
-	default:
-		hook("Notification", map[string]any{"notification_type": "permission_prompt", "message": "Claude needs your permission to use Bash"})
-	}
+	return strings.Replace(strings.Replace(menuScreen, "❯ 1.", "  1.", 1), "  3. Type something.", "❯ 3. "+words, 1)
 }
 
 // show draws a menu or dialog that waits for a key.
@@ -201,7 +185,37 @@ func keys() {
 		mu.Lock()
 		by := shownBy
 		mu.Unlock()
+		mu.Lock()
+		typing := own
+		mu.Unlock()
+		if typing != nil { // your words in "Type something.", until Enter sends them
+			words, enter := strings.CutSuffix(string(b), "\r")
+			typing.WriteString(words)
+			if enter {
+				mu.Lock()
+				shown, shownBy, own = "", "", nil
+				mu.Unlock()
+				go answered("menu", "own "+typing.String())
+			} else {
+				show("menu", ownScreen(typing.String()))
+			}
+			continue
+		}
 		if by != "" && len(b) == 1 && b[0] >= '1' && b[0] <= '9' { // a digit picks on the menu or dialog
+			switch {
+			case by == "menu" && b[0] == '3':
+				mu.Lock()
+				own = &strings.Builder{}
+				mu.Unlock()
+				show("menu", ownScreen(""))
+				continue
+			case by == "menu" && b[0] == '4':
+				mu.Lock()
+				shown, shownBy = "", ""
+				mu.Unlock()
+				go answered("menu", "chat")
+				continue
+			}
 			mu.Lock()
 			shown, shownBy = "", ""
 			mu.Unlock()

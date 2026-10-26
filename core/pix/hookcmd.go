@@ -18,11 +18,7 @@ func RunHook(event, sock, payload string, stdin io.Reader, stdout io.Writer) int
 		raw, _ := io.ReadAll(io.LimitReader(stdin, wire.MaxLine))
 		payload = string(raw)
 	}
-	wait := hookWait
-	if holds(event) {
-		wait += MaxHold // its question may wait for Pixie's answer (#268)
-	}
-	reply, err := askLocal(sock, wire.Msg{Kind: wire.KindEvent, Event: "hook", Status: event, Text: payload}, wait)
+	reply, err := askLocal(sock, wire.Msg{Kind: wire.KindEvent, Event: "hook", Status: event, Text: payload}, hookWait)
 	if err == nil && reply.Text != "" {
 		io.WriteString(stdout, reply.Text)
 	}
