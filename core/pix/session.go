@@ -413,8 +413,8 @@ func (s *Session) Hook(event string, p map[string]any) string {
 			if q.hold != nil {
 				ev.Details, ev.Typed = details, true
 			}
-			if s.ask(q, ev) && q.hold != nil {
-				return s.await(q, wait)
+			if h := q.hold; s.ask(q, ev) && h != nil { // read before ask shares q
+				return s.await(q, h, wait)
 			}
 		}
 		return ""
@@ -431,8 +431,8 @@ func (s *Session) Hook(event string, p map[string]any) string {
 			} else if wait > 0 { // held: its dialog shows meanwhile, so you can answer it there too
 				q.hold, q.suggestions = newHold(), p["permission_suggestions"]
 			}
-			if s.ask(q, ev) && q.hold != nil {
-				return s.await(q, wait)
+			if h := q.hold; s.ask(q, ev) && h != nil { // read before ask shares q
+				return s.await(q, h, wait)
 			}
 		}
 		return ""

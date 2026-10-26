@@ -115,6 +115,7 @@ type question struct {
 	marker  string // shown while it waits ("" when it was seen on screen to begin with)
 	detail  string // shown with it: this request's own text, so another dialog doesn't count
 	seen    bool   // its marker and detail showed since it was asked
+	shown   bool   // and both were on the screen at once (a tall dialog's top can scroll off)
 	// read reads its dialog off the screen; held: its event, not sent yet: it waits for its
 	// dialog to be read (or dialogWait), so DeskPixie gets the dialog as shown. optKeys: what
 	// answers each of the dialog's options (nil: its number).
@@ -251,10 +252,10 @@ func (s *Session) ask(q *question, ev wire.Msg) bool {
 	return true
 }
 
-// offScreen: q showed on screen and is no longer there, so it was answered or went (#347).
+// offScreen: q showed on screen, whole, and is no longer there, so it was answered or went (#347).
 // Under mu.
 func (s *Session) offScreen(q *question) bool {
-	return q.seen && q.marker != "" && !shows(s.screen, q.marker, q.detail)
+	return q.shown && q.marker != "" && !shows(s.screen, q.marker, q.detail)
 }
 
 // offScreenWait: how long after another tool ends pix looks again whether a question it
@@ -276,10 +277,9 @@ func (s *Session) retell(id string) {
 	s.client.Send(ev)
 }
 
-// await is the reply of held question q's hook: Pixie's answer, or "" once wait passed (the
+// await is the reply of held question q's hook h: Pixie's answer, or "" once wait passed (the
 // terminal shows it) or it was answered or withdrawn elsewhere.
-func (s *Session) await(q *question, wait time.Duration) string {
-	h := q.hold
+func (s *Session) await(q *question, h *hold, wait time.Duration) string {
 	t := time.NewTimer(wait)
 	defer t.Stop()
 	select {
@@ -407,8 +407,9 @@ func (s *Session) answerOnce(id, choice string) wire.Msg {
 	if q != nil && q.id == id && q.hold != nil {
 		if r, ok := q.hookAnswer(choice); ok {
 			s.q = nil
+			h := q.hold
 			s.mu.Unlock()
-			if !q.hold.give(r) {
+			if !h.give(r) {
 				return wire.Msg{Err: "The question is no longer waiting."}
 			}
 			s.client.Send(wire.Msg{Kind: wire.KindEvent, Event: "question-gone", ID: id})
@@ -440,6 +441,7 @@ func (s *Session) answerOnce(id, choice string) wire.Msg {
 	s.q = nil
 	if q.hold != nil {
 		q.hold.give("") // the keys answer it
+		q.hold = nil    // and its hook has its reply: tried again, keys answer it again
 	}
 	if s.landing != nil {
 		// An answer still checked whose prompt this one followed on screen: it left, so it landed.
@@ -585,6 +587,9 @@ func (s *Session) noteScreen(vt *screen) {
 	prompt := promptOf(s.o.tool, lines)
 	s.mu.Lock()
 	s.screen, s.prompt = text, prompt
+	if q := s.q; q != nil && q.seen && q.marker != "" && shows(text, q.marker, q.detail) {
+		q.shown = true
+	}
 	if l := s.landing; l != nil && !shows(text, l.marker, l.detail) {
 		s.landing = nil
 		close(l.done)
@@ -654,6 +659,7 @@ func (w *questionWatch) watch(s *Session, out string, vt *screen) {
 		s.mu.Lock()
 		if s.q == q {
 			q.seen = true
+			q.shown = shows(s.screen, q.marker, q.detail)
 		}
 		s.mu.Unlock()
 	}

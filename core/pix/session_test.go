@@ -892,6 +892,27 @@ func askBash(t *testing.T, h *harness, command string) wire.Msg {
 	return askedQuestion(t, h)
 }
 
+// Review of #347: a held permission answered by keys the agent didn't take still waits, and
+// a second answer is typed again, not lost on its hook that already had its reply.
+func TestAHeldPermissionTheAgentDidntTakeCanBeAnsweredAgain(t *testing.T) {
+	defer func(w time.Duration) { answerWait = w }(answerWait)
+	answerWait = 300 * time.Millisecond
+	h := screensHarness(t, bashDialog, "", 0) // takes the key, draws nothing
+	h.s.setHold(5 * time.Second)
+	reply := hookAsync(h, "PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "npm test"}})
+	pending(t, h)
+	q := askedQuestion(t, h)
+	if err := answer(t, h, q.ID, "2"); err != "The session didn't take the answer." { // no rules to say it: by keys
+		t.Fatalf("%q", err)
+	}
+	if out := hookReply(t, reply, time.Second); out != nil {
+		t.Fatalf("%v", out)
+	}
+	if err := answer(t, h, q.ID, "yes"); err != "The session didn't take the answer." {
+		t.Fatalf("typed again: %q", err)
+	}
+}
+
 // #268: an answer counts once its prompt left the screen; one the agent didn't take (the
 // prompt stays) is refused, so Pixie says so. The prompt still waits (#347): it can be tried
 // again.
@@ -1004,6 +1025,26 @@ func TestAQuestionOffTheScreenGoesWithTheNextTool(t *testing.T) {
 	h.s.runner.OnOutput([]byte("\x1b[2J\x1b[H⏺ Working…\r\n"))
 	h.s.Hook("PostToolUse", map[string]any{"tool_name": "Read", "tool_input": map[string]any{"file_path": "/y"}})
 	waitEvent(t, h.d.events, "question gone", func(m wire.Msg) bool { return m.Event == "question-gone" && m.ID == q.ID })
+}
+
+// Review of #347: a dialog taller than the pane (its command scrolled off the top) was seen go
+// by but never shown whole: it is not taken for gone, whatever tool ends meanwhile.
+func TestADialogNeverShownWholeIsNotOffTheScreen(t *testing.T) {
+	h := agentHarness(t, "claude", `stty raw -echo; cat >/dev/null`)
+	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "npm test"}})
+	askedQuestion(t, h)
+	h.s.mu.Lock()
+	q := h.s.q
+	q.seen = true // went by in the output, its top off the screen since
+	h.s.screen = noSpace("Do you want to proceed?❯ 1. Yes")
+	off := h.s.offScreen(q)
+	q.shown = true
+	h.s.screen = noSpace("⏺ Working…")
+	gone := h.s.offScreen(q)
+	h.s.mu.Unlock()
+	if off || !gone {
+		t.Fatalf("never shown whole: off %v; shown and gone: %v", off, gone)
+	}
 }
 
 // #347: a new question takes the place of one that left the screen unseen by any hook.
