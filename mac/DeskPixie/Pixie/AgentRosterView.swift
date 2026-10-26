@@ -42,11 +42,19 @@ struct AgentRosterView: View {
     let onChatWindow: () -> Void
 
     static let listWidth: CGFloat = 260
+    /// The space above the reply on show in the deck, when the deck is above Pixie (#334).
+    @State private var deckSlack: CGFloat = 0
 
     var body: some View {
         VStack(spacing: 4) {
             if model.open && !below { list }
-            if showsCard && !below { earlierBubble; card }
+            if showsCard && !below {
+                // Your words sit on the reply on show, not on the deck's tallest card (#334).
+                earlierBubble.offset(y: deckSlack)
+                card.onPreferenceChange(DeckSlack.self) { new in
+                    MainActor.assumeIsolated { deckSlack = new }
+                }
+            }
             if let offer, !below { offerBubble(offer) }
             HStack(spacing: 6) {
                 if model.visible {
@@ -93,7 +101,8 @@ struct AgentRosterView: View {
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
-            .frame(width: QuickChatCard.width, alignment: .leading)
+            // As wide as the reply card under it, not the deck its neighbours peek into (#334).
+            .frame(width: QuickChatCard.width - 2 * DeckPager<Int, EmptyView>.peek, alignment: .leading)
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.separator))
             .opacity(earlierPhase == .fading ? 0 : 1)
