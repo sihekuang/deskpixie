@@ -2,6 +2,7 @@ package pix
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -581,7 +582,8 @@ func (s *Session) runCommand(m wire.Msg) wire.Msg {
 		// and wraps even a routine coordinator instruction in a generic "another Claude
 		// session" notice. The caller labels its own text ("Coordinator says: ") before it
 		// reaches here; this package only ever sees the final text to type.
-		if err := s.queue.Push(text); err != nil {
+		seq, err := s.queue.Push(text)
+		if err != nil {
 			return wire.Msg{Err: err.Error()}
 		}
 		s.release() // a new message: what waited after a stop goes with it
@@ -589,23 +591,23 @@ func (s *Session) runCommand(m wire.Msg) wire.Msg {
 		// Typed at once, or waiting and why (#183, #306).
 		if s.flushNow() {
 			s.keylog("prompt typed")
-			return wire.Msg{Status: "typed"}
+			return wire.Msg{Status: "typed", Seq: s.queue.Delivered(s.hasUnsent())}
 		}
 		s.flushSoon()
 		s.keylog("prompt waiting: status=%s %s", s.currentStatus(), s.gate.State())
-		return wire.Msg{Status: "waiting", Reason: s.waitReason()}
+		return wire.Msg{Status: "waiting", Reason: s.waitReason(), Seq: seq} // its number (#339)
 	case "flush":
 		// "Send it anyway" (#187): type what waits even if the gate thinks you're typing. A
 		// working agent gets it with its next tool; a question on screen is never typed into.
 		if s.hasUnsent() { // a menu stopped one: it goes once that's answered (#306)
 			s.flushSoon()
-			return wire.Msg{Status: "waiting", Reason: s.waitReason()}
+			return wire.Msg{Status: "waiting", Reason: s.waitReason(), Seq: s.queue.Last()}
 		}
 		if st := s.currentStatus(); st != "idle" && s.queue.Len() > 0 {
-			return wire.Msg{Status: "waiting", Reason: st}
+			return wire.Msg{Status: "waiting", Reason: st, Seq: s.queue.Last()}
 		}
 		if m := s.menuHold(); m != "" && s.queue.Len() > 0 { // nor a menu only you should answer (#306)
-			return wire.Msg{Status: "waiting", Reason: m}
+			return wire.Msg{Status: "waiting", Reason: m, Seq: s.queue.Last()}
 		}
 		s.release()
 		s.flushMu.Lock()
@@ -623,14 +625,14 @@ func (s *Session) runCommand(m wire.Msg) wire.Msg {
 		s.flushMu.Unlock()
 		if s.hasUnsent() || s.queue.Len() > 0 { // a menu showed meanwhile
 			s.flushSoon()
-			return wire.Msg{Status: "waiting", Reason: s.waitReason()}
+			return wire.Msg{Status: "waiting", Reason: s.waitReason(), Seq: s.queue.Last()}
 		}
 		s.title()
 		s.keylog("flush: typed %d", len(msgs))
 		if len(msgs) > 0 {
 			s.delivered()
 		}
-		return wire.Msg{Status: "typed"}
+		return wire.Msg{Status: "typed", Seq: s.queue.Delivered(s.hasUnsent())}
 	case "stop":
 		// "Stop it and send it now" (#320): Esc ends a busy turn, then what waits goes in as any
 		// message would. Never past your typing, a question or a menu, and the turn isn't cut
@@ -659,19 +661,19 @@ func (s *Session) runCommand(m wire.Msg) wire.Msg {
 			}
 			if wait != "" {
 				s.flushSoon()
-				return wire.Msg{Status: "waiting", Reason: wait}
+				return wire.Msg{Status: "waiting", Reason: wait, Seq: s.queue.Last()}
 			}
 		}
 		if s.flushNow() {
 			s.keylog("stop: typed")
 			s.delivered()
-			return wire.Msg{Status: "typed"}
+			return wire.Msg{Status: "typed", Seq: s.queue.Delivered(s.hasUnsent())}
 		}
 		if s.queue.Len() == 0 && !s.hasUnsent() { // nothing waits, or the stop's own flush typed it
-			return wire.Msg{Status: "typed"}
+			return wire.Msg{Status: "typed", Seq: s.queue.Delivered(s.hasUnsent())}
 		}
 		s.flushSoon()
-		return wire.Msg{Status: "waiting", Reason: s.waitReason()}
+		return wire.Msg{Status: "waiting", Reason: s.waitReason(), Seq: s.queue.Last()}
 	case "keys":
 		if menu := s.menuShown(); menu != "" { // only you answer it (#306)
 			return wire.Msg{Err: menuWaits(s.o.tool, menu)}
@@ -743,9 +745,10 @@ func (s *Session) waitReason() string {
 	return "typing"
 }
 
-// delivered tells DeskPixie the messages that waited have reached the agent (#183).
+// delivered tells DeskPixie the messages that waited have reached the agent (#183): every one
+// numbered up to Seq (#339).
 func (s *Session) delivered() {
-	s.client.Send(wire.Msg{Kind: wire.KindEvent, Event: "delivered"})
+	s.client.Send(wire.Msg{Kind: wire.KindEvent, Event: "delivered", Seq: s.queue.Delivered(s.hasUnsent())})
 }
 
 // flushSoon types queued messages once the agent is idle and you aren't typing, checking
@@ -1041,7 +1044,8 @@ func (s *Session) start(ctx context.Context) error {
 	s.client = &Client{
 		Sock: s.o.daemonSock,
 		Hello: wire.Msg{Kind: wire.KindRegister, Tool: s.o.tool, Cwd: cwd, GitRoot: gitRoot(cwd),
-			Where: s.o.where, App: s.o.app, Description: s.o.description, Build: wire.SelfBuild()},
+			Where: s.o.where, App: s.o.app, Description: s.o.description, Build: wire.SelfBuild(),
+			Run: rand.Text()},
 		OnCommand: s.command,
 		OnRegistered: func(reply wire.Msg) {
 			s.o.log.Printf("registered with DeskPixie as %s (outdated %v)", reply.Address, reply.Outdated)

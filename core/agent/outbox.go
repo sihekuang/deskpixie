@@ -34,6 +34,10 @@ type OutboxLine struct {
 	Asking bool   `json:"asking,omitempty"`
 	// Note: shown small under a line, never said (a session dialog's command, #105).
 	Note string `json:"note,omitempty"`
+	// Held and HeldSeq: the session whose message the line says still waits, and its number
+	// (#339).
+	Held    string `json:"held,omitempty"`
+	HeldSeq uint64 `json:"heldSeq,omitempty"`
 }
 
 // UnmarshalJSON requires id, text, kind and at; token and delivered default (as serde does).
@@ -53,6 +57,8 @@ func (l *OutboxLine) UnmarshalJSON(b []byte) error {
 		Brief     string    `json:"brief"`
 		Asking    bool      `json:"asking"`
 		Note      string    `json:"note"`
+		Held      string    `json:"held"`
+		HeldSeq   uint64    `json:"heldSeq"`
 	}
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
@@ -60,7 +66,7 @@ func (l *OutboxLine) UnmarshalJSON(b []byte) error {
 	if raw.ID == nil || raw.Text == nil || raw.Kind == nil || raw.At == nil {
 		return errors.New("outbox line: missing field")
 	}
-	*l = OutboxLine{ID: *raw.ID, Text: *raw.Text, Kind: *raw.Kind, Token: raw.Token, At: *raw.At, Delivered: raw.Delivered, Job: raw.Job, Worker: raw.Worker, App: raw.App, Session: raw.Session, Title: raw.Title, Brief: raw.Brief, Asking: raw.Asking, Note: raw.Note}
+	*l = OutboxLine{ID: *raw.ID, Text: *raw.Text, Kind: *raw.Kind, Token: raw.Token, At: *raw.At, Delivered: raw.Delivered, Job: raw.Job, Worker: raw.Worker, App: raw.App, Session: raw.Session, Title: raw.Title, Brief: raw.Brief, Asking: raw.Asking, Note: raw.Note, Held: raw.Held, HeldSeq: raw.HeldSeq}
 	return nil
 }
 
@@ -83,7 +89,7 @@ func NewOutbox() *Outbox { return &Outbox{} }
 // Push adds a line; returns its jsonl record to append.
 func (o *Outbox) Push(line Line, now Millis) string {
 	o.nextID++
-	entry := OutboxLine{ID: o.nextID, Text: line.Text, Kind: line.Kind, Token: line.Token, At: now, Job: line.Job, Worker: line.Worker, App: line.App, Session: line.Session, Title: line.Title, Brief: line.Brief, Asking: line.Asking, Note: line.Note}
+	entry := OutboxLine{ID: o.nextID, Text: line.Text, Kind: line.Kind, Token: line.Token, At: now, Job: line.Job, Worker: line.Worker, App: line.App, Session: line.Session, Title: line.Title, Brief: line.Brief, Asking: line.Asking, Note: line.Note, Held: line.Held, HeldSeq: line.HeldSeq}
 	o.lines = append(o.lines, entry)
 	return entry.record()
 }

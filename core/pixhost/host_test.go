@@ -806,3 +806,39 @@ func TestAnOutdatedSessionIsReportedOnce(t *testing.T) {
 		t.Fatalf("told again after a reconnect: %+v", got)
 	}
 }
+
+// #339: pix reporting what waited delivered reaches the controller, so a notice saying it still
+// waits can go unsaid.
+func TestDeliveredBecomesAPaneEvent(t *testing.T) {
+	h, sock := newHost(t)
+	events := h.Subscribe()
+	p, r := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api", Run: "r1"})
+	wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "delivered", Seq: 4})
+	select {
+	case ev := <-events:
+		if ev.Kind != agent.PaneEventDelivered || ev.Agent != r.Address || ev.Seq != 4 || ev.Run != "r1" {
+			t.Fatalf("%+v", ev)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no event")
+	}
+	// A prompt's result carries its number too (#343 review).
+	go func() {
+		m, _ := p.dec.Next()
+		wire.Encode(p.c, wire.Msg{Kind: wire.KindResult, ID: m.ID, Status: "waiting", Reason: "working", Seq: 5})
+	}()
+	if d, err := h.PromptDelivery(context.Background(), r.Address, "hi"); err != nil || d.Seq != 5 || d.Run != "r1" {
+		t.Fatalf("%+v %v", d, err)
+	}
+	// An older pix numbers nothing: no run, so its 0 still means all of them.
+	old, ro := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/web"})
+	wire.Encode(old.c, wire.Msg{Kind: wire.KindEvent, Event: "delivered"})
+	for ev := range events {
+		if ev.Kind == agent.PaneEventDelivered {
+			if ev.Agent != ro.Address || ev.Seq != 0 || ev.Run != "" {
+				t.Fatalf("%+v", ev)
+			}
+			break
+		}
+	}
+}

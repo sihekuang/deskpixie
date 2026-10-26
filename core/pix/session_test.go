@@ -1962,3 +1962,26 @@ func TestARequeuedMessageKeepsItsNoteApart(t *testing.T) {
 	h.s.runner.Hangup()
 	h.s.finish()
 }
+
+// #339: a message's waiting reply carries its number, and the delivery the highest one that
+// went in, so DeskPixie can tell which of its notices it covers.
+func TestRepliesAndDeliveriesCarryMessageNumbers(t *testing.T) {
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}})
+	if h.s.client.Hello.Run == "" { // its numbering, so DeskPixie reads a 0 as none (#343)
+		t.Fatal("pix registers without a run")
+	}
+	h.s.setStatus("working")
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "a"})
+	waitEvent(t, h.d.events, "a waits", func(m wire.Msg) bool { return m.ID == "1" && m.Status == "waiting" && m.Seq == 1 })
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "2", Command: "prompt", Text: "b"})
+	waitEvent(t, h.d.events, "b waits", func(m wire.Msg) bool { return m.ID == "2" && m.Status == "waiting" && m.Seq == 2 })
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "3", Command: "flush"})
+	waitEvent(t, h.d.events, "flush waits too", func(m wire.Msg) bool { return m.ID == "3" && m.Status == "waiting" && m.Seq == 2 })
+	h.s.Hook("PostToolUse", map[string]any{})
+	waitEvent(t, h.d.events, "delivered up to b", func(m wire.Msg) bool { return m.Event == "delivered" && m.Seq == 2 })
+	h.s.setStatus("idle")
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "4", Command: "prompt", Text: "c"})
+	waitEvent(t, h.d.events, "c typed", func(m wire.Msg) bool { return m.ID == "4" && m.Status == "typed" && m.Seq == 3 })
+	h.s.runner.Hangup()
+	h.s.finish()
+}

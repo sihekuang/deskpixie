@@ -1099,3 +1099,25 @@ func TestCancellingTheJobThatJustAskedAnswersItInstead(t *testing.T) {
 		}
 	})
 }
+
+// #339: once a session has the message a notice said still waits, the voice loop is told to
+// drop that notice if it hasn't said it yet.
+func TestADeliveredSessionWithdrawsItsHeldNoticeFromTheVoiceLoop(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRig(t)
+		r.voice.SetOpen(true)
+		r.h.Voice(VoiceSignal{Kind: voice.SigOpened})
+		delegate(t, r, "ask the landing session")
+		settle()
+		r.h.Input(SessionWaitingInput("repo-claude", "landing page", "working"))
+		settle()
+		if hasCall(r.voice.Calls(), agenttest.WithdrawHeldCall("repo-claude", 0)) {
+			t.Fatal("withdrawn before it was delivered")
+		}
+		r.h.Input(PaneInput(PaneEvent{Kind: PaneEventDelivered, Agent: "repo-claude"}))
+		settle()
+		if !hasCall(r.voice.Calls(), agenttest.WithdrawHeldCall("repo-claude", 0)) {
+			t.Fatal(r.voice.Calls())
+		}
+	})
+}

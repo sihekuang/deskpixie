@@ -116,6 +116,13 @@ type Delivery struct {
 	Reason string
 	// Outdated: the session runs another pix than the app's (#189).
 	Outdated bool
+	// Seq (#339): waiting, the number pix gave the message (or the last one waiting); typed,
+	// every message up to it went in.
+	Seq uint64
+	// Run: the pix numbering Seq belongs to, which starts again at 1 when a new pix takes the
+	// name. Set, a Seq of 0 means none went in yet; "" from a pix too old to number its
+	// messages, whose 0 means all of them.
+	Run string
 }
 
 // DeliveryPrompter prompts a session and says whether the message was typed or waits.
@@ -169,7 +176,7 @@ func deliveryReply(name string, d Delivery) McpReply {
 	if d.Outdated {
 		v["outdated"], v["update"] = true, OutdatedUpdate
 	}
-	return McpReply{Value: v}
+	return McpReply{Value: v, Seq: d.Seq, Run: d.Run}
 }
 
 // OutdatedUpdate is what to tell the person about a session on an older pix (#189).
