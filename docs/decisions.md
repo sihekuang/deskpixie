@@ -102,3 +102,9 @@ Keychain before .env is a ruling (no source settles it): a key typed into the ap
 **Trigger:** The maintainer asked for "a way to cancel agent progress in both chat and attached widget".
 **Basis:** Unanimous across ChatGPT, Claude.ai, Gemini, GitHub Copilot Chat and Cursor: a square stop icon appears in place of (or next to) the control for a response in progress, stops it at once without a confirmation, and keeps what was done so far; Claude Code and Codex CLIs interrupt a turn with Esc, which is what pix sends.
 **Sources:** https://help.openai.com/en/articles/6825453-chatgpt-release-notes · https://support.anthropic.com/en/articles/8525154-claude-is-providing-incorrect-or-misleading-responses-what-s-going-on · https://docs.github.com/en/copilot/using-github-copilot/copilot-chat/asking-github-copilot-questions-in-your-ide · https://docs.cursor.com/chat/overview · https://docs.anthropic.com/en/docs/claude-code/interactive-mode
+
+## 2026-10-26 — More time to answer a relayed question (#337)
+**Decision:** After Pixie relays any question the user is to answer (a "Coordinator question:", or a session asking), she listens at least `QuestionListenMin` (10 s), however short the silence timeout is set, as she already did after a confirm question.
+**Trigger:** #337 reported the listening timeout starting while Pixie was still speaking. The code and the voice log showed the countdown already starts when playback ends; the conversations that closed had a long multiple-choice question and a 5 s silence timeout.
+**Basis:** Existing project convention: `ConfirmListenMin` (core/voice/conversation.go, from the Oct 18 voice log) already gave a relayed confirm question 10 s; this extends it to the other relayed questions.
+**Sources:** core/voice/conversation.go (`timeout`, `ConfirmListenMin`), core/voice/claims_conversation_test.go (`TestAConfirmQuestionGetsTimeForTheAnswer`).

@@ -395,7 +395,7 @@ func closes(fx []Effect) bool {
 }
 
 // Voice log, Oct 18 (20:38, 22:09): with a 3 s silence timeout a conversation closed 3 s after
-// Pixie said "Say confirm …". After a confirm question it listens at least ConfirmListenMin.
+// Pixie said "Say confirm …". After a confirm question it listens at least QuestionListenMin.
 func TestAConfirmQuestionGetsTimeForTheAnswer(t *testing.T) {
 	c := NewConversation(ConversationConfig{IdleTimeout: 3 * time.Second})
 	c.Step(HotkeyInput(), t0())
@@ -406,8 +406,30 @@ func TestAConfirmQuestionGetsTimeForTheAnswer(t *testing.T) {
 	if fx := ticks(c, ms(t0(), 500), 5*time.Second); closes(fx) {
 		t.Fatal("closed before the user could say the confirm word")
 	}
-	if fx := ticks(c, ms(t0(), 5_600), ConfirmListenMin); !closes(fx) {
+	if fx := ticks(c, ms(t0(), 5_600), QuestionListenMin); !closes(fx) {
 		t.Fatal("never closed")
+	}
+}
+
+// #337: any question Pixie relays gets the same time to answer: a long one with choices
+// ("Pick A or B") can't be answered in a 5 s silence timeout.
+func TestARelayedQuestionGetsTimeForTheAnswer(t *testing.T) {
+	for _, notice := range []string{
+		"Coordinator question: The landing session asks: name the other products, or not? Which should it do?",
+		"Session update: deskpixie: hand-off is asking: should I rebuild it and open the PR?",
+	} {
+		c := NewConversation(ConversationConfig{IdleTimeout: 5 * time.Second})
+		c.Step(HotkeyInput(), t0())
+		model(c, evReady, t0())
+		c.Step(MicLiveInput(), t0())
+		c.Step(InjectInput(Notice{Text: notice}), t0())
+		reply(c, "The session is asking which to do: name them, or not?", ms(t0(), 500))
+		if fx := ticks(c, ms(t0(), 500), 8*time.Second); closes(fx) {
+			t.Fatalf("%q: closed before the user could answer", notice)
+		}
+		if fx := ticks(c, ms(t0(), 8_600), QuestionListenMin); !closes(fx) {
+			t.Fatalf("%q: never closed", notice)
+		}
 	}
 }
 
