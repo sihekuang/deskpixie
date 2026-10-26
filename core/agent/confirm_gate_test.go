@@ -142,6 +142,14 @@ func TestGatedActions(t *testing.T) {
 		{"Push after I check in my changes.", []string{"push"}},
 		{"Merge after I have reviewed it.", nil},
 		{"Push after my OK, then merge.", []string{"merge"}},
+		{"Ask me before you push unless it's a typo fix.", []string{"push"}},
+		{"Check with me before you deploy if anything looks off.", []string{"deploy"}},
+		{"Also, if you're unsure, ask me before you push.", []string{"push"}},
+		{"Fix the bug, and if you're unsure, ask me before you push.", []string{"push"}},
+		{"When in doubt, ask me before you push.", []string{"push"}},
+		{"Push it, it works when I check.", []string{"push"}},
+		{"Deploy it, it looks fine when I look at it locally.", []string{"deploy"}},
+		{"Push the changes once I've reviewed them.", nil},
 	} {
 		if got := GatedActions(tc.text); !slices.Equal(got, tc.want) {
 			t.Errorf("GatedActions(%q) = %q, want %q", tc.text, got, tc.want)

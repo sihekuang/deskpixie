@@ -569,8 +569,12 @@ var waitsFor = map[string]bool{"after": true, "once": true, "when": true}
 // ("keep pushing"), and one in a condition ("if you're unsure, ask me before you push") still
 // ask.
 func waitsOnSender(words []string, i int) bool {
-	if len(words) > 0 && (words[0] == "if" || words[0] == "unless" || len(words) > 1 && words[0] == "in" && words[1] == "case") ||
-		i > 0 && words[i-1] == "keep" {
+	// A condition anywhere in the clause ("ask me before you push unless it's a typo fix")
+	// lets the step go ahead unasked when it doesn't hold.
+	clause := " " + strings.Join(words, " ") + " "
+	conditional := strings.Contains(clause, " if ") || strings.Contains(clause, " unless ") ||
+		strings.Contains(clause, " in case ") || strings.Contains(clause, " in doubt ")
+	if conditional || i > 0 && words[i-1] == "keep" {
 		return false
 	}
 	j := i - 1
@@ -603,13 +607,13 @@ func waitsOnSender(words []string, i int) bool {
 			return true
 		}
 	}
-	for k := i + 1; k < len(words) && !negationEnds[words[k]] && words[k] != "and"; k++ {
-		if _, step := gatedForms[words[k]]; step {
-			return false
-		}
-		if !waitsFor[words[k]] {
-			continue
-		}
+	// The wait comes right after the step and what it sends: "push it once", "merge the
+	// changes after"; "push it, it works when I check" waits for nothing.
+	k := i + 1
+	for n := 0; n < 2 && k < len(words) && goAheadObjects[words[k]]; n++ {
+		k++
+	}
+	if k < len(words) && waitsFor[words[k]] {
 		r := slices.Concat(words[k+1:min(len(words), k+5)], []string{"", "", ""})
 		if r[0] == "i" && r[1] == "have" {
 			r = append([]string{"i've"}, r[2:]...)
