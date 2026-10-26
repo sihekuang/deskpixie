@@ -23,6 +23,7 @@ func (c *AgentController) onSessionQuestion(session string, q SessionQuestion, n
 		return
 	}
 	c.confirms.TakeSession(session, "")
+	delete(c.announced, session)
 	tokens := c.pendingTokens()
 	label := maskPendingTokens(q.Label, tokens)
 	line := Line{Kind: LineQuestion, App: q.App, Session: session, Title: label}
@@ -79,6 +80,9 @@ func (c *AgentController) onSessionQuestion(session string, q SessionQuestion, n
 	if q.Kind == "notice" || (q.Kind == "menu" && len(q.Options) == 0) {
 		line.Text, line.Brief = describe("")
 		c.deliver(line, now, fx)
+		if id, ok := c.asking[session]; ok {
+			c.announced[session] = announcedQuestion{question: q.ID, line: id}
+		}
 		return
 	}
 	c.sessionSeq++
@@ -114,6 +118,26 @@ func (c *AgentController) onSessionQuestion(session string, q SessionQuestion, n
 	// lists it with its buttons while it waits (as permissions do, #97).
 	if !c.outbox.HasTokenSince(before, token) {
 		*fx = append(*fx, Effect{Kind: EfAppend, File: OutboxFile, Line: c.outbox.PushHeard(line, now)})
+	}
+}
+
+// announcedQuestion is a session's prompt asked without buttons: pix's id for it, and the
+// outbox line that asks it.
+type announcedQuestion struct {
+	question string
+	line     uint64
+}
+
+// dropAnnounced: pix says session's prompt id is gone (answered in its terminal, or the
+// session moved on): its asking line goes with it, if it is still the session's open question.
+func (c *AgentController) dropAnnounced(session, id string, fx *[]Effect) {
+	a, ok := c.announced[session]
+	if !ok || a.question != id {
+		return
+	}
+	delete(c.announced, session)
+	if c.asking[session] == a.line {
+		c.dropAsking(session, fx)
 	}
 }
 

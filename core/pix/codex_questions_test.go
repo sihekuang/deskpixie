@@ -49,14 +49,24 @@ func TestAHeldCodexQuestionIsAnsweredThroughItsHook(t *testing.T) {
 	}
 }
 
-// Nobody answers in time: the hook lets go and Codex shows its question in the terminal.
+// Nobody answers in time: the hook lets go and Codex shows its question in the terminal. pix
+// answers no Codex question by keys, so it is asked again without its buttons (#347): it still
+// waits, to be answered in the terminal.
 func TestAHeldCodexQuestionNobodyAnswersGoesToTheTerminal(t *testing.T) {
 	h := codexHoldHarness(t, 200*time.Millisecond)
 	reply := hookAsync(h, "PreToolUse", codexAsk)
-	askedQuestion(t, h)
+	q := askedQuestion(t, h)
 	if out := hookReply(t, reply, 2*time.Second); out != nil {
 		t.Fatalf("%v", out)
 	}
+	again := askedQuestion(t, h)
+	if again.ID != q.ID || again.Source != "menu" || again.Text != "Which database?" || len(again.Keys) != 0 || again.Typed {
+		t.Fatalf("%+v", again)
+	}
+	if err := answer(t, h, q.ID, "1"); err == "" { // its keys aren't pix's to type
+		t.Fatal("answered by keys")
+	}
+	noQuestionGone(t, h, 200*time.Millisecond)
 }
 
 // Without a hold (or one Pixie can't show: a secret, several questions) the question is only

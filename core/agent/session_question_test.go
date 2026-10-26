@@ -222,6 +222,42 @@ func TestANoticeIsAnnouncedOnly(t *testing.T) {
 	}
 }
 
+// #347: a prompt asked without buttons waits in the bubble until pix says it is gone (answered
+// in its terminal), whatever else the session does meanwhile; a gone that is another prompt's
+// leaves it be.
+func TestAnAnnouncedPromptWaitsUntilPixSaysItIsGone(t *testing.T) {
+	for _, q := range []SessionQuestion{
+		{ID: "q4", Label: "api", Kind: "menu", Text: "Which files?"},
+		{ID: "q6", Label: "api", Kind: "notice", Tool: "ExitPlanMode", Input: `{"plan":"x"}`},
+	} {
+		c := ctl()
+		askSession(c, q, T0)
+		c.Step(PaneInput(PaneEvent{Kind: PaneEventStatus, Agent: sessionName, Status: PaneWorking}), T0+1)
+		if b := bubbleOf(sessionGone(c, "q9", T0+2)); len(c.Updates()) != 1 || b != nil {
+			t.Fatalf("%s: another prompt's gone took it: %+v", q.Kind, c.Updates())
+		}
+		if b := bubbleOf(sessionGone(c, q.ID, T0+3)); len(b) != 0 {
+			t.Fatalf("%s: answered in its terminal, still listed: %+v", q.Kind, b)
+		}
+	}
+}
+
+// #347: a question pix asks again without its buttons (a Codex menu its hook let go of) takes
+// the buttons' place: still in the bubble, now to be answered in its terminal.
+func TestAQuestionAskedAgainWithoutButtonsStillWaits(t *testing.T) {
+	c := ctl()
+	askSession(c, pushMenu, T0)
+	again := pushMenu
+	again.Options = nil
+	b := bubbleOf(askSession(c, again, T0+1))
+	if len(b) != 1 || b[0].Token != "" || !strings.Contains(b[0].Text, "Answer it in its terminal") {
+		t.Fatalf("%+v", b)
+	}
+	if b := bubbleOf(sessionGone(c, pushMenu.ID, T0+2)); len(b) != 0 {
+		t.Fatalf("%+v", b)
+	}
+}
+
 // Review #6: a session's options and command can't speak a confirm word pending elsewhere.
 func TestASessionsTextNeverSpeaksAPendingConfirmWord(t *testing.T) {
 	c := workingOnJob1()

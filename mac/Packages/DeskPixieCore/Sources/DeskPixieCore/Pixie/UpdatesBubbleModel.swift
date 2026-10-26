@@ -374,12 +374,13 @@ public struct UpdatesBubbleModel: Sendable {
         return true
     }
 
-    /// You acted on a card (#286): Allow, Deny, an option, a typed answer, "Chat about this" or
-    /// "Open its terminal". It leaves the deck at once and the next slides into its place,
-    /// without waiting for the core; a list from the core that still has it doesn't bring it
-    /// back, until the core drops it too.
+    /// You acted on a card (#286): Allow, Deny, an option, a typed answer or "Chat about this".
+    /// It leaves the deck at once and the next slides into its place, without waiting for the
+    /// core; a list from the core that still has it doesn't bring it back, until the core drops
+    /// it too. A card that asks without buttons stays (#347): opening its terminal doesn't
+    /// answer it, and the core drops it once it is answered there.
     public mutating func act(on id: UInt64, now: TimeInterval? = nil) {
-        guard lines.contains(where: { $0.id == id }) else { return }
+        guard let line = lines.first(where: { $0.id == id }), !line.offersTerminal else { return }
         defer { if let now { noteDecisions(now) } }
         dismissed.insert(id)
         let onCard = current?.id

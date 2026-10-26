@@ -279,6 +279,73 @@ func TestSubagentToolLeavesQueuedForTheSession(t *testing.T) {
 	h.s.finish()
 }
 
+// #344: a background subagent's tool, or the session's own tool run beside the menu, leaves the
+// menu as it is: still held in its hook, still asked in Pixie, still blocked. The menu's own
+// tool ending ends it.
+func TestASubagentToolLeavesTheSessionsQuestion(t *testing.T) {
+	h := holdHarness(t, 5*time.Second)
+	reply := hookAsync(h, "PreToolUse", pushMenu)
+	q := askedQuestion(t, h)
+	h.s.Hook("Notification", map[string]any{"notification_type": "permission_prompt"})
+	h.s.Hook("PostToolUse", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "ls"},
+		"agent_id": "a0d84cff17c3490ba", "agent_type": "general-purpose"})
+	// What Claude Code does when it asks beside another tool call: the session's own Agent call
+	// that started a background subagent ends after the menu went up.
+	h.s.Hook("PostToolUse", map[string]any{"tool_name": "Agent", "tool_input": map[string]any{"run_in_background": true}})
+	select {
+	case r := <-reply:
+		t.Fatalf("the menu's hook let go: %q", r)
+	default:
+	}
+	noQuestionGone(t, h, 200*time.Millisecond)
+	if st := h.s.currentStatus(); st != "blocked" || h.s.currentQuestion() == nil {
+		t.Fatalf("status %s, question %v", st, h.s.currentQuestion())
+	}
+	h.s.Hook("PostToolUse", map[string]any{"tool_name": "AskUserQuestion", "tool_input": pushMenu["tool_input"]})
+	waitEvent(t, h.d.events, "question gone", func(m wire.Msg) bool { return m.Event == "question-gone" && m.ID == q.ID })
+	if st := h.s.currentStatus(); st != "working" {
+		t.Fatalf("after its own tool: %s", st)
+	}
+}
+
+// #344, the foreground case: a subagent's own permission dialog still ends with its tool, told
+// by its agent_id, or by the call itself when its PermissionRequest came without one.
+func TestASubagentsOwnPermissionEndsWithItsTool(t *testing.T) {
+	ls := map[string]any{"command": "ls -la"}
+	for name, asked := range map[string]map[string]any{
+		"its agent": {"tool_name": "Bash", "tool_input": ls, "agent_id": "sub1"},
+		"its call":  {"tool_name": "Bash", "tool_input": ls},
+		"a notice":  {"tool_name": "ExitPlanMode", "tool_input": map[string]any{}, "agent_id": "sub1"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := keyHarness(t, "claude")
+			h.s.Hook("PermissionRequest", asked)
+			q := askedQuestion(t, h)
+			h.s.Hook("Notification", map[string]any{"notification_type": "permission_prompt"})
+			h.s.Hook("PostToolUse", map[string]any{"tool_name": asked["tool_name"], "tool_input": asked["tool_input"], "agent_id": "sub1"})
+			waitEvent(t, h.d.events, "question gone", func(m wire.Msg) bool { return m.Event == "question-gone" && m.ID == q.ID })
+			if st := h.s.currentStatus(); st != "working" {
+				t.Fatalf("status %s", st)
+			}
+		})
+	}
+}
+
+// And the other way round: the session's own tool, or another subagent's, leaves a subagent's
+// dialog waiting.
+func TestAnotherAgentsToolLeavesASubagentsPermission(t *testing.T) {
+	h := keyHarness(t, "claude")
+	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "ls -la"}, "agent_id": "sub1"})
+	askedQuestion(t, h)
+	h.s.Hook("Notification", map[string]any{"notification_type": "permission_prompt"})
+	h.s.Hook("PostToolUse", map[string]any{"tool_name": "Read", "tool_input": map[string]any{"file_path": "/x"}})
+	h.s.Hook("PostToolUse", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "pwd"}, "agent_id": "sub2"})
+	noQuestionGone(t, h, 200*time.Millisecond)
+	if st := h.s.currentStatus(); st != "blocked" || h.s.currentQuestion() == nil {
+		t.Fatalf("status %s, question %v", st, h.s.currentQuestion())
+	}
+}
+
 // #336: after a subagent's tool, stop-and-send still has the message to send: it stops the
 // turn and types it, rather than finding nothing waits and saying it was sent.
 func TestStopAfterASubagentToolStillTypesWhatWaits(t *testing.T) {
@@ -903,7 +970,9 @@ func TestTheSessionMovingOnWithdrawsTheQuestion(t *testing.T) {
 	h := keyHarness(t, "claude")
 	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "ls"}})
 	q := askedQuestion(t, h)
-	h.s.Hook("PostToolUse", map[string]any{"tool_name": "Bash"})
+	h.s.Hook("PostToolUse", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "pwd"}}) // another call (#347)
+	noQuestionGone(t, h, 100*time.Millisecond)
+	h.s.Hook("PostToolUse", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "ls"}})
 	waitEvent(t, h.d.events, "question gone", func(m wire.Msg) bool { return m.Event == "question-gone" && m.ID == q.ID })
 }
 

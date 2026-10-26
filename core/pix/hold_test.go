@@ -90,8 +90,8 @@ func TestAHeldMenuIsAnsweredThroughItsHook(t *testing.T) {
 	}
 }
 
-// Nobody answers in Pixie: the hook lets go, so the terminal shows the menu, and Pixie's bubble
-// goes away.
+// Nobody answers in Pixie in time: the hook lets go, so the terminal shows the menu, and the
+// question still waits in Pixie (#347): its buttons type the answer there, as without a hold.
 func TestAHeldMenuNobodyAnswersGoesToTheTerminal(t *testing.T) {
 	h := holdHarness(t, 300*time.Millisecond)
 	start := time.Now()
@@ -100,9 +100,29 @@ func TestAHeldMenuNobodyAnswersGoesToTheTerminal(t *testing.T) {
 	if out := hookReply(t, reply, 2*time.Second); out != nil || time.Since(start) < 300*time.Millisecond {
 		t.Fatalf("%v after %v", out, time.Since(start))
 	}
-	waitEvent(t, h.d.events, "question gone", func(m wire.Msg) bool { return m.Event == "question-gone" && m.ID == q.ID })
-	if err := answer(t, h, q.ID, "1"); !strings.Contains(err, "no longer waiting") {
-		t.Fatalf("%q", err)
+	noQuestionGone(t, h, 300*time.Millisecond)
+	h.s.runner.OnOutput([]byte("Push main?\r\n❯ 1. Push\r\n  2. Don't push\r\nEnter to select"))
+	errs := make(chan string, 1)
+	go func() { errs <- answer(t, h, q.ID, "2") }()
+	typed(t, h, '2')
+	if err := <-errs; err != "" {
+		t.Fatal(err)
+	}
+}
+
+// noQuestionGone: pix doesn't take its question back from DeskPixie within d.
+func noQuestionGone(t *testing.T, h *harness, d time.Duration) {
+	t.Helper()
+	deadline := time.After(d)
+	for {
+		select {
+		case m := <-h.d.events:
+			if m.Event == "question-gone" {
+				t.Fatalf("question %s gone", m.ID)
+			}
+		case <-deadline:
+			return
+		}
 	}
 }
 
@@ -200,6 +220,23 @@ func TestAPermissionAnsweredInTheTerminalLetsItsHookGo(t *testing.T) {
 		t.Fatalf("%v", out)
 	}
 	waitEvent(t, h.d.events, "question gone", func(m wire.Msg) bool { return m.Event == "question-gone" && m.ID == q.ID })
+}
+
+// A held permission nobody answers in Pixie stays there too (#347): its dialog shows in the
+// terminal the whole time, and Pixie's Yes is typed into it.
+func TestAHeldPermissionNobodyAnswersStillWaits(t *testing.T) {
+	h := holdHarness(t, 300*time.Millisecond)
+	reply, q := heldBash(t, h)
+	if out := hookReply(t, reply, 2*time.Second); out != nil {
+		t.Fatalf("%v", out)
+	}
+	noQuestionGone(t, h, 300*time.Millisecond)
+	errs := make(chan string, 1)
+	go func() { errs <- answer(t, h, q.ID, "yes") }()
+	typed(t, h, '1')
+	if err := <-errs; err != "" {
+		t.Fatal(err)
+	}
 }
 
 // Losing DeskPixie lets a held question go at once: nobody is left to answer it in Pixie.

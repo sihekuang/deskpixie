@@ -129,6 +129,29 @@ type question struct {
 	suggestions any
 	// replyMenu: a held menu's hook reply for an answer, as its agent takes it.
 	replyMenu func(input map[string]any, a menuAnswer) (string, bool)
+	// agent: the subagent whose hook asked it ("": the session's own, #344); tool: the tool it
+	// asks about; use: a permission's tool call (its name and input), as its PostToolUse names
+	// it again.
+	agent, tool, use string
+}
+
+// toolUse is the tool call a hook's payload is about: its name and input, as JSON (map keys
+// sorted, so the same call reads the same in every hook).
+func toolUse(p map[string]any) string {
+	b, _ := json.Marshal([]any{p["tool_name"], p["tool_input"]})
+	return string(b)
+}
+
+// endsWith: the PostToolUse hook p is the end of the very tool call q waits on (#344, #347): a
+// permission's call (whichever agent's hook it came in, as a subagent's dialog may come
+// without its agent_id), or the menu tool of the agent that asked it. Any other tool that
+// finishes meanwhile leaves q waiting: a background subagent's, or one the agent ran beside it.
+func (q *question) endsWith(p map[string]any) bool {
+	if q.use != "" {
+		return q.use == toolUse(p)
+	}
+	name, _ := p["tool_name"].(string)
+	return q.kind == "menu" && q.tool != "" && q.tool == name && q.agent == agentOf(p)
 }
 
 // menuAnswer is Pixie's answer to a held menu: an option's label, your own words (own), or
@@ -214,32 +237,45 @@ func (s *Session) ask(q *question, ev wire.Msg) bool {
 	return true
 }
 
-// await is the reply of held question q's hook: Pixie's answer, or "" once wait passed (its
-// bubble goes and the terminal shows it) or it was answered or withdrawn elsewhere.
+// await is the reply of held question q's hook: Pixie's answer, or "" once wait passed (the
+// terminal shows it) or it was answered or withdrawn elsewhere.
 func (s *Session) await(q *question, wait time.Duration) string {
+	h := q.hold
 	t := time.NewTimer(wait)
 	defer t.Stop()
 	select {
-	case r := <-q.hold.reply:
+	case r := <-h.reply:
 		return r
 	case <-t.C:
-		s.withdraw(q)
-		return <-q.hold.reply // "", or an answer given just before
+		s.unhold(q)
+		return <-h.reply // "", or an answer given just before
 	}
 }
 
-// withdraw takes q back if it still waits, lets its hook go, and tells DeskPixie it's gone.
-func (s *Session) withdraw(q *question) {
+// unhold lets held question q's hook go once its wait passed: the terminal shows it now, and
+// it still waits on you (#347). Pixie keeps it until it is answered or gone from the session:
+// with its buttons where its keys answer it (as without a hold), else as asked in the terminal.
+func (s *Session) unhold(q *question) {
 	s.mu.Lock()
+	h := q.hold
 	mine := s.q == q
+	keys := q.kind == "permission" || menuTools[s.o.tool].keys
+	var ev *wire.Msg
 	if mine {
-		s.q = nil
+		q.hold = nil
+		if !keys && q.held == nil { // asked again, without its buttons: answered in its terminal
+			q.options, q.labels = 0, nil
+			text, _, _ := menuOf(q.input)
+			ev = &wire.Msg{Kind: wire.KindEvent, Event: "question", ID: q.id, Source: "menu", Text: text}
+		}
 	}
-	told := mine && q.held == nil
 	s.mu.Unlock()
-	q.hold.give("")
-	if told {
-		s.client.Send(wire.Msg{Kind: wire.KindEvent, Event: "question-gone", ID: q.id})
+	h.give("")
+	if mine {
+		s.o.log.Printf("question %s: in the terminal now, still waiting", q.id)
+	}
+	if ev != nil {
+		s.client.Send(*ev)
 	}
 }
 
@@ -280,15 +316,24 @@ func (s *Session) currentQuestion() *question {
 	return s.q
 }
 
-// clearQuestion: the prompt was answered (here, or by you) or the session moved on.
-func (s *Session) clearQuestion() {
+// clearQuestion: the prompt was answered (here, or by you) or the session moved on; why says
+// which (the hook or key that showed it), for the log.
+func (s *Session) clearQuestion(why string) {
 	s.mu.Lock()
 	q := s.q
 	s.q = nil
+	var h *hold
+	if q != nil {
+		h = q.hold
+	}
 	told := q != nil && q.held == nil // a held one was never told
 	s.mu.Unlock()
-	if q != nil && q.hold != nil {
-		q.hold.give("") // answered in the terminal, or the session moved on: its hook lets go
+	if q == nil {
+		return
+	}
+	s.o.log.Printf("question %s gone: %s", q.id, why)
+	if h != nil {
+		h.give("") // answered in the terminal, or the session moved on: its hook lets go
 	}
 	if told {
 		s.client.Send(wire.Msg{Kind: wire.KindEvent, Event: "question-gone", ID: q.id})
