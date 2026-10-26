@@ -1761,3 +1761,87 @@ func TestCodexsInterruptFrameWithItsOldBusyFooterKeepsPixiesHold(t *testing.T) {
 		t.Fatalf("held, and idle: queue %d, status %s", h.s.queue.Len(), h.s.currentStatus())
 	}
 }
+
+// #340: stop-and-send's note starts what it types, once it pressed Esc; with nothing to stop,
+// what it types goes as given.
+func TestStopTypesItsNoteOnlyWhenItStopped(t *testing.T) {
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", stopsOnEsc}})
+	h.s.setStatus("working")
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "from pixie"})
+	waitEvent(t, h.d.events, "waiting: working", func(m wire.Msg) bool { return m.ID == "1" && m.Reason == "working" })
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "2", Command: "stop", Text: "[stopped and sent]"})
+	waitEvent(t, h.d.events, "typed", func(m wire.Msg) bool { return m.ID == "2" && m.Status == "typed" })
+	if got := h.s.typedForTest(); !strings.Contains(got, "\x1b[200~[stopped and sent] from pixie\x1b[201~") {
+		t.Fatalf("typed %q", got)
+	}
+	h.s.runner.Hangup()
+	h.s.finish()
+
+	h = newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}})
+	h.s.queue.Push("from pixie") // idle, with a message waiting: nothing for the stop to stop
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "2", Command: "stop", Text: "[stopped and sent]"})
+	waitEvent(t, h.d.events, "typed", func(m wire.Msg) bool { return m.ID == "2" && m.Status == "typed" })
+	if got := h.s.typedForTest(); strings.Contains(got, "[stopped and sent]") || !strings.Contains(got, "\x1b[200~from pixie\x1b[201~") {
+		t.Fatalf("nothing was stopped, yet: %q", got)
+	}
+	h.s.runner.Hangup()
+	h.s.finish()
+}
+
+// #340: a turn that hasn't stopped yet ("stopping") gets the note with what goes in once it
+// has; messages its next tool takes as context (nothing typed) drop it.
+func TestStopsNoteWaitsForTheStopAndGoesWithContext(t *testing.T) {
+	defer func(w time.Duration) { InterruptWait = w }(InterruptWait)
+	InterruptWait = 200 * time.Millisecond
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}})
+	h.s.setStatus("working")
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "from pixie"})
+	waitEvent(t, h.d.events, "waiting: working", func(m wire.Msg) bool { return m.ID == "1" && m.Reason == "working" })
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "2", Command: "stop", Text: "[stopped and sent]"})
+	waitEvent(t, h.d.events, "stopping", func(m wire.Msg) bool { return m.ID == "2" && m.Reason == "stopping" })
+	h.s.Hook("Stop", map[string]any{}) // it stopped after all
+	waitEvent(t, h.d.events, "delivered", func(m wire.Msg) bool { return m.Event == "delivered" })
+	if got := h.s.typedForTest(); !strings.Contains(got, "\x1b[200~[stopped and sent] from pixie\x1b[201~") {
+		t.Fatalf("typed %q", got)
+	}
+
+	h.s.setStatus("working")
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "3", Command: "prompt", Text: "second"})
+	waitEvent(t, h.d.events, "waiting: working", func(m wire.Msg) bool { return m.ID == "3" && m.Reason == "working" })
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "4", Command: "stop", Text: "[stopped and sent]"})
+	waitEvent(t, h.d.events, "stopping", func(m wire.Msg) bool { return m.ID == "4" && m.Reason == "stopping" })
+	if reply := h.s.Hook("PostToolUse", map[string]any{}); !strings.Contains(reply, "second") || strings.Contains(reply, "[stopped") {
+		t.Fatalf("context %q", reply)
+	}
+	if n := h.s.takeNote(); n != "" {
+		t.Fatalf("note left for a later typing: %q", n)
+	}
+	h.s.runner.Hangup()
+	h.s.finish()
+}
+
+// #340: flush's note goes in only past your typing: with nobody typing, it's an ordinary send.
+func TestFlushTypesItsNoteOnlyPastYourTyping(t *testing.T) {
+	h := newHarness(t, "codex", Launch{Path: "/bin/sh", Args: []string{"-c", "stty raw -echo; od -An -c; sleep 30"}})
+	h.stdinW.WriteString("my draft")
+	time.Sleep(100 * time.Millisecond)
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "from pixie"})
+	waitEvent(t, h.d.events, "waiting", func(m wire.Msg) bool { return m.ID == "1" && m.Status == "waiting" })
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "2", Command: "flush", Text: "[sent while you were typing]"})
+	waitEvent(t, h.d.events, "flushed", func(m wire.Msg) bool { return m.ID == "2" && m.Status == "typed" })
+	if got := h.s.typedForTest(); !strings.Contains(got, "\x1b[200~[sent while you were typing] from pixie\x1b[201~") {
+		t.Fatalf("typed %q", got)
+	}
+	h.s.runner.Hangup()
+	h.s.finish()
+
+	if got := withNote("[n]", nil); got != nil {
+		t.Fatalf("nothing to start: %q", got)
+	}
+	if got := withNote("", []string{"a", "b"}); len(got) != 2 || got[0] != "a" {
+		t.Fatalf("no note: %q", got)
+	}
+	if got := withNote("[n]", []string{"a", "b"}); len(got) != 2 || got[0] != "[n] a" || got[1] != "b" {
+		t.Fatalf("%q", got)
+	}
+}

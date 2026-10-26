@@ -152,6 +152,9 @@ type Session struct {
 	// stopped: Pixie's stop ended the turn: what waits stays queued (still counted) until you
 	// type your next prompt here or Pixie sends a new message (#309).
 	stopped bool
+	// note: what the next typing of what waits starts with, after stop-and-send pressed Esc
+	// (#340); "" for none.
+	note string
 
 	turnStart     time.Time        // when this turn went working (zero: none seen)
 	turnFromPixie bool             // a prompt of this turn was Pixie's
@@ -518,6 +521,7 @@ func (s *Session) Hook(event string, p map[string]any) string {
 			s.setStatus("working")
 		}
 		if msgs := s.queue.Drain(); len(msgs) > 0 {
+			s.takeNote() // nothing is typed: they go in as context
 			s.title()
 			s.delivered()
 			ctx := "Messages from Pixie:\n- " + strings.Join(msgs, "\n- ")
@@ -598,7 +602,11 @@ func (s *Session) runCommand(m wire.Msg) wire.Msg {
 		}
 		s.release()
 		s.flushMu.Lock()
-		msgs := s.queue.Drain()
+		note := ""
+		if !s.gate.Clear(time.Now()) { // typed past your typing: say so there (#340)
+			note = m.Text
+		}
+		msgs := withNote(note, s.queue.Drain())
 		if err := s.forceIn(msgs); err != nil {
 			s.flushMu.Unlock()
 			return wire.Msg{Err: err.Error()}
@@ -635,6 +643,7 @@ func (s *Session) runCommand(m wire.Msg) wire.Msg {
 				if err := s.stopTurn(); err != nil {
 					return wire.Msg{Err: err.Error()}
 				}
+				s.setNote(m.Text) // what goes in next was stopped for: say so there (#340)
 				if s.currentStatus() == "working" {
 					wait = "stopping" // it gets them once it has
 				}
@@ -698,7 +707,7 @@ func (s *Session) flushNow() bool {
 	}
 	// One prompt, one wait for the agent to take it (#305): a wait per message could outlast the
 	// command's time limit.
-	msgs := s.queue.Drain()
+	msgs := withNote(s.takeNote(), s.queue.Drain())
 	prompt := strings.Join(msgs, "\n\n")
 	if err := s.typeIn(prompt); err != nil {
 		s.holdBack(err, msgs, prompt, "") // a menu showed: they wait for it (#306)
@@ -835,6 +844,31 @@ func isStopKey(b []byte) bool {
 
 // kittyStops: Esc's press as kitty's event types report it (its release is no key).
 var kittyStops = strings.NewReplacer("\x1b[27;1:1u", "\x1b", "\x1b[27;1:2u", "\x1b", "\x1b[27;1:3u", "")
+
+// setNote: the next typing of what waits starts with note (#340).
+func (s *Session) setNote(note string) {
+	s.mu.Lock()
+	s.note = note
+	s.mu.Unlock()
+}
+
+// takeNote is the note the next typing starts with, and forgets it.
+func (s *Session) takeNote() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := s.note
+	s.note = ""
+	return n
+}
+
+// withNote starts msgs with note, a few words in brackets (#340): forced in, they say so in
+// the terminal. msgs as they are with no note.
+func withNote(note string, msgs []string) []string {
+	if note == "" || len(msgs) == 0 {
+		return msgs
+	}
+	return append([]string{note + " " + msgs[0]}, msgs[1:]...)
+}
 
 // held: Pixie's stop holds what waits (see interrupted).
 func (s *Session) held() bool {

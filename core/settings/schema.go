@@ -498,6 +498,7 @@ var Fields = concat(
 		enabledWhen(unit(spec("notifications.sessionTurnsMinSeconds", "Only turns longer than", "Shorter turns stay quiet; you were probably watching. Turns Pixie started are always announced.", intKind(0, 3600, false), ApplyRestart), "seconds"), on("notifications.sessionTurns")),
 		unit(spec("agent.questionWaitSecs", "Wait for Pixie's answer", "How long a question from a session you started with pix waits for your answer in Pixie before the session shows it in its terminal. 0 shows it there at once; Pixie's buttons then type your answer.", intKind(0, int64(pix.MaxHold.Seconds()), false), ApplyRestart), "seconds"),
 		spec("agent.alwaysForceSend", "Always send messages at once", "Messages Pixie passes to your sessions go in right away, with any still waiting, even while you're typing there. A busy session still gets them with its next step.", boolKind, ApplyRestart),
+		spec("agent.markForcedSends", "Mark messages sent in anyway", "A message Pixie stops a session for, or types while you're typing there, starts with a note like [stopped and sent], so you can see what happened.", boolKind, ApplyLive),
 		spec("agent.editor", "Open files in", "Where a file named in Pixie's bubbles opens when you click it. Automatic uses the editor the session runs in (VS Code, Cursor, Zed or a JetBrains IDE), else the file's default app.", staticChoice(Editors), ApplyLive),
 	),
 
