@@ -60,11 +60,12 @@ type Msg struct {
 	// answer (registered, #268; 0 holds none).
 	DurationMs int64 `json:"durationMs,omitempty"`
 	// Prompt and Body (question, #105): a dialog's own question and what its box shows.
-	Prompt  string   `json:"prompt,omitempty"`
-	Body    string   `json:"body,omitempty"`
-	Command string   `json:"command,omitempty"`
-	Text    string   `json:"text,omitempty"`
-	Keys    []string `json:"keys,omitempty"`
+	Prompt  string `json:"prompt,omitempty"`
+	Body    string `json:"body,omitempty"`
+	Command string `json:"command,omitempty"`
+	// Text: also, for a flush or stop command, the note what it forces in starts with (#340).
+	Text string   `json:"text,omitempty"`
+	Keys []string `json:"keys,omitempty"`
 	// Details and Typed (a menu's question, #268): each option's description ("" none), and
 	// that it also takes a typed answer and "Chat about this" (held in its hook).
 	Details []string `json:"details,omitempty"`

@@ -512,8 +512,8 @@ func (h *Host) PromptDelivery(ctx context.Context, name, text string) (agent.Del
 }
 
 // Flush has pix type session name's waiting messages now, past its typing gate (#187).
-func (h *Host) Flush(ctx context.Context, name string) (agent.Delivery, error) {
-	r, err := h.commandResult(ctx, name, wire.Msg{Command: "flush"})
+func (h *Host) Flush(ctx context.Context, name, note string) (agent.Delivery, error) {
+	r, err := h.commandResult(ctx, name, wire.Msg{Command: "flush", Text: note})
 	if he, ok := err.(agent.HostError); ok && he.Detail == "unknown command flush" { // a pix from before #187
 		return agent.Delivery{}, errors.New("This session's pix can't send waiting messages in; restart it to update pix.")
 	}
@@ -530,8 +530,8 @@ func (h *Host) Flush(ctx context.Context, name string) (agent.Delivery, error) {
 }
 
 // StopAndSend has pix stop session name's busy turn and type what waits (#320).
-func (h *Host) StopAndSend(ctx context.Context, name string) (agent.Delivery, error) {
-	r, err := h.commandResult(ctx, name, wire.Msg{Command: "stop"})
+func (h *Host) StopAndSend(ctx context.Context, name, note string) (agent.Delivery, error) {
+	r, err := h.commandResult(ctx, name, wire.Msg{Command: "stop", Text: note})
 	if he, ok := err.(agent.HostError); ok && he.Detail == "unknown command stop" { // a pix from before #320
 		return agent.Delivery{}, errors.New("This session's pix can't stop it to send; restart it to update pix.")
 	}

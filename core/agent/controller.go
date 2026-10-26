@@ -91,6 +91,9 @@ type Settings struct {
 	// AlwaysForceSend (`agent.alwaysForceSend`, off by default, #205): every message to a
 	// session you started with pix is sent as message_session's force sends it.
 	AlwaysForceSend bool
+	// MarkForcedSends (`agent.markForcedSends`, on by default, live, #340): a message forced
+	// into a session you started with pix starts with a note in brackets saying so.
+	MarkForcedSends bool
 	// CoordinatorKind (`agent.coordinatorKind`, #87): the coordinator's agent, named in the
 	// tray when it can't start.
 	CoordinatorKind AgentKind
@@ -100,7 +103,7 @@ type Settings struct {
 
 // DefaultSettings: 4 notifications a minute, 2-minute permission timeout, narration on.
 func DefaultSettings() Settings {
-	return Settings{NotifyPerMinute: 4, PermissionTimeoutMs: 120_000, Narration: true, UpdateQuietMs: UpdateQuietMs, Workers: DefaultWorkerPolicy(), SessionTurns: true, SessionTurnsMinMs: 30_000, ReplyHistoryMs: 300_000}
+	return Settings{NotifyPerMinute: 4, PermissionTimeoutMs: 120_000, Narration: true, UpdateQuietMs: UpdateQuietMs, Workers: DefaultWorkerPolicy(), SessionTurns: true, SessionTurnsMinMs: 30_000, ReplyHistoryMs: 300_000, MarkForcedSends: true}
 }
 
 // WorkerPolicy is `agent.workers` (spec §12): whether the coordinator may start workers, how

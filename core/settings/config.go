@@ -177,6 +177,10 @@ type AgentSettings struct {
 	// AlwaysForceSend (#205): every message Pixie passes to a session you started with pix
 	// goes in at once, as message_session's force would send it (off by default).
 	AlwaysForceSend bool `json:"alwaysForceSend"`
+	// MarkForcedSends (#340): a message Pixie forces into a session you started with pix (stop
+	// and send, or typed while you're typing there) starts with a note in brackets saying so
+	// (on by default).
+	MarkForcedSends bool `json:"markForcedSends"`
 	// QuestionWaitSecs (#268): how long a question from a session you started with pix waits
 	// for your answer in Pixie, held in its hook, before the session shows it in its terminal.
 	// 0 doesn't hold it: Pixie's buttons type the answer, as before.
@@ -222,7 +226,7 @@ func Default() Config {
 			Enabled: true, SessionHost: "herdr", Session: "deskpixie", Terminal: "warp",
 			CoordinatorKind: CoordinatorClaude, CoordinatorEffort: "low",
 			Port: 48217, HoldOpenSecs: 180, PermissionTimeoutSecs: 120, NotifyPerMinute: 4, QuestionWaitSecs: 20, Editor: richtext.EditorAuto,
-			Narration: true, ProjectsRoot: "~/Documents/deskpixie",
+			Narration: true, ProjectsRoot: "~/Documents/deskpixie", MarkForcedSends: true,
 			// Handed-off work keeps running when the app quits; the next start adopts it.
 			KeepPanesOnQuit: true,
 			Workers:         WorkerSettings{Max: 4, Kinds: []string{"claude", "codex"}},

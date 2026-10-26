@@ -174,6 +174,9 @@ type AgentHandle struct {
 	keepPanes bool
 	// forceSend (agent.alwaysForceSend, #205): every message to your sessions is forced.
 	forceSend bool
+	// markForced (agent.markForcedSends, live, #340): a message forced into your session starts
+	// with a note in brackets saying so.
+	markForced atomic.Bool
 	// confirmWait: ConfirmWait (tests shorten it).
 	confirmWait time.Duration
 	// awaiting: session tool calls waiting on your late confirm (#246), so a repeat asks nothing.
@@ -255,6 +258,7 @@ func NewRuntimeWithWorkers(deps Deps, cfg RuntimeConfig, workers *WorkerDeps) *A
 		rechecked: make(chan struct{}),
 		kept:      cfg.Kept.Workers,
 	}
+	h.markForced.Store(cfg.Settings.MarkForcedSends)
 	jobs := deps.Store.Load(JobsFile)
 	// Worktrees of workers that were live when the app last ended without forgetting them (a
 	// crash): re-checked in Run, and forgotten.
@@ -711,11 +715,21 @@ func (h *AgentHandle) answerSession(name, id, answer, said string) {
 func (h *AgentHandle) tellSession(name, answer string) {
 	ctx, cancel := context.WithTimeout(h.ctx, OpLimit)
 	defer cancel()
-	if r := sessionTool(ctx, h.deps.Host.Session(), McpCall{Kind: CallMessageSession, Name: name, Text: answer, Force: h.forceSend}, h.maskPending); r.Err != nil {
+	if r := h.sessionTool(ctx, McpCall{Kind: CallMessageSession, Name: name, Text: answer, Force: h.forceSend}); r.Err != nil {
 		log.Printf("agent: answering %s: %v", name, r.Err)
 		h.Input(SessionAnswerFailedInput(name, r.Err.Error()))
 	}
 }
+
+// sessionTool runs a session tool on your sessions' host, with the settings the app keeps for
+// them (#340).
+func (h *AgentHandle) sessionTool(ctx context.Context, call McpCall) McpReply {
+	call.Mark = h.markForced.Load()
+	return sessionTool(ctx, h.deps.Host.Session(), call, h.maskPending)
+}
+
+// SetMarkForced: agent.markForcedSends changed (#340); the next forced message follows it.
+func (h *AgentHandle) SetMarkForced(on bool) { h.markForced.Store(on) }
 
 // SetAway: the shell's presence (screen locked, displays asleep or idle).
 func (h *AgentHandle) SetAway(away bool) { h.Input(PresenceInput(away)) }
@@ -1329,7 +1343,7 @@ const AwaitingConfirmNote = "Not done yet: it waits for the user to confirm (the
 func (h *AgentHandle) runSessionTool(call McpCall) McpReply {
 	ctx, cancel := context.WithTimeout(h.ctx, OpLimit)
 	defer cancel()
-	r := sessionTool(ctx, h.deps.Host.Session(), call, h.maskPending)
+	r := h.sessionTool(ctx, call)
 	if (call.Kind == CallMessageSession || call.Kind == CallFlushSession || call.Kind == CallStopAndSendSession) && r.Err == nil {
 		v, _ := r.Value.(map[string]any)
 		if reason, _ := v["reason"].(string); v["status"] == "waiting" {
@@ -1346,7 +1360,7 @@ func (h *AgentHandle) runSessionTool(call McpCall) McpReply {
 func (h *AgentHandle) runLateSessionTool(call McpCall, job JobID) {
 	ctx, cancel := context.WithTimeout(h.ctx, OpLimit)
 	defer cancel()
-	r := sessionTool(ctx, h.deps.Host.Session(), call, h.maskPending)
+	r := h.sessionTool(ctx, call)
 	if call.Kind != CallMessageSession && call.Kind != CallFlushSession && r.Err == nil {
 		return
 	}

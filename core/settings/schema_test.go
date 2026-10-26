@@ -98,7 +98,7 @@ func TestEveryFieldPathExistsInConfig(t *testing.T) {
 func TestTheLiveListIsPinned(t *testing.T) {
 	want := []string{"hotkey", "replyMode", "pack", "scale", "pixiesFolder", "proximityFade.enabled", "proximityFade.radius",
 		"alwaysShowCaption", "captionDismissSecs", "captionFadeSecs", "replyHistoryMins", "chatKeepDays",
-		"voice.inputDevice", "voice.outputDevice", "voice.noiseFilter", "canvas.autoOpen", "agent.editor",
+		"voice.inputDevice", "voice.outputDevice", "voice.noiseFilter", "canvas.autoOpen", "agent.markForcedSends", "agent.editor",
 		"notifications.bubble.enabled", "notifications.bubble.popSecs", "notifications.bubble.lines", "notifications.awayAfterMins", "logMaxMB"}
 	if got := LivePaths(); !reflect.DeepEqual(got, want) {
 		t.Fatal(got)

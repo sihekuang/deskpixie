@@ -124,15 +124,40 @@ type DeliveryPrompter interface {
 }
 
 // Flusher sends a session's waiting messages in past the typing gate (#187): "typed", or still
-// "waiting" with why (a busy session gets them with its next step).
+// "waiting" with why (a busy session gets them with its next step). Typed past your typing,
+// they start with note ("": none, #340).
 type Flusher interface {
-	Flush(ctx context.Context, name string) (Delivery, error)
+	Flush(ctx context.Context, name, note string) (Delivery, error)
 }
 
 // StopSender stops a session's busy turn so its waiting messages go in now (#320): "typed", or
-// still "waiting" with why (it didn't stop in time, a question, or you're typing there).
+// still "waiting" with why (it didn't stop in time, a question, or you're typing there). Sent
+// in after a stop, they start with note ("": none, #340).
 type StopSender interface {
-	StopAndSend(ctx context.Context, name string) (Delivery, error)
+	StopAndSend(ctx context.Context, name, note string) (Delivery, error)
+}
+
+// The notes a message forced into your session starts with, so its terminal shows what
+// happened (#340).
+const (
+	StoppedNote = "[stopped and sent]"
+	TypingNote  = "[sent while you were typing]"
+)
+
+// forcedNote is the note a forced send of call starts with: stop_and_send_session's, or a
+// flush's (flush_session, or message_session's force); "" with the setting off (call.Mark)
+// and for anything else. pix adds it only when it does force them in.
+func forcedNote(call McpCall) string {
+	if !call.Mark {
+		return ""
+	}
+	switch call.Kind {
+	case CallStopAndSendSession:
+		return StoppedNote
+	case CallFlushSession, CallMessageSession:
+		return TypingNote
+	}
+	return ""
 }
 
 // deliveryReply is message_session's, flush_session's or stop_and_send_session's reply for d.
@@ -240,7 +265,7 @@ func sessionTool(ctx context.Context, host SessionHost, call McpCall, mask func(
 				return McpReply{Err: derr}
 			}
 			if f, ok := sec.(Flusher); ok && call.Force && d.Status == "waiting" {
-				if d, derr = f.Flush(ctx, call.Name); derr != nil {
+				if d, derr = f.Flush(ctx, call.Name, forcedNote(call)); derr != nil {
 					return McpReply{Err: derr}
 				}
 			}
@@ -252,7 +277,7 @@ func sessionTool(ctx context.Context, host SessionHost, call McpCall, mask func(
 		if !ok {
 			return McpReply{Err: errors.New("This session's pix can't send waiting messages in; restart it to update pix.")}
 		}
-		d, ferr := f.Flush(ctx, call.Name)
+		d, ferr := f.Flush(ctx, call.Name, forcedNote(call))
 		if ferr != nil {
 			return McpReply{Err: ferr}
 		}
@@ -262,7 +287,7 @@ func sessionTool(ctx context.Context, host SessionHost, call McpCall, mask func(
 		if !ok {
 			return McpReply{Err: errors.New("This session's pix can't stop it to send; restart it to update pix.")}
 		}
-		d, serr := st.StopAndSend(ctx, call.Name)
+		d, serr := st.StopAndSend(ctx, call.Name, forcedNote(call))
 		if serr != nil {
 			return McpReply{Err: serr}
 		}

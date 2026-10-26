@@ -3,6 +3,7 @@ package agent_test
 import (
 	"cmp"
 	"context"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -317,10 +318,12 @@ type deliveringFake struct {
 	// stop_and_send_session (#320)
 	stopResult agent.Delivery
 	stopped    []string
+	// notes: the note each flush or stop was asked to start with (#340)
+	notes []string
 }
 
-func (d *deliveringFake) StopAndSend(ctx context.Context, name string) (agent.Delivery, error) {
-	d.stopped = append(d.stopped, name)
+func (d *deliveringFake) StopAndSend(ctx context.Context, name, note string) (agent.Delivery, error) {
+	d.stopped, d.notes = append(d.stopped, name), append(d.notes, note)
 	return d.stopResult, nil
 }
 
@@ -376,8 +379,8 @@ func TestMessageSessionSaysWhenTheMessageWaits(t *testing.T) {
 	}
 }
 
-func (d *deliveringFake) Flush(ctx context.Context, name string) (agent.Delivery, error) {
-	d.flushed = append(d.flushed, name)
+func (d *deliveringFake) Flush(ctx context.Context, name, note string) (agent.Delivery, error) {
+	d.flushed, d.notes = append(d.flushed, name), append(d.notes, note)
 	return d.flushResult, nil
 }
 
@@ -466,5 +469,40 @@ func TestASessionOnAnOlderPixSaysSo(t *testing.T) {
 	}
 	if rows := sessionRows(t, agent.SessionToolForTest(ctx, c, agent.McpCall{Kind: agent.CallListSessions})); !rows[0].Outdated {
 		t.Fatalf("%+v", rows)
+	}
+}
+
+// #340: what a forced send types starts with a note saying how it was forced: stop and send,
+// or past your typing (flush_session, message_session's force). Off, or for an ordinary
+// message, nothing is added.
+func TestForcedSendsAskForTheirNote(t *testing.T) {
+	for _, mark := range []bool{true, false} {
+		_, user, primary := newSessionHarness(t)
+		d := &deliveringFake{userFake: user, delivery: agent.Delivery{Status: "waiting", Reason: "typing"},
+			flushResult: agent.Delivery{Status: "typed"}, stopResult: agent.Delivery{Status: "typed"}}
+		c := agent.NewCompositeHost(primary, d)
+		ctx := context.Background()
+		for _, call := range []agent.McpCall{
+			{Kind: agent.CallStopAndSendSession, Name: "focus-claude", Mark: mark},
+			{Kind: agent.CallFlushSession, Name: "focus-claude", Mark: mark},
+			{Kind: agent.CallMessageSession, Name: "focus-claude", Text: "hi", Force: true, Mark: mark},
+			{Kind: agent.CallMessageSession, Name: "focus-claude", Text: "plain", Mark: mark}, // waits: not forced
+		} {
+			if r := agent.SessionToolForTest(ctx, c, call); r.Err != nil {
+				t.Fatal(r.Err)
+			}
+		}
+		want := []string{agent.StoppedNote, agent.TypingNote, agent.TypingNote}
+		if !mark {
+			want = []string{"", "", ""}
+		}
+		if !slices.Equal(d.notes, want) {
+			t.Fatalf("mark=%v: notes %q", mark, d.notes)
+		}
+		for _, p := range user.Prompts() {
+			if strings.Contains(p.Text, "[") {
+				t.Fatalf("mark=%v: the message itself changed: %q", mark, p.Text)
+			}
+		}
 	}
 }
