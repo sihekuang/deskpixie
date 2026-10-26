@@ -61,6 +61,43 @@ func (w *screenWatch) saw(chunk, marker string) bool {
 	return false
 }
 
+// interruptOnScreen finds Claude's interrupt line on screen (at: its last row, -1 for none;
+// a narrow pane wraps it over a few) and what follows it (#322): latest, the input box with
+// no prompt of yours (❯) or reply (⏺) before it; stale, a turn since (a redraw brought back
+// an earlier interrupt); neither while the rest isn't drawn yet (a redraw cut between reads).
+func interruptOnScreen(lines []string) (at int, latest, stale bool) {
+	at = -1
+	marker := noSpace(claudeInterrupted)
+	for i := range lines {
+		// It ends on row i: in rows j..i, and not already in rows j..i-1.
+		joined, before := noSpace(lines[i]), ""
+		for j := i - 1; ; j-- {
+			if strings.Contains(joined, marker) {
+				if !strings.Contains(before, marker) {
+					at = i
+				}
+				break
+			}
+			if j < 0 || j <= i-3 {
+				break
+			}
+			joined, before = noSpace(lines[j])+joined, noSpace(lines[j])+before
+		}
+	}
+	if at < 0 {
+		return at, false, false
+	}
+	for _, l := range lines[at+1:] {
+		switch l = strings.TrimSpace(l); {
+		case strings.HasPrefix(l, "─"), strings.HasPrefix(l, "╭"): // the input box: what's in it is yours
+			return at, true, false
+		case strings.HasPrefix(l, "❯"), strings.HasPrefix(l, "⏺"):
+			return at, false, true
+		}
+	}
+	return at, false, false
+}
+
 type sessionOpts struct {
 	tool, description, daemonSock, home, where, app string
 	stdin, stdout                                   *os.File
@@ -108,6 +145,10 @@ type Session struct {
 	// #309). The next interrupt is Pixie's while it is set: a key of yours, a prompt, or that
 	// interrupt clears it, and it lapses after pixieEscWindow.
 	escAt time.Time
+	// stopKeyAt: when Esc or Ctrl-C last went to the agent, yours or Pixie's (#322). Claude's
+	// interrupt on screen counts only after one, once; Enter or a turn's end drops it. A
+	// redraw that brings back an earlier interrupt comes with no key.
+	stopKeyAt time.Time
 	// stopped: Pixie's stop ended the turn: what waits stays queued (still counted) until you
 	// type your next prompt here or Pixie sends a new message (#309).
 	stopped bool
@@ -209,6 +250,7 @@ var forceSettle = 300 * time.Millisecond
 // Keys you type meanwhile go in after the Enter, not inside the message. A menu that showed
 // meanwhile gets no Enter (#306): the message stays typed in the prompt behind it, a menuUp.
 func (s *Session) typeIn(text string) error {
+	s.dropStopKey() // its Enter starts a prompt (#322)
 	var menu string
 	unsettled, pasted, entered, err := s.runner.PasteAndEnter(Paste(text), pasteQuiet, pasteLimit, func() bool {
 		menu = s.menuShown()
@@ -259,9 +301,16 @@ func newSession(o sessionOpts) *Session {
 				s.clearQuestion() // you are answering it yourself
 				s.forgetEsc()     // an interrupt after a key of yours is yours
 			}
+			switch {
+			case isStopKey(b):
+				s.stopKey()
+			case kittyKeys.Replace(string(withoutReports(b))) == "\r":
+				s.dropStopKey() // a prompt: Claude draws the last interrupt again before it
+			}
 		}}
 	// Only the PTY reader goroutine touches these.
 	var watch, stopped screenWatch
+	var armed bool // Claude's interrupt line went by: is it this turn's? (#322)
 	var shown questionWatch
 	var vt *screen
 	var notes osc9Watch
@@ -294,15 +343,26 @@ func newSession(o sessionOpts) *Session {
 	case "claude":
 		s.runner.OnOutput = func(b []byte) {
 			out := string(b)
-			// Working, or blocked: Esc at a permission prompt fires no Stop either.
-			if watch.saw(out, claudeInterrupted) {
-				s.clearQuestion() // at a prompt too: it was dismissed
-				if s.currentStatus() != "idle" {
-					s.interrupted()
-				}
-			}
+			armed = watch.saw(out, claudeInterrupted) || armed
 			vt = s.screenFor(vt)
 			vt.Write(b)
+			// Working, or blocked: Esc at a permission prompt fires no Stop either. The line
+			// counts once the screen shows it last, not when a redraw brings back an earlier one.
+			if armed {
+				switch at, latest, _ := interruptOnScreen(vt.Lines()); {
+				case latest:
+					armed = false
+					if !s.takeStopKey() { // a redraw: no Esc asked for it
+						break
+					}
+					s.clearQuestion() // at a prompt too: it was dismissed
+					if s.currentStatus() != "idle" {
+						s.interrupted()
+					}
+				case at < 0:
+					armed = false
+				}
+			}
 			s.noteScreen(vt) // before watch: the question it may send is answered against this screen
 			shown.watch(s, out, vt)
 		}
@@ -369,6 +429,7 @@ func (s *Session) Hook(event string, p map[string]any) string {
 		s.submitted(prompt) // a message a menu stopped, sent from the terminal (#306)
 		pixie := s.fromPixie(prompt)
 		s.forgetEsc() // a prompt began a turn: a later interrupt isn't that Esc's
+		s.takeStopKey()
 		if !pixie {
 			s.gate.Sent() // your prompt went in (#185)
 			s.release()   // it gets what waits with its next tool, or when it stops
@@ -389,6 +450,7 @@ func (s *Session) Hook(event string, p map[string]any) string {
 		return fmt.Sprintf(`{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":%q}}`, askDescription)
 	case "Stop":
 		s.clearQuestion()
+		s.dropStopKey() // the turn is over: a later interrupt line isn't that key's (#322)
 		pixie := false
 		if s.o.tool == "codex" { // its notify carries the turn's prompts; there is no prompt hook
 			s.promptDrawn() // a turn ran, so its prompt is up (#306)
@@ -545,11 +607,13 @@ func (s *Session) runCommand(m wire.Msg) wire.Msg {
 			switch k {
 			case "Escape":
 				b = []byte{0x1b}
+				s.stopKey()
 				s.mu.Lock()
 				s.escAt = s.now()
 				s.mu.Unlock()
 			case "Enter":
 				b = []byte{'\r'}
+				s.dropStopKey()
 			default:
 				return wire.Msg{Err: "unknown key " + k}
 			}
@@ -672,6 +736,48 @@ func (s *Session) forgetEsc() {
 	s.escAt = time.Time{}
 	s.mu.Unlock()
 }
+
+// stopKey: Esc or Ctrl-C went to the agent (#322).
+func (s *Session) stopKey() {
+	s.mu.Lock()
+	s.stopKeyAt = s.now()
+	s.mu.Unlock()
+}
+
+// dropStopKey: a prompt or a turn's end; an Esc before it stopped nothing that's left.
+func (s *Session) dropStopKey() {
+	s.mu.Lock()
+	s.stopKeyAt = time.Time{}
+	s.mu.Unlock()
+}
+
+// takeStopKey reports whether a stop key went to the agent lately (within pixieEscWindow: a
+// slow tool can take a while to give way), and uses it up.
+func (s *Session) takeStopKey() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ok := !s.stopKeyAt.IsZero() && s.now().Sub(s.stopKeyAt) < pixieEscWindow
+	s.stopKeyAt = time.Time{}
+	return ok
+}
+
+// isStopKey: b holds Ctrl-C or an Esc of its own (not one starting an escape sequence), as you
+// type them, kitty-encoded too: held down or with another key in the same read.
+func isStopKey(b []byte) bool {
+	k := kittyStops.Replace(kittyKeys.Replace(string(withoutReports(b))))
+	if strings.ContainsRune(k, 0x03) {
+		return true
+	}
+	for i := 0; i < len(k); i++ {
+		if k[i] == 0x1b && (i+1 == len(k) || !strings.ContainsRune("[O]P_^X", rune(k[i+1]))) {
+			return true
+		}
+	}
+	return false
+}
+
+// kittyStops: Esc's press as kitty's event types report it (its release is no key).
+var kittyStops = strings.NewReplacer("\x1b[27;1:1u", "\x1b", "\x1b[27;1:2u", "\x1b", "\x1b[27;1:3u", "")
 
 // held: Pixie's stop holds what waits (see interrupted).
 func (s *Session) held() bool {
