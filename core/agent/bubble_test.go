@@ -371,6 +371,52 @@ func TestASessionsNextTurnTakesItsQuestionOffTheBadge(t *testing.T) {
 	}
 }
 
+// #361: you answered the session (your reply passed on, or typed in its terminal) and it is
+// working on it, its next turn: its question leaves the badge then, not once that turn ends.
+// Another session working, or this one blocked, leaves it.
+func TestASessionsNextTurnStartingTakesItsQuestionOffTheBadge(t *testing.T) {
+	c := ctlWith(func(s *Settings) { s.SessionTurns = true })
+	asking := longTurn
+	asking.Reply = "Shall I go ahead and push?"
+	sessionTurn(c, asking, T0)
+	c.Step(paneStatus("api-claude", PaneIdle), T0+1)
+	c.Step(paneStatus("web-claude", PaneIdle), T0+2)
+	c.Step(paneStatus("web-claude", PaneWorking), T0+3)
+	if got := c.Updates(); len(got) != 1 {
+		t.Fatalf("another session's turn took it: %+v", got)
+	}
+	c.Step(paneStatus("api-claude", PaneWorking), T0+4)
+	if got := c.Updates(); len(got) != 0 {
+		t.Fatalf("working on your answer, still on the badge: %+v", got)
+	}
+}
+
+// Working after blocked is only a dialog answered (a background subagent's permission, say),
+// not your answer to what the turn asked.
+func TestADialogAnsweredAfterTheTurnKeepsItsQuestion(t *testing.T) {
+	c := ctlWith(func(s *Settings) { s.SessionTurns = true })
+	asking := longTurn
+	asking.Reply = "Shall I go ahead and push?"
+	sessionTurn(c, asking, T0)
+	c.Step(paneStatus("api-claude", PaneIdle), T0+1)
+	c.Step(paneStatus("api-claude", PaneBlocked), T0+2)
+	c.Step(paneStatus("api-claude", PaneWorking), T0+3)
+	if got := c.Updates(); len(got) != 1 {
+		t.Fatalf("%+v", got)
+	}
+}
+
+// After a restart pix tells its session's status again, which says nothing of a new turn: its
+// open question stays (a Codex menu waits while it works).
+func TestARestartsFirstStatusKeepsTheOpenQuestion(t *testing.T) {
+	ask := OutboxLine{Kind: LineSession, Session: "api-claude", Asking: true, Text: "api: asks"}
+	c := restoredCtl(ask)
+	c.Step(paneStatus("api-claude", PaneWorking), T0+1)
+	if got := c.Updates(); len(got) != 1 {
+		t.Fatalf("%+v", got)
+	}
+}
+
 func TestAlertingLanes(t *testing.T) {
 	tok := "hawk"
 	for _, tc := range []struct {
