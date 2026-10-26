@@ -79,6 +79,6 @@ func TestAHandOffThatWaitsIsSaidAsWaiting(t *testing.T) {
 	} {
 		c := workingOnJob1()
 		openVoice(c)
-		wantEffects(t, visible(c.Step(SessionWaitingInput("repo-claude", landing, reason), T0)), eInject("Coordinator reply: "+want))
+		wantEffects(t, visible(c.Step(SessionWaitingInput("repo-claude", landing, reason), T0)), eHeldInject("Coordinator reply: "+want, "repo-claude"))
 	}
 }

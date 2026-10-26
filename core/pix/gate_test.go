@@ -156,11 +156,11 @@ func TestPaste(t *testing.T) {
 func TestQueueLimit(t *testing.T) {
 	var q Queue
 	for i := 0; i < MaxQueue; i++ {
-		if err := q.Push("m"); err != nil {
+		if _, err := q.Push("m"); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := q.Push("one too many"); err != ErrQueueFull {
+	if _, err := q.Push("one too many"); err != ErrQueueFull {
 		t.Fatalf("want ErrQueueFull, got %v", err)
 	}
 	if len(q.Drain()) != MaxQueue || q.Len() != 0 {

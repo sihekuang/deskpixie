@@ -8,6 +8,7 @@ package agent_test
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,11 +27,15 @@ import (
 // pixSession is one `pix claude` running fakeclaude in a terminal, registered with host.
 type pixSession struct {
 	t    *testing.T
+	bin  string // pix, fakeclaude and their folders
+	sock string
 	dir  string // fakeclaude's FAKE_DIR
 	host *pixhost.Host
 	addr string // its name, as the coordinator's session tools know it
 	keys *os.File
 	ctl  *os.File
+	cmd  *exec.Cmd
+	runs int
 	done int
 }
 
@@ -55,14 +60,10 @@ func startPixSessionHolding(t *testing.T, wait time.Duration) *pixSession {
 			t.Fatalf("build %s: %v\n%s", pkg, err, b)
 		}
 	}
-	fake, home, support := filepath.Join(bin, "f"), filepath.Join(bin, "home"), filepath.Join(bin, "support")
-	for _, d := range []string{fake, home, support} {
-		if err := os.Mkdir(d, 0o700); err != nil {
+	for _, d := range []string{"home", "support"} {
+		if err := os.Mkdir(filepath.Join(bin, d), 0o700); err != nil {
 			t.Fatal(err)
 		}
-	}
-	if err := syscall.Mkfifo(filepath.Join(fake, "ctl"), 0o600); err != nil {
-		t.Fatal(err)
 	}
 	sock := filepath.Join(bin, "d.sock")
 	host := pixhost.New(sock, func() []string { return nil })
@@ -71,20 +72,39 @@ func startPixSessionHolding(t *testing.T, wait time.Duration) *pixSession {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { host.Shutdown() })
+	p := &pixSession{t: t, bin: bin, sock: sock, host: host}
+	p.launch()
+	return p
+}
 
+// launch runs a new `pix claude`, with a fakeclaude folder of its own, and waits until it has
+// registered.
+func (p *pixSession) launch() {
+	t := p.t
+	t.Helper()
+	p.runs++
+	p.dir, p.done = filepath.Join(p.bin, fmt.Sprintf("f%d", p.runs)), 0
+	if err := os.Mkdir(p.dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(filepath.Join(p.dir, "ctl"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	ptmx, tty, err := pty.Open()
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(filepath.Join(bin, "pix"), "claude")
-	cmd.Dir = bin
-	cmd.Env = pixEnv("PATH="+bin+":/usr/bin:/bin", "HOME="+home, "DESKPIXIE_SUPPORT_DIR="+support,
-		"DESKPIXIE_PIX_SOCK="+sock, "FAKE_DIR="+fake, "TERM=xterm-256color",
-		"TMPDIR="+bin) // pix's own folder goes here, short enough for its socket, and goes with bin
+	cmd := exec.Command(filepath.Join(p.bin, "pix"), "claude")
+	cmd.Dir = p.bin
+	cmd.Env = pixEnv("PATH="+p.bin+":/usr/bin:/bin", "HOME="+filepath.Join(p.bin, "home"),
+		"DESKPIXIE_SUPPORT_DIR="+filepath.Join(p.bin, "support"), "DESKPIXIE_PIX_SOCK="+p.sock,
+		"FAKE_DIR="+p.dir, "TERM=xterm-256color",
+		"TMPDIR="+p.bin) // pix's own folder goes here, short enough for its socket, and goes with bin
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = tty, tty, tty
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
+	p.cmd = cmd
 	t.Cleanup(func() { stopPix(cmd) })
 	tty.Close()
 	go func() { // what the terminal shows; read so the agent never blocks writing it
@@ -93,21 +113,33 @@ func startPixSessionHolding(t *testing.T, wait time.Duration) *pixSession {
 		}
 	}()
 	t.Cleanup(func() { ptmx.Close() })
-	ctl, err := os.OpenFile(filepath.Join(fake, "ctl"), os.O_RDWR, 0)
+	ctl, err := os.OpenFile(filepath.Join(p.dir, "ctl"), os.O_RDWR, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { ctl.Close() })
-	p := &pixSession{t: t, dir: fake, host: host, keys: ptmx, ctl: ctl}
+	p.keys, p.ctl = ptmx, ctl
 	p.waitFor("registered", func() bool {
-		l, err := host.List(context.Background())
+		l, err := p.host.List(context.Background())
 		if err != nil || len(l) != 1 || !l[0].User.Reachable {
 			return false
 		}
 		p.addr = l[0].Name
 		return true
 	})
-	return p
+}
+
+// restart closes the session's terminal tab and runs pix again in the same folder: a new pix
+// under the same name, its messages numbered from 1 again.
+func (p *pixSession) restart() {
+	p.t.Helper()
+	old := p.addr
+	stopPix(p.cmd)
+	p.waitFor("gone", func() bool { l, _ := p.host.List(context.Background()); return len(l) == 0 })
+	p.launch()
+	if p.addr != old {
+		p.t.Fatalf("the new pix is %s, not %s", p.addr, old)
+	}
 }
 
 // stopPix ends pix as a closed terminal tab would (SIGTERM), so it removes its own folder; only
@@ -125,12 +157,17 @@ func stopPix(cmd *exec.Cmd) {
 }
 
 // pixEnv is the test's environment without anything that would make pix think it is nested,
-// report to the real app, use the real home, or leave its folder in the real temp folder.
+// report to the real app, use the real home or app data (any DESKPIXIE_ switch), or leave its
+// folder in the real temp folder.
 func pixEnv(extra ...string) []string {
 	var env []string
 	for _, kv := range os.Environ() {
-		switch k, _, _ := strings.Cut(kv, "="); k {
-		case "PIX_SESSION", "PIX_SOCK", "PIXIE_AGENT_TOKEN", "PATH", "HOME", "DESKPIXIE_SUPPORT_DIR", "DESKPIXIE_PIX_SOCK",
+		k, _, _ := strings.Cut(kv, "=")
+		if strings.HasPrefix(k, "DESKPIXIE_") { // the test sets the ones it needs (no keylog, …)
+			continue
+		}
+		switch k {
+		case "PIX_SESSION", "PIX_SOCK", "PIXIE_AGENT_TOKEN", "PATH", "HOME",
 			"TERMINAL_EMULATOR", "TERM_PROGRAM", "__CFBundleIdentifier", "TERM", "TMPDIR":
 			continue
 		}

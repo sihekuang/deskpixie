@@ -7,6 +7,11 @@ type Notice struct {
 	// Sessions: the user's sessions the notice is about, for buttons that go to them (#261);
 	// never said.
 	Sessions []string
+	// Held: the session whose message this notice says still waits (#183), and HeldSeq the
+	// number pix gave that message (0: not known); never said. Once that session has it,
+	// WithdrawHeld drops the notice if it hasn't been said yet (#339).
+	Held    string
+	HeldSeq uint64
 }
 
 // SignalKind enumerates what the voice loop tells the rest of the app.
