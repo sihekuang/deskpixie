@@ -1048,3 +1048,20 @@ func TestANewRequestListsPixiesRunningWorker(t *testing.T) {
 		}
 	})
 }
+
+// #352: a worker effect applied while the app quits (a just-started worker's brief) makes no
+// lane, so Shutdown's forget runs in Shutdown and the token is revoked before it returns.
+func TestAWorkerEffectWhileQuittingMakesNoLane(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := withJob(t, true)
+		name := workerName(t, call(r, Coordinator, startCall("focus")))
+		settle()
+		if LateWorkerOpForTest(r.h, Effect{Kind: EfPromptWorker, Name: name, Text: "late brief"}) {
+			t.Fatal("a lane was made while quitting")
+		}
+		r.h.Shutdown()
+		if !slices.Contains(r.tokens.Revoked(), name) {
+			t.Fatal(r.tokens.Revoked())
+		}
+	})
+}
