@@ -1861,6 +1861,11 @@ func (h *AgentHandle) withKnown(change func(map[string]repoSlug)) {
 func (h *AgentHandle) workerOp(e Effect) {
 	h.lanesMu.Lock()
 	defer h.lanesMu.Unlock()
+	// Once quitting, no lane is made: Shutdown has cleared them and stops, closes and forgets
+	// every worker itself, so a forget can't land on a late lane and run after it returns (#352).
+	if h.quitting() {
+		return
+	}
 	l, ok := h.lanes[e.Name]
 	if !ok {
 		l = h.newLane(e.Name)
