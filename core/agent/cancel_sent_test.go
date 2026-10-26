@@ -135,3 +135,14 @@ func TestATurnOverBeforeItsHandOffWasReportedIsntStopped(t *testing.T) {
 		t.Fatalf("%q", name)
 	}
 }
+
+// #332 review: a request that never started its turn (Claude dropped the Enter): the next turn,
+// long after, is the user's own.
+func TestATurnStartingLongAfterTheHandOffIsntPixies(t *testing.T) {
+	c := sentAndClosed(t)
+	c.Step(TickInput(), T0+30_000)
+	c.Step(paneStatus("repo-claude", PaneWorking), T0+120_000)
+	if name, ok := c.SentTo(""); ok {
+		t.Fatalf("%q", name)
+	}
+}

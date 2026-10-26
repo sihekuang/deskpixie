@@ -677,6 +677,10 @@ func (c *AgentController) sessionStatus(name string, st PaneStatus, now Millis) 
 	t, ok := c.sentTurn[name]
 	switch {
 	case !ok:
+	case st == PaneWorking && !t.working && now >= t.at+SentIdleGraceMs:
+		// Not started within the grace (its Enter lost, its status missed): this turn is
+		// someone else's, likely the user's own.
+		delete(c.sentTurn, name)
 	case st == PaneWorking:
 		t.working = true
 		c.sentTurn[name] = t
