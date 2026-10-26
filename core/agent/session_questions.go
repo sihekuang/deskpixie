@@ -246,6 +246,12 @@ func number(w string) string {
 // "not" besides ("let's go with Postgres"). false when it names none, several or one it rules out.
 func MenuChoice(options []string, answer string) (int, bool) {
 	raw := menuWords(answer)
+	// An option named word for word first: "Option 2" is the option of that name, wherever it is.
+	for k, o := range options {
+		if strings.Join(menuWords(o), " ") == strings.Join(raw, " ") {
+			return k + 1, true
+		}
+	}
 	// "option 2", "number one" and nothing else: a place, whatever numbers the options have.
 	if place := trimLeadFillers(raw); len(place) == 2 && (place[0] == "option" || place[0] == "number" || place[0] == "choice") {
 		if n, err := strconv.Atoi(number(place[1])); err == nil {

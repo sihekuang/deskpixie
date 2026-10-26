@@ -191,6 +191,7 @@ func TestAMenuChoiceReadsOptionsAsSaid(t *testing.T) {
 		{[]string{"SQLite", "Any one is fine"}, "one", 1}, // no option has a number: a place
 		{[]string{"Python 3", "Go", "Rust"}, "option 4", 0},
 		{[]string{"New", "Existing"}, "the new one", 1},
+		{[]string{"Option 2", "Option 1"}, "Option 2", 1},
 		{[]string{"Postgres", "SQLite", "MySQL"}, "let's go with option 2, please", 2},
 		// … and only that: "option N" ruled out, or beside another, picks nothing.
 		{[]string{"Postgres", "SQLite", "MySQL"}, "not option 2", 0},
