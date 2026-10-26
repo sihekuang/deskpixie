@@ -179,7 +179,9 @@ func (a *App) threadAdd(e chat.Entry) {
 
 // threadRequests is every open request now. One not stored yet is added; one stored is left as
 // it is, outcome and all, unless it is from another time: its line id was given to a new
-// request, which replaces it. An open one that is no longer listed was answered somewhere else.
+// request, which replaces it. One still open that no longer takes a typed answer (its session's
+// hook let go of it, #347) is changed so. An open one that is no longer listed was answered
+// somewhere else.
 func (a *App) threadRequests(list []chat.Entry) {
 	op := a.beginThread()
 	defer op.end()
@@ -192,6 +194,9 @@ func (a *App) threadRequests(list []chat.Entry) {
 			op.add(e)
 		case e.At != 0 && stored.At != e.At:
 			op.renew(e)
+		case e.Request != nil && stored.Request != nil && stored.Request.Outcome == "" && stored.Request.Typed != e.Request.Typed:
+			typed := e.Request.Typed
+			op.update(e.ID, func(e *chat.Entry) { e.Request.Typed = typed })
 		}
 	}
 	for _, e := range a.thread.Needs() {

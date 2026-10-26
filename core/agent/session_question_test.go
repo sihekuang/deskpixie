@@ -211,6 +211,46 @@ func TestAFailedAnswerSaysToUseTheTerminal(t *testing.T) {
 	wantContains(t, fx, eNotify("Couldn't answer in api-claude: The question is no longer on screen. Answer it in its terminal."))
 }
 
+// #347: a menu asked again while it waits (its hook let go: no typed answer now) changes in
+// place: the same card, not told again.
+func TestAMenuAskedAgainWhileItWaitsChangesInPlace(t *testing.T) {
+	c := ctl()
+	menu := pushMenu
+	menu.Typed = true
+	b := bubbleOf(askSession(c, menu, T0))
+	if len(b) != 1 || !b[0].Typed {
+		t.Fatalf("%+v", b)
+	}
+	menu.Typed = false
+	fx := askSession(c, menu, T0+1)
+	if n := len(effectsOfKind(fx, EfNotify)) + len(effectsOfKind(fx, EfInject)); n != 0 {
+		t.Fatalf("told again: %s", fmtEffects(fx))
+	}
+	if b2 := bubbleOf(fx); len(b2) != 1 || b2[0].Typed || b2[0].Token != b[0].Token || b2[0].ID != b[0].ID {
+		t.Fatalf("%+v", b2)
+	}
+	if c.confirms.TakesTyped(b[0].Token) {
+		t.Fatal("still takes a typed answer")
+	}
+}
+
+// #347: a tap pix couldn't type took the question out of the bubble; pix asks it again, and
+// it is back.
+func TestAQuestionAskedAgainAfterAFailedAnswerIsBack(t *testing.T) {
+	c := ctl()
+	askSession(c, pushMenu, T0)
+	tok := c.Updates()[0].Token
+	c.Step(ChooseInput(tok, 1), T0+1)
+	if len(c.Updates()) != 0 {
+		t.Fatalf("%+v", c.Updates())
+	}
+	c.Step(SessionAnswerFailedInput(sessionName, "The question isn't on screen."), T0+2)
+	b := bubbleOf(askSession(c, pushMenu, T0+3))
+	if len(b) != 1 || b[0].Token == "" || len(b[0].Options) != 2 {
+		t.Fatalf("%+v", b)
+	}
+}
+
 // Review #5: a dialog pix can't answer (its first option isn't a plain Yes) is only announced.
 func TestANoticeIsAnnouncedOnly(t *testing.T) {
 	c := ctl()

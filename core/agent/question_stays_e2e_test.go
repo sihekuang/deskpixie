@@ -81,6 +81,16 @@ func TestASessionsMenuStaysUntilYouTapAnOption(t *testing.T) {
 	time.Sleep(heldFor + 500*time.Millisecond) // its hook lets go: Claude shows the menu
 	p.waitFor("blocked on the menu", func() bool { return p.status() == PaneBlocked })
 	p.stillAsked(h, item, "the hold ran out")
+	// Its keys answer it now: a pick, but no typed answer or chat, which only the hook took.
+	if !item.Typed {
+		t.Fatalf("held, it took a typed answer: %+v", item)
+	}
+	p.waitFor("no typed answer offered", func() bool {
+		items := h.Updates()
+		return len(items) == 1 && !items[0].Typed && !agentapp.RequestEntries(items, RosterView{})[0].Request.Typed
+	})
+	h.TypedAnswer(item.Token, "push it later") // from a card shown before: it stays
+	p.stillAsked(h, item, "a typed answer it can't take")
 	p.step("subtool")
 	p.stillAsked(h, item, "a subagent's tool, at the menu")
 	if st := p.status(); st != PaneBlocked {
@@ -90,7 +100,7 @@ func TestASessionsMenuStaysUntilYouTapAnOption(t *testing.T) {
 	p.stillAsked(h, item, "a redraw")
 	h.UpdatesSeen([]uint64{item.ID})
 	p.stillAsked(h, item, "the bubble seen")
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(1500 * time.Millisecond) // past pix's look whether it left the screen
 	p.stillAsked(h, item, "a while longer")
 	h.Choose(item.Token, 2)
 	p.gone(h, "menu key 2")
@@ -138,6 +148,8 @@ func TestASubagentsPermissionStaysUntilYouAllowIt(t *testing.T) {
 	p.stillAsked(h, item, "the hold ran out")
 	p.step("redraw")
 	p.stillAsked(h, item, "a redraw")
+	time.Sleep(1500 * time.Millisecond)
+	p.stillAsked(h, item, "a while longer")
 	h.Decide(item.Token, true)
 	p.gone(h, "subperm key 1")
 	p.waitFor("working again", func() bool { return p.status() == PaneWorking })

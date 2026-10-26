@@ -102,6 +102,17 @@ func (c *Confirmations) RequestSession(p Pending) (string, bool) {
 	return token, true
 }
 
+// RefreshSession sets whether session's prompt id still takes a typed answer (#347); true if
+// that prompt waits.
+func (c *Confirmations) RefreshSession(session, id string, typed bool) bool {
+	at := slices.IndexFunc(c.pending, func(p Pending) bool { return p.Session == session && session != "" && p.Question == id })
+	if at < 0 {
+		return false
+	}
+	c.pending[at].Typed = typed
+	return true
+}
+
 // TakeSession removes session's prompt with this id ("" any of its prompts); true if there was one.
 func (c *Confirmations) TakeSession(session, id string) bool {
 	before := len(c.pending)

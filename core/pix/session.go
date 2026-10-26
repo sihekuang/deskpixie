@@ -525,6 +525,10 @@ func (s *Session) Hook(event string, p map[string]any) string {
 			if s.currentStatus() == "blocked" {
 				s.setStatus("working")
 			}
+		} else {
+			// Unless it went in a way no hook tells (denied by a rule, its tool failed): seen,
+			// and off the screen now, it went too.
+			time.AfterFunc(offScreenWait, func() { s.goneIfOffScreen(q) })
 		}
 		// A subagent's tool (agent_id set) would hand what waits to that subagent, not to the
 		// session you talk to (#336): it waits for the session's own next tool, or its stop.
@@ -540,6 +544,20 @@ func (s *Session) Hook(event string, p map[string]any) string {
 		}
 	}
 	return ""
+}
+
+// goneIfOffScreen clears q if it still waits but showed and is off the screen now (#347).
+func (s *Session) goneIfOffScreen(q *question) {
+	s.mu.Lock()
+	gone := s.q == q && s.offScreen(q)
+	s.mu.Unlock()
+	if !gone {
+		return
+	}
+	s.dropQuestion(q, "off screen")
+	if s.currentStatus() == "blocked" {
+		s.setStatus("working")
+	}
 }
 
 // agentOf is the subagent whose hook p is ("": the session's own).

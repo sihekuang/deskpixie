@@ -100,6 +100,11 @@ func TestAHeldMenuNobodyAnswersGoesToTheTerminal(t *testing.T) {
 	if out := hookReply(t, reply, 2*time.Second); out != nil || time.Since(start) < 300*time.Millisecond {
 		t.Fatalf("%v after %v", out, time.Since(start))
 	}
+	// Asked again as it is now: its options still, but no typed answer or chat, which only
+	// its hook could take.
+	if again := askedQuestion(t, h); again.ID != q.ID || strings.Join(again.Keys, "|") != "Push|Don't push" || again.Typed || !q.Typed {
+		t.Fatalf("%+v, then %+v", q, again)
+	}
 	noQuestionGone(t, h, 300*time.Millisecond)
 	h.s.runner.OnOutput([]byte("Push main?\r\n❯ 1. Push\r\n  2. Don't push\r\nEnter to select"))
 	errs := make(chan string, 1)

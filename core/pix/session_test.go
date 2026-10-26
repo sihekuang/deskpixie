@@ -893,7 +893,8 @@ func askBash(t *testing.T, h *harness, command string) wire.Msg {
 }
 
 // #268: an answer counts once its prompt left the screen; one the agent didn't take (the
-// prompt stays) is refused, so Pixie says to answer it in the terminal.
+// prompt stays) is refused, so Pixie says so. The prompt still waits (#347): it can be tried
+// again.
 func TestAnAnswerTheAgentDoesntTakeIsRefused(t *testing.T) {
 	defer func(w time.Duration) { answerWait = w }(answerWait)
 	answerWait = 300 * time.Millisecond
@@ -902,8 +903,8 @@ func TestAnAnswerTheAgentDoesntTakeIsRefused(t *testing.T) {
 	if err := answer(t, h, q.ID, "yes"); err != "The session didn't take the answer." {
 		t.Fatalf("%q", err)
 	}
-	if err := answer(t, h, q.ID, "yes"); !strings.Contains(err, "no longer waiting") {
-		t.Fatalf("typed once: %q", err)
+	if err := answer(t, h, q.ID, "no"); err != "The session didn't take the answer." {
+		t.Fatalf("still waiting: %q", err)
 	}
 }
 
@@ -963,6 +964,61 @@ func TestAKeyYouPressWithdrawsTheQuestion(t *testing.T) {
 	waitEvent(t, h.d.events, "question gone", func(m wire.Msg) bool { return m.Event == "question-gone" && m.ID == q.ID })
 	if err := answer(t, h, q.ID, "yes"); !strings.Contains(err, "no longer waiting") {
 		t.Fatalf("%q", err)
+	}
+}
+
+// #347: an answer pix can't type leaves the question waiting, so it is asked again: Pixie
+// took it as answered, and its card comes back.
+func TestAnAnswerPixCantTypeAsksTheQuestionAgain(t *testing.T) {
+	h := keyHarness(t, "claude")
+	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "npm test"}})
+	q := askedQuestion(t, h)
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "yes", Command: "answer", Text: q.ID, Source: "yes"})
+	var again, reply *wire.Msg
+	waitEvent(t, h.d.events, "the reply and the question again", func(m wire.Msg) bool {
+		switch {
+		case m.ID == "yes":
+			reply = &m
+		case m.Event == "question":
+			again = &m
+		}
+		return reply != nil && again != nil
+	})
+	if !strings.Contains(reply.Err, "isn't on screen") || again.ID != q.ID || again.ToolName != "Bash" {
+		t.Fatalf("%+v, %+v", reply, again)
+	}
+}
+
+// #347: a question that showed and left the screen with no hook or key saying so (denied by
+// a rule, its tool failed) goes once another tool ends; one still on screen stays.
+func TestAQuestionOffTheScreenGoesWithTheNextTool(t *testing.T) {
+	defer func(w time.Duration) { offScreenWait = w }(offScreenWait)
+	offScreenWait = 50 * time.Millisecond
+	// An agent that draws nothing: the test alone feeds the screen, as only the PTY reader may.
+	h := agentHarness(t, "claude", `stty raw -echo; cat >/dev/null`)
+	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "npm test"}})
+	q := askedQuestion(t, h)
+	h.s.runner.OnOutput([]byte("Bash command\r\n npm test\r\nDo you want to proceed?\r\n❯ 1. Yes"))
+	h.s.Hook("PostToolUse", map[string]any{"tool_name": "Read", "tool_input": map[string]any{"file_path": "/x"}})
+	noQuestionGone(t, h, 200*time.Millisecond) // still on screen
+	h.s.runner.OnOutput([]byte("\x1b[2J\x1b[H⏺ Working…\r\n"))
+	h.s.Hook("PostToolUse", map[string]any{"tool_name": "Read", "tool_input": map[string]any{"file_path": "/y"}})
+	waitEvent(t, h.d.events, "question gone", func(m wire.Msg) bool { return m.Event == "question-gone" && m.ID == q.ID })
+}
+
+// #347: a new question takes the place of one that left the screen unseen by any hook.
+func TestANewQuestionReplacesOneOffTheScreen(t *testing.T) {
+	h := agentHarness(t, "claude", `stty raw -echo; cat >/dev/null`)
+	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "npm test"}})
+	q := askedQuestion(t, h)
+	h.s.runner.OnOutput([]byte("Bash command\r\n npm test\r\nDo you want to proceed?\r\n❯ 1. Yes"))
+	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "npm run build"}})
+	noQuestionGone(t, h, 100*time.Millisecond) // the first is still on screen: the second waits its turn
+	h.s.runner.OnOutput([]byte("\x1b[2J\x1b[H⏺ Working…\r\n"))
+	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "npm run lint"}})
+	waitEvent(t, h.d.events, "question gone", func(m wire.Msg) bool { return m.Event == "question-gone" && m.ID == q.ID })
+	if next := askedQuestion(t, h); next.ID == q.ID || !strings.Contains(next.Input, "npm run lint") {
+		t.Fatalf("%+v", next)
 	}
 }
 

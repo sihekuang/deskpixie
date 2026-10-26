@@ -17,9 +17,14 @@ import (
 // sessionRequestBase starts the request ids of session prompts, apart from hook request ids.
 const sessionRequestBase RequestID = 1 << 62
 
-// onSessionQuestion asks you session's prompt q; a prompt it asked before is replaced.
+// onSessionQuestion asks you session's prompt q; a prompt it asked before is replaced. Asked
+// again while it waits with its buttons (pix's hook let go of it, #347), it changes in place:
+// it is not told twice.
 func (c *AgentController) onSessionQuestion(session string, q SessionQuestion, now Millis, fx *[]Effect) {
 	if c.shutDown {
+		return
+	}
+	if len(q.Options) > 0 && c.confirms.RefreshSession(session, q.ID, q.Typed) {
 		return
 	}
 	c.confirms.TakeSession(session, "")
