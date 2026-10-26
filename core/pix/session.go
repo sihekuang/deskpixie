@@ -61,6 +61,30 @@ func (w *screenWatch) saw(chunk, marker string) bool {
 	return false
 }
 
+// interruptOnScreen finds Claude's interrupt line on screen (at, -1 for none) and whether it is
+// the latest thing there (#322): no prompt of yours (❯) or reply (⏺) between it and the input
+// box. A redraw that shows an earlier interrupt above a turn since doesn't count.
+func interruptOnScreen(lines []string) (at int, latest bool) {
+	at = -1
+	for i, l := range lines {
+		if strings.Contains(noSpace(l), noSpace(claudeInterrupted)) {
+			at = i
+		}
+	}
+	if at < 0 {
+		return at, false
+	}
+	for _, l := range lines[at+1:] {
+		switch l = strings.TrimSpace(l); {
+		case strings.HasPrefix(l, "─"): // the input box: what's in it is yours
+			return at, true
+		case strings.HasPrefix(l, "❯"), strings.HasPrefix(l, "⏺"):
+			return at, false
+		}
+	}
+	return at, true
+}
+
 type sessionOpts struct {
 	tool, description, daemonSock, home, where, app string
 	stdin, stdout                                   *os.File
@@ -262,6 +286,7 @@ func newSession(o sessionOpts) *Session {
 		}}
 	// Only the PTY reader goroutine touches these.
 	var watch, stopped screenWatch
+	var armed bool // Claude's interrupt line went by: is it this turn's? (#322)
 	var shown questionWatch
 	var vt *screen
 	var notes osc9Watch
@@ -294,15 +319,23 @@ func newSession(o sessionOpts) *Session {
 	case "claude":
 		s.runner.OnOutput = func(b []byte) {
 			out := string(b)
-			// Working, or blocked: Esc at a permission prompt fires no Stop either.
-			if watch.saw(out, claudeInterrupted) {
-				s.clearQuestion() // at a prompt too: it was dismissed
-				if s.currentStatus() != "idle" {
-					s.interrupted()
-				}
-			}
+			armed = watch.saw(out, claudeInterrupted) || armed
 			vt = s.screenFor(vt)
 			vt.Write(b)
+			// Working, or blocked: Esc at a permission prompt fires no Stop either. The line
+			// counts once the screen shows it last, not when a redraw brings back an earlier one.
+			if armed {
+				switch at, latest := interruptOnScreen(vt.Lines()); {
+				case latest:
+					armed = false
+					s.clearQuestion() // at a prompt too: it was dismissed
+					if s.currentStatus() != "idle" {
+						s.interrupted()
+					}
+				case at < 0:
+					armed = false
+				}
+			}
 			s.noteScreen(vt) // before watch: the question it may send is answered against this screen
 			shown.watch(s, out, vt)
 		}

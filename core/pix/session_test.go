@@ -408,6 +408,48 @@ func TestClaudeInterruptOnScreenMeansIdle(t *testing.T) {
 	h.s.finish()
 }
 
+// #322: the interrupt counts only while it is the latest thing on screen. Below it, a prompt
+// you sent (❯) or a reply (⏺) means a turn since; the input box and its draft don't.
+func TestInterruptOnScreenIsOnlyTheLatest(t *testing.T) {
+	box := []string{"────────", "❯ my draft", "────────", "  ⏵⏵ auto mode on"}
+	cases := []struct {
+		name   string
+		lines  []string
+		at     int
+		latest bool
+	}{
+		{"just stopped", append([]string{"  the story so far", "  ⎿  Interrupted · What should Claude do instead?"}, box...), 1, true},
+		{"no box yet", []string{"  ⎿  Interrupted · What should Claude do instead?", ""}, 0, true},
+		{"a turn since", append([]string{"  ⎿  Interrupted · What should Claude do instead?", "❯ Write a story", "⏺ Once upon a time"}, box...), 0, false},
+		{"a reply since", append([]string{"  ⎿  Interrupted · What should Claude do instead?", "⏺ PLUM"}, box...), 0, false},
+		{"stopped twice", append([]string{"  ⎿  Interrupted · What should Claude do instead?", "❯ Write a story", "  ⎿  Interrupted · What should Claude do instead?"}, box...), 2, true},
+		{"none", box, -1, false},
+	}
+	for _, c := range cases {
+		if at, latest := interruptOnScreen(c.lines); at != c.at || latest != c.latest {
+			t.Errorf("%s: %d %t", c.name, at, latest)
+		}
+	}
+}
+
+// #322: Claude Code redraws an earlier interrupt above the turn now running: still working.
+func TestARedrawnInterruptDoesNotEndTheTurn(t *testing.T) {
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c",
+		`read x; printf '\033[2J\033[H  ⎿  Interrupted · What should Claude do instead?\r\n❯ Write a story\r\n⏺ Once upon a time\r\n'; ` +
+			`read y; printf '\033[2J\033[H  ⎿  Interrupted · What should Claude do instead?\r\n'; sleep 30`}})
+	h.s.setStatus("working")
+	waitEvent(t, h.d.events, "working", func(m wire.Msg) bool { return m.Event == "status" && m.Status == "working" })
+	h.stdinW.WriteString("go\n")
+	time.Sleep(300 * time.Millisecond)
+	if st := h.s.currentStatus(); st != "working" {
+		t.Fatalf("redraw made it %s", st)
+	}
+	h.stdinW.WriteString("again\n") // now the interrupt is the latest thing: it's over
+	waitEvent(t, h.d.events, "idle", func(m wire.Msg) bool { return m.Event == "status" && m.Status == "idle" })
+	h.s.runner.Hangup()
+	h.s.finish()
+}
+
 func TestScreenMarkersDontFlipStatusTheWrongWay(t *testing.T) {
 	var w screenWatch
 	if w.saw("Interrupted · What should Claude do instead?", claudeInterrupted) != true {
