@@ -581,7 +581,14 @@ func waitsOnSender(words []string, i int) bool {
 	if j >= 0 && (youWords[words[j]] || words[j] == "we") {
 		j--
 	}
-	if j >= 0 && words[j] == "before" {
+	// The step ends the clause, or a "then" follows it: "ask me before you push to main, other
+	// branches are fine" only waits for part of it.
+	rest := words[i+1:]
+	if at := slices.Index(rest, "then"); at >= 0 {
+		rest = rest[:at]
+	}
+	ends := len(rest) <= 2 && !slices.ContainsFunc(rest, func(w string) bool { return !goAheadObjects[w] })
+	if j >= 0 && words[j] == "before" && ends {
 		t := words[:j]
 		for n := 0; n < 4 && len(t) > 0 && goAheadObjects[t[len(t)-1]]; n++ {
 			t = t[:len(t)-1]
