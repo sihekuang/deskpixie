@@ -521,8 +521,9 @@ type AgentController struct {
 	// has already told you (#177); true while it has done nothing else since.
 	handedOff map[JobID]bool
 	// sentTurn: the job each of your sessions is on a turn for, from the request Pixie typed
-	// in until that turn ends (#332): what a cancel of the job, closed by then, stops.
-	sentTurn map[string]JobID
+	// in until that turn ends, is stopped or the session closes (#332): what a cancel of the
+	// job, closed by then, stops.
+	sentTurn map[string]sentTurn
 	// typedTo: the typed job last handed to each of your sessions; that session's told turns
 	// go to the text box while it shows that job (#241).
 	typedTo map[string]JobID
@@ -582,7 +583,7 @@ func NewAgentController(settings Settings) *AgentController {
 		memories:    NewMemoryLog(),
 		workers:     NewWorkers(),
 		handedOff:   map[JobID]bool{},
-		sentTurn:    map[string]JobID{},
+		sentTurn:    map[string]sentTurn{},
 		typedTo:     map[string]JobID{},
 		jobSessions: map[JobID][]string{},
 		asking:      map[string]uint64{},
@@ -645,12 +646,41 @@ func (c *AgentController) ResolveCancel(id string) (JobID, error) {
 	return "", fmt.Errorf("Several jobs are open (%s). Which one?", joinIDs(open))
 }
 
+// sentTurn is the turn Pixie typed a job's request into: when, and whether the session was seen
+// working since.
+type sentTurn struct {
+	job     JobID
+	at      Millis
+	working bool
+}
+
+// SentIdleGraceMs: a session seen idle this soon after a request was typed in may not have
+// started on it yet; later, idle means its turn was stopped (pix reports no turn then, #332).
+const SentIdleGraceMs Millis = 3000
+
+// sessionStatus keeps sentTurn to the turn still running: a stop, Esc in its terminal or any
+// other end without a reported turn leaves the session idle.
+func (c *AgentController) sessionStatus(name string, st PaneStatus, now Millis) {
+	t, ok := c.sentTurn[name]
+	switch {
+	case !ok:
+	case st == PaneWorking:
+		t.working = true
+		c.sentTurn[name] = t
+	case t.working || now >= t.at+SentIdleGraceMs:
+		delete(c.sentTurn, name)
+	}
+}
+
 // SentTo is the session a cancel of a job that is already closed means (#332): the job raw
-// (with none named, the one Pixie typed into a session last) passed its request to one of your
-// sessions, which is still on that turn. "Stop that" just after a hand-off stops the session.
+// (with none named and no job open, the one Pixie typed into a session last) passed its request
+// to one of your sessions, which is still on that turn. "Stop that" just after a hand-off stops
+// the session.
 func (c *AgentController) SentTo(raw string) (string, bool) {
 	var want JobID
-	if raw = strings.TrimSpace(raw); raw != "" {
+	if raw = strings.TrimSpace(raw); raw == "" && len(c.OpenJobs()) > 0 {
+		return "", false // which open job is the user's to say
+	} else if raw != "" {
 		j, ok := ParseJobID(raw)
 		if !ok {
 			return "", false
@@ -658,13 +688,12 @@ func (c *AgentController) SentTo(raw string) (string, bool) {
 		want = j
 	}
 	name, newest := "", Millis(0)
-	for session, id := range c.sentTurn {
-		j, ok := c.jobs.Get(id)
-		if !ok || c.jobs.IsOpen(id) || want != "" && id != want {
+	for session, t := range c.sentTurn {
+		if _, ok := c.jobs.Get(t.job); !ok || c.jobs.IsOpen(t.job) || want != "" && t.job != want {
 			continue
 		}
-		if name == "" || j.Updated > newest || j.Updated == newest && session < name {
-			name, newest = session, j.Updated
+		if name == "" || t.at > newest || t.at == newest && session < name {
+			name, newest = session, t.at
 		}
 	}
 	return name, name != ""
@@ -760,8 +789,10 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 			}
 		case ev.Kind == PaneEventQuestion || ev.Kind == PaneEventQuestionGone:
 		case ev.Kind == PaneEventStatus:
+			c.sessionStatus(ev.Agent, ev.Status, now)
 			c.onWorkerStatus(ev.Agent, ev.Status, now, &fx)
 		default:
+			delete(c.sentTurn, ev.Agent)         // its name may be another session's next
 			c.confirms.TakeSession(ev.Agent, "") // a session that closed asks nothing any more
 			c.dropAsking(ev.Agent, &fx)
 			c.workerGone(ev.Agent, now, &fx)
@@ -1900,7 +1931,7 @@ func (c *AgentController) tellSessionSent(job JobID, name, description, waiting 
 	}
 	text, brief, title := sessionSentText(description, waiting)
 	if name != "" && waiting == "" {
-		c.sentTurn[name] = job
+		c.sentTurn[name] = sentTurn{job: job, at: now}
 	} else if name != "" {
 		delete(c.sentTurn, name) // a held message isn't its turn: a stop wouldn't stop it
 	}

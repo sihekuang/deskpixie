@@ -30,10 +30,14 @@ func TestCancellingADoneHandOffStopsYourSession(t *testing.T) {
 	if n := escapes(user.Keys(), "focus-claude"); n != 1 {
 		t.Fatal(user.Keys())
 	}
-	// Idle by the next one: nothing to stop, and said so.
+	// Stopped, it's idle: that turn is over, and the next cancel stops nothing.
 	user.SetStatus("focus-claude", PaneIdle)
+	if !eventually(func() bool { _, ok := r.h.SentTo(""); return !ok }) {
+		t.Fatal("idle after working ends the turn")
+	}
+	user.SetStatus("focus-claude", PaneWorking) // the user's own request
 	out = invoke(t, Jobs{H: r.h}, `{"action":"cancel"}`).(map[string]any)
-	if out["status"] != "not working" || escapes(user.Keys(), "focus-claude") != 1 {
+	if out["error"] != "No job is open." || escapes(user.Keys(), "focus-claude") != 1 {
 		t.Fatal(out, user.Keys())
 	}
 }

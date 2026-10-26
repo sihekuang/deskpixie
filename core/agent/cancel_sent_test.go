@@ -55,3 +55,46 @@ func TestAnOpenJobIsCancelledAsBefore(t *testing.T) {
 		t.Fatalf("still open: the cancel stops it, not the session: %q", name)
 	}
 }
+
+// #332 review: a stop (or Esc in its terminal) ends the turn with no turn reported: seen idle
+// after working, it's over, and the user's own next turn is never stopped for it.
+func TestAStoppedTurnIsNoLongerPixies(t *testing.T) {
+	c := sentAndClosed(t)
+	c.Step(paneStatus("repo-claude", PaneWorking), T0+11)
+	c.Step(paneStatus("repo-claude", PaneIdle), T0+12)
+	c.Step(paneStatus("repo-claude", PaneWorking), T0+13) // the user's own request
+	if name, ok := c.SentTo(""); ok {
+		t.Fatalf("%q", name)
+	}
+}
+
+func TestIdleJustAfterTheRequestWentInIsntTheEnd(t *testing.T) {
+	c := sentAndClosed(t)
+	c.Step(paneStatus("repo-claude", PaneIdle), T0+6) // before it started on it
+	if _, ok := c.SentTo(""); !ok {
+		t.Fatal("not started yet is still its turn")
+	}
+	c.Step(paneStatus("repo-claude", PaneIdle), T0+5+SentIdleGraceMs)
+	if _, ok := c.SentTo(""); ok {
+		t.Fatal("idle since: over")
+	}
+}
+
+func TestAClosedSessionsNameIsntStoppedLater(t *testing.T) {
+	c := sentAndClosed(t)
+	c.Step(PaneInput(PaneEvent{Kind: PaneEventExited, Agent: "repo-claude"}), T0+11)
+	if name, ok := c.SentTo(""); ok {
+		t.Fatalf("a new session may take its name: %q", name)
+	}
+}
+
+func TestWithJobsOpenACancelWithoutAnIDStopsNoSession(t *testing.T) {
+	c := sentAndClosed(t)
+	c.Step(DelegateInput(job(2), "another", ""), T0+11)
+	if name, ok := c.SentTo(""); ok {
+		t.Fatalf("the open job is the one to cancel, or ask which: %q", name)
+	}
+	if name, ok := c.SentTo("job_000000000001"); !ok || name != "repo-claude" {
+		t.Fatal("named, it still means its session", name, ok)
+	}
+}
