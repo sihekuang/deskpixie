@@ -246,12 +246,10 @@ func number(w string) string {
 // "not" besides ("let's go with Postgres"). false when it names none, several or one it rules out.
 func MenuChoice(options []string, answer string) (int, bool) {
 	raw := menuWords(answer)
-	// "option 2", "number one": a place, whatever numbers the options have.
-	for k := 0; k+1 < len(raw); k++ {
-		if raw[k] == "option" || raw[k] == "number" || raw[k] == "choice" {
-			if n, err := strconv.Atoi(number(raw[k+1])); err == nil {
-				return n, n >= 1 && n <= len(options) && len(raw) <= k+3
-			}
+	// "option 2", "number one" and nothing else: a place, whatever numbers the options have.
+	if place := trimLeadFillers(raw); len(place) == 2 && (place[0] == "option" || place[0] == "number" || place[0] == "choice") {
+		if n, err := strconv.Atoi(number(place[1])); err == nil {
+			return n, n >= 1 && n <= len(options)
 		}
 	}
 	words := stripFillers(raw)
@@ -285,7 +283,7 @@ func MenuChoice(options []string, answer string) (int, bool) {
 		if d := number(w); d != "" {
 			found := 0
 			for k, o := range options {
-				if ow := menuWords(o); slices.Contains(ow, d) || d == "1" && slices.Contains(ow, "one") {
+				if slices.Contains(menuWords(o), d) {
 					if found != 0 {
 						return 0, false
 					}
@@ -314,6 +312,18 @@ func MenuChoice(options []string, answer string) (int, bool) {
 		}
 	}
 	return found, true
+}
+
+// trimLeadFillers drops the fillers at the start and "please" or "thanks" at the end, but
+// never "option" or "number" before a place: "let's go with option 2, please" is "option 2".
+func trimLeadFillers(words []string) []string {
+	for len(words) > 0 && (words[len(words)-1] == "please" || words[len(words)-1] == "thanks") {
+		words = words[:len(words)-1]
+	}
+	for len(words) > 0 && menuFillers[words[0]] && words[0] != "option" && words[0] != "number" {
+		words = words[1:]
+	}
+	return words
 }
 
 // stripFillers drops the fillers at the end, then at the start, keeping one word at least:

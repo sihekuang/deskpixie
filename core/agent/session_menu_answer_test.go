@@ -188,9 +188,20 @@ func TestAMenuChoiceReadsOptionsAsSaid(t *testing.T) {
 		{[]string{"Python 3", "Go", "Rust"}, "option 3", 3},
 		{[]string{"Python 3", "Go", "Rust"}, "option three", 3},
 		{[]string{"SQLite", "Any one is fine"}, "option one", 1},
-		{[]string{"SQLite", "Any one is fine"}, "one", 1},
+		{[]string{"SQLite", "Any one is fine"}, "one", 1}, // no option has a number: a place
 		{[]string{"Python 3", "Go", "Rust"}, "option 4", 0},
 		{[]string{"New", "Existing"}, "the new one", 1},
+		{[]string{"Postgres", "SQLite", "MySQL"}, "let's go with option 2, please", 2},
+		// … and only that: "option N" ruled out, or beside another, picks nothing.
+		{[]string{"Postgres", "SQLite", "MySQL"}, "not option 2", 0},
+		{[]string{"Postgres", "SQLite", "MySQL"}, "I don't want option two", 0},
+		{[]string{"Postgres", "SQLite", "MySQL"}, "anything but number three", 0},
+		{[]string{"Postgres", "SQLite", "MySQL"}, "SQLite instead of option 1", 0},
+		{[]string{"Postgres", "SQLite", "MySQL"}, "MySQL, not option one", 0},
+		{[]string{"Postgres", "SQLite", "MySQL"}, "option two? No.", 0},
+		// A lone "one" never names an option by its pronoun.
+		{[]string{"Use 2 workers", "Let me pick one"}, "one", 0},
+		{[]string{"Use 2 workers", "Use 4 workers", "Any one is fine"}, "one", 0},
 		// Ruled out: nothing is picked.
 		{[]string{"Postgres", "SQLite", "MySQL"}, "anything but SQLite", 0},
 		{[]string{"Postgres", "SQLite", "MySQL"}, "avoid MySQL", 0},
