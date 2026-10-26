@@ -61,14 +61,27 @@ func (w *screenWatch) saw(chunk, marker string) bool {
 	return false
 }
 
-// interruptOnScreen finds Claude's interrupt line on screen (at, -1 for none) and whether it is
-// the latest thing there (#322): no prompt of yours (❯) or reply (⏺) between it and the input
-// box. A redraw that shows an earlier interrupt above a turn since doesn't count.
+// interruptOnScreen finds Claude's interrupt line on screen (at: its last row, -1 for none;
+// a narrow pane wraps it over a few) and whether it is the latest thing there (#322): no
+// prompt of yours (❯) or reply (⏺) between it and the input box. A redraw that shows an
+// earlier interrupt above a turn since doesn't count.
 func interruptOnScreen(lines []string) (at int, latest bool) {
 	at = -1
-	for i, l := range lines {
-		if strings.Contains(noSpace(l), noSpace(claudeInterrupted)) {
-			at = i
+	marker := noSpace(claudeInterrupted)
+	for i := range lines {
+		// It ends on row i: in rows j..i, and not already in rows j..i-1.
+		joined, before := noSpace(lines[i]), ""
+		for j := i - 1; ; j-- {
+			if strings.Contains(joined, marker) {
+				if !strings.Contains(before, marker) {
+					at = i
+				}
+				break
+			}
+			if j < 0 || j <= i-3 {
+				break
+			}
+			joined, before = noSpace(lines[j])+joined, noSpace(lines[j])+before
 		}
 	}
 	if at < 0 {

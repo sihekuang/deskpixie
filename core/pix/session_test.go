@@ -424,6 +424,7 @@ func TestInterruptOnScreenIsOnlyTheLatest(t *testing.T) {
 		{"a reply since", append([]string{"  ⎿  Interrupted · What should Claude do instead?", "⏺ PLUM"}, box...), 0, false},
 		{"stopped twice", append([]string{"  ⎿  Interrupted · What should Claude do instead?", "❯ Write a story", "  ⎿  Interrupted · What should Claude do instead?"}, box...), 2, true},
 		{"none", box, -1, false},
+		{"wrapped in a narrow pane", append([]string{"  ⎿  Interrupted · What", "should Claude do instead?"}, box...), 1, true},
 	}
 	for _, c := range cases {
 		if at, latest := interruptOnScreen(c.lines); at != c.at || latest != c.latest {
