@@ -87,7 +87,8 @@ func (Jobs) Description() string {
 	return "The coordinator's jobs. action \"status\": what each job is doing (status, age in seconds, latest " +
 		"progress), to answer \"what's the coordinator doing?\". Not the user's sessions (\"how many sessions are open?\"): " +
 		"delegate those. action \"cancel\": stop a job; without job_id it " +
-		"cancels the only open job, and if several are open it returns an error asking which."
+		"cancels the only open job, and if several are open it returns an error asking which. A job already done whose " +
+		"request went to one of the user's sessions has that session's turn on it stopped instead (\"stop that\" just after a hand-off)."
 }
 
 func (Jobs) Parameters() json.RawMessage {
@@ -97,7 +98,7 @@ func (Jobs) Parameters() json.RawMessage {
 		`"required":["action"],"additionalProperties":false}`)
 }
 
-func (j Jobs) Invoke(_ context.Context, raw json.RawMessage) voice.ToolOutcome {
+func (j Jobs) Invoke(ctx context.Context, raw json.RawMessage) voice.ToolOutcome {
 	args := decodeArgs(raw)
 	action, _ := args["action"].(string)
 	switch action {
@@ -110,6 +111,23 @@ func (j Jobs) Invoke(_ context.Context, raw json.RawMessage) voice.ToolOutcome {
 	case "cancel":
 		id, to, err := j.H.CancelAsked(textArg(args, "job_id"))
 		if err != nil {
+			// Closed already, its request typed into one of your sessions: that turn is what's
+			// stopped (#332), as the session's stop button does.
+			if name, ok := j.H.SentTo(textArg(args, "job_id")); ok {
+				sent, err := j.H.Interrupt(ctx, name)
+				if err == nil {
+					j.H.SentStopped(name) // stopped, or done already: not Pixie's turn any more
+				}
+				switch {
+				case err != nil:
+					return toolError(err)
+				case !sent:
+					return toolReply(map[string]any{"session": name, "status": "not working",
+						"note": "Your session had already finished that; there was nothing to stop."})
+				}
+				return toolReply(map[string]any{"session": name, "status": "stopped",
+					"note": "The job was done, so your session's turn on it was stopped instead."})
+			}
 			return toolError(err)
 		}
 		if to != "" {

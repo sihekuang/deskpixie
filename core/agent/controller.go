@@ -520,6 +520,16 @@ type AgentController struct {
 	// handedOff: jobs whose request the coordinator passed to one of your sessions, which Pixie
 	// has already told you (#177); true while it has done nothing else since.
 	handedOff map[JobID]bool
+	// sentTurn: the job each of your sessions is on a turn for, from the request Pixie typed
+	// in until that turn ends, is stopped or the session closes (#332): what a cancel of the
+	// job, closed by then, stops.
+	sentTurn map[string]sentTurn
+	// sessionWorking: your sessions last seen working, so a hand-off reported after its turn
+	// started still knows it did (#332).
+	sessionWorking map[string]bool
+	// pixieTurnEnded: when each session last finished a turn Pixie typed in: one reported
+	// before its hand-off (a quick turn beats the tool's reply) is that hand-off's, over.
+	pixieTurnEnded map[string]Millis
 	// typedTo: the typed job last handed to each of your sessions; that session's told turns
 	// go to the text box while it shows that job (#241).
 	typedTo map[string]JobID
@@ -568,23 +578,26 @@ type AgentController struct {
 
 func NewAgentController(settings Settings) *AgentController {
 	return &AgentController{
-		router:      NewRouter(settings.NotifyPerMinute),
-		confirms:    NewConfirmations(settings.PermissionTimeoutMs),
-		narrator:    NewNarrator(NarrateIntervalMs),
-		updates:     NewUpdatesWith(settings.UpdateQuietMs),
-		settings:    settings,
-		jobs:        NewJobTable(),
-		inbox:       NewInbox(),
-		outbox:      NewOutbox(),
-		memories:    NewMemoryLog(),
-		workers:     NewWorkers(),
-		handedOff:   map[JobID]bool{},
-		typedTo:     map[string]JobID{},
-		jobSessions: map[JobID][]string{},
-		asking:      map[string]uint64{},
-		typed:       map[JobID]bool{},
-		opener:      newOpener(settings.NotifyPerMinute),
-		modes:       map[string]bool{},
+		router:         NewRouter(settings.NotifyPerMinute),
+		confirms:       NewConfirmations(settings.PermissionTimeoutMs),
+		narrator:       NewNarrator(NarrateIntervalMs),
+		updates:        NewUpdatesWith(settings.UpdateQuietMs),
+		settings:       settings,
+		jobs:           NewJobTable(),
+		inbox:          NewInbox(),
+		outbox:         NewOutbox(),
+		memories:       NewMemoryLog(),
+		workers:        NewWorkers(),
+		handedOff:      map[JobID]bool{},
+		sentTurn:       map[string]sentTurn{},
+		sessionWorking: map[string]bool{},
+		pixieTurnEnded: map[string]Millis{},
+		typedTo:        map[string]JobID{},
+		jobSessions:    map[JobID][]string{},
+		asking:         map[string]uint64{},
+		typed:          map[JobID]bool{},
+		opener:         newOpener(settings.NotifyPerMinute),
+		modes:          map[string]bool{},
 	}
 }
 
@@ -640,6 +653,72 @@ func (c *AgentController) ResolveCancel(id string) (JobID, error) {
 	}
 	return "", fmt.Errorf("Several jobs are open (%s). Which one?", joinIDs(open))
 }
+
+// sentTurn is the turn Pixie typed a job's request into: when, and whether the session was seen
+// working since.
+type sentTurn struct {
+	job     JobID
+	at      Millis
+	working bool
+}
+
+// SentIdleGraceMs: a session seen idle this soon after a request was typed in may not have
+// started on it yet; later, idle means its turn was stopped (pix reports no turn then, #332).
+const SentIdleGraceMs Millis = 3000
+
+// SentTurnRaceMs: a turn of Pixie's that ended at most this long before its hand-off was
+// reported, the session idle since, was that hand-off's (#332).
+const SentTurnRaceMs Millis = 30_000
+
+// sessionStatus keeps sentTurn to the turn still running: a stop, Esc in its terminal or any
+// other end without a reported turn leaves the session idle.
+func (c *AgentController) sessionStatus(name string, st PaneStatus, now Millis) {
+	c.sessionWorking[name] = st == PaneWorking
+	t, ok := c.sentTurn[name]
+	switch {
+	case !ok:
+	case st == PaneWorking && !t.working && now >= t.at+SentIdleGraceMs:
+		// Not started within the grace (its Enter lost, its status missed): this turn is
+		// someone else's, likely the user's own.
+		delete(c.sentTurn, name)
+	case st == PaneWorking:
+		t.working = true
+		c.sentTurn[name] = t
+	case t.working || now >= t.at+SentIdleGraceMs:
+		delete(c.sentTurn, name)
+	}
+}
+
+// SentTo is the session a cancel of a job that is already closed means (#332): the job raw
+// (with none named and no job open, the one Pixie typed into a session last) passed its request
+// to one of your sessions, which is still on that turn. "Stop that" just after a hand-off stops
+// the session.
+func (c *AgentController) SentTo(raw string) (string, bool) {
+	var want JobID
+	if raw = strings.TrimSpace(raw); raw == "" && len(c.OpenJobs()) > 0 {
+		return "", false // which open job is the user's to say
+	} else if raw != "" {
+		j, ok := ParseJobID(raw)
+		if !ok {
+			return "", false
+		}
+		want = j
+	}
+	name, newest := "", Millis(0)
+	for session, t := range c.sentTurn {
+		if _, ok := c.jobs.Get(t.job); !ok || c.jobs.IsOpen(t.job) || want != "" && t.job != want {
+			continue
+		}
+		if name == "" || t.at > newest || t.at == newest && session < name {
+			name, newest = session, t.at
+		}
+	}
+	return name, name != ""
+}
+
+// SentStopped: the turn Pixie typed into session was stopped (#332); a later cancel doesn't
+// mean it.
+func (c *AgentController) SentStopped(session string) { delete(c.sentTurn, session) }
 
 // Step applies one input and returns the effects to carry out, in order.
 func (c *AgentController) Step(in Input, now Millis) []Effect {
@@ -731,8 +810,12 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 			}
 		case ev.Kind == PaneEventQuestion || ev.Kind == PaneEventQuestionGone:
 		case ev.Kind == PaneEventStatus:
+			c.sessionStatus(ev.Agent, ev.Status, now)
 			c.onWorkerStatus(ev.Agent, ev.Status, now, &fx)
 		default:
+			delete(c.sentTurn, ev.Agent) // its name may be another session's next
+			delete(c.sessionWorking, ev.Agent)
+			delete(c.pixieTurnEnded, ev.Agent)
 			c.confirms.TakeSession(ev.Agent, "") // a session that closed asks nothing any more
 			c.dropAsking(ev.Agent, &fx)
 			c.workerGone(ev.Agent, now, &fx)
@@ -1870,6 +1953,15 @@ func (c *AgentController) tellSessionSent(job JobID, name, description, waiting 
 		delete(c.typedTo, name) // its answer is for this request now, not an earlier typed one
 	}
 	text, brief, title := sessionSentText(description, waiting)
+	ended, done := c.pixieTurnEnded[name]
+	switch {
+	case name != "" && waiting == "" && !c.sessionWorking[name] && done && now <= ended+SentTurnRaceMs:
+		delete(c.sentTurn, name) // its turn already came and went
+	case name != "" && waiting == "":
+		c.sentTurn[name] = sentTurn{job: job, at: now, working: c.sessionWorking[name]}
+	case name != "":
+		delete(c.sentTurn, name) // a held message isn't its turn: a stop wouldn't stop it
+	}
 	c.handedOff[job] = true
 	tokens := c.pendingTokens()
 	text = maskPendingTokens(text, tokens) // kept masked too: a typed job's box shows it again (#231)
@@ -1948,6 +2040,10 @@ const MaxSessionDetailBytes = 2 << 10
 // agent-settable too.
 func (c *AgentController) onSessionTurn(name string, t SessionTurn, now Millis, fx *[]Effect) {
 	c.dropAsking(name, fx)
+	delete(c.sentTurn, name)
+	if t.FromPixie {
+		c.pixieTurnEnded[name] = now
+	}
 	if c.shutDown {
 		return
 	}
