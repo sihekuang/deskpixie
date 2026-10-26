@@ -397,58 +397,95 @@ func TestReRegisterSendsAddressAndSessionID(t *testing.T) {
 
 func TestClaudeInterruptOnScreenMeansIdle(t *testing.T) {
 	// Claude fires no Stop hook when a turn is interrupted; its screen says so instead. The
-	// message arrives in two chunks, as PTY reads can split it.
+	// message arrives in two chunks, as PTY reads can split it. Your Esc asked for it (#322).
 	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c",
-		`read x; printf '\033[1m⎿  Interrupted · What should Clau'; sleep 0.2; printf 'de do instead?\033[0m\n'; sleep 30`}})
+		`read x; printf '\033[1m⎿  Interrupted · What should Clau'; sleep 0.2; printf 'de do instead?\033[0m\r\n────\r\n❯ \r\n────\r\n'; sleep 30`}})
 	h.s.setStatus("working")
 	waitEvent(t, h.d.events, "working", func(m wire.Msg) bool { return m.Event == "status" && m.Status == "working" })
-	h.stdinW.WriteString("go\n")
+	pressEsc(h)
 	waitEvent(t, h.d.events, "idle after the interrupt", func(m wire.Msg) bool { return m.Event == "status" && m.Status == "idle" })
 	h.s.runner.Hangup()
 	h.s.finish()
 }
 
-// #322: the interrupt counts only while it is the latest thing on screen. Below it, a prompt
-// you sent (❯) or a reply (⏺) means a turn since; the input box and its draft don't.
+// #322: the interrupt counts only once the input box shows below it with nothing between.
+// A prompt you sent (❯) or a reply (⏺) there means a turn since; the box's draft doesn't; with
+// neither drawn yet (a redraw cut between reads) it isn't decided.
 func TestInterruptOnScreenIsOnlyTheLatest(t *testing.T) {
 	box := []string{"────────", "❯ my draft", "────────", "  ⏵⏵ auto mode on"}
+	const line = "  ⎿  Interrupted · What should Claude do instead?"
 	cases := []struct {
-		name   string
-		lines  []string
-		at     int
-		latest bool
+		name          string
+		lines         []string
+		at            int
+		latest, stale bool
 	}{
-		{"just stopped", append([]string{"  the story so far", "  ⎿  Interrupted · What should Claude do instead?"}, box...), 1, true},
-		{"no box yet", []string{"  ⎿  Interrupted · What should Claude do instead?", ""}, 0, true},
-		{"a turn since", append([]string{"  ⎿  Interrupted · What should Claude do instead?", "❯ Write a story", "⏺ Once upon a time"}, box...), 0, false},
-		{"a reply since", append([]string{"  ⎿  Interrupted · What should Claude do instead?", "⏺ PLUM"}, box...), 0, false},
-		{"stopped twice", append([]string{"  ⎿  Interrupted · What should Claude do instead?", "❯ Write a story", "  ⎿  Interrupted · What should Claude do instead?"}, box...), 2, true},
-		{"none", box, -1, false},
-		{"wrapped in a narrow pane", append([]string{"  ⎿  Interrupted · What", "should Claude do instead?"}, box...), 1, true},
+		{"just stopped", append([]string{"  the story so far", line}, box...), 1, true, false},
+		{"box not drawn yet", []string{line, "", ""}, 0, false, false},
+		{"a turn since", append([]string{line, "❯ Write a story", "⏺ Once upon a time"}, box...), 0, false, true},
+		{"a reply since", append([]string{line, "⏺ PLUM"}, box...), 0, false, true},
+		{"stopped twice", append([]string{line, "❯ Write a story", line}, box...), 2, true, false},
+		{"none", box, -1, false, false},
+		{"wrapped in a narrow pane", append([]string{"  ⎿  Interrupted · What", "should Claude do instead?"}, box...), 1, true, false},
 	}
 	for _, c := range cases {
-		if at, latest := interruptOnScreen(c.lines); at != c.at || latest != c.latest {
-			t.Errorf("%s: %d %t", c.name, at, latest)
+		if at, latest, stale := interruptOnScreen(c.lines); at != c.at || latest != c.latest || stale != c.stale {
+			t.Errorf("%s: %d %t %t", c.name, at, latest, stale)
 		}
 	}
 }
 
-// #322: Claude Code redraws an earlier interrupt above the turn now running: still working.
+// #322: Claude Code redraws an earlier interrupt above the turn now running, the redraw cut
+// between two reads right after that line: still working. Your Esc then stops it; and when
+// the next prompt begins, Claude draws that interrupt again over an empty input box before it
+// shows the prompt: still working, as no Esc asked for it.
 func TestARedrawnInterruptDoesNotEndTheTurn(t *testing.T) {
 	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c",
-		`read x; printf '\033[2J\033[H  ⎿  Interrupted · What should Claude do instead?\r\n❯ Write a story\r\n⏺ Once upon a time\r\n'; ` +
-			`read y; printf '\033[2J\033[H  ⎿  Interrupted · What should Claude do instead?\r\n'; sleep 30`}})
+		`read x; printf '\033[2J\033[H  ⎿  Interrupted · What should Claude do instead?\r\n'; sleep 0.3; ` +
+			`printf '❯ Write a story\r\n⏺ Once upon a time\r\n────\r\n❯ \r\n────\r\n'; ` +
+			`read y; printf '\033[2J\033[H⏺ Once upon a time\r\n  ⎿  Interrupted · What should Claude do instead?\r\n────\r\n❯ \r\n────\r\n'; ` +
+			`read z; printf '\033[2J\033[H⏺ Once upon a time\r\n  ⎿  Interrupted · What should Claude do instead?\r\n────\r\n❯ \r\n────\r\n'; ` +
+			`printf 'Next turn\r\n'; sleep 30`}})
 	h.s.setStatus("working")
 	waitEvent(t, h.d.events, "working", func(m wire.Msg) bool { return m.Event == "status" && m.Status == "working" })
 	h.stdinW.WriteString("go\n")
-	time.Sleep(300 * time.Millisecond)
+	waitScreen(t, h, "Onceuponatime") // the turn drawn below the old line
 	if st := h.s.currentStatus(); st != "working" {
 		t.Fatalf("redraw made it %s", st)
 	}
-	h.stdinW.WriteString("again\n") // now the interrupt is the latest thing: it's over
+	pressEsc(h)
 	waitEvent(t, h.d.events, "idle", func(m wire.Msg) bool { return m.Event == "status" && m.Status == "idle" })
+	h.s.Hook("UserPromptSubmit", map[string]any{"prompt": "next"})
+	h.stdinW.WriteString("next\n")
+	waitScreen(t, h, "Nextturn")
+	if st := h.s.currentStatus(); st != "working" {
+		t.Fatalf("the redraw at the next prompt made it %s", st)
+	}
 	h.s.runner.Hangup()
 	h.s.finish()
+}
+
+// pressEsc types Esc on its own, then a line, as a test agent's `read` wants one.
+func pressEsc(h *harness) {
+	h.stdinW.WriteString("\x1b")
+	time.Sleep(50 * time.Millisecond)
+	h.stdinW.WriteString("\n")
+}
+
+// waitScreen waits until the screen pix reads shows text (spaces taken out).
+func waitScreen(t *testing.T, h *harness, text string) {
+	t.Helper()
+	for end := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		h.s.mu.Lock()
+		shown := strings.Contains(h.s.screen, text)
+		h.s.mu.Unlock()
+		if shown {
+			return
+		}
+		if time.Now().After(end) {
+			t.Fatalf("the screen never showed %q", text)
+		}
+	}
 }
 
 func TestScreenMarkersDontFlipStatusTheWrongWay(t *testing.T) {
@@ -836,7 +873,8 @@ func TestClaudesInterruptAtAPromptWithdrawsTheQuestion(t *testing.T) {
 	h.s.Hook("Notification", map[string]any{})
 	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "ls"}})
 	q := askedQuestion(t, h)
-	h.s.runner.OnOutput([]byte(claudeInterrupted))
+	h.s.runner.OnInput([]byte{0x1b})                                // your Esc (#322)
+	h.s.runner.OnOutput([]byte(claudeInterrupted + "\r\n────\r\n")) // the input box below it
 	waitEvent(t, h.d.events, "question gone", func(m wire.Msg) bool { return m.Event == "question-gone" && m.ID == q.ID })
 }
 
@@ -974,7 +1012,7 @@ func TestAnInterruptAtAPromptDoesNotCountTowardTheNextTurn(t *testing.T) {
 	h.s.Hook("UserPromptSubmit", map[string]any{"prompt": "a long job"})
 	h.s.Hook("Notification", map[string]any{})
 	at = at.Add(10 * time.Minute)
-	h.s.runner.OnOutput([]byte(claudeInterrupted))
+	h.s.runner.OnOutput([]byte(claudeInterrupted + "\r\n────\r\n")) // the input box below it (#322)
 	h.s.Hook("UserPromptSubmit", map[string]any{"prompt": "something quick"})
 	at = at.Add(3 * time.Second)
 	h.s.Hook("Stop", map[string]any{"last_assistant_message": "Done."})
@@ -1408,7 +1446,7 @@ func eventually(t *testing.T, what string, f func() bool) {
 // escAgent is a Claude stand-in that shows Claude's interrupt once it has read n keys (Esc).
 func escAgent(n int) Launch {
 	return Launch{Path: "/bin/sh", Args: []string{"-c", "stty raw -echo; " + strings.Repeat("head -c 1 >/dev/null; ", n) +
-		"printf '\\033[1m⎿  Interrupted · What should Claude do instead?\\033[0m\\r\\n'; sleep 30"}}
+		"printf '\\033[1m⎿  Interrupted · What should Claude do instead?\\033[0m\\r\\n────\\r\\n❯ \\r\\n────\\r\\n'; sleep 30"}}
 }
 
 // stoppedWithAWaitingMessage is a working Claude session with one message waiting for it,

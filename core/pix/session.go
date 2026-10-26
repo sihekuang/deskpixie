@@ -62,10 +62,10 @@ func (w *screenWatch) saw(chunk, marker string) bool {
 }
 
 // interruptOnScreen finds Claude's interrupt line on screen (at: its last row, -1 for none;
-// a narrow pane wraps it over a few) and whether it is the latest thing there (#322): no
-// prompt of yours (❯) or reply (⏺) between it and the input box. A redraw that shows an
-// earlier interrupt above a turn since doesn't count.
-func interruptOnScreen(lines []string) (at int, latest bool) {
+// a narrow pane wraps it over a few) and what follows it (#322): latest, the input box with
+// no prompt of yours (❯) or reply (⏺) before it; stale, a turn since (a redraw brought back
+// an earlier interrupt); neither while the rest isn't drawn yet (a redraw cut between reads).
+func interruptOnScreen(lines []string) (at int, latest, stale bool) {
 	at = -1
 	marker := noSpace(claudeInterrupted)
 	for i := range lines {
@@ -85,17 +85,17 @@ func interruptOnScreen(lines []string) (at int, latest bool) {
 		}
 	}
 	if at < 0 {
-		return at, false
+		return at, false, false
 	}
 	for _, l := range lines[at+1:] {
 		switch l = strings.TrimSpace(l); {
-		case strings.HasPrefix(l, "─"): // the input box: what's in it is yours
-			return at, true
+		case strings.HasPrefix(l, "─"), strings.HasPrefix(l, "╭"): // the input box: what's in it is yours
+			return at, true, false
 		case strings.HasPrefix(l, "❯"), strings.HasPrefix(l, "⏺"):
-			return at, false
+			return at, false, true
 		}
 	}
-	return at, true
+	return at, false, false
 }
 
 type sessionOpts struct {
@@ -145,6 +145,10 @@ type Session struct {
 	// #309). The next interrupt is Pixie's while it is set: a key of yours, a prompt, or that
 	// interrupt clears it, and it lapses after pixieEscWindow.
 	escAt time.Time
+	// stopKeyAt: when Esc or Ctrl-C last went to the agent, yours or Pixie's (#322). Claude's
+	// interrupt on screen counts only after one, once, and not after a prompt since: a redraw
+	// that brings back an earlier interrupt comes with no key.
+	stopKeyAt time.Time
 	// stopped: Pixie's stop ended the turn: what waits stays queued (still counted) until you
 	// type your next prompt here or Pixie sends a new message (#309).
 	stopped bool
@@ -296,6 +300,9 @@ func newSession(o sessionOpts) *Session {
 				s.clearQuestion() // you are answering it yourself
 				s.forgetEsc()     // an interrupt after a key of yours is yours
 			}
+			if isStopKey(b) {
+				s.stopKey()
+			}
 		}}
 	// Only the PTY reader goroutine touches these.
 	var watch, stopped screenWatch
@@ -338,9 +345,12 @@ func newSession(o sessionOpts) *Session {
 			// Working, or blocked: Esc at a permission prompt fires no Stop either. The line
 			// counts once the screen shows it last, not when a redraw brings back an earlier one.
 			if armed {
-				switch at, latest := interruptOnScreen(vt.Lines()); {
+				switch at, latest, _ := interruptOnScreen(vt.Lines()); {
 				case latest:
 					armed = false
+					if !s.takeStopKey() { // a redraw: no Esc asked for it
+						break
+					}
 					s.clearQuestion() // at a prompt too: it was dismissed
 					if s.currentStatus() != "idle" {
 						s.interrupted()
@@ -415,6 +425,7 @@ func (s *Session) Hook(event string, p map[string]any) string {
 		s.submitted(prompt) // a message a menu stopped, sent from the terminal (#306)
 		pixie := s.fromPixie(prompt)
 		s.forgetEsc() // a prompt began a turn: a later interrupt isn't that Esc's
+		s.takeStopKey()
 		if !pixie {
 			s.gate.Sent() // your prompt went in (#185)
 			s.release()   // it gets what waits with its next tool, or when it stops
@@ -591,6 +602,7 @@ func (s *Session) runCommand(m wire.Msg) wire.Msg {
 			switch k {
 			case "Escape":
 				b = []byte{0x1b}
+				s.stopKey()
 				s.mu.Lock()
 				s.escAt = s.now()
 				s.mu.Unlock()
@@ -717,6 +729,29 @@ func (s *Session) forgetEsc() {
 	s.mu.Lock()
 	s.escAt = time.Time{}
 	s.mu.Unlock()
+}
+
+// stopKey: Esc or Ctrl-C went to the agent (#322).
+func (s *Session) stopKey() {
+	s.mu.Lock()
+	s.stopKeyAt = s.now()
+	s.mu.Unlock()
+}
+
+// takeStopKey reports whether a stop key went to the agent lately (within pixieEscWindow: a
+// slow tool can take a while to give way), and uses it up.
+func (s *Session) takeStopKey() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ok := !s.stopKeyAt.IsZero() && s.now().Sub(s.stopKeyAt) < pixieEscWindow
+	s.stopKeyAt = time.Time{}
+	return ok
+}
+
+// isStopKey: b is Esc (once or twice) or holds Ctrl-C, as you type them, kitty-encoded too.
+func isStopKey(b []byte) bool {
+	k := kittyKeys.Replace(string(withoutReports(b)))
+	return k == "\x1b" || k == "\x1b\x1b" || strings.ContainsRune(k, 0x03)
 }
 
 // held: Pixie's stop holds what waits (see interrupted).
