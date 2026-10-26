@@ -217,7 +217,7 @@ type Conversation struct {
 	pendingTools         int      // until they finish, ResponseDone doesn't end the turn
 	ending               bool     // end_conversation was called: end once the reply finished playing
 	heard                []string // every notice given to Pixie in this conversation, lowercased
-	confirmAsked         bool     // a confirm question was relayed and the user hasn't spoken since
+	asked                bool     // a question was relayed (a confirm word's, a job's, a session's) and the user hasn't spoken since
 	confirmFixed         bool     // a made-up confirm word was corrected in this conversation
 	endWhy               string   // why ending was set ("goodbye", "after a hand-off")
 	endReason            string   // why the last conversation ended (#71's voice log)
@@ -312,15 +312,17 @@ func (c *Conversation) timeout() time.Duration {
 	case !c.followUpUntil.IsZero() && c.idleTimeout < FollowUpWindow:
 		t = FollowUpWindow // the follow-up window decides, not the shorter silence timeout
 	}
-	if c.confirmAsked && t < ConfirmListenMin {
-		t = ConfirmListenMin
+	if c.asked && t < QuestionListenMin {
+		t = QuestionListenMin
 	}
 	return t
 }
 
-// ConfirmListenMin: after Pixie relays a confirm question ("Say confirm hawk."), it listens at
-// least this long, however short the silence timeout is set.
-const ConfirmListenMin = 10 * time.Second
+// QuestionListenMin: after Pixie relays a question, a confirm word's ("Say confirm hawk.") or
+// any other the user is to answer ("Coordinator question: …", a session asking, #337), it
+// listens at least this long, however short the silence timeout is set: a long question
+// with choices takes more than a few seconds to answer.
+const QuestionListenMin = 10 * time.Second
 
 // FollowUpWindow: after Pixie answers a check and asks if there's anything else, the user has
 // this long to start a real reply (#103).
@@ -382,7 +384,6 @@ func (c *Conversation) Step(in Input, now time.Time) []Effect {
 	case InInject:
 		if c.IsActive() {
 			c.heard = append(c.heard, strings.ToLower(in.Notice.Text))
-			c.confirmAsked = c.confirmAsked || sayConfirm.MatchString(in.Notice.Text)
 			c.injects = append(c.injects, in.Notice)
 			fx = c.tryInject(now, fx)
 		} else {
@@ -533,8 +534,8 @@ func (c *Conversation) onModel(ev Event, now time.Time, fx []Effect) []Effect {
 				Effect{Kind: EfSignal, Signal: VoiceSignal{Kind: SigOpened}})
 		}
 	case EvSpeechStarted:
-		c.turn++               // the user's new turn: earlier tool calls no longer belong to it
-		c.confirmAsked = false // they are answering
+		c.turn++        // the user's new turn: earlier tool calls no longer belong to it
+		c.asked = false // they are answering
 		c.newHandOffTurn()
 		switch c.phase {
 		case PhaseSpeaking:
@@ -708,6 +709,8 @@ func (c *Conversation) tryInject(now time.Time, fx []Effect) []Effect {
 	if asksQuestion(n.Text) {
 		c.questionAsked = true
 	}
+	// Once said, not when queued: the user's words before it don't answer it.
+	c.asked = c.asked || sayConfirm.MatchString(n.Text) || asksQuestion(n.Text)
 	if c.endAfterNotice != "" {
 		c.ending, c.endWhy = true, c.endAfterNotice // once Pixie has said it
 		c.endAfterNotice = ""
@@ -803,7 +806,7 @@ func (c *Conversation) resetTurn() {
 	c.hoHistory = nil
 	c.questionAsked, c.answerTurn = false, false
 	c.endNotBefore = time.Time{}
-	c.heard, c.confirmAsked, c.confirmFixed = nil, false, false
+	c.heard, c.asked, c.confirmFixed = nil, false, false
 }
 
 // ---------- the hand-off safety net (#71) ----------
