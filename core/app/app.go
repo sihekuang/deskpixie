@@ -1081,6 +1081,10 @@ func (ap applier) Apply(field string, cfg settings.Config) error {
 			"fadeSecs": cfg.CaptionFadeSecs, "historyMins": cfg.ReplyHistoryMins})
 	case settings.RouteChat:
 		err = a.applyChatKeepDays(cfg.ChatKeepDays)
+	case settings.RouteForcedSends:
+		if a.agent != nil {
+			a.agent.SetMarkForced(cfg.Agent.MarkForcedSends)
+		}
 	}
 	// The tray shows the size, pack and fade checkmarks and the hotkey line.
 	a.pushTray()

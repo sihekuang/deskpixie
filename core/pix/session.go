@@ -152,6 +152,9 @@ type Session struct {
 	// stopped: Pixie's stop ended the turn: what waits stays queued (still counted) until you
 	// type your next prompt here or Pixie sends a new message (#309).
 	stopped bool
+	// note: what the next typing of what waits starts with, after stop-and-send pressed Esc
+	// (#340); "" for none.
+	note string
 
 	turnStart     time.Time        // when this turn went working (zero: none seen)
 	turnFromPixie bool             // a prompt of this turn was Pixie's
@@ -197,15 +200,17 @@ func (s *Session) newWork(prompt string) {
 // with it. Claude Code stashes the draft (Ctrl-S) and puts it back by itself once the prompt is
 // sent, whatever pix knows of it. Elsewhere pix deletes the draft it followed, sends, and types
 // it back; a draft it couldn't follow (after an arrow key) is sent along with the message.
-func (s *Session) forceIn(msgs []string) error {
+// The prompt starts with note ("": none, #340); a menu that sends them back to wait keeps it
+// apart from them.
+func (s *Session) forceIn(msgs []string, note string) error {
 	if len(msgs) == 0 {
 		return nil
 	}
-	prompt := strings.Join(msgs, "\n\n")
+	prompt := strings.Join(withNote(note, msgs), "\n\n")
 	draft, known := s.gate.Draft()
 	empty := known && draft == ""
 	typeIn := func() error { // a menu that stops it keeps the messages (#306)
-		if err := s.typeIn(prompt); err != nil && !s.holdBack(err, msgs, prompt, "") {
+		if err := s.typeIn(prompt); err != nil && !s.holdBack(err, msgs, prompt, "", note) {
 			return err
 		}
 		return nil
@@ -226,7 +231,7 @@ func (s *Session) forceIn(msgs []string) error {
 		}
 		time.Sleep(forceSettle)
 		if err := s.typeIn(prompt); err != nil {
-			if s.holdBack(err, msgs, prompt, draft) { // your draft comes back once it's sent (#306)
+			if s.holdBack(err, msgs, prompt, draft, note) { // your draft comes back once it's sent (#306)
 				return nil
 			}
 			return err
@@ -523,6 +528,7 @@ func (s *Session) Hook(event string, p map[string]any) string {
 			return ""
 		}
 		if msgs := s.queue.Drain(); len(msgs) > 0 {
+			s.takeNote() // nothing is typed: they go in as context
 			s.title()
 			s.delivered()
 			ctx := "Messages from Pixie:\n- " + strings.Join(msgs, "\n- ")
@@ -603,8 +609,14 @@ func (s *Session) runCommand(m wire.Msg) wire.Msg {
 		}
 		s.release()
 		s.flushMu.Lock()
+		// A stop's note still waiting goes with them (or goes, with nothing to type); else
+		// typed past your typing, they say so there (#340).
+		note := s.takeNote()
+		if note == "" && !s.gate.Clear(time.Now()) {
+			note = m.Text
+		}
 		msgs := s.queue.Drain()
-		if err := s.forceIn(msgs); err != nil {
+		if err := s.forceIn(msgs, note); err != nil {
 			s.flushMu.Unlock()
 			return wire.Msg{Err: err.Error()}
 		}
@@ -640,6 +652,7 @@ func (s *Session) runCommand(m wire.Msg) wire.Msg {
 				if err := s.stopTurn(); err != nil {
 					return wire.Msg{Err: err.Error()}
 				}
+				s.setNote(m.Text) // what goes in next was stopped for: say so there (#340)
 				if s.currentStatus() == "working" {
 					wait = "stopping" // it gets them once it has
 				}
@@ -703,10 +716,10 @@ func (s *Session) flushNow() bool {
 	}
 	// One prompt, one wait for the agent to take it (#305): a wait per message could outlast the
 	// command's time limit.
-	msgs := s.queue.Drain()
-	prompt := strings.Join(msgs, "\n\n")
+	note, msgs := s.takeNote(), s.queue.Drain()
+	prompt := strings.Join(withNote(note, msgs), "\n\n")
 	if err := s.typeIn(prompt); err != nil {
-		s.holdBack(err, msgs, prompt, "") // a menu showed: they wait for it (#306)
+		s.holdBack(err, msgs, prompt, "", note) // a menu showed: they wait for it (#306)
 		return false
 	}
 	s.title()
@@ -840,6 +853,38 @@ func isStopKey(b []byte) bool {
 
 // kittyStops: Esc's press as kitty's event types report it (its release is no key).
 var kittyStops = strings.NewReplacer("\x1b[27;1:1u", "\x1b", "\x1b[27;1:2u", "\x1b", "\x1b[27;1:3u", "")
+
+// setNote: the next typing of what waits starts with note (#340).
+func (s *Session) setNote(note string) {
+	s.mu.Lock()
+	s.note = note
+	s.mu.Unlock()
+}
+
+// keepNote: messages typed with note went back to wait; it goes with them again (#340).
+func (s *Session) keepNote(note string) {
+	if note != "" {
+		s.setNote(note)
+	}
+}
+
+// takeNote is the note the next typing starts with, and forgets it.
+func (s *Session) takeNote() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := s.note
+	s.note = ""
+	return n
+}
+
+// withNote starts msgs with note, a few words in brackets (#340): forced in, they say so in
+// the terminal. msgs as they are with no note.
+func withNote(note string, msgs []string) []string {
+	if note == "" || len(msgs) == 0 {
+		return msgs
+	}
+	return append([]string{note + " " + msgs[0]}, msgs[1:]...)
+}
 
 // held: Pixie's stop holds what waits (see interrupted).
 func (s *Session) held() bool {

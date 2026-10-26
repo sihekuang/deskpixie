@@ -661,7 +661,7 @@ func TestFlushSaysTypedOrWhyItStillWaits(t *testing.T) {
 			res.Kind, res.ID = wire.KindResult, m.ID
 			wire.Encode(p.c, res)
 		}()
-		return h.Flush(context.Background(), r.Address)
+		return h.Flush(context.Background(), r.Address, "")
 	}
 	if d, err := flush(wire.Msg{Status: "typed"}); err != nil || d.Status != "typed" {
 		t.Fatalf("%+v %v", d, err)
@@ -689,7 +689,7 @@ func TestStopAndSendSaysTypedOrWhyItStillWaits(t *testing.T) {
 			res.Kind, res.ID = wire.KindResult, m.ID
 			wire.Encode(p.c, res)
 		}()
-		return h.StopAndSend(context.Background(), r.Address)
+		return h.StopAndSend(context.Background(), r.Address, "")
 	}
 	if d, err := stop(wire.Msg{Status: "typed"}); err != nil || d.Status != "typed" {
 		t.Fatalf("%+v %v", d, err)
@@ -761,7 +761,7 @@ func TestAnOlderPixIsMarkedOutdated(t *testing.T) {
 		t.Fatalf("%+v %v", d, err)
 	}
 	go po.answer("")
-	if d, err := h.Flush(context.Background(), unknown.Address); err != nil || !d.Outdated {
+	if d, err := h.Flush(context.Background(), unknown.Address, ""); err != nil || !d.Outdated {
 		t.Fatalf("flush: %+v %v", d, err)
 	}
 

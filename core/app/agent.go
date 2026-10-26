@@ -138,6 +138,8 @@ type Agent interface {
 	ChatStop()
 	// SetTextMode: replyMode is text (no conversation is opened for updates).
 	SetTextMode(on bool)
+	// SetMarkForced: agent.markForcedSends changed (#340).
+	SetMarkForced(on bool)
 	// Attachments wait for the next request (#240); nil when there is nowhere to keep them.
 	Attachments() *attach.Store
 	// Shutdown is the app's quit: deny pending permissions, stop the panes, clear the MCP

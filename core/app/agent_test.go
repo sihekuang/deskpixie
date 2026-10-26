@@ -49,6 +49,7 @@ type fakeAgent struct {
 	interrupted     []string
 	interruptErr    error
 	textModes       []bool
+	markForced      []bool // SetMarkForced calls (#340)
 	attach          *attach.Store
 	places          map[string][2]string // session → folder, app
 	placeCalls      int

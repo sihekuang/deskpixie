@@ -33,6 +33,8 @@ const (
 	RouteCaptions
 	// RouteChat: the chat window keeps history this many days (#302).
 	RouteChat
+	// RouteForcedSends: the agent marks the next forced message, or doesn't (#340).
+	RouteForcedSends
 )
 
 // RouteFor is the route for a Live field (or "position" for Reset position); ok is false for
@@ -64,6 +66,8 @@ func RouteFor(path string) (Route, bool) {
 		return RouteCaptions, true
 	case "chatKeepDays":
 		return RouteChat, true
+	case "agent.markForcedSends":
+		return RouteForcedSends, true
 	case "position":
 		return RouteResetPosition, true
 	}

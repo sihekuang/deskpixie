@@ -60,6 +60,11 @@ func (f *fakeAgent) SetTextMode(on bool) {
 	f.textModes = append(f.textModes, on)
 	f.mu.Unlock()
 }
+func (f *fakeAgent) SetMarkForced(on bool) {
+	f.mu.Lock()
+	f.markForced = append(f.markForced, on)
+	f.mu.Unlock()
+}
 
 func TestChatSendCallsTheAgent(t *testing.T) {
 	f := &fakeAgent{tray: AgentTray{Enabled: true}}
@@ -176,5 +181,22 @@ func TestAlwaysShowCaptionTellsTheShell(t *testing.T) {
 	}
 	if out := h.call("chat.mode", nil); string(out) != `{"alwaysShowCaption":true,"captionDismissSecs":120,"captionFadeSecs":4,"mode":"voice","replyHistoryMins":5}` {
 		t.Fatal(string(out))
+	}
+}
+
+// #340: turning agent.markForcedSends off (or on) tells the running agent at once.
+func TestMarkForcedSendsAppliesLiveToTheAgent(t *testing.T) {
+	f := &fakeAgent{tray: AgentTray{Enabled: true}}
+	h := newHarness(t, withAgent(f))
+	h.take()
+	for _, on := range []bool{false, true} {
+		if s := h.set("agent.markForcedSends", on); s.SetError != nil && string(s.SetError) != "null" {
+			t.Fatal(string(s.SetError))
+		}
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !slices.Equal(f.markForced, []bool{false, true}) {
+		t.Fatal(f.markForced)
 	}
 }

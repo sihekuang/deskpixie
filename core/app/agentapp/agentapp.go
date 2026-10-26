@@ -408,6 +408,7 @@ func Build(c Config) *Agent {
 			SessionTurnsMinMs:   agent.Millis(c.Notifications.SessionTurnsMinSeconds) * 1000,
 			OpenConversation:    s.OpenConversationForUpdates,
 			AlwaysForceSend:     s.AlwaysForceSend,
+			MarkForcedSends:     s.MarkForcedSends,
 			CoordinatorKind:     kind,
 			SpokenPaths:         spoken,
 		},
@@ -709,6 +710,9 @@ func (a *Agent) ChatStop() { a.handle.ChatStop() }
 
 // SetTextMode: replyMode is text.
 func (a *Agent) SetTextMode(on bool) { a.handle.SetTextMode(on) }
+
+// SetMarkForced: agent.markForcedSends changed (#340).
+func (a *Agent) SetMarkForced(on bool) { a.handle.SetMarkForced(on) }
 
 // Roster is the roster beside Pixie (agent.RosterView).
 func (a *Agent) Roster() any { return a.handle.Roster() }

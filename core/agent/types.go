@@ -679,6 +679,9 @@ type McpCall struct {
 	Text     string
 	Verbatim bool // SetSessionVerbatim only (#143): the session's new setting.
 	Force    bool // MessageSession only (#187): send it in now, with what waits, past the typing gate.
+	// Mark: the app's agent.markForcedSends, never the coordinator's (#340): what a forced send
+	// types starts with a note in brackets.
+	Mark     bool
 	Summary  string
 	Outcome  Outcome
 	Evidence string
