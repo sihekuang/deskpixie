@@ -540,6 +540,9 @@ type AgentController struct {
 	// sessionWorking: your sessions last seen working, so a hand-off reported after its turn
 	// started still knows it did (#332).
 	sessionWorking map[string]bool
+	// sessionIdle: your sessions last seen idle, so working next is a new turn (#361); a
+	// restart knows none.
+	sessionIdle map[string]bool
 	// pixieTurnEnded: when each session last finished a turn Pixie typed in: one reported
 	// before its hand-off (a quick turn beats the tool's reply) is that hand-off's, over.
 	pixieTurnEnded map[string]Millis
@@ -616,6 +619,7 @@ func NewAgentController(settings Settings) *AgentController {
 		handedOff:      map[JobID]bool{},
 		sentTurn:       map[string]sentTurn{},
 		sessionWorking: map[string]bool{},
+		sessionIdle:    map[string]bool{},
 		pixieTurnEnded: map[string]Millis{},
 		typedTo:        map[string]JobID{},
 		heldNoticed:    map[string]uint64{},
@@ -842,11 +846,20 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 			c.heldDelivered(ev.Agent, ev.Seq, ev.Run, &fx)
 		case ev.Kind == PaneEventQuestion || ev.Kind == PaneEventQuestionGone:
 		case ev.Kind == PaneEventStatus:
+			if a, ok := c.announced[ev.Agent]; ev.Status == PaneWorking && c.sessionIdle[ev.Agent] && (!ok || c.asking[ev.Agent] != a.line) {
+				// Working after idle is its next turn: what its last one asked was answered, by
+				// you here or in its terminal (#361). Working after blocked is only a dialog
+				// answered, maybe a subagent's; a prompt pix announced waits until pix says
+				// it's gone (#347).
+				c.dropAsking(ev.Agent, &fx)
+			}
+			c.sessionIdle[ev.Agent] = ev.Status == PaneIdle
 			c.sessionStatus(ev.Agent, ev.Status, now)
 			c.onWorkerStatus(ev.Agent, ev.Status, now, &fx)
 		default:
 			delete(c.sentTurn, ev.Agent) // its name may be another session's next
 			delete(c.sessionWorking, ev.Agent)
+			delete(c.sessionIdle, ev.Agent)
 			delete(c.pixieTurnEnded, ev.Agent)
 			c.confirms.TakeSession(ev.Agent, "") // a session that closed asks nothing any more
 			delete(c.announced, ev.Agent)
