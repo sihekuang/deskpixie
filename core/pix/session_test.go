@@ -955,6 +955,44 @@ func TestTheNextDialogWithTheSameMarkerStillCountsAsTaken(t *testing.T) {
 	}
 }
 
+// #355: Claude draws its dialog as it asks, so the dialog can be on the screen before its hook
+// comes, and is drawn no more after it. It still showed: Pixie's Yes is typed.
+func TestADialogDrawnBeforeItsHookCanBeAnswered(t *testing.T) {
+	h := screensHarness(t, bashDialog, "\x1b[2J\x1b[H* Bash(npm test)\r\n", 0)
+	waitScreen(t, h, noSpace("Do you want to proceed?"))
+	q := askBash(t, h, "npm test")
+	if err := answer(t, h, q.ID, "yes"); err != "" {
+		t.Fatal(err)
+	}
+}
+
+// #355 as it happened: the dialog drawn before its hook, the hold passed (the terminal shows it
+// now), and then Pixie's Yes.
+func TestADialogDrawnBeforeItsHeldHookCanBeAnsweredOnceTheHoldPassed(t *testing.T) {
+	h := screensHarness(t, bashDialog, "\x1b[2J\x1b[H* Bash(npm test)\r\n", 0)
+	h.s.setHold(200 * time.Millisecond)
+	waitScreen(t, h, noSpace("Do you want to proceed?"))
+	reply := hookAsync(h, "PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "npm test"}})
+	q := askedQuestion(t, h)
+	if out := hookReply(t, reply, 3*time.Second); out != nil {
+		t.Fatalf("the hold passed: %v", out)
+	}
+	if err := answer(t, h, q.ID, "yes"); err != "" {
+		t.Fatal(err)
+	}
+}
+
+// A dialog with the same marker but another request's text, on the screen when the hook comes,
+// is not this one's: nothing is typed until this one shows.
+func TestAnotherDialogOnTheScreenBeforeTheHookIsNotThisOne(t *testing.T) {
+	h := screensHarness(t, bashDialog, "", 0)
+	waitScreen(t, h, noSpace("Do you want to proceed?"))
+	q := askBash(t, h, "npm run build")
+	if err := answer(t, h, q.ID, "yes"); err != "The question isn't on screen yet." {
+		t.Fatalf("%q", err)
+	}
+}
+
 // A prompt that showed but is no longer drawn (the screen was cleared or redrawn without it) is
 // not typed into: its leaving couldn't tell whether the answer was taken.
 func TestAPromptNoLongerDrawnIsNotTypedInto(t *testing.T) {

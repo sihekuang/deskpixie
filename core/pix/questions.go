@@ -241,6 +241,13 @@ func (s *Session) ask(q *question, ev wire.Msg) bool {
 	s.qseq++
 	q.id = "q" + strconv.Itoa(s.qseq)
 	s.q = q
+	// Claude draws its dialog as it asks, so the dialog can be on the screen before its hook
+	// comes, and isn't drawn again after it (#355). Its own text there (its detail) says it is
+	// this one; a prompt with no detail counts only once shown after it was asked.
+	if q.marker != "" && q.detail != "" && shows(s.screen, q.marker, q.detail) {
+		q.seen = true
+		s.sawQuestion(q, s.screen)
+	}
 	ev.Kind, ev.Event, ev.ID = wire.KindEvent, "question", q.id
 	if q.read != nil {
 		q.held = &ev
