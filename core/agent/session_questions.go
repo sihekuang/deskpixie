@@ -198,8 +198,12 @@ var menuFillers = map[string]bool{"yes": true, "yeah": true, "ok": true, "okay":
 	"lets": true, "go": true, "with": true, "pick": true, "choose": true, "the": true, "option": true, "number": true,
 	"please": true, "thanks": true, "i": true, "want": true, "id": true, "like": true}
 
-var ordinals = map[string]int{"1": 1, "one": 1, "first": 1, "2": 2, "two": 2, "second": 2, "3": 3, "three": 3, "third": 3,
-	"4": 4, "four": 4, "fourth": 4, "5": 5, "five": 5, "fifth": 5}
+// numberWords are read as their digits, in what's said and in the options alike: "two" is "2".
+var numberWords = map[string]string{"one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6",
+	"seven": "7", "eight": "8", "nine": "9", "ten": "10"}
+
+// ordinals are an option's place: "the second one".
+var ordinals = map[string]int{"first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5}
 
 // menuNegators make an answer say what not to pick: "not Postgres", "anything but SQLite",
 // "other than Postgres".
@@ -211,7 +215,18 @@ var menuNegators = map[string]bool{"not": true, "no": true, "dont": true, "never
 // menuWords: text folded for matching: lower case, no apostrophes, only letters and digits.
 func menuWords(text string) []string {
 	text = strings.NewReplacer("'", "", "’", "").Replace(strings.ToLower(text))
-	return strings.FieldsFunc(text, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsNumber(r) })
+	words := strings.FieldsFunc(text, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsNumber(r) })
+	for k, w := range words {
+		if d, ok := numberWords[w]; ok {
+			words[k] = d
+		}
+	}
+	return words
+}
+
+// isNumber: w is all digits.
+func isNumber(w string) bool {
+	return w != "" && strings.IndexFunc(w, func(r rune) bool { return !unicode.IsDigit(r) }) < 0
 }
 
 // MenuChoice is the option (from 1) an answer picks: one said as it reads ("SQLite"), by its
@@ -220,19 +235,44 @@ func menuWords(text string) []string {
 func MenuChoice(options []string, answer string) (int, bool) {
 	raw := menuWords(answer)
 	words := stripFillers(raw)
-	said := strings.Join(words, " ")
-	for k, o := range options {
-		ow := menuWords(o)
-		if strings.Join(ow, " ") == strings.Join(raw, " ") || strings.Join(stripFillers(ow), " ") == said {
-			return k + 1, true
+	// Word for word first, then with fillers left out on both sides: "yes please" is the
+	// option "Yes please" before it is "Yes".
+	for _, form := range []func([]string) []string{func(w []string) []string { return w }, stripFillers} {
+		said := strings.Join(form(raw), " ")
+		for k, o := range options {
+			if strings.Join(form(menuWords(o)), " ") == said {
+				return k + 1, true
+			}
 		}
 	}
 	if len(words) == 1 {
-		if n := ordinals[words[0]]; n >= 1 && n <= len(options) {
+		w := words[0]
+		if n := ordinals[w]; n >= 1 && n <= len(options) {
 			return n, true
 		}
-		if words[0] == "last" && len(options) > 0 {
+		if w == "last" && len(options) > 0 {
 			return len(options), true
+		}
+		// A number is a place ("option 2"), unless the options have numbers of their own:
+		// then "two" names "2 workers", never the second option.
+		numbered := slices.ContainsFunc(options, func(o string) bool { return slices.ContainsFunc(menuWords(o), isNumber) })
+		if isNumber(w) && !numbered {
+			if n, err := strconv.Atoi(w); err == nil && n >= 1 && n <= len(options) {
+				return n, true
+			}
+			return 0, false
+		}
+		if isNumber(w) {
+			found := 0
+			for k, o := range options {
+				if slices.Contains(menuWords(o), w) {
+					if found != 0 {
+						return 0, false
+					}
+					found = k + 1
+				}
+			}
+			return found, found != 0
 		}
 	}
 	found := 0
@@ -257,10 +297,14 @@ func MenuChoice(options []string, answer string) (int, bool) {
 }
 
 // stripFillers drops the fillers at the end, then at the start, keeping one word at least:
-// "yes please" is "yes", "option A" is "a", "the second one" is "second".
+// "yes please" is "yes", "option A" is "a", "the second one" is "second", "option one" is "1".
 func stripFillers(words []string) []string {
-	for len(words) > 1 && (menuFillers[words[len(words)-1]] || words[len(words)-1] == "one") {
-		words = words[:len(words)-1]
+	for n := len(words); n > 1; n = len(words) {
+		last, prev := words[n-1], words[n-2]
+		if !menuFillers[last] && !(last == "1" && (ordinals[prev] > 0 || prev == "last")) {
+			break
+		}
+		words = words[:n-1]
 	}
 	for len(words) > 1 && menuFillers[words[0]] {
 		words = words[1:]

@@ -171,6 +171,16 @@ func TestAMenuChoiceReadsOptionsAsSaid(t *testing.T) {
 		{[]string{"Yes, proceed", "No, stop"}, "Yes, proceed", 1},
 		{[]string{"Go ahead", "Wait"}, "Go ahead", 1},
 		{[]string{"The first approach", "The second approach"}, "The second approach", 2},
+		{[]string{"Postgres", "SQLite", "MySQL"}, "option one", 1},
+		{[]string{"Postgres", "SQLite", "MySQL"}, "number two", 2},
+		{[]string{"Yes", "Yes please"}, "yes please", 2},
+		// Options with numbers: a number names one, never a place.
+		{[]string{"2", "4", "8"}, "two", 1},
+		{[]string{"2 workers", "4 workers", "8 workers"}, "2", 1},
+		{[]string{"3 retries", "5 retries", "1 retry"}, "3", 1},
+		{[]string{"3 retries", "5 retries", "1 retry"}, "one", 3},
+		{[]string{"3 retries", "5 retries", "1 retry"}, "the second one", 2},
+		{[]string{"2 workers", "4 workers"}, "6", 0},
 		// Ruled out: nothing is picked.
 		{[]string{"Postgres", "SQLite", "MySQL"}, "anything but SQLite", 0},
 		{[]string{"Postgres", "SQLite", "MySQL"}, "avoid MySQL", 0},
