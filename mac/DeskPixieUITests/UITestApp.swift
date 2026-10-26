@@ -126,9 +126,10 @@ final class UITestApp {
             // A turn starts and ends as claude's hooks do: each JSON file put in $TURNS goes to
             // `pix hook <event>` (what pix's settings tell claude to run), the event named by the
             // file's name up to its first "-". A lone Esc typed into it (pix interrupting it) is
-            // noted in $TURNS.esc and answered with what claude shows then, which ends the turn
-            // for pix; an Esc that a "[" or "O" follows within 0.1 s starts an escape sequence
-            // (a bracketed paste, a key), not an interrupt. It stops with its pix.
+            // noted in $TURNS.esc and answered with what claude shows then (its interrupt line over
+            // the input box, #322), which ends the turn for pix; an Esc that a "[" or "O" follows
+            // within 0.1 s starts an escape sequence (a bracketed paste, a key), not an interrupt.
+            // It stops with its pix.
             let script = """
             #!/bin/sh
             stty -icanon -echo min 1 time 0 2>/dev/null
@@ -142,7 +143,7 @@ final class UITestApp {
                   stty min 1 time 0 2>/dev/null
                   if [ "$n" != "5b" ] && [ "$n" != "4f" ]; then
                     touch "$TURNS.esc"
-                    printf 'What should Claude do instead?\\r\\n'
+                    printf '  ⎿  Interrupted · What should Claude do instead?\\r\\n────\\r\\n❯ \\r\\n────\\r\\n'
                   fi
                 fi
               done
