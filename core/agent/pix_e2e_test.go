@@ -74,12 +74,13 @@ func startPixSession(t *testing.T) *pixSession {
 	cmd := exec.Command(filepath.Join(bin, "pix"), "claude")
 	cmd.Dir = bin
 	cmd.Env = pixEnv("PATH="+bin+":/usr/bin:/bin", "HOME="+home, "DESKPIXIE_SUPPORT_DIR="+support,
-		"DESKPIXIE_PIX_SOCK="+sock, "FAKE_DIR="+fake, "TERM=xterm-256color")
+		"DESKPIXIE_PIX_SOCK="+sock, "FAKE_DIR="+fake, "TERM=xterm-256color",
+		"TMPDIR="+bin) // pix's own folder goes here, short enough for its socket, and goes with bin
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = tty, tty, tty
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { cmd.Process.Signal(syscall.SIGKILL); cmd.Wait() })
+	t.Cleanup(func() { stopPix(cmd) })
 	tty.Close()
 	go func() { // what the terminal shows; read so the agent never blocks writing it
 		s := bufio.NewScanner(ptmx)
@@ -104,14 +105,28 @@ func startPixSession(t *testing.T) *pixSession {
 	return p
 }
 
+// stopPix ends pix as a closed terminal tab would (SIGTERM), so it removes its own folder; only
+// a pix that doesn't end by then is killed.
+func stopPix(cmd *exec.Cmd) {
+	done := make(chan struct{})
+	go func() { cmd.Wait(); close(done) }()
+	cmd.Process.Signal(syscall.SIGTERM)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		cmd.Process.Kill()
+		<-done
+	}
+}
+
 // pixEnv is the test's environment without anything that would make pix think it is nested,
-// report to the real app, or use the real home.
+// report to the real app, use the real home, or leave its folder in the real temp folder.
 func pixEnv(extra ...string) []string {
 	var env []string
 	for _, kv := range os.Environ() {
 		switch k, _, _ := strings.Cut(kv, "="); k {
 		case "PIX_SESSION", "PIX_SOCK", "PIXIE_AGENT_TOKEN", "PATH", "HOME", "DESKPIXIE_SUPPORT_DIR", "DESKPIXIE_PIX_SOCK",
-			"TERMINAL_EMULATOR", "TERM_PROGRAM", "__CFBundleIdentifier", "TERM":
+			"TERMINAL_EMULATOR", "TERM_PROGRAM", "__CFBundleIdentifier", "TERM", "TMPDIR":
 			continue
 		}
 		env = append(env, kv)

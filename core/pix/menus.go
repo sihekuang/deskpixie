@@ -215,7 +215,8 @@ func (s *Session) promptDrawn() {
 // you sent it.
 type unsent struct {
 	text, draft string
-	msgs        []string
+	msgs        []string // as queued, without note
+	note        string   // what they were typed starting with (#340)
 	turns       int
 	sent        bool
 }
@@ -233,21 +234,23 @@ func (s *Session) submitted(prompt string) {
 
 // holdBack keeps msgs that a menu stopped (err, a menuUp): queued again if nothing was typed
 // and no draft of yours was set aside, else unsent until the menu is answered. false for
-// another error.
-func (s *Session) holdBack(err error, msgs []string, text, draft string) bool {
+// another error. note, what they were typed starting with, stays apart from msgs and goes with
+// them when they are typed again (#340).
+func (s *Session) holdBack(err error, msgs []string, text, draft, note string) bool {
 	m, ok := err.(menuUp)
 	if !ok {
 		return false
 	}
 	if !m.pasted && draft == "" {
 		s.queue.Requeue(msgs)
+		s.keepNote(note)
 		return true
 	}
 	if !m.pasted {
 		text = ""
 	}
 	s.mu.Lock()
-	s.unsent = &unsent{text: text, draft: draft, msgs: msgs, turns: s.turns}
+	s.unsent = &unsent{text: text, draft: draft, msgs: msgs, note: note, turns: s.turns}
 	s.mu.Unlock()
 	return true
 }
@@ -298,9 +301,10 @@ func (s *Session) finishUnsent() (sent bool) {
 		} else {
 			s.gate.Sent()
 		}
-		if err := s.forceIn(u.msgs); err != nil {
+		if err := s.forceIn(u.msgs, u.note); err != nil {
 			s.o.log.Printf("sending the messages a menu stopped: %v", err)
 			s.queue.Requeue(u.msgs)
+			s.keepNote(u.note)
 			return false
 		}
 		if s.hasUnsent() { // a menu stopped them again
@@ -315,6 +319,7 @@ func (s *Session) finishUnsent() (sent bool) {
 		s.o.log.Printf("the message a menu stopped is no longer in the prompt: typing it again")
 	}
 	s.queue.Requeue(u.msgs)
+	s.keepNote(u.note)
 	s.restoreDraft(u.draft)
 	return false
 }

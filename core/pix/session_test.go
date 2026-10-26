@@ -1879,3 +1879,86 @@ func TestFlushTypesItsNoteOnlyPastYourTyping(t *testing.T) {
 		t.Fatalf("%q", got)
 	}
 }
+
+// #340 review: a stop's note waiting for the turn to end goes with a flush that types what
+// waits (or goes with nothing to type), never with a later ordinary message.
+func TestAFlushUsesUpAStopsNote(t *testing.T) {
+	defer func(w time.Duration) { InterruptWait = w }(InterruptWait)
+	InterruptWait = 200 * time.Millisecond
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}})
+	h.s.setStatus("working")
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "first"})
+	waitEvent(t, h.d.events, "waiting: working", func(m wire.Msg) bool { return m.ID == "1" && m.Reason == "working" })
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "2", Command: "stop", Text: "[stopped and sent]"})
+	waitEvent(t, h.d.events, "stopping", func(m wire.Msg) bool { return m.ID == "2" && m.Reason == "stopping" })
+	h.stdinW.WriteString("my draft") // you start typing: the flusher holds back
+	for end := time.Now().Add(5 * time.Second); h.s.gate.Clear(time.Now()); time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(end) {
+			t.Fatal("the gate never saw you typing")
+		}
+	}
+	h.s.Hook("Stop", map[string]any{}) // the turn ends
+	time.Sleep(700 * time.Millisecond)
+	if h.s.queue.Len() != 1 {
+		t.Fatalf("typed over your typing: %d queued", h.s.queue.Len())
+	}
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "3", Command: "flush", Text: "[sent while you were typing]"})
+	waitEvent(t, h.d.events, "flushed", func(m wire.Msg) bool { return m.ID == "3" && m.Status == "typed" })
+	if got := h.s.typedForTest(); !strings.Contains(got, "\x1b[200~[stopped and sent] first\x1b[201~") {
+		t.Fatalf("flush typed %q", got)
+	}
+	// Claude puts your line back; you send it, and that turn ends.
+	h.s.Hook("UserPromptSubmit", map[string]any{"prompt": "my draft"})
+	h.s.Hook("Stop", map[string]any{})
+	h.s.gate.mu.Lock()
+	h.s.gate.last = time.Now().Add(-TypingQuiet) // and stop typing a while
+	h.s.gate.mu.Unlock()
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "4", Command: "prompt", Text: "ordinary"})
+	waitEvent(t, h.d.events, "typed", func(m wire.Msg) bool { return m.ID == "4" && m.Status == "typed" })
+	if got := h.s.typedForTest(); !strings.Contains(got, "\x1b[200~ordinary\x1b[201~") {
+		t.Fatalf("typed %q", got)
+	}
+
+	// With nothing to type, the flush drops it.
+	h.s.setNote("[stopped and sent]")
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "5", Command: "flush"})
+	waitEvent(t, h.d.events, "flushed", func(m wire.Msg) bool { return m.ID == "5" && m.Status == "typed" })
+	if n := h.s.takeNote(); n != "" {
+		t.Fatalf("kept %q", n)
+	}
+	h.s.runner.Hangup()
+	h.s.finish()
+}
+
+// #340 review: messages a menu sends back to wait are queued as they were, their note apart:
+// context from the next tool carries none, and typed again they start with it once.
+func TestARequeuedMessageKeepsItsNoteApart(t *testing.T) {
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}})
+	stopped := menuUp{menu: "trust"}
+	if !h.s.holdBack(stopped, []string{"x"}, "[stopped and sent] x", "", "[stopped and sent]") {
+		t.Fatal("not held back")
+	}
+	h.s.setStatus("working")
+	if reply := h.s.Hook("PostToolUse", map[string]any{}); !strings.Contains(reply, "- x") || strings.Contains(reply, "[stopped") {
+		t.Fatalf("context %q", reply)
+	}
+	if n := h.s.takeNote(); n != "" {
+		t.Fatalf("note left after the context took them: %q", n)
+	}
+
+	h.s.holdBack(stopped, []string{"y"}, "[stopped and sent] y", "", "[stopped and sent]")
+	h.s.setStatus("idle")
+	h.stdinW.WriteString("my draft")
+	for end := time.Now().Add(5 * time.Second); h.s.gate.Clear(time.Now()); time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(end) {
+			t.Fatal("the gate never saw you typing")
+		}
+	}
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "flush", Text: "[sent while you were typing]"})
+	waitEvent(t, h.d.events, "flushed", func(m wire.Msg) bool { return m.ID == "1" && m.Status == "typed" })
+	if got := h.s.typedForTest(); !strings.Contains(got, "\x1b[200~[stopped and sent] y\x1b[201~") || strings.Contains(got, "] [") {
+		t.Fatalf("typed %q", got)
+	}
+	h.s.runner.Hangup()
+	h.s.finish()
+}
