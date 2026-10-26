@@ -520,6 +520,11 @@ func (s *Session) Hook(event string, p map[string]any) string {
 		if s.currentStatus() == "blocked" {
 			s.setStatus("working")
 		}
+		// A subagent's tool (agent_id set) would hand what waits to that subagent, not to the
+		// session you talk to (#336): it waits for the session's own next tool, or its stop.
+		if id, _ := p["agent_id"].(string); id != "" {
+			return ""
+		}
 		if msgs := s.queue.Drain(); len(msgs) > 0 {
 			s.takeNote() // nothing is typed: they go in as context
 			s.title()

@@ -262,6 +262,40 @@ func TestPostToolUseDeliversQueued(t *testing.T) {
 	h.s.finish()
 }
 
+// #336: a subagent's tool (its hook carries agent_id) doesn't take what waits: the context
+// would reach the subagent, not the session. The session's own next tool still does.
+func TestSubagentToolLeavesQueuedForTheSession(t *testing.T) {
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}})
+	h.s.setStatus("working")
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "check the tests"})
+	waitEvent(t, h.d.events, "prompt result", func(m wire.Msg) bool { return m.ID == "1" && m.Reason == "working" })
+	if reply := h.s.Hook("PostToolUse", map[string]any{"tool_name": "Bash", "agent_id": "a0d84cff17c3490ba", "agent_type": "general-purpose"}); reply != "" || h.s.queue.Len() != 1 {
+		t.Fatalf("a subagent's tool took it: reply %q, queue %d", reply, h.s.queue.Len())
+	}
+	if reply := h.s.Hook("PostToolUse", map[string]any{"tool_name": "Bash", "agent_id": ""}); !strings.Contains(reply, "check the tests") || h.s.queue.Len() != 0 {
+		t.Fatalf("the session's own tool: reply %q, queue %d", reply, h.s.queue.Len())
+	}
+	h.s.runner.Hangup()
+	h.s.finish()
+}
+
+// #336: after a subagent's tool, stop-and-send still has the message to send: it stops the
+// turn and types it, rather than finding nothing waits and saying it was sent.
+func TestStopAfterASubagentToolStillTypesWhatWaits(t *testing.T) {
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", stopsOnEsc}})
+	h.s.setStatus("working")
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "from pixie"})
+	waitEvent(t, h.d.events, "waiting: working", func(m wire.Msg) bool { return m.ID == "1" && m.Reason == "working" })
+	h.s.Hook("PostToolUse", map[string]any{"tool_name": "Bash", "agent_id": "sub1"})
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "2", Command: "stop"})
+	waitEvent(t, h.d.events, "typed", func(m wire.Msg) bool { return m.ID == "2" && m.Status == "typed" })
+	if got := h.s.typedForTest(); !strings.HasPrefix(got, "\x1b") || !strings.Contains(got, "\x1b[200~from pixie\x1b[201~") || h.s.queue.Len() != 0 {
+		t.Fatalf("typed %q, %d still queued", got, h.s.queue.Len())
+	}
+	h.s.runner.Hangup()
+	h.s.finish()
+}
+
 // claudeInbox fakes the ~/.claude/sessions/<pid>.json record and inbox socket Claude Code
 // itself would leave for s's wrapped process, so a prompt command's choice to use it (or not)
 // is actually exercised rather than failing open because no record exists. got receives every
