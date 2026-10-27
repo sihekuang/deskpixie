@@ -2287,3 +2287,57 @@ func TestAForcedSendGoneLeavesLaterMessagesUnforced(t *testing.T) {
 		t.Fatalf("forced in: %q", got)
 	}
 }
+
+// #373 review: a second forced send while the first's stop hasn't taken presses no second Esc
+// (in Claude a second one opens its rewind).
+func TestASecondForcedSendPressesNoSecondEsc(t *testing.T) {
+	defer func(w time.Duration) { InterruptWait = w }(InterruptWait)
+	InterruptWait = 200 * time.Millisecond
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}})
+	h.s.setStatus("working")
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "first"})
+	waitEvent(t, h.d.events, "waiting: working", func(m wire.Msg) bool { return m.ID == "1" && m.Reason == "working" })
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "2", Command: "stop"})
+	waitEvent(t, h.d.events, "stopping", func(m wire.Msg) bool { return m.ID == "2" && m.Reason == "stopping" })
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "3", Command: "flush"})
+	waitEvent(t, h.d.events, "still stopping", func(m wire.Msg) bool { return m.ID == "3" && m.Reason == "stopping" })
+	time.Sleep(700 * time.Millisecond) // the flusher's turns too
+	if got := h.s.typedForTest(); strings.Count(got, "\x1b") != 1 {
+		t.Fatalf("Esc pressed %d times: %q", strings.Count(got, "\x1b"), got)
+	}
+}
+
+// #373 review: Pixie's stop ends a forced send: what waits isn't forced in after it.
+func TestPixiesStopEndsAForcedSend(t *testing.T) {
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}})
+	h.s.mu.Lock()
+	h.s.forced = &forcing{escTurn: -1}
+	h.s.escAt = h.s.now()
+	h.s.mu.Unlock()
+	h.s.interrupted()
+	if h.s.isForced() {
+		t.Fatal("still forced after Pixie's stop")
+	}
+}
+
+// #373 review: forced past your draft, messages a menu kept back go in once it's answered even
+// while you're typing there.
+func TestForcedMessagesAMenuKeptGoPastYourTyping(t *testing.T) {
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "stty raw -echo; cat >/dev/null"}})
+	h.stdinW.WriteString("my draft")
+	for end := time.Now().Add(5 * time.Second); h.s.gate.Clear(time.Now()); time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(end) {
+			t.Fatal("the gate never saw you typing")
+		}
+	}
+	h.s.mu.Lock()
+	h.s.unsent = &unsent{draft: "my draft", msgs: []string{"kept"}, turns: h.s.turns}
+	h.s.forced = &forcing{escTurn: -1}
+	h.s.mu.Unlock()
+	h.s.flushMu.Lock()
+	sent := h.s.finishUnsent()
+	h.s.flushMu.Unlock()
+	if got := h.s.typedForTest(); !sent || !strings.Contains(got, "\x1b[200~kept\x1b[201~") {
+		t.Fatalf("sent %v, typed %q", sent, got)
+	}
+}

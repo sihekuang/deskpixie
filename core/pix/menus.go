@@ -279,7 +279,11 @@ func (s *Session) finishUnsent() (sent bool) {
 		s.dropUnsent()
 		s.o.log.Printf("the message a menu stopped was sent from the terminal")
 		return true
-	case s.currentStatus() != "idle" || s.menuHold() != "" || !s.gate.Clear(time.Now()):
+	case s.currentStatus() != "idle" || s.menuHold() != "":
+		return false
+	case !s.gate.Clear(time.Now()) && !(u.text == "" && s.isForced()):
+		// Forced past your draft, they don't wait for your typing (#373); typed in, an Enter
+		// now would send your keys with them.
 		return false
 	}
 	if u.text != "" && s.promptHolds(u.text) {

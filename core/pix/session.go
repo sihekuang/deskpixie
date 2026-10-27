@@ -666,11 +666,11 @@ func (s *Session) runCommand(m wire.Msg) wire.Msg {
 }
 
 // forcing is a forced send still to go in (#373): the notes it starts with when it went past
-// your typing or stopped a turn, and whether its Esc was pressed (once: a second one could open
-// Claude's rewind).
+// your typing or stopped a turn, and the turn its Esc was pressed in (one Esc a turn: a second
+// could open Claude's rewind; -1: none yet).
 type forcing struct {
 	typing, stopped string
-	esc             bool
+	escTurn         int
 }
 
 // forceSend sends what waits in by force (#373), as you would at the terminal: a busy turn is
@@ -679,8 +679,12 @@ type forcing struct {
 // it); it is still forced then.
 func (s *Session) forceSend(m wire.Msg) wire.Msg {
 	typing, stopped := m.TypingNote, m.StoppedNote
-	if typing == "" && stopped == "" { // an app from before #373: its one note
-		typing, stopped = m.Text, m.Text
+	if typing == "" && stopped == "" { // an app from before #373: its one note, for what it asked
+		if m.Command == "stop" {
+			stopped = m.Text
+		} else {
+			typing = m.Text
+		}
 	}
 	s.forgetEsc()
 	s.release()
@@ -689,7 +693,11 @@ func (s *Session) forceSend(m wire.Msg) wire.Msg {
 		return wire.Msg{Status: "typed", Seq: s.queue.Delivered(false)}
 	}
 	s.mu.Lock()
-	s.forced = &forcing{typing: typing, stopped: stopped}
+	f := &forcing{typing: typing, stopped: stopped, escTurn: -1}
+	if s.forced != nil { // one already waits: its Esc counts for this one too
+		f.escTurn = s.forced.escTurn
+	}
+	s.forced = f
 	s.mu.Unlock()
 	if s.forceNow() {
 		s.keylog("forced: typed")
@@ -725,10 +733,10 @@ func (s *Session) forceNow() bool {
 	}
 	if s.currentStatus() == "working" {
 		s.mu.Lock()
-		esc := f.esc
-		f.esc = true
+		pressed := f.escTurn == s.turns
+		f.escTurn = s.turns
 		s.mu.Unlock()
-		if !esc {
+		if !pressed {
 			if err := s.stopTurn(); err != nil {
 				s.o.log.Printf("forced send: %v", err)
 				return false
@@ -883,6 +891,7 @@ func (s *Session) interrupted() {
 	s.escAt = time.Time{}
 	if pixie {
 		s.stopped = true
+		s.forced = nil // a stop means stop: what waits isn't forced in after it (#373)
 	}
 	s.mu.Unlock()
 	s.setStatus("idle")
