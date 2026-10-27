@@ -328,11 +328,11 @@ func (s *Session) sendHeld(q *question, d *dialog) {
 // logTold notes question q as DeskPixie is told it with ev (#363): what it asks, and how
 // Pixie can answer it.
 func (s *Session) logTold(q *question, ev wire.Msg) {
-	what := ev.Text
-	if ev.Prompt != "" {
-		what = ev.Prompt
-	} else if what == "" {
-		what = strings.TrimSpace(ev.ToolName + " " + ev.Input)
+	// A menu's question, but only a tool's name: its input (a command, a file) can hold a key,
+	// and this log never holds what's sent to the agent.
+	what := ev.ToolName
+	if q.kind == "menu" {
+		what = ev.Text
 	}
 	how := fmt.Sprintf("%d options", len(ev.Keys))
 	switch {

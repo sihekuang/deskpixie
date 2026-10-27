@@ -156,7 +156,7 @@ func TestWhatAQuestionAsksIsLogged(t *testing.T) {
 		{"PreToolUse", map[string]any{"tool_name": "AskUserQuestion", "tool_input": map[string]any{"questions": []any{multi}}},
 			`asked: menu "Which ones?", no buttons (several picks): answered in its terminal`},
 		{"PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "npm test"}},
-			`asked: permission "Bash {\"command\":\"npm test\"}", Allow or Deny`},
+			`asked: permission "Bash", Allow or Deny`},
 	} {
 		h.s.Hook(c.event, c.p)
 		for end := time.Now().Add(3 * time.Second); ; time.Sleep(20 * time.Millisecond) {
@@ -169,5 +169,8 @@ func TestWhatAQuestionAsksIsLogged(t *testing.T) {
 			}
 		}
 		h.s.clearQuestion("test")
+	}
+	if b, _ := os.ReadFile(path); strings.Contains(string(b), "npm test") {
+		t.Fatalf("a tool's input in the log:\n%s", b)
 	}
 }
