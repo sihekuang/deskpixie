@@ -214,6 +214,12 @@ final class ChatSessionsUITests: XCTestCase {
             .joined(separator: "\r\n")
     }
 
+    /// What a failure needs: the keys alpha got, and pix's log.
+    private static func seen(_ h: UITestApp) -> String {
+        let log = (try? String(contentsOf: h.support.appendingPathComponent("logs/pix.log"), encoding: .utf8)) ?? "(no pix.log)"
+        return "keys \(h.keysTyped("alpha").debugDescription); pix.log:\n" + log.split(separator: "\n").suffix(25).joined(separator: "\n")
+    }
+
     /// Its card's boxes are ticked, then Send: pix ticks each in alpha's menu and goes on (Tab),
     /// and Claude's review comes as the next card, whose Submit answers sends them.
     func testAQuestionOfSeveralPicksIsTickedAndSent() throws {
@@ -235,13 +241,13 @@ final class ChatSessionsUITests: XCTestCase {
         send.click()
 
         let submit = window.buttons.matching(NSPredicate(format: "label == 'Submit answers'")).firstMatch
-        XCTAssertTrue(submit.waitForExistence(timeout: 30), "no review card")
+        XCTAssertTrue(submit.waitForExistence(timeout: 30), "no review card: \(Self.seen(h))")
         XCTAssertTrue(window.waitForText("Which toppings? → Cheese, Olives", timeout: 5), "the review shows the picks")
         XCTAssertTrue(window.waitForText("You answered: Cheese, Olives", timeout: 5), "the first card's outcome")
         submit.click()
         let deadline = Date().addingTimeInterval(15)
         while h.keysTyped("alpha") != "13\t1" && Date() < deadline { Thread.sleep(forTimeInterval: 0.2) }
-        XCTAssertEqual(h.keysTyped("alpha"), "13\t1", "the keys pix typed into alpha's menu")
+        XCTAssertEqual(h.keysTyped("alpha"), "13\t1", "the keys pix typed into alpha's menu: \(Self.seen(h))")
         XCTAssertTrue(window.waitForText("You answered: Submit answers", timeout: 15))
     }
 
