@@ -84,7 +84,7 @@ type Settings struct {
 	SessionTurnsMinMs Millis
 	// ReplyHistoryMs: how far back the reply deck brings unseen replies after a restart (#286).
 	ReplyHistoryMs Millis
-	// OpenConversation (`agent.openConversationForUpdates`, a feature flag, off by default): a job's done
+	// OpenConversation (`agent.openConversationForUpdates`, on by default): a job's done
 	// or failed line, an agent question or a spoken worker report that comes while no
 	// conversation is open makes Pixie open one and say it (opener.go).
 	OpenConversation bool
