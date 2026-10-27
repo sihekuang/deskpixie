@@ -130,6 +130,8 @@ type question struct {
 	agent, tool, use string
 	// told: its event as DeskPixie last had it (nil: not told yet), to ask it again (#347).
 	told *wire.Msg
+	// why: a menu Pixie shows no buttons for, why (for the log, #363).
+	why string
 }
 
 // toolUse is the tool call a hook's payload is about: its name and input, as JSON (map keys
@@ -259,6 +261,7 @@ func (s *Session) ask(q *question, ev wire.Msg) bool {
 	told := ev
 	q.told = &told
 	s.mu.Unlock()
+	s.logTold(q, ev)
 	s.client.Send(ev)
 	return true
 }
@@ -318,7 +321,31 @@ func (s *Session) sendHeld(q *question, d *dialog) {
 	told := ev
 	q.told = &told
 	s.mu.Unlock()
+	s.logTold(q, ev)
 	s.client.Send(ev)
+}
+
+// logTold notes question q as DeskPixie is told it with ev (#363): what it asks, and how
+// Pixie can answer it.
+func (s *Session) logTold(q *question, ev wire.Msg) {
+	// A menu's question, but only a tool's name: its input (a command, a file) can hold a key,
+	// and this log never holds what's sent to the agent.
+	what := ev.ToolName
+	if q.kind == "menu" {
+		what = ev.Text
+	}
+	how := fmt.Sprintf("%d options", len(ev.Keys))
+	switch {
+	case len(ev.Keys) == 0 && ev.Source == "permission":
+		how = "Allow or Deny" // its dialog not read off the screen
+	case len(ev.Keys) == 0 && q.why != "":
+		how = "no buttons (" + q.why + "): answered in its terminal"
+	case len(ev.Keys) == 0:
+		how = "no buttons: answered in its terminal"
+	case ev.Typed:
+		how += ", or your own words"
+	}
+	s.o.log.Printf("question %s asked: %s %q, %s", q.id, ev.Source, firstRunes(what, 60), how)
 }
 
 func (s *Session) currentQuestion() *question {
@@ -605,38 +632,43 @@ func (w *questionWatch) watch(s *Session, out string, vt *screen) {
 
 // menuOf is the question of an AskUserQuestion input and its options when a digit answers it:
 // one question, one pick, at most 8 options (Claude adds "Type something" after them). Else
-// no options: you answer it in the terminal.
-func menuOf(input any) (string, []string, []string) {
+// no options, and why (for the log, #363): you answer it in the terminal.
+func menuOf(input any) (text string, labels, details []string, why string) {
 	m, _ := input.(map[string]any)
 	qs, _ := m["questions"].([]any)
 	if len(qs) == 0 {
-		return "", nil, nil
+		return "", nil, nil, "no question"
 	}
 	first, _ := qs[0].(map[string]any)
-	text, _ := first["question"].(string)
+	text, _ = first["question"].(string)
 	if len(qs) > 1 {
-		return fmt.Sprintf("%s (and %d more)", text, len(qs)-1), nil, nil
+		return fmt.Sprintf("%s (and %d more)", text, len(qs)-1), nil, nil, fmt.Sprintf("%d questions at once", len(qs))
 	}
 	multi, _ := first["multiSelect"].(bool)
 	secret, _ := first["isSecret"].(bool) // Codex: typed in its terminal only
-	if multi || secret {
-		return text, nil, nil
+	switch {
+	case multi:
+		return text, nil, nil, "several picks"
+	case secret:
+		return text, nil, nil, "a secret"
 	}
 	opts, _ := first["options"].([]any)
-	var labels, details []string
 	for _, o := range opts {
 		om, _ := o.(map[string]any)
 		label, _ := om["label"].(string)
 		if label == "" {
-			return text, nil, nil
+			return text, nil, nil, "an option without a label"
 		}
 		detail, _ := om["description"].(string)
 		labels, details = append(labels, label), append(details, detail)
 	}
-	if len(labels) > 8 {
-		return text, nil, nil
+	switch {
+	case len(labels) > 8:
+		return text, nil, nil, fmt.Sprintf("%d options", len(labels))
+	case len(labels) == 0:
+		return text, nil, nil, "no options"
 	}
-	return text, labels, details
+	return text, labels, details, ""
 }
 
 // onlyReports: b is the terminal reporting focus or the mouse, not a key of yours.

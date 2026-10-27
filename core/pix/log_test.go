@@ -135,3 +135,42 @@ func TestDaemonSocketFollowsTheAppsDataFolder(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+// #363: what a question asks, and how Pixie can answer it, reaches the log: a menu's options,
+// one Pixie shows no buttons for and why, a permission before its dialog is read.
+func TestWhatAQuestionAsksIsLogged(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pix.log")
+	h := newLoggedHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "stty raw -echo; sleep 30"}}, openLog(path, 1<<20, "claude"))
+	t.Cleanup(func() { h.s.runner.Hangup(); h.s.finish() })
+	one := map[string]any{"question": "Which?", "options": []any{map[string]any{"label": "A"}, map[string]any{"label": "B"}}}
+	multi := map[string]any{"question": "Which ones?", "multiSelect": true, "options": one["options"]}
+	for _, c := range []struct {
+		event string
+		p     map[string]any
+		want  string
+	}{
+		{"PreToolUse", map[string]any{"tool_name": "AskUserQuestion", "tool_input": map[string]any{"questions": []any{one}}},
+			`asked: menu "Which?", 2 options`},
+		{"PreToolUse", map[string]any{"tool_name": "AskUserQuestion", "tool_input": map[string]any{"questions": []any{one, one}}},
+			`asked: menu "Which? (and 1 more)", no buttons (2 questions at once): answered in its terminal`},
+		{"PreToolUse", map[string]any{"tool_name": "AskUserQuestion", "tool_input": map[string]any{"questions": []any{multi}}},
+			`asked: menu "Which ones?", no buttons (several picks): answered in its terminal`},
+		{"PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "npm test"}},
+			`asked: permission "Bash", Allow or Deny`},
+	} {
+		h.s.Hook(c.event, c.p)
+		for end := time.Now().Add(3 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+			b, _ := os.ReadFile(path)
+			if strings.Contains(string(b), c.want) {
+				break
+			}
+			if time.Now().After(end) {
+				t.Fatalf("no %q in the log:\n%s", c.want, b)
+			}
+		}
+		h.s.clearQuestion("test")
+	}
+	if b, _ := os.ReadFile(path); strings.Contains(string(b), "npm test") {
+		t.Fatalf("a tool's input in the log:\n%s", b)
+	}
+}
