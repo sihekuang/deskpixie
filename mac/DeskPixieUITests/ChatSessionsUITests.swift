@@ -235,8 +235,16 @@ final class ChatSessionsUITests: XCTestCase {
         XCTAssertTrue(send.waitForExistence(timeout: 30), "no card with boxes for alpha's question")
         XCTAssertFalse(send.isEnabled, "Send waits for a box ticked")
         XCTAssertFalse(window.element("chat.request.reply").exists, "it takes no typed answer")
-        window.element("chat.request.pick.1").click()
-        window.element("chat.request.pick.3").click()
+        // The system's notifications prompt can come up meanwhile and take a click: each box is
+        // seen ticked before the next.
+        for n in [1, 3] {
+            let box = window.element("chat.request.pick.\(n)")
+            for _ in 0..<3 where !box.isSelected {
+                box.click()
+                _ = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "isSelected == true"), object: box)], timeout: 3)
+            }
+            XCTAssertTrue(box.isSelected, "box \(n) isn't ticked")
+        }
         XCTAssertTrue(send.isEnabled)
         send.click()
 
