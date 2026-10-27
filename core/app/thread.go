@@ -284,6 +284,20 @@ func chosenOutcome(option int) func(chat.Entry) string {
 	}
 }
 
+// pickedOutcome names the options picked (from 1) by their text, else their numbers (#364).
+func pickedOutcome(options []int) func(chat.Entry) string {
+	return func(e chat.Entry) string {
+		names := make([]string, len(options))
+		for i, o := range options {
+			names[i] = strconv.Itoa(o)
+			if o >= 1 && o <= len(e.Request.Options) {
+				names[i] = e.Request.Options[o-1]
+			}
+		}
+		return "You answered: " + strings.Join(names, ", ")
+	}
+}
+
 func typedOutcome(text string) func(chat.Entry) string {
 	return func(chat.Entry) string { return "You answered: " + text }
 }

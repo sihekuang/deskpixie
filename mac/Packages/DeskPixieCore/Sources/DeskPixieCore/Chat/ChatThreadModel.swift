@@ -337,6 +337,12 @@ public final class ChatThreadModel {
         await call("agent.choose") { try client.choose(token: token, option: option) }
     }
 
+    /// The options (from 1) ticked of a question that takes several (#364).
+    public func pick(token: String, options: [Int]) async {
+        let client = client
+        await call("agent.pick") { try client.pick(token: token, options: options) }
+    }
+
     public func typedAnswer(token: String, text: String) async {
         let client = client
         await call("agent.typedAnswer") { try client.typedAnswer(token: token, text: text) }
@@ -433,14 +439,20 @@ public final class ChatThreadModel {
     /// One button per option (`agent.choose`).
     public static func offersOptions(_ e: ChatEntry) -> Bool {
         guard isOpen(e), let r = e.request else { return false }
-        return r.kind == "question" && !r.token.isEmpty && !r.options.isEmpty
+        return r.kind == "question" && !r.token.isEmpty && !r.options.isEmpty && !r.multi
+    }
+
+    /// A box per option to tick, then Send (`agent.pick`, #364).
+    public static func offersPicks(_ e: ChatEntry) -> Bool {
+        guard isOpen(e), let r = e.request else { return false }
+        return r.kind == "question" && !r.token.isEmpty && !r.options.isEmpty && r.multi
     }
 
     /// Reply…: a question that takes a typed answer, or one with no buttons, answered by a
     /// message to its session.
     public static func offersReply(_ e: ChatEntry) -> Bool {
         guard isOpen(e), let r = e.request, r.kind == "question" else { return false }
-        if !r.token.isEmpty { return r.typed }
+        if !r.token.isEmpty { return r.typed && !r.multi }
         return e.who.kind == "session" && !e.who.name.isEmpty
     }
 

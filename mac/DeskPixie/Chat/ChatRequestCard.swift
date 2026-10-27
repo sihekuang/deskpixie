@@ -2,12 +2,14 @@ import DeskPixieCore
 import SwiftUI
 
 /// A request waiting on you (spec §4.1): an orange-edged card under its session's header. A
-/// permission has Allow and Deny (`agent.decide`); a question its options (`agent.choose`) and,
+/// permission has Allow and Deny (`agent.decide`); a question its options (`agent.choose`), or
+/// boxes to tick and Send when it takes several picks (`agent.pick`, #364), and,
 /// when it takes a typed answer or has no buttons, Reply…, which points the box at it. Once
 /// answered, the thread shows its outcome line instead.
 struct ChatRequestCard: View {
     let entry: ChatEntry
     let actions: ChatActions
+    @State private var picks = MenuPicks()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -50,6 +52,21 @@ struct ChatRequestCard: View {
                     Button(option) { actions.choose(token, i + 1) }
                         .buttonStyle(CardButtonStyle())
                 }
+            }
+            if ChatThreadModel.offersPicks(entry) {
+                ForEach(Array((entry.request?.options ?? []).enumerated()), id: \.offset) { i, option in
+                    Button { picks.toggle(i + 1) } label: {
+                        Label(option, systemImage: picks.isPicked(i + 1) ? "checkmark.square.fill" : "square")
+                    }
+                    .buttonStyle(CardButtonStyle())
+                    .accessibilityAddTraits(picks.isPicked(i + 1) ? .isSelected : [])
+                    .accessibilityIdentifier("chat.request.pick.\(i + 1)")
+                }
+                Button("Send") { actions.pick(token, picks.options) }
+                    .buttonStyle(CardButtonStyle(prominent: true))
+                    .disabled(!picks.canSend)
+                    .opacity(picks.canSend ? 1 : 0.5)
+                    .accessibilityIdentifier("chat.request.send")
             }
             if ChatThreadModel.offersReply(entry) {
                 Button("Reply…") { actions.reply(entry) }

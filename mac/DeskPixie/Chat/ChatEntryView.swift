@@ -55,6 +55,8 @@ struct ChatActions {
     var stopTarget: (ChatEntry) -> ChatStopTarget? = { _ in nil }
     var liveWho: (ChatEntry) -> ChatWho = { $0.who }
     var stop: (ChatStopTarget) -> Void = { _ in }
+    /// Send on a question of several picks: the options ticked, from 1 (#364).
+    var pick: (String, [Int]) -> Void = { _, _ in }
 }
 
 /// One message in the thread, drawn by who said it (spec §4.1): your bubble on the right,

@@ -124,6 +124,11 @@ func (f *fakeAgent) TypedAnswer(token, text string) {
 	f.decided = append(f.decided, fmt.Sprintf("%s:typed %s", token, text))
 	f.mu.Unlock()
 }
+func (f *fakeAgent) Pick(token string, options []int) {
+	f.mu.Lock()
+	f.decided = append(f.decided, fmt.Sprintf("%s:picks %v", token, options))
+	f.mu.Unlock()
+}
 func (f *fakeAgent) ChatAbout(token string) {
 	f.mu.Lock()
 	f.decided = append(f.decided, token+":chat")
@@ -411,15 +416,16 @@ func TestTheBubbleChooseCallReachesTheAgent(t *testing.T) {
 	}
 }
 
-// #268: a typed answer and "Chat about this" from the bubble reach the agent.
+// #268: a typed answer and "Chat about this" from the bubble reach the agent, as do picks (#364).
 func TestTheBubbleTypedAnswerAndChatReachTheAgent(t *testing.T) {
 	f := &fakeAgent{}
 	h := newHarness(t, withAgent(f))
 	h.call("agent.typedAnswer", map[string]any{"token": "hawk", "text": "MariaDB"})
 	h.call("agent.chatAbout", map[string]any{"token": "owl"})
+	h.call("agent.pick", map[string]any{"token": "lark", "options": []int{1, 3}}) // #364
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if !slices.Equal(f.decided, []string{"hawk:typed MariaDB", "owl:chat"}) {
+	if !slices.Equal(f.decided, []string{"hawk:typed MariaDB", "owl:chat", "lark:picks [1 3]"}) {
 		t.Fatal(f.decided)
 	}
 }
@@ -468,6 +474,7 @@ func TestTheUpdatesBubbleCallsAreNoOpsWithoutAnAgent(t *testing.T) {
 		"agent.choose":      map[string]any{"token": "hawk", "option": 1},
 		"agent.typedAnswer": map[string]any{"token": "hawk", "text": "x"},
 		"agent.chatAbout":   map[string]any{"token": "hawk"},
+		"agent.pick":        map[string]any{"token": "hawk", "options": []int{1}},
 		"agent.focusJob":    map[string]any{"job": "job_000000000001"},
 		"presence.set":      map[string]any{"away": true},
 	} {

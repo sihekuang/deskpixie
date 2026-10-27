@@ -35,6 +35,8 @@ public struct UpdateLine: Codable, Sendable, Equatable, Identifiable {
     /// The menu also takes a typed answer (`agent.typedAnswer`) and "Chat about this"
     /// (`agent.chatAbout`), as its terminal does (#268).
     public let typed: Bool?
+    /// You tick several of the menu's options and send them (`agent.pick`, #364).
+    public let multi: Bool?
 
     /// What the row says: the brief when there is one, else the full text.
     public var shownText: String {
@@ -49,7 +51,10 @@ public struct UpdateLine: Codable, Sendable, Equatable, Identifiable {
     public var offersOptions: Bool { kind == "question" && token != nil && !(options ?? []).isEmpty }
 
     /// Whether the menu also shows "Type something…" and "Chat about this" (#268).
-    public var offersTyped: Bool { offersOptions && typed == true }
+    public var offersTyped: Bool { offersOptions && typed == true && multi != true }
+
+    /// Whether its options are boxes to tick, sent together (#364).
+    public var offersPicks: Bool { offersOptions && multi == true }
 
     /// The line asks you something but offers no buttons (#286): its card offers its terminal.
     public var offersTerminal: Bool {
@@ -74,7 +79,8 @@ public struct UpdateLine: Codable, Sendable, Equatable, Identifiable {
     public init(id: UInt64, text: String, kind: String, at: Int64, job: String?, worker: String?,
                 token: String? = nil, app: String? = nil, session: String? = nil,
                 title: String? = nil, brief: String? = nil, asking: Bool? = nil,
-                options: [String]? = nil, note: String? = nil, details: [String]? = nil, typed: Bool? = nil) {
+                options: [String]? = nil, note: String? = nil, details: [String]? = nil, typed: Bool? = nil,
+                multi: Bool? = nil) {
         self.id = id
         self.text = text
         self.kind = kind
@@ -91,6 +97,7 @@ public struct UpdateLine: Codable, Sendable, Equatable, Identifiable {
         self.note = note
         self.details = details
         self.typed = typed
+        self.multi = multi
     }
 }
 

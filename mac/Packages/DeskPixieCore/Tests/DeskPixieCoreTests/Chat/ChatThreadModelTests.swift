@@ -58,6 +58,13 @@ final class FakeChatClient: ChatClient, @unchecked Sendable {
     }
     func decide(token: String, allow: Bool) throws { try check() }
     func choose(token: String, option: Int) throws { try check() }
+    struct Picked: Equatable { let token: String; let options: [Int] }
+    private var _picked: [Picked] = []
+    var picked: [Picked] { lock.withLock { _picked } }
+    func pick(token: String, options: [Int]) throws {
+        try check()
+        lock.withLock { _picked.append(Picked(token: token, options: options)) }
+    }
     struct Typed: Equatable { let token: String; let text: String }
     private var _typed: [Typed] = []
     var typed: [Typed] { lock.withLock { _typed } }
@@ -272,6 +279,7 @@ final class ChatThreadModelTests: XCTestCase {
         let r = try JSONDecoder().decode(ChatRequest.self, from: Data(#"{"item":7,"kind":"permission"}"#.utf8))
         XCTAssertEqual(r.options, [])
         XCTAssertEqual(r.outcome, "")
+        XCTAssertFalse(r.multi)
         let b = try JSONDecoder().decode(ChatBadge.self, from: Data(#"{"needs":1,"unread":2}"#.utf8))
         XCTAssertNil(b.preview)
     }
@@ -280,13 +288,22 @@ final class ChatThreadModelTests: XCTestCase {
         let json = #"""
         {"id":"req7","at":9,"who":{"kind":"session","name":"herdr:1.2","label":"api","yours":true,"status":"asking","color":3},
          "text":"ok?","spoken":true,"sessions":["herdr:1.2"],"lines":[4],"attachments":["/a"],
-         "request":{"token":"tk","item":7,"kind":"question","options":["a","b"],"typed":true,"outcome":"x","job":"j"},"read":true}
+         "request":{"token":"tk","item":7,"kind":"question","options":["a","b"],"typed":true,"multi":true,"outcome":"x","job":"j"},"read":true}
         """#
         let e = try JSONDecoder().decode(ChatEntry.self, from: Data(json.utf8))
         XCTAssertEqual(e.who.color, 3)
         XCTAssertEqual(e.request?.options, ["a", "b"])
+        XCTAssertEqual(e.request?.multi, true)
         XCTAssertEqual(e.lines, [4])
         XCTAssertTrue(e.read)
+    }
+
+    /// #364: the options ticked go to the core together.
+    func testPicksReachTheClient() async {
+        let client = FakeChatClient([])
+        let model = ChatThreadModel(client: client)
+        await model.pick(token: "tk", options: [1, 3])
+        XCTAssertEqual(client.picked, [FakeChatClient.Picked(token: "tk", options: [1, 3])])
     }
 
     func testAnOlderEntryNotLoadedIsDroppedWhileThereIsMoreAndNeverShownTwice() async {
@@ -435,6 +452,14 @@ final class ChatThreadModelTests: XCTestCase {
         let noButtons = ask(4, kind: "question", token: "", options: ["a"])
         XCTAssertFalse(ChatThreadModel.offersOptions(noButtons), "no token, nothing to choose with")
         XCTAssertTrue(ChatThreadModel.offersReply(noButtons), "answered by a message to its session")
+
+        // #364: a question of several picks ticks them instead, and takes no typed answer.
+        var picks = ask(6, kind: "question", options: ["a", "b"], typed: true)
+        picks.request?.multi = true
+        XCTAssertTrue(ChatThreadModel.offersPicks(picks))
+        XCTAssertFalse(ChatThreadModel.offersOptions(picks))
+        XCTAssertFalse(ChatThreadModel.offersReply(picks))
+        XCTAssertFalse(ChatThreadModel.offersPicks(menu))
 
         var done = menu
         done.request?.outcome = "You answered: a"

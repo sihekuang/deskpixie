@@ -37,6 +37,10 @@ struct UpdatesBubbleView: View {
     var onSendTyped: (String) -> Void = { _ in }
     var onStopTyping: () -> Void = {}
     var onChat: (String) -> Void = { _ in }
+    /// The boxes ticked of a question that takes several picks, and Send (token, options from
+    /// 1) under the stray-click guard (#364).
+    @ObservedObject var picks: BubblePicks
+    var onPick: (String, [Int]) -> Void = { _, _ in }
     /// "Open its terminal" on a line that asks without buttons: its pane comes up (#286); the
     /// card stays until it is answered there (#347).
     var onTerminal: (UpdateLine) -> Void = { _ in }
@@ -127,7 +131,9 @@ struct UpdatesBubbleView: View {
                 .padding(.horizontal, 8)
                 .padding(.bottom, 4)
             }
-            if line.offersOptions, let token = line.token, let options = line.options {
+            if line.offersPicks, let token = line.token, let options = line.options {
+                picksList(token, options, line)
+            } else if line.offersOptions, let token = line.token, let options = line.options {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(Array(options.enumerated()), id: \.offset) { i, option in
                         Button { onChoose(token, i + 1) } label: {
@@ -181,6 +187,41 @@ struct UpdatesBubbleView: View {
         }
         .padding(4)
         .deckCard()
+    }
+
+    /// A box per option to tick, then Send with those ticked (#364).
+    private func picksList(_ token: String, _ options: [String], _ line: UpdateLine) -> some View {
+        let ticked = picks.picked[token] ?? MenuPicks()
+        return VStack(alignment: .leading, spacing: 4) {
+            ForEach(Array(options.enumerated()), id: \.offset) { i, option in
+                Button { picks.picked[token, default: MenuPicks()].toggle(i + 1) } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Image(systemName: ticked.isPicked(i + 1) ? "checkmark.square.fill" : "square")
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(option)
+                            if let detail = line.detail(of: i) {
+                                Text(detail)
+                                    .font(.caption)
+                                    .opacity(0.75)
+                            }
+                        }
+                    }
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(OptionButtonStyle(prominent: false))
+                .accessibilityAddTraits(ticked.isPicked(i + 1) ? .isSelected : [])
+            }
+            Button { onPick(token, ticked.options) } label: {
+                Text("Send").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(!ticked.canSend)
+        }
+        .controlSize(.small)
+        .padding(.horizontal, 8)
+        .padding(.bottom, 4)
     }
 
     /// The typed answer's field (#268): Return sends, Esc goes back to the options.
@@ -268,6 +309,11 @@ private struct OutlineButtonStyle: ButtonStyle {
 
 /// The typed answer's draft (#268), kept outside the view so redraws don't lose it.
 @MainActor
+/// The boxes ticked of each question that takes several picks, by its token (#364).
+final class BubblePicks: ObservableObject {
+    @Published var picked: [String: MenuPicks] = [:]
+}
+
 final class BubbleTyping: ObservableObject {
     @Published var draft = ""
     /// Bumped to put the cursor in the field again.

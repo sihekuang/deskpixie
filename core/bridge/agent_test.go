@@ -41,6 +41,7 @@ func (b *bridgeAgent) Decide(string, bool)                       {}
 func (b *bridgeAgent) Choose(string, int)                        {}
 func (b *bridgeAgent) TypedAnswer(string, string)                {}
 func (b *bridgeAgent) ChatAbout(string)                          {}
+func (b *bridgeAgent) Pick(string, []int)                        {}
 func (b *bridgeAgent) Updates() any                              { return []any{} }
 func (b *bridgeAgent) SetAway(bool)                              {}
 func (b *bridgeAgent) FocusJob(string, string)                   {}

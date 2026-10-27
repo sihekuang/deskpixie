@@ -1383,6 +1383,20 @@ func (a *App) Register(r Registrar) {
 		}
 		return struct{}{}, nil
 	})
+	r.Register("agent.pick", func(args json.RawMessage) (any, error) {
+		var in struct {
+			Token   string `json:"token"`
+			Options []int  `json:"options"`
+		}
+		if err := decodeArgs("agent.pick", args, &in); err != nil {
+			return nil, err
+		}
+		a.threadAnswered(in.Token, pickedOutcome(in.Options))
+		if a.agent != nil {
+			a.agent.Pick(in.Token, in.Options)
+		}
+		return struct{}{}, nil
+	})
 	r.Register("agent.chatAbout", func(args json.RawMessage) (any, error) {
 		var in struct {
 			Token string `json:"token"`

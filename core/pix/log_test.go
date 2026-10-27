@@ -137,7 +137,7 @@ func TestDaemonSocketFollowsTheAppsDataFolder(t *testing.T) {
 }
 
 // #363: what a question asks, and how Pixie can answer it, reaches the log: a menu's options,
-// one Pixie shows no buttons for and why, a permission before its dialog is read.
+// several questions or picks (#364), one Pixie shows no buttons for and why, a permission before its dialog is read.
 func TestWhatAQuestionAsksIsLogged(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "pix.log")
 	h := newLoggedHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "stty raw -echo; sleep 30"}}, openLog(path, 1<<20, "claude"))
@@ -152,9 +152,9 @@ func TestWhatAQuestionAsksIsLogged(t *testing.T) {
 		{"PreToolUse", map[string]any{"tool_name": "AskUserQuestion", "tool_input": map[string]any{"questions": []any{one}}},
 			`asked: menu "Which?", 2 options`},
 		{"PreToolUse", map[string]any{"tool_name": "AskUserQuestion", "tool_input": map[string]any{"questions": []any{one, one}}},
-			`asked: menu "Which? (and 1 more)", no buttons (2 questions at once): answered in its terminal`},
+			`asked: menu "Which? (1 of 2)", 2 options, or your own words`},
 		{"PreToolUse", map[string]any{"tool_name": "AskUserQuestion", "tool_input": map[string]any{"questions": []any{multi}}},
-			`asked: menu "Which ones?", no buttons (several picks): answered in its terminal`},
+			`asked: menu "Which ones?", 2 options, several picks`},
 		{"PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "npm test"}},
 			`asked: permission "Bash", Allow or Deny`},
 	} {

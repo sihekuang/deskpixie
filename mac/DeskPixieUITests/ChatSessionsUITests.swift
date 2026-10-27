@@ -201,6 +201,64 @@ final class ChatSessionsUITests: XCTestCase {
         return items.filter { $0.hasPrefix("Coordinator:") }
     }
 
+    // MARK: A question of several picks (#364)
+
+    /// Claude's menu tab of several picks (2.1.311), these ticked.
+    private static func toppings(_ ticked: Set<Int>) -> String {
+        let options = ["Cheese", "Ham", "Olives"].enumerated().map { i, o in
+            "\(i == 0 ? "❯" : " ") \(i + 1). [\(ticked.contains(i + 1) ? "✔" : " ")] \(o)"
+        }
+        // A tick marks the tab answered at once, as Claude's does.
+        return (["←  \(ticked.isEmpty ? "☐" : "☒") Pick  ✔ Submit  →", "Which toppings?"] + options + ["  4. [ ] Type something",
+                "────────────────────", "  5. Chat about this", "Enter to select · ↑/↓ to navigate · Esc to cancel"])
+            .joined(separator: "\r\n")
+    }
+
+    /// What a failure needs: the keys alpha got, and pix's log.
+    private static func seen(_ h: UITestApp) -> String {
+        let log = (try? String(contentsOf: h.support.appendingPathComponent("logs/pix.log"), encoding: .utf8)) ?? "(no pix.log)"
+        return "keys \(h.keysTyped("alpha").debugDescription); pix.log:\n" + log.split(separator: "\n").suffix(25).joined(separator: "\n")
+    }
+
+    /// Its card's boxes are ticked, then Send: pix ticks each in alpha's menu and goes on (Tab),
+    /// and Claude's review comes as the next card, whose Submit answers sends them.
+    func testAQuestionOfSeveralPicksIsTickedAndSent() throws {
+        let (h, window, _) = try start()
+        let review = "←  ☒ Pick  ✔ Submit  →\r\nReview your answers\r\n ● Which toppings?\r\n   → Cheese, Olives\r\n"
+            + "Ready to submit your answers?\r\n❯ 1. Submit answers\r\n  2. Cancel"
+        try h.askMenu("alpha", input: ["questions": [["question": "Which toppings?", "header": "Pick", "multiSelect": true,
+                                                       "options": [["label": "Cheese"], ["label": "Ham"], ["label": "Olives"]]]]],
+                      screen: Self.toppings([]),
+                      after: [("1", Self.toppings([1])), ("3", Self.toppings([1, 3])), ("\t", review),
+                              ("1", "⏺ User answered Claude's questions:\r\n  ⎿  · Which toppings? → Cheese, Olives\r\n")])
+        let send = window.element("chat.request.send")
+        XCTAssertTrue(send.waitForExistence(timeout: 30), "no card with boxes for alpha's question")
+        XCTAssertFalse(send.isEnabled, "Send waits for a box ticked")
+        XCTAssertFalse(window.element("chat.request.reply").exists, "it takes no typed answer")
+        // The system's notifications prompt can come up meanwhile and take a click: each box is
+        // seen ticked before the next.
+        for n in [1, 3] {
+            let box = window.element("chat.request.pick.\(n)")
+            for _ in 0..<3 where !box.isSelected {
+                box.click()
+                _ = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "isSelected == true"), object: box)], timeout: 3)
+            }
+            XCTAssertTrue(box.isSelected, "box \(n) isn't ticked")
+        }
+        XCTAssertTrue(send.isEnabled)
+        send.click()
+
+        let submit = window.buttons.matching(NSPredicate(format: "label == 'Submit answers'")).firstMatch
+        XCTAssertTrue(submit.waitForExistence(timeout: 30), "no review card: \(Self.seen(h))")
+        XCTAssertTrue(window.waitForText("Which toppings? → Cheese, Olives", timeout: 5), "the review shows the picks")
+        XCTAssertTrue(window.waitForText("You answered: Cheese, Olives", timeout: 5), "the first card's outcome")
+        submit.click()
+        let deadline = Date().addingTimeInterval(15)
+        while h.keysTyped("alpha") != "13\t1" && Date() < deadline { Thread.sleep(forTimeInterval: 0.2) }
+        XCTAssertEqual(h.keysTyped("alpha"), "13\t1", "the keys pix typed into alpha's menu: \(Self.seen(h))")
+        XCTAssertTrue(window.waitForText("You answered: Submit answers", timeout: 15))
+    }
+
     // MARK: A session that ends
 
     func testBetaEndingWhilePickedSaysSo() throws {

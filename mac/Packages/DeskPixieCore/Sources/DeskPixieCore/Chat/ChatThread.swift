@@ -43,17 +43,20 @@ public struct ChatRequest: Codable, Equatable, Sendable {
     public var kind: String
     public var options: [String]
     public var typed: Bool
+    /// Several of its options are ticked and sent together (`agent.pick`, #364).
+    public var multi: Bool
     public var outcome: String
     /// The job asking ("" = a session's question, or a permission no job owns).
     public var job: String
 
     public init(token: String = "", item: UInt64, kind: String, options: [String] = [],
-                typed: Bool = false, outcome: String = "", job: String = "") {
+                typed: Bool = false, multi: Bool = false, outcome: String = "", job: String = "") {
         self.token = token
         self.item = item
         self.kind = kind
         self.options = options
         self.typed = typed
+        self.multi = multi
         self.outcome = outcome
         self.job = job
     }
@@ -65,11 +68,12 @@ public struct ChatRequest: Codable, Equatable, Sendable {
                   kind: try c.decode(String.self, forKey: .kind),
                   options: try c.decodeIfPresent([String].self, forKey: .options) ?? [],
                   typed: try c.decodeIfPresent(Bool.self, forKey: .typed) ?? false,
+                  multi: try c.decodeIfPresent(Bool.self, forKey: .multi) ?? false,
                   outcome: try c.decodeIfPresent(String.self, forKey: .outcome) ?? "",
                   job: try c.decodeIfPresent(String.self, forKey: .job) ?? "")
     }
 
-    private enum CodingKeys: String, CodingKey { case token, item, kind, options, typed, outcome, job }
+    private enum CodingKeys: String, CodingKey { case token, item, kind, options, typed, multi, outcome, job }
 }
 
 /// One message in the thread. The `id` is opaque (never parse it); an entry with an ID already
@@ -247,6 +251,8 @@ public protocol ChatClient: Sendable {
     func decide(token: String, allow: Bool) throws
     /// `option` counts from 1.
     func choose(token: String, option: Int) throws
+    /// `agent.pick`: the options (from 1) ticked of a question that takes several (#364).
+    func pick(token: String, options: [Int]) throws
     func typedAnswer(token: String, text: String) throws
     /// Stops what Pixie is working on.
     func stop() throws
