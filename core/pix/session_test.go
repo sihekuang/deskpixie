@@ -1554,8 +1554,10 @@ func TestAPromptYouSubmittedOpensTheGateHoweverEnterWasSent(t *testing.T) {
 }
 
 // "Send it anyway" (#187): flush types what waits even while the gate thinks you're typing; a
-// working agent still gets it with its next tool, and a question on screen is never typed into.
+// working agent is stopped for it (#373), and while it hasn't stopped the message waits.
 func TestFlushTypesWhatWaitsDespiteTheGate(t *testing.T) {
+	defer func(w time.Duration) { InterruptWait = w }(InterruptWait)
+	InterruptWait = 200 * time.Millisecond
 	h := newHarness(t, "codex", Launch{Path: "/bin/sh", Args: []string{"-c", "read x; echo seen:$x; sleep 30"}})
 	h.stdinW.WriteString("half a sent") // the gate holds the message
 	time.Sleep(100 * time.Millisecond)
@@ -1570,7 +1572,10 @@ func TestFlushTypesWhatWaitsDespiteTheGate(t *testing.T) {
 	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "3", Command: "prompt", Text: "later"})
 	waitEvent(t, h.d.events, "waiting: working", func(m wire.Msg) bool { return m.ID == "3" && m.Reason == "working" })
 	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "4", Command: "flush"})
-	waitEvent(t, h.d.events, "still waiting: working", func(m wire.Msg) bool { return m.ID == "4" && m.Status == "waiting" && m.Reason == "working" })
+	waitEvent(t, h.d.events, "stopping", func(m wire.Msg) bool { return m.ID == "4" && m.Status == "waiting" && m.Reason == "stopping" })
+	if got := h.s.typedForTest(); !strings.HasSuffix(got, "\x1b") {
+		t.Fatalf("no Esc for the busy turn: %q", got)
+	}
 	h.s.runner.Hangup()
 	h.s.finish()
 }
@@ -1638,9 +1643,9 @@ func TestStopNeverAnswersAQuestion(t *testing.T) {
 	}
 }
 
-// #320: stopping isn't forcing: while you type there the message waits for you, your draft is
-// left alone, and the turn isn't cut for a message that can't go in yet.
-func TestStopNeverTypesOverYourDraft(t *testing.T) {
+// #373: stopping is forcing: the busy turn is stopped and the message goes in past your typing,
+// Claude setting your draft aside (Ctrl-S) and putting it back after.
+func TestStopGoesInPastYourDraft(t *testing.T) {
 	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", stopsOnEsc}})
 	h.s.setStatus("working")
 	h.stdinW.WriteString("my draft")
@@ -1654,9 +1659,10 @@ func TestStopNeverTypesOverYourDraft(t *testing.T) {
 	}
 	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "from pixie"})
 	waitEvent(t, h.d.events, "waiting: working", func(m wire.Msg) bool { return m.ID == "1" && m.Reason == "working" })
-	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "2", Command: "stop"})
-	waitEvent(t, h.d.events, "waiting: typing", func(m wire.Msg) bool { return m.ID == "2" && m.Status == "waiting" && m.Reason == "typing" })
-	if got := h.s.typedForTest(); strings.Contains(got, "\x1b") || strings.Contains(got, "from pixie") || h.s.queue.Len() != 1 || h.s.currentStatus() != "working" {
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "2", Command: "stop", TypingNote: "[sent while you were typing]", StoppedNote: "[stopped and sent]"})
+	waitEvent(t, h.d.events, "typed", func(m wire.Msg) bool { return m.ID == "2" && m.Status == "typed" })
+	got := h.s.typedForTest()
+	if !strings.HasPrefix(got, "my draft\x1b\x13") || !strings.Contains(got, "\x1b[200~[stopped and sent] from pixie\x1b[201~") || h.s.queue.Len() != 0 {
 		t.Fatalf("typed %q, %d queued", got, h.s.queue.Len())
 	}
 	h.s.runner.Hangup()
@@ -2106,8 +2112,9 @@ func TestFlushTypesItsNoteOnlyPastYourTyping(t *testing.T) {
 	}
 }
 
-// #340 review: a stop's note waiting for the turn to end goes with a flush that types what
-// waits (or goes with nothing to type), never with a later ordinary message.
+// #340 review: a stop's note waiting for the turn to end goes with what waits once the turn ends
+// (#373: past your typing), or with a flush that has nothing to type, never with a later
+// ordinary message.
 func TestAFlushUsesUpAStopsNote(t *testing.T) {
 	defer func(w time.Duration) { InterruptWait = w }(InterruptWait)
 	InterruptWait = 200 * time.Millisecond
@@ -2123,15 +2130,11 @@ func TestAFlushUsesUpAStopsNote(t *testing.T) {
 			t.Fatal("the gate never saw you typing")
 		}
 	}
-	h.s.Hook("Stop", map[string]any{}) // the turn ends
-	time.Sleep(700 * time.Millisecond)
-	if h.s.queue.Len() != 1 {
-		t.Fatalf("typed over your typing: %d queued", h.s.queue.Len())
-	}
-	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "3", Command: "flush", Text: "[sent while you were typing]"})
-	waitEvent(t, h.d.events, "flushed", func(m wire.Msg) bool { return m.ID == "3" && m.Status == "typed" })
-	if got := h.s.typedForTest(); !strings.Contains(got, "\x1b[200~[stopped and sent] first\x1b[201~") {
-		t.Fatalf("flush typed %q", got)
+	h.s.Hook("Stop", map[string]any{}) // the turn ends: still forced, it goes in past your typing
+	for end := time.Now().Add(5 * time.Second); !strings.Contains(h.s.typedForTest(), "\x1b[200~[stopped and sent] first\x1b[201~"); time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(end) {
+			t.Fatalf("typed %q, %d queued", h.s.typedForTest(), h.s.queue.Len())
+		}
 	}
 	// Claude puts your line back; you send it, and that turn ends.
 	h.s.Hook("UserPromptSubmit", map[string]any{"prompt": "my draft"})
@@ -2210,4 +2213,77 @@ func TestRepliesAndDeliveriesCarryMessageNumbers(t *testing.T) {
 	waitEvent(t, h.d.events, "c typed", func(m wire.Msg) bool { return m.ID == "4" && m.Status == "typed" && m.Seq == 3 })
 	h.s.runner.Hangup()
 	h.s.finish()
+}
+
+// #373: a forced send waits for a question on screen (Esc there would deny it), and goes in by
+// force once it's answered: past your typing, with the note for that.
+func TestAForcedSendWaitsForAQuestionThenGoesPastYourTyping(t *testing.T) {
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "stty raw -echo; cat >/dev/null"}})
+	h.s.setStatus("blocked")
+	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "ls"}})
+	askedQuestion(t, h)
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "from pixie"})
+	waitEvent(t, h.d.events, "waiting", func(m wire.Msg) bool { return m.ID == "1" && m.Status == "waiting" })
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "2", Command: "flush", TypingNote: "[sent while you were typing]", StoppedNote: "[stopped and sent]"})
+	waitEvent(t, h.d.events, "blocked", func(m wire.Msg) bool { return m.ID == "2" && m.Status == "waiting" && m.Reason == "blocked" })
+	time.Sleep(600 * time.Millisecond)
+	if got := h.s.typedForTest(); got != "" {
+		t.Fatalf("typed into the question: %q", got)
+	}
+	h.stdinW.WriteString("1") // you answer it
+	h.s.clearQuestion("test")
+	h.s.setStatus("idle")
+	h.stdinW.WriteString("my draft") // and start typing
+	for end := time.Now().Add(5 * time.Second); !strings.Contains(h.s.typedForTest(), "\x1b[200~[sent while you were typing] from pixie\x1b[201~"); time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(end) {
+			t.Fatalf("typed %q, %d queued", h.s.typedForTest(), h.s.queue.Len())
+		}
+	}
+	if !strings.Contains(h.s.typedForTest(), "\x13") {
+		t.Fatalf("your draft wasn't set aside: %q", h.s.typedForTest())
+	}
+}
+
+// #373: a forced send with nothing in its way types as any message would, with no note.
+func TestAForcedSendWithNothingInItsWayHasNoNote(t *testing.T) {
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "stty raw -echo; cat >/dev/null"}})
+	h.s.setStatus("working")
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "from pixie"})
+	waitEvent(t, h.d.events, "waiting", func(m wire.Msg) bool { return m.ID == "1" && m.Status == "waiting" })
+	h.s.setStatus("idle")
+	h.s.mu.Lock()
+	h.s.stopped = true // held after Pixie's stop: the forced send lets it go
+	h.s.mu.Unlock()
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "2", Command: "flush", TypingNote: "[sent while you were typing]", StoppedNote: "[stopped and sent]"})
+	waitEvent(t, h.d.events, "typed", func(m wire.Msg) bool { return m.ID == "2" && m.Status == "typed" })
+	if got := h.s.typedForTest(); !strings.Contains(got, "\x1b[200~from pixie\x1b[201~") || strings.Contains(got, "\x1b[200~[") {
+		t.Fatalf("typed %q", got)
+	}
+}
+
+// #373: a forced send that went in another way (a menu's, #306) leaves nothing forced behind: a
+// later message waits for your typing as any would.
+func TestAForcedSendGoneLeavesLaterMessagesUnforced(t *testing.T) {
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "stty raw -echo; cat >/dev/null"}})
+	h.s.mu.Lock()
+	h.s.forced = &forcing{}
+	h.s.mu.Unlock()
+	h.s.flushSoon() // nothing waits
+	for end := time.Now().Add(5 * time.Second); h.s.isForced(); time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(end) {
+			t.Fatal("still forced")
+		}
+	}
+	h.stdinW.WriteString("my draft")
+	for end := time.Now().Add(5 * time.Second); h.s.gate.Clear(time.Now()); time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(end) {
+			t.Fatal("the gate never saw you typing")
+		}
+	}
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "later"})
+	waitEvent(t, h.d.events, "waiting: typing", func(m wire.Msg) bool { return m.ID == "1" && m.Reason == "typing" })
+	time.Sleep(700 * time.Millisecond)
+	if got := h.s.typedForTest(); strings.Contains(got, "later") {
+		t.Fatalf("forced in: %q", got)
+	}
 }

@@ -318,12 +318,12 @@ type deliveringFake struct {
 	// stop_and_send_session (#320)
 	stopResult agent.Delivery
 	stopped    []string
-	// notes: the note each flush or stop was asked to start with (#340)
-	notes []string
+	// notes: the notes each flush or stop was asked to start with (#340)
+	notes []agent.ForcedNotes
 }
 
-func (d *deliveringFake) StopAndSend(ctx context.Context, name, note string) (agent.Delivery, error) {
-	d.stopped, d.notes = append(d.stopped, name), append(d.notes, note)
+func (d *deliveringFake) StopAndSend(ctx context.Context, name string, notes agent.ForcedNotes) (agent.Delivery, error) {
+	d.stopped, d.notes = append(d.stopped, name), append(d.notes, notes)
 	return d.stopResult, nil
 }
 
@@ -379,8 +379,8 @@ func TestMessageSessionSaysWhenTheMessageWaits(t *testing.T) {
 	}
 }
 
-func (d *deliveringFake) Flush(ctx context.Context, name, note string) (agent.Delivery, error) {
-	d.flushed, d.notes = append(d.flushed, name), append(d.notes, note)
+func (d *deliveringFake) Flush(ctx context.Context, name string, notes agent.ForcedNotes) (agent.Delivery, error) {
+	d.flushed, d.notes = append(d.flushed, name), append(d.notes, notes)
 	return d.flushResult, nil
 }
 
@@ -492,9 +492,10 @@ func TestForcedSendsAskForTheirNote(t *testing.T) {
 				t.Fatal(r.Err)
 			}
 		}
-		want := []string{agent.StoppedNote, agent.TypingNote, agent.TypingNote}
+		both := agent.ForcedNotes{Typing: agent.TypingNote, Stopped: agent.StoppedNote}
+		want := []agent.ForcedNotes{both, both, both}
 		if !mark {
-			want = []string{"", "", ""}
+			want = []agent.ForcedNotes{{}, {}, {}}
 		}
 		if !slices.Equal(d.notes, want) {
 			t.Fatalf("mark=%v: notes %q", mark, d.notes)

@@ -156,6 +156,9 @@ type Session struct {
 	// note: what the next typing of what waits starts with, after stop-and-send pressed Esc
 	// (#340); "" for none.
 	note string
+	// forced: what waits is to go in by force (#373) once nothing on screen holds it; nil when
+	// it isn't.
+	forced *forcing
 
 	turnStart     time.Time        // when this turn went working (zero: none seen)
 	turnFromPixie bool             // a prompt of this turn was Pixie's
@@ -623,84 +626,11 @@ func (s *Session) runCommand(m wire.Msg) wire.Msg {
 		s.flushSoon()
 		s.keylog("prompt waiting: status=%s %s", s.currentStatus(), s.gate.State())
 		return wire.Msg{Status: "waiting", Reason: s.waitReason(), Seq: seq} // its number (#339)
-	case "flush":
-		// "Send it anyway" (#187): type what waits even if the gate thinks you're typing. A
-		// working agent gets it with its next tool; a question on screen is never typed into.
-		if s.hasUnsent() { // a menu stopped one: it goes once that's answered (#306)
-			s.flushSoon()
-			return wire.Msg{Status: "waiting", Reason: s.waitReason(), Seq: s.queue.Last()}
-		}
-		if st := s.currentStatus(); st != "idle" && s.queue.Len() > 0 {
-			return wire.Msg{Status: "waiting", Reason: st, Seq: s.queue.Last()}
-		}
-		if m := s.menuHold(); m != "" && s.queue.Len() > 0 { // nor a menu only you should answer (#306)
-			return wire.Msg{Status: "waiting", Reason: m, Seq: s.queue.Last()}
-		}
-		s.release()
-		s.flushMu.Lock()
-		// A stop's note still waiting goes with them (or goes, with nothing to type); else
-		// typed past your typing, they say so there (#340).
-		note := s.takeNote()
-		if note == "" && !s.gate.Clear(time.Now()) {
-			note = m.Text
-		}
-		msgs := s.queue.Drain()
-		if err := s.forceIn(msgs, note); err != nil {
-			s.flushMu.Unlock()
-			return wire.Msg{Err: err.Error()}
-		}
-		s.flushMu.Unlock()
-		if s.hasUnsent() || s.queue.Len() > 0 { // a menu showed meanwhile
-			s.flushSoon()
-			return wire.Msg{Status: "waiting", Reason: s.waitReason(), Seq: s.queue.Last()}
-		}
-		s.title()
-		s.keylog("flush: typed %d", len(msgs))
-		if len(msgs) > 0 {
-			s.delivered()
-		}
-		return wire.Msg{Status: "typed", Seq: s.queue.Delivered(s.hasUnsent())}
-	case "stop":
-		// "Stop it and send it now" (#320): Esc ends a busy turn, then what waits goes in as any
-		// message would. Never past your typing, a question or a menu, and the turn isn't cut
-		// for a message that would wait for those anyway: an Esc there would answer them.
-		// Unlike Pixie's stop button (#309), it holds nothing back, and it lets go of what that
-		// stop held.
-		s.forgetEsc()
-		s.release()
-		if s.queue.Len() > 0 || s.hasUnsent() {
-			wait := ""
-			switch {
-			case s.hasUnsent() || s.menuShown() != "":
-				wait = s.waitReason()
-			case s.currentQuestion() != nil:
-				wait = "blocked"
-			case !s.gate.Clear(time.Now()):
-				wait = "typing"
-			case s.currentStatus() == "working":
-				if err := s.stopTurn(); err != nil {
-					return wire.Msg{Err: err.Error()}
-				}
-				s.setNote(m.Text) // what goes in next was stopped for: say so there (#340)
-				if s.currentStatus() == "working" {
-					wait = "stopping" // it gets them once it has
-				}
-			}
-			if wait != "" {
-				s.flushSoon()
-				return wire.Msg{Status: "waiting", Reason: wait, Seq: s.queue.Last()}
-			}
-		}
-		if s.flushNow() {
-			s.keylog("stop: typed")
-			s.delivered()
-			return wire.Msg{Status: "typed", Seq: s.queue.Delivered(s.hasUnsent())}
-		}
-		if s.queue.Len() == 0 && !s.hasUnsent() { // nothing waits, or the stop's own flush typed it
-			return wire.Msg{Status: "typed", Seq: s.queue.Delivered(s.hasUnsent())}
-		}
-		s.flushSoon()
-		return wire.Msg{Status: "waiting", Reason: s.waitReason(), Seq: s.queue.Last()}
+	case "flush", "stop":
+		// "Send it anyway" (#187) and "stop it and send it now" (#320) are one forced send
+		// (#373): it goes in now, a busy turn stopped and past your typing; only a question or
+		// a menu on screen holds it.
+		return s.forceSend(m)
 	case "keys":
 		if menu := s.menuShown(); menu != "" { // only you answer it (#306)
 			return wire.Msg{Err: menuWaits(s.o.tool, menu)}
@@ -735,6 +665,121 @@ func (s *Session) runCommand(m wire.Msg) wire.Msg {
 	return wire.Msg{Err: "unknown command " + m.Command}
 }
 
+// forcing is a forced send still to go in (#373): the notes it starts with when it went past
+// your typing or stopped a turn, and whether its Esc was pressed (once: a second one could open
+// Claude's rewind).
+type forcing struct {
+	typing, stopped string
+	esc             bool
+}
+
+// forceSend sends what waits in by force (#373), as you would at the terminal: a busy turn is
+// stopped (Esc), and it goes past your typing, your draft put back after (forceIn). A question,
+// a permission or a menu on screen holds it until it's answered (Esc there would deny or cancel
+// it); it is still forced then.
+func (s *Session) forceSend(m wire.Msg) wire.Msg {
+	typing, stopped := m.TypingNote, m.StoppedNote
+	if typing == "" && stopped == "" { // an app from before #373: its one note
+		typing, stopped = m.Text, m.Text
+	}
+	s.forgetEsc()
+	s.release()
+	if s.queue.Len() == 0 && !s.hasUnsent() {
+		s.takeNote() // a stop's note waiting goes, with nothing to type (#340)
+		return wire.Msg{Status: "typed", Seq: s.queue.Delivered(false)}
+	}
+	s.mu.Lock()
+	s.forced = &forcing{typing: typing, stopped: stopped}
+	s.mu.Unlock()
+	if s.forceNow() {
+		s.keylog("forced: typed")
+		s.delivered()
+		return wire.Msg{Status: "typed", Seq: s.queue.Delivered(s.hasUnsent())}
+	}
+	s.flushSoon()
+	return wire.Msg{Status: "waiting", Reason: s.forceWait(), Seq: s.queue.Last()}
+}
+
+// forceWait is why a forced send still waits: what holds it on screen, or a stopped turn that
+// hasn't given way yet.
+func (s *Session) forceWait() string {
+	switch {
+	case s.hasUnsent() || s.menuHold() != "":
+		return s.waitReason()
+	case s.currentQuestion() != nil || s.currentStatus() == "blocked":
+		return "blocked"
+	case s.currentStatus() == "working":
+		return "stopping"
+	}
+	return s.waitReason()
+}
+
+// forceNow types a forced send if nothing on screen holds it, first stopping a busy turn;
+// true if it did.
+func (s *Session) forceNow() bool {
+	s.mu.Lock()
+	f := s.forced
+	s.mu.Unlock()
+	if f == nil || s.hasUnsent() || s.menuHold() != "" || s.currentQuestion() != nil || s.currentStatus() == "blocked" {
+		return false
+	}
+	if s.currentStatus() == "working" {
+		s.mu.Lock()
+		esc := f.esc
+		f.esc = true
+		s.mu.Unlock()
+		if !esc {
+			if err := s.stopTurn(); err != nil {
+				s.o.log.Printf("forced send: %v", err)
+				return false
+			}
+			s.setNote(f.stopped) // what goes in was stopped for: say so there (#340)
+		}
+		if s.currentStatus() != "idle" {
+			return false // it gets them once it has stopped
+		}
+	}
+	s.flushMu.Lock()
+	defer s.flushMu.Unlock()
+	note := s.takeNote()
+	if note == "" && !s.gate.Clear(time.Now()) {
+		note = f.typing
+	}
+	msgs := s.queue.Drain()
+	if err := s.forceIn(msgs, note); err != nil {
+		s.o.log.Printf("forced send: %v", err)
+		return false
+	}
+	if s.hasUnsent() || s.queue.Len() > 0 { // a menu showed meanwhile: they wait for it
+		return false
+	}
+	s.mu.Lock()
+	if s.forced == f {
+		s.forced = nil
+	}
+	s.mu.Unlock()
+	s.title()
+	return true
+}
+
+// forcedDone drops a forced send once nothing waits (a menu's way sent them, #306): a later
+// message isn't forced by it.
+func (s *Session) forcedDone() {
+	if s.queue.Len() > 0 || s.hasUnsent() {
+		return
+	}
+	s.mu.Lock()
+	s.forced = nil
+	s.mu.Unlock()
+}
+
+// isForced: a forced send is still to go in.
+func (s *Session) isForced() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.forced != nil
+}
+
 // flushNow types the queued messages if the agent is idle at its prompt (no menu on screen,
 // #306) and you aren't typing; true if it did.
 func (s *Session) flushNow() bool {
@@ -751,6 +796,9 @@ func (s *Session) flushNow() bool {
 		s.holdBack(err, msgs, prompt, "", note) // a menu showed: they wait for it (#306)
 		return false
 	}
+	s.mu.Lock()
+	s.forced = nil // a forced send waiting went with them
+	s.mu.Unlock()
 	s.title()
 	return true
 }
@@ -790,6 +838,7 @@ func (s *Session) flushSoon() {
 	s.mu.Unlock()
 	go func() {
 		defer func() { s.mu.Lock(); s.flushing = false; s.mu.Unlock() }()
+		defer s.forcedDone()
 		since, logAt := time.Now(), time.Now().Add(s.holdLog)
 		for (s.queue.Len() > 0 || s.hasUnsent()) && !s.held() {
 			if s.hasUnsent() { // a menu stopped it (#306)
@@ -798,6 +847,11 @@ func (s *Session) flushSoon() {
 				s.flushMu.Unlock()
 				if sent && s.queue.Len() == 0 && !s.hasUnsent() { // all of them in
 					s.delivered()
+				}
+			} else if s.isForced() {
+				if s.forceNow() {
+					s.delivered()
+					return
 				}
 			} else if s.flushNow() {
 				s.delivered()
