@@ -155,7 +155,9 @@ func (takeClipboard) Name() string { return "take_clipboard" }
 
 func (takeClipboard) Description() string {
 	return "Attach what the user has copied (a screenshot, an image or files) to their next request to " +
-		"the coordinator. Use when they ask you to take, look at or use what they copied. Then call " +
+		"the coordinator. Only call this when the user explicitly asks you to take, look at or use " +
+		"their screenshot or what they copied in this request. Never call it on your own because " +
+		"something might be on the clipboard, or because a request mentions the screen. Then call " +
 		"delegate with their request."
 }
 
@@ -163,12 +165,23 @@ func (takeClipboard) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)
 }
 
+// WaitedFor: the delegate Pixie calls with take_clipboard waits for what it attaches (#367).
+func (takeClipboard) WaitedFor() {}
+
 func (t takeClipboard) Invoke(ctx context.Context, _ json.RawMessage) voice.ToolOutcome {
 	s := t.a.attachments()
 	if s == nil {
 		return clipReply(map[string]any{"error": errNoCoordinator.Error()})
 	}
-	before := len(s.Pending())
+	before := map[string]bool{}
+	for _, it := range s.Pending() {
+		before[it.ID] = true
+	}
+	return t.read(ctx, s, before)
+}
+
+// read asks the shell for the clipboard and says what it attached that wasn't in before.
+func (t takeClipboard) read(ctx context.Context, s *attach.Store, before map[string]bool) voice.ToolOutcome {
 	id, ch := t.a.clip.open()
 	defer t.a.clip.close(id)
 	t.a.emit("clipboard.read", map[string]any{"request": id})
@@ -183,13 +196,14 @@ func (t takeClipboard) Invoke(ctx context.Context, _ json.RawMessage) voice.Tool
 	if errText != "" {
 		return clipReply(map[string]any{"error": errText})
 	}
-	items := s.Pending()
-	if len(items) <= before {
-		return clipReply(map[string]any{"error": clipNothing})
+	var names []string
+	for _, it := range s.Pending() {
+		if !before[it.ID] {
+			names = append(names, it.Name)
+		}
 	}
-	names := make([]string, 0, len(items)-before)
-	for _, it := range items[before:] {
-		names = append(names, it.Name)
+	if len(names) == 0 {
+		return clipReply(map[string]any{"error": clipNothing})
 	}
 	return clipReply(map[string]any{"attached": names})
 }

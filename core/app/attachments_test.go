@@ -127,6 +127,32 @@ func TestTakeClipboardTimesOut(t *testing.T) {
 	}
 }
 
+// #367: the delegate Pixie calls with take_clipboard waits for it in the voice runtime.
+func TestTakeClipboardIsWaitedFor(t *testing.T) {
+	h, _ := attachHarness(t)
+	if _, ok := h.app.clipboardTool().(voice.WaitedForTool); !ok {
+		t.Fatal("take_clipboard is not waited for")
+	}
+}
+
+// A chip removed during the read doesn't hide what the read attached (counts would).
+func TestTakeClipboardNamesWhatItAddedByID(t *testing.T) {
+	h, _ := attachHarness(t)
+	out := h.call("attachments.add", map[string]string{"name": "old.png", "data": b64([]byte("png"))})
+	var old struct{ Item attach.Item }
+	if err := json.Unmarshal(out, &old); err != nil {
+		t.Fatal(err)
+	}
+	m := runTakeClipboard(t, h, func(req string) {
+		h.call("attachments.remove", map[string]string{"id": old.Item.ID})
+		h.call("attachments.add", map[string]string{"name": "new.png", "data": b64([]byte("png"))})
+		h.call("clipboard.done", map[string]string{"request": req})
+	})
+	if got, _ := json.Marshal(m); string(got) != `{"attached":["new.png"]}` {
+		t.Fatal(string(got))
+	}
+}
+
 func TestTakeClipboardIsAVoiceToolOnlyWithTheAgent(t *testing.T) {
 	h, _ := attachHarness(t)
 	tools, _ := h.app.voiceExtras()
@@ -136,6 +162,18 @@ func TestTakeClipboardIsAVoiceToolOnlyWithTheAgent(t *testing.T) {
 	plain := newHarness(t)
 	if tools, _ := plain.app.voiceExtras(); hasTool(tools, "take_clipboard") {
 		t.Fatal("without the agent")
+	}
+}
+
+// #367: the description is all that tells the voice model when to call take_clipboard, so it
+// must say to call it only on an explicit ask.
+func TestTakeClipboardIsOnlyForAnExplicitAsk(t *testing.T) {
+	h, _ := attachHarness(t)
+	d := h.app.clipboardTool().Description()
+	for _, want := range []string{"Only call this when the user explicitly asks", "Never call it on your own"} {
+		if !strings.Contains(d, want) {
+			t.Fatalf("description lacks %q: %s", want, d)
+		}
 	}
 }
 

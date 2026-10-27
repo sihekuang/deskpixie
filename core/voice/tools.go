@@ -34,6 +34,14 @@ type Tool interface {
 	Invoke(ctx context.Context, args json.RawMessage) ToolOutcome
 }
 
+// WaitedForTool is a Tool the calls after it wait for while it runs, within one conversation
+// (#367: take_clipboard, so the delegate called with it sends what it attaches). Keep it short:
+// every later call waits, at most until it ends. WaitedFor only marks it.
+type WaitedForTool interface {
+	Tool
+	WaitedFor()
+}
+
 // ToolRegistry holds tools by name. Safe for concurrent use.
 type ToolRegistry struct {
 	mu    sync.RWMutex

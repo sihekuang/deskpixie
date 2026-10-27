@@ -13,6 +13,7 @@ import (
 	"errors"
 	"log"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -207,6 +208,8 @@ type Runtime struct {
 	micFailed chan AudioError
 	connected chan connectResult
 	toolDone  chan toolResult
+	// waited are the WaitedForTool calls running (#367); only the loop touches it.
+	waited    []chan struct{}
 	handOffs  chan handOffResult
 	ctlNotify chan struct{}
 	ctlMu     sync.Mutex
@@ -755,6 +758,7 @@ func (r *Runtime) apply(fx Effect) {
 	switch fx.Kind {
 	case EfConnect:
 		r.gen++
+		r.waited = nil // a new conversation doesn't wait on the last one's calls
 		key, ok := r.secrets.APIKey(r.model.Name())
 		if !ok {
 			hint := r.secrets.KeyHint(r.model.Name())
@@ -882,7 +886,9 @@ func (r *Runtime) handOff(task, context string, claim, answer bool) {
 		raw, _ = json.Marshal(ClientDelegationArgs{Task: task, Context: context, Answer: answer})
 	}
 	ctx := r.ctx
+	earlier, _ := r.waitedFor(tool)
 	go func() {
+		waitFor(ctx, earlier)
 		out := invoke(ctx, raw)
 		n, why := HandOffNotice(task, out.Output)
 		r.cfg.Log.Printf("hand-off result: %s", why)
@@ -915,7 +921,44 @@ func (r *Runtime) invokeTool(callID, name string, args json.RawMessage) {
 		return
 	}
 	ctx := r.ctx
-	go func() { deliver(tool.Invoke(ctx, args)) }()
+	earlier, done := r.waitedFor(tool)
+	go func() {
+		defer done()
+		waitFor(ctx, earlier)
+		deliver(tool.Invoke(ctx, args))
+	}()
+}
+
+// waitedFor are the WaitedForTool calls still running, which a new call waits for; done ends
+// this call, when it is one itself. On the runtime's loop, so calls are taken in their order.
+func (r *Runtime) waitedFor(tool Tool) (earlier []chan struct{}, done func()) {
+	running := r.waited[:0]
+	for _, ch := range r.waited {
+		select {
+		case <-ch:
+		default:
+			running = append(running, ch)
+		}
+	}
+	r.waited = running
+	earlier = slices.Clone(running)
+	if _, ok := tool.(WaitedForTool); !ok {
+		return earlier, func() {}
+	}
+	ch := make(chan struct{})
+	r.waited = append(r.waited, ch)
+	return earlier, func() { close(ch) }
+}
+
+// waitFor waits until every call in calls has ended, or the runtime shuts down.
+func waitFor(ctx context.Context, calls []chan struct{}) {
+	for _, ch := range calls {
+		select {
+		case <-ch:
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 // userStarted: the user's turn began; begun while Pixie was quiet, its words are theirs even
