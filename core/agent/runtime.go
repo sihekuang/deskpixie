@@ -502,6 +502,7 @@ func (h *AgentHandle) requestNote() string {
 	}
 	h.ctlMu.Lock()
 	defer h.ctlMu.Unlock()
+	sessions = withMenus(sessions, h.ctl.SessionMenus())
 	return RequestNote(sessions, h.ctl.jobs.WorkerRows(), func(id JobID) string {
 		j, _ := h.ctl.jobs.Get(id)
 		return j.Task
@@ -726,7 +727,15 @@ func (h *AgentHandle) tellSession(name, answer string) {
 // them (#340).
 func (h *AgentHandle) sessionTool(ctx context.Context, call McpCall) McpReply {
 	call.Mark = h.markForced.Load()
-	return sessionTool(ctx, h.deps.Host.Session(), call, h.maskPending)
+	r := sessionTool(ctx, h.deps.Host.Session(), call, h.maskPending)
+	if v, ok := r.Value.(map[string]any); ok && call.Kind == CallListSessions {
+		if rows, ok := v["sessions"].([]SessionRow); ok {
+			h.ctlMu.Lock()
+			v["sessions"] = withMenus(rows, h.ctl.SessionMenus())
+			h.ctlMu.Unlock()
+		}
+	}
+	return r
 }
 
 // SetMarkForced: agent.markForcedSends changed (#340); the next forced message follows it.

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -96,6 +97,7 @@ func (c *AgentController) onSessionQuestion(session string, q SessionQuestion, n
 	if q.Kind == "menu" {
 		pending.Menu = true
 		pending.Typed, pending.Multi = q.Typed, q.Multi
+		pending.Text = mask(q.Text)
 		for _, d := range q.Details {
 			pending.Details = append(pending.Details, mask(d))
 		}
@@ -161,6 +163,52 @@ func (c *AgentController) onChoose(token string, option int, now Millis, fx *[]E
 	}
 	c.noteTap(token, now)
 	c.answerSession(p, strconv.Itoa(option), now, fx)
+}
+
+// SessionMenus: the menu each of your sessions waits on, as the coordinator sees it (#384).
+func (c *AgentController) SessionMenus() map[string]string {
+	menus := map[string]string{}
+	for _, p := range c.confirms.Pending() {
+		if p.Menu && p.Session != "" {
+			menus[p.Session] = MenuView(p)
+		}
+	}
+	return menus
+}
+
+// answerSessionMenu is answer_session_menu (#384): the coordinator picks the options the user
+// named of the menu session waits on, as a tap on them would.
+func (c *AgentController) answerSessionMenu(session string, options []int, now Millis, fx *[]Effect) (any, error) {
+	at := slices.IndexFunc(c.confirms.Pending(), func(p Pending) bool { return p.Menu && p.Session == session })
+	if at < 0 {
+		return nil, fmt.Errorf("%s isn't waiting on a menu.", session)
+	}
+	p := c.confirms.Pending()[at]
+	switch {
+	case len(options) == 0:
+		return nil, errors.New("Say which option, by its number.")
+	case !p.Multi && len(options) > 1:
+		return nil, errors.New("That menu takes one option.")
+	}
+	for i, o := range options {
+		if o < 1 || o > len(p.Options) || slices.Contains(options[:i], o) {
+			return nil, fmt.Errorf("Its options are 1 to %d, each once.", len(p.Options))
+		}
+		// As by voice (#330): one that pushes, merges, publishes or deploys is the person's tap.
+		if actions := GatedActions(p.Options[o-1]); len(actions) > 0 {
+			return nil, fmt.Errorf("That option asks it to %s: the person picks it in the bubble. Tell them so.", spokenList(actions))
+		}
+	}
+	if p.Multi {
+		c.onPicks(p.Token, options, now, fx)
+	} else {
+		c.onChoose(p.Token, options[0], now, fx)
+	}
+	picked := make([]string, len(options))
+	for i, o := range options {
+		picked[i] = p.Options[o-1]
+	}
+	return map[string]any{"name": session, "status": "answered", "picked": picked}, nil
 }
 
 // onPicks: the options picked of a session menu question that takes several (#364).

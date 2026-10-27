@@ -235,6 +235,8 @@ func (c *AgentController) onMcp(agent string, call McpCall, now Millis, fx *[]Ef
 			c.sayForWorker(agent, func(who string) string { return WorkerBlockedSpoken(who, call.Reason) }, now, fx)
 			value = map[string]any{"ok": true}
 		}
+	case call.Kind == CallAnswerSessionMenu && coordinator:
+		value, err = c.answerSessionMenu(call.Name, call.Picks, now, fx)
 	case call.Kind == CallStartWorker && coordinator:
 		err = errors.New("start_worker is handled by the runtime.")
 	default:

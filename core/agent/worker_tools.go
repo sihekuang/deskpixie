@@ -1,8 +1,10 @@
 package agent
 
 import (
+	"encoding/json"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -151,6 +153,47 @@ func Catalog(role Role) []map[string]any {
 			"inputSchema": objectSchema(stringProps([2]string{"reason", "Why you are blocked, at most 35 words, as plain speech."}), "reason"),
 		},
 	}
+}
+
+// optionNumbers reads answer_session_menu's options (#384): whole numbers from 1, as JSON
+// numbers (json.Number from the MCP server, float64 elsewhere) or, as a model sometimes sends
+// them, strings ("2") or a lone number.
+func optionNumbers(v any) ([]int, error) {
+	list, ok := v.([]any)
+	if !ok {
+		list = []any{v}
+	}
+	bad := badArgs("options must be option numbers, from 1")
+	var out []int
+	for _, x := range list {
+		var n float64
+		switch t := x.(type) {
+		case float64:
+			n = t
+		case json.Number:
+			f, err := t.Float64()
+			if err != nil {
+				return nil, bad
+			}
+			n = f
+		case string:
+			i, err := strconv.Atoi(strings.TrimSpace(t))
+			if err != nil {
+				return nil, bad
+			}
+			n = float64(i)
+		default:
+			return nil, bad
+		}
+		if n < 1 || n != float64(int(n)) {
+			return nil, bad
+		}
+		out = append(out, int(n))
+	}
+	if len(out) == 0 {
+		return nil, bad
+	}
+	return out, nil
 }
 
 // ParseToolCall checks a `tools/call` from role and turns it into an McpCall. A tool of the
@@ -347,6 +390,16 @@ func ParseToolCall(role Role, name string, args any) (McpCall, error) {
 		}
 		force, _ := obj["force"].(bool)
 		return McpCall{Kind: CallMessageSession, Name: n, Text: t, Force: force}, nil
+	case "answer_session_menu":
+		n, err := needName("name")
+		if err != nil {
+			return McpCall{}, err
+		}
+		picks, err := optionNumbers(obj["options"])
+		if err != nil {
+			return McpCall{}, err
+		}
+		return McpCall{Kind: CallAnswerSessionMenu, Name: n, Picks: picks}, nil
 	case "interrupt_session", "close_session", "flush_session", "stop_and_send_session":
 		n, err := needName("name")
 		if err != nil {
