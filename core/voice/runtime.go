@@ -758,6 +758,7 @@ func (r *Runtime) apply(fx Effect) {
 	switch fx.Kind {
 	case EfConnect:
 		r.gen++
+		r.waited = nil // a new conversation doesn't wait on the last one's calls
 		key, ok := r.secrets.APIKey(r.model.Name())
 		if !ok {
 			hint := r.secrets.KeyHint(r.model.Name())

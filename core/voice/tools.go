@@ -34,8 +34,9 @@ type Tool interface {
 	Invoke(ctx context.Context, args json.RawMessage) ToolOutcome
 }
 
-// WaitedForTool is a Tool the calls after it in a turn wait for (#367: take_clipboard, so the
-// delegate called with it sends what it attaches). WaitedFor only marks it.
+// WaitedForTool is a Tool the calls after it wait for while it runs, within one conversation
+// (#367: take_clipboard, so the delegate called with it sends what it attaches). Keep it short:
+// every later call waits, at most until it ends. WaitedFor only marks it.
 type WaitedForTool interface {
 	Tool
 	WaitedFor()
