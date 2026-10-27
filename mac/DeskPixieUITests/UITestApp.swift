@@ -356,10 +356,18 @@ final class UITestApp {
         return window
     }
 
-    /// The menu bar's Chat…, then the window. Chat… waits for the core to start, so the menu is
-    /// opened again until it can be chosen.
+    /// The menu bar's Chat…, then the window.
     @discardableResult
     func openChatFromMenuBar(file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
+        chooseFromMenuBar("Chat…", typing: "chat", file: file, line: line)
+        let window = chatWindow
+        XCTAssertTrue(window.waitForExistence(timeout: 15), "the chat window didn't open", file: file, line: line)
+        return window
+    }
+
+    /// Chooses item in the menu bar's menu by typing its first letters. Items like Chat… and
+    /// Settings… wait for the core to start, so the menu is opened again until it can be chosen.
+    func chooseFromMenuBar(_ item: String, typing: String, file: StaticString = #filePath, line: UInt = #line) {
         let status = app.statusItems.firstMatch
         XCTAssertTrue(status.waitForExistence(timeout: 30), "no menu bar item", file: file, line: line)
         // Just after a launch the item may be listed before it has its place in the menu bar, and a
@@ -370,22 +378,21 @@ final class UITestApp {
         let deadline = Date().addingTimeInterval(60)
         while Date() < deadline {
             status.click()
-            let chat = app.menuItems["Chat…"]
-            if chat.waitForExistence(timeout: 5), chat.isEnabled {
+            // The menu bar's own, not the app menu's (Settings… is in both).
+            let entry = status.menuItems[item]
+            if entry.waitForExistence(timeout: 5), entry.isEnabled {
                 // Chosen by typing its name and Return, not by clicking the item: while the core
                 // starts, the menu is rebuilt as it stays open (status lines, the agent), and a
                 // click on an item that was just replaced fails the test outright ("open menu
                 // during menu traversal"). The menu's own type-select finds the new one.
-                for key in "chat" { app.typeKey(String(key), modifierFlags: []) }
+                for key in typing { app.typeKey(String(key), modifierFlags: []) }
                 app.typeKey(.return, modifierFlags: [])
-                break
+                return
             }
             app.typeKey(.escape, modifierFlags: [])
             Thread.sleep(forTimeInterval: 1) // the core is still starting: ask again in a moment
         }
-        let window = chatWindow
-        XCTAssertTrue(window.waitForExistence(timeout: 15), "the chat window didn't open", file: file, line: line)
-        return window
+        XCTFail("\(item) never could be chosen from the menu bar", file: file, line: line)
     }
 
     var chatWindow: XCUIElement { app.windows["chat.window"] }

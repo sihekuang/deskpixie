@@ -19,18 +19,9 @@ final class SettingsUITests: XCTestCase {
         harness = nil
     }
 
-    /// Settings… from the menu bar menu, and the window it opens. Chosen by typing its name, as
-    /// `openChatFromMenuBar` does: the app menu has a Settings… too, and the menu bar's is
-    /// rebuilt while the core starts.
+    /// Settings… from the menu bar menu, and the window it opens.
     private func openSettings(_ h: UITestApp) -> XCUIElement {
-        let status = h.app.statusItems.firstMatch
-        XCTAssertTrue(status.waitForExistence(timeout: 30), "no menu bar item")
-        let placed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: status)
-        XCTAssertEqual(XCTWaiter().wait(for: [placed], timeout: 30), .completed, "the menu bar item never took its place")
-        status.click()
-        XCTAssertTrue(status.menuItems["Settings…"].waitForExistence(timeout: 5), "no Settings… in the menu")
-        for key in "settings" { h.app.typeKey(String(key), modifierFlags: []) }
-        h.app.typeKey(.return, modifierFlags: [])
+        h.chooseFromMenuBar("Settings…", typing: "settings")
         let window = h.app.windows.matching(identifier: "settings").firstMatch
         XCTAssertTrue(window.waitForExistence(timeout: 15), "no Settings window")
         return window
@@ -46,8 +37,9 @@ final class SettingsUITests: XCTestCase {
         let field = window.textFields["Search settings"]
         XCTAssertTrue(field.waitForExistence(timeout: 10), "no search field")
         field.click()
-        field.typeText("hotkey")
-        XCTAssertEqual(field.value as? String, "hotkey", "the field stopped taking keys")
-        XCTAssertTrue(window.waitForText("Voice hotkey", timeout: 5), "no result for it")
+        field.typeText("always send")
+        XCTAssertEqual(field.value as? String, "always send", "the field stopped taking keys")
+        // Not on General, the page Settings opens on: only the search shows it.
+        XCTAssertTrue(window.waitForText("Always send messages at once", timeout: 5), "no result for it")
     }
 }
