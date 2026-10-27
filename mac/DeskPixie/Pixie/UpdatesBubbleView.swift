@@ -44,6 +44,10 @@ struct UpdatesBubbleView: View {
     /// "Open its terminal" on a line that asks without buttons: its pane comes up (#286); the
     /// card stays until it is answered there (#347).
     var onTerminal: (UpdateLine) -> Void = { _ in }
+    /// Dismiss on a session's question card: it leaves the badge; the session is untouched (#388).
+    var onDismiss: (UpdateLine) -> Void = { _ in }
+    /// "See in chat": the chat window opens at the card's question (#388).
+    var onOpenChat: (UpdateLine) -> Void = { _ in }
     /// Hide on a card: the deck closes to the badge, everything still waiting (#286).
     var onCollapse: () -> Void = {}
 
@@ -184,9 +188,29 @@ struct UpdatesBubbleView: View {
                 .padding(.horizontal, 8)
                 .padding(.bottom, 4)
             }
+            cardFooter(line)
         }
         .padding(4)
         .deckCard()
+    }
+
+    /// Where else the card can be seen, and Dismiss (#388): its terminal (when the card's own
+    /// button isn't already that), its question in the chat window, and Dismiss on a session's
+    /// question that has no buttons.
+    private func cardFooter(_ line: UpdateLine) -> some View {
+        HStack(spacing: 6) {
+            if line.hasSource && !line.offersTerminal {
+                Button { onTerminal(line) } label: { Label("Terminal", systemImage: "terminal") }
+            }
+            Button { onOpenChat(line) } label: { Label("See in chat", systemImage: "bubble.left.and.bubble.right") }
+            if line.offersDismiss {
+                Button { onDismiss(line) } label: { Label("Dismiss", systemImage: "xmark") }
+            }
+        }
+        .buttonStyle(OutlineButtonStyle())
+        .controlSize(.small)
+        .padding(.horizontal, 8)
+        .padding(.bottom, 4)
     }
 
     /// A box per option to tick, then Send with those ticked (#364).

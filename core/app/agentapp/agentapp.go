@@ -649,6 +649,7 @@ func (a *Agent) Decide(token string, allow bool) { a.handle.Decide(token, allow)
 func (a *Agent) Choose(token string, option int)  { a.handle.Choose(token, option) }
 func (a *Agent) TypedAnswer(token, text string)   { a.handle.TypedAnswer(token, text) }
 func (a *Agent) ChatAbout(token string)           { a.handle.ChatAbout(token) }
+func (a *Agent) Dismiss(id uint64)                { a.handle.Dismiss(id) }
 func (a *Agent) Pick(token string, options []int) { a.handle.Pick(token, options) }
 
 // UpdatesSeen: the updates bubble showed these lines long enough to count as heard.

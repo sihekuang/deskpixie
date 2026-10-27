@@ -37,6 +37,9 @@ type Request struct {
 	Outcome string   `json:"outcome,omitempty"`
 	// Job is the job asking ("" = a session's question or a permission no job owns).
 	Job string `json:"job,omitempty"`
+	// Dismissible: a session's own question with no buttons, which agent.dismiss takes away
+	// (#388).
+	Dismissible bool `json:"dismissible,omitempty"`
 }
 
 // Entry is one message in the thread.

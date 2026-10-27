@@ -48,9 +48,12 @@ public struct ChatRequest: Codable, Equatable, Sendable {
     public var outcome: String
     /// The job asking ("" = a session's question, or a permission no job owns).
     public var job: String
+    /// A session's own question with no buttons: Dismiss takes it away (`agent.dismiss`, #388).
+    public var dismissible: Bool
 
     public init(token: String = "", item: UInt64, kind: String, options: [String] = [],
-                typed: Bool = false, multi: Bool = false, outcome: String = "", job: String = "") {
+                typed: Bool = false, multi: Bool = false, outcome: String = "", job: String = "",
+                dismissible: Bool = false) {
         self.token = token
         self.item = item
         self.kind = kind
@@ -59,6 +62,7 @@ public struct ChatRequest: Codable, Equatable, Sendable {
         self.multi = multi
         self.outcome = outcome
         self.job = job
+        self.dismissible = dismissible
     }
 
     public init(from decoder: Decoder) throws {
@@ -70,10 +74,11 @@ public struct ChatRequest: Codable, Equatable, Sendable {
                   typed: try c.decodeIfPresent(Bool.self, forKey: .typed) ?? false,
                   multi: try c.decodeIfPresent(Bool.self, forKey: .multi) ?? false,
                   outcome: try c.decodeIfPresent(String.self, forKey: .outcome) ?? "",
-                  job: try c.decodeIfPresent(String.self, forKey: .job) ?? "")
+                  job: try c.decodeIfPresent(String.self, forKey: .job) ?? "",
+                  dismissible: try c.decodeIfPresent(Bool.self, forKey: .dismissible) ?? false)
     }
 
-    private enum CodingKeys: String, CodingKey { case token, item, kind, options, typed, multi, outcome, job }
+    private enum CodingKeys: String, CodingKey { case token, item, kind, options, typed, multi, outcome, job, dismissible }
 }
 
 /// One message in the thread. The `id` is opaque (never parse it); an entry with an ID already
@@ -254,6 +259,8 @@ public protocol ChatClient: Sendable {
     /// `agent.pick`: the options (from 1) ticked of a question that takes several (#364).
     func pick(token: String, options: [Int]) throws
     func typedAnswer(token: String, text: String) throws
+    /// `agent.dismiss`: a session's question taken away unanswered, by its line (#388).
+    func dismiss(item: UInt64) throws
     /// Stops what Pixie is working on.
     func stop() throws
     /// `agent.interrupt {name, surface: "chat"}`: interrupts the turn of the agent with this

@@ -40,6 +40,10 @@ public struct EngineChatClient: ChatClient, Sendable {
         let options: [Int]
     }
 
+    private struct DismissArgs: Encodable {
+        let id: UInt64
+    }
+
     private struct TypedArgs: Encodable {
         let token: String
         let text: String
@@ -79,6 +83,10 @@ public struct EngineChatClient: ChatClient, Sendable {
 
     public func pick(token: String, options: [Int]) throws {
         _ = try engine.call("agent.pick", PickArgs(token: token, options: options))
+    }
+
+    public func dismiss(item: UInt64) throws {
+        _ = try engine.call("agent.dismiss", DismissArgs(id: item))
     }
 
     public func typedAnswer(token: String, text: String) throws {

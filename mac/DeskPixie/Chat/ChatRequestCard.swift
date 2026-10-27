@@ -74,6 +74,12 @@ struct ChatRequestCard: View {
                     .accessibilityIdentifier("chat.request.reply")
                     .help("Answer in the message box")
             }
+            if ChatThreadModel.offersDismiss(entry), let item = entry.request?.item {
+                Button("Dismiss") { actions.dismiss(item) }
+                    .buttonStyle(CardButtonStyle())
+                    .accessibilityIdentifier("chat.request.dismiss")
+                    .help("Take it off the badge without answering; the session still waits in its terminal")
+            }
         }
     }
 }

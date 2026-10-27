@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
+	"slices"
 )
 
 // The updates bubble (spec docs/specs/2026-10-14-updates-bubble-design.md): what needs you
@@ -42,6 +43,9 @@ type UpdateItem struct {
 	Multi bool `json:"multi,omitempty"`
 	// Note: shown small under the line, never said (a session dialog's command, #105).
 	Note string `json:"note,omitempty"`
+	// Dismissible: a session's own question with no buttons (#388): agent.dismiss takes it off
+	// the badge; the session still waits for an answer in its terminal.
+	Dismissible bool `json:"dismissible,omitempty"`
 }
 
 // alerting: a line that needs you to act (#286): a question (permission, menu or job) or a
@@ -144,9 +148,28 @@ func (c *AgentController) bubbleItems() []UpdateItem {
 				item.Options, item.Details, item.Typed, item.Multi = p.Options, p.Details, p.Typed, p.Multi
 			}
 		}
+		item.Dismissible = asksSession(l)
 		items = append(items, item)
 	}
 	return items
+}
+
+// dismiss takes session's question with line id off the badge (#388), when it is one of
+// Dismissible's: you don't mean to answer it. The session itself is left as it is, and what you
+// say next isn't taken as its answer.
+func (c *AgentController) dismiss(id uint64, fx *[]Effect) {
+	at := slices.IndexFunc(c.outbox.lines, func(l OutboxLine) bool { return l.ID == id })
+	if at < 0 {
+		return
+	}
+	l := c.outbox.lines[at]
+	if !asksSession(l) || c.asking[l.Session] != id {
+		return
+	}
+	c.dropAsking(l.Session, fx)
+	if c.asked.session == l.Session {
+		c.asked = asker{}
+	}
 }
 
 func updateItem(l OutboxLine) UpdateItem {

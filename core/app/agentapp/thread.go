@@ -59,7 +59,8 @@ func EntryForLine(l agent.OutboxLine, r agent.RosterView) chat.Entry {
 func RequestEntries(items []agent.UpdateItem, r agent.RosterView) []chat.Entry {
 	out := []chat.Entry{}
 	for _, it := range items {
-		req := &chat.Request{Item: it.ID, Kind: "question", Options: it.Options, Typed: it.Typed, Multi: it.Multi, Job: string(it.Job)}
+		req := &chat.Request{Item: it.ID, Kind: "question", Options: it.Options, Typed: it.Typed, Multi: it.Multi, Job: string(it.Job),
+			Dismissible: it.Dismissible}
 		if it.Token != "" {
 			req.Token = it.Token
 			if len(it.Options) == 0 {

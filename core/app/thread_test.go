@@ -379,6 +379,30 @@ func TestARequestAnsweredElsewhereIsRecordedSo(t *testing.T) {
 	}
 }
 
+// #388: Dismiss, in the bubble or the chat window, records the session's question as dismissed,
+// not answered elsewhere, and reaches the agent. A request that isn't dismissible keeps waiting.
+func TestADismissedQuestionIsRecordedSo(t *testing.T) {
+	f := &fakeAgent{tray: AgentTray{Enabled: true}}
+	h := newHarness(t, withAgent(f))
+	asks := request(4, "", "Want me to push it?")
+	asks.Request.Kind, asks.Request.Dismissible = "question", true
+	f.hooks.ThreadRequests([]chat.Entry{asks, request(5, "t5", "run make")})
+	h.call("agent.dismiss", map[string]any{"id": 4})
+	h.call("agent.dismiss", map[string]any{"id": 5}) // a permission: not the bubble's to drop
+	f.hooks.ThreadRequests([]chat.Entry{request(5, "t5", "run make")})
+	if got := outcomeOf(t, h, "req4"); got != "Dismissed" {
+		t.Fatal(got)
+	}
+	if got := outcomeOf(t, h, "req5"); got != "" {
+		t.Fatal("still open:", got)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !slices.Equal(f.decided, []string{"4:dismiss", "5:dismiss"}) {
+		t.Fatal(f.decided)
+	}
+}
+
 func TestReadingMarksTheLinesShown(t *testing.T) {
 	f := &fakeAgent{tray: AgentTray{Enabled: true}}
 	h := newHarness(t, withAgent(f))

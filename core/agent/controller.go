@@ -160,6 +160,7 @@ const (
 	InChoose                               // Token, Option: a tap on a session menu's option in the updates bubble (#105)
 	InTypedAnswer                          // Token, Text: an answer typed in the bubble for a session menu (#268)
 	InChatAbout                            // Token: "Chat about this" on a session menu (#268)
+	InDismiss                              // IDs: Dismiss on a session's question card in the updates bubble (#388)
 	InPicks                                // Token, Picks: the options picked of a session menu question that takes several (#364)
 	InSessionAnswerFailed                  // Name, Text: EfAnswerSession could not be typed (#105)
 	InSessionAnswered                      // Name, Text: EfAnswerSession was taken by the session; Text is its Line (#268)
@@ -310,6 +311,7 @@ func TypedAnswerInput(token, text string) Input {
 
 // ChatAboutInput is "Chat about this" on the session menu with token (#268).
 func ChatAboutInput(token string) Input { return Input{Kind: InChatAbout, Token: token} }
+func DismissInput(id uint64) Input      { return Input{Kind: InDismiss, IDs: []uint64{id}} }
 
 // PicksInput is the options (from 1) picked of the session menu question with this token that
 // takes several (#364).
@@ -1009,6 +1011,10 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 		c.onTypedAnswer(in.Token, in.Text, now, &fx)
 	case InChatAbout:
 		c.onChatAbout(in.Token, now, &fx)
+	case InDismiss:
+		for _, id := range in.IDs {
+			c.dismiss(id, &fx)
+		}
 	case InPicks:
 		c.onPicks(in.Token, in.Picks, now, &fx)
 	case InSessionAnswered:

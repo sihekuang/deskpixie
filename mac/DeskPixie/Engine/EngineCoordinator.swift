@@ -660,6 +660,7 @@ final class EngineCoordinator {
     /// bubble (held pops) and to the core (`presence.set`: no chime, no conversation by Pixie).
     private func startBubble(pixie m: PixieController, settings: BubbleSettingsValues) {
         let b = UpdatesBubbleController(engine: engine, worker: worker, pixie: m)
+        b.onOpenChat = { [weak self] id in self?.showChat(at: id) } // "See in chat" on a card (#388)
         bubble = b
         // A click on an update's Mac notification does what a click on its bubble line does (#199).
         ForegroundPresenter.onOpenUpdate = { [weak self] line in self?.bubble?.openFromNotification(line) }

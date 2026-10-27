@@ -95,6 +95,8 @@ type Agent interface {
 	// session menu that takes one (#268).
 	TypedAnswer(token, text string)
 	ChatAbout(token string)
+	// Dismiss: Dismiss on a session's question card in the bubble, by its line id (#388).
+	Dismiss(id uint64)
 	// Pick: the options (from 1) picked of a session menu question that takes several (#364).
 	Pick(token string, options []int)
 	// UpdatesSeen: the updates bubble showed these lines long enough to count as heard.

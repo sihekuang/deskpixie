@@ -65,6 +65,12 @@ final class FakeChatClient: ChatClient, @unchecked Sendable {
         try check()
         lock.withLock { _picked.append(Picked(token: token, options: options)) }
     }
+    private var _dismissed: [UInt64] = []
+    var dismissed: [UInt64] { lock.withLock { _dismissed } }
+    func dismiss(item: UInt64) throws {
+        try check()
+        lock.withLock { _dismissed.append(item) }
+    }
     struct Typed: Equatable { let token: String; let text: String }
     private var _typed: [Typed] = []
     var typed: [Typed] { lock.withLock { _typed } }
@@ -304,6 +310,25 @@ final class ChatThreadModelTests: XCTestCase {
         let model = ChatThreadModel(client: client)
         await model.pick(token: "tk", options: [1, 3])
         XCTAssertEqual(client.picked, [FakeChatClient.Picked(token: "tk", options: [1, 3])])
+    }
+
+    /// #388: Dismiss goes to the core with the request's line, and shows only on an open
+    /// question the core marked dismissible.
+    func testDismissReachesTheClientAndShowsOnlyWhenOffered() async {
+        let client = FakeChatClient([])
+        let model = ChatThreadModel(client: client)
+        await model.dismiss(item: 42)
+        XCTAssertEqual(client.dismissed, [42])
+
+        var asks = ask(5, kind: "question", token: "")
+        XCTAssertFalse(ChatThreadModel.offersDismiss(asks), "not marked")
+        asks.request?.dismissible = true
+        XCTAssertTrue(ChatThreadModel.offersDismiss(asks))
+        asks.request?.outcome = "Dismissed"
+        XCTAssertFalse(ChatThreadModel.offersDismiss(asks), "no longer open")
+        let json = #"{"id":"req7","at":1,"who":{"kind":"session","name":"api"},"text":"Want me to?","request":{"item":7,"kind":"question","dismissible":true}}"#
+        let decoded = try? JSONDecoder().decode(ChatEntry.self, from: Data(json.utf8))
+        XCTAssertEqual(decoded?.request?.dismissible, true)
     }
 
     func testAnOlderEntryNotLoadedIsDroppedWhileThereIsMoreAndNeverShownTwice() async {

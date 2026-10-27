@@ -1367,6 +1367,20 @@ func (a *App) Register(r Registrar) {
 		}
 		return struct{}{}, nil
 	})
+	// agent.dismiss {"id": n}: Dismiss on a session's question card (#388).
+	r.Register("agent.dismiss", func(args json.RawMessage) (any, error) {
+		var in struct {
+			ID uint64 `json:"id"`
+		}
+		if err := decodeArgs("agent.dismiss", args, &in); err != nil {
+			return nil, err
+		}
+		a.threadDismissed(in.ID)
+		if a.agent != nil {
+			a.agent.Dismiss(in.ID)
+		}
+		return struct{}{}, nil
+	})
 	r.Register("agent.typedAnswer", func(args json.RawMessage) (any, error) {
 		var in struct {
 			Token string `json:"token"`

@@ -37,6 +37,9 @@ public struct UpdateLine: Codable, Sendable, Equatable, Identifiable {
     public let typed: Bool?
     /// You tick several of the menu's options and send them (`agent.pick`, #364).
     public let multi: Bool?
+    /// A session's own question with no buttons: Dismiss takes it off the badge
+    /// (`agent.dismiss`, #388); the session still waits for an answer in its terminal.
+    public let dismissible: Bool?
 
     /// What the row says: the brief when there is one, else the full text.
     public var shownText: String {
@@ -61,6 +64,18 @@ public struct UpdateLine: Codable, Sendable, Equatable, Identifiable {
         !offersDecision && !offersOptions && (kind == "question" || asking == true)
     }
 
+    /// Whether the card shows Dismiss (#388).
+    public var offersDismiss: Bool { offersTerminal && dismissible == true }
+
+    /// The card says where it comes from (a session, a job, a worker or an app): its terminal
+    /// can be brought up, whatever buttons it has (#388).
+    public var hasSource: Bool {
+        [session, job, worker, app].contains { !($0 ?? "").isEmpty }
+    }
+
+    /// Its entry in the chat window: the thread keys a waiting request by its line (#388).
+    public var chatEntryID: String { "req\(id)" }
+
     /// The badge card's header (#286): "Permission · <who>", "<who> is asking", else who it is
     /// about.
     public var deckHeader: String {
@@ -80,7 +95,7 @@ public struct UpdateLine: Codable, Sendable, Equatable, Identifiable {
                 token: String? = nil, app: String? = nil, session: String? = nil,
                 title: String? = nil, brief: String? = nil, asking: Bool? = nil,
                 options: [String]? = nil, note: String? = nil, details: [String]? = nil, typed: Bool? = nil,
-                multi: Bool? = nil) {
+                multi: Bool? = nil, dismissible: Bool? = nil) {
         self.id = id
         self.text = text
         self.kind = kind
@@ -98,6 +113,7 @@ public struct UpdateLine: Codable, Sendable, Equatable, Identifiable {
         self.details = details
         self.typed = typed
         self.multi = multi
+        self.dismissible = dismissible
     }
 }
 

@@ -49,6 +49,9 @@ final class UpdatesBubbleController {
     /// Counts `updates` events, so a slower `agent.updates` read never overwrites a newer list.
     private var eventsApplied = 0
 
+    /// Opens the chat window at an entry (#388); set by whoever owns the chat window.
+    var onOpenChat: ((String) -> Void)?
+
     init(engine: CoreEngine, worker: CoreWorker, pixie: PixieController) {
         self.engine = engine
         self.worker = worker
@@ -333,6 +336,11 @@ final class UpdatesBubbleController {
             onTerminal: { [weak self] line in
                 self?.focus(line) // the card stays until it is answered there (#347)
             },
+            onDismiss: { [weak self] line in
+                guard let self else { return }
+                self.call("agent.dismiss", DismissArgs(id: line.id)) // the core's updates take it off
+            },
+            onOpenChat: { [weak self] line in self?.onOpenChat?(line.chatEntryID) },
             onCollapse: { [weak self] in
                 guard let self else { return }
                 self.releaseKey()
@@ -412,6 +420,7 @@ final class UpdatesBubbleController {
     private struct PickArgs: Encodable, Sendable { let token: String; let options: [Int] }
     private struct TypedArgs: Encodable, Sendable { let token: String; let text: String }
     private struct ChatArgs: Encodable, Sendable { let token: String }
+    private struct DismissArgs: Encodable, Sendable { let id: UInt64 }
     private struct FocusJobArgs: Encodable, Sendable { let job: String; let worker: String }
     private struct FocusSessionArgs: Encodable, Sendable { let name: String }
 }
