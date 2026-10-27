@@ -37,6 +37,9 @@ func TestFindClaim(t *testing.T) {
 		{"I've passed it on to your session.", nil, DelegateTool, false},
 		{"Sure thing, I'll tell them to create both unassigned at three points each.", nil, DelegateTool, false},
 		{"I've told the session to go ahead.", nil, DelegateTool, false},
+		{"I'll send it on Monday.", nil, "", false}, // review of #381: "on" a day
+		{"I sent it on Friday.", nil, "", false},
+		{"I'll send that along to them.", nil, DelegateTool, false},
 		{"Okay, I'll let them know.", nil, DelegateTool, false},
 		{"I'll send that along.", nil, DelegateTool, false},
 		{"I'll pass that along.", []string{"answer_job"}, "", false},

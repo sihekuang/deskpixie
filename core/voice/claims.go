@@ -64,9 +64,9 @@ var claimSpecs = []claimSpec{
 			objects: words("coordinator agent agents claude brain")},
 		// Passing it along or telling the session, without naming who (#380): "I'll pass that
 		// along", "I'll tell them to …", "I'll let them know"; not "I'll pass on that" or "I'll
-		// tell you".
-		{verbs: words("pass passed passing send sent sending"), next: words("it that this them your"),
-			objects: words("along on")},
+		// tell you"; nor "send it on Monday".
+		{verbs: words("pass passed passing"), next: words("it that this them your"), objects: words("along on")},
+		{verbs: words("send sent sending"), next: words("it that this them your"), objects: words("along")},
 		{verbs: words("tell told telling"), next: words("them the your"),
 			objects: words("them session sessions claude")},
 		{verbs: words("let"), next: words("them"), objects: words("know")},
