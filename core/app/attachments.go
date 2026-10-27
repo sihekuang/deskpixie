@@ -155,7 +155,9 @@ func (takeClipboard) Name() string { return "take_clipboard" }
 
 func (takeClipboard) Description() string {
 	return "Attach what the user has copied (a screenshot, an image or files) to their next request to " +
-		"the coordinator. Use when they ask you to take, look at or use what they copied. Then call " +
+		"the coordinator. Only call this when the user explicitly asks you to take, look at or use " +
+		"their screenshot or what they copied in this request. Never call it on your own because " +
+		"something might be on the clipboard, or because a request mentions the screen. Then call " +
 		"delegate with their request."
 }
 

@@ -139,6 +139,18 @@ func TestTakeClipboardIsAVoiceToolOnlyWithTheAgent(t *testing.T) {
 	}
 }
 
+// #367: the description is all that tells the voice model when to call take_clipboard, so it
+// must say to call it only on an explicit ask.
+func TestTakeClipboardIsOnlyForAnExplicitAsk(t *testing.T) {
+	h, _ := attachHarness(t)
+	d := h.app.clipboardTool().Description()
+	for _, want := range []string{"Only call this when the user explicitly asks", "Never call it on your own"} {
+		if !strings.Contains(d, want) {
+			t.Fatalf("description lacks %q: %s", want, d)
+		}
+	}
+}
+
 func hasTool(tools []voice.Tool, name string) bool {
 	for _, t := range tools {
 		if t.Name() == name {
