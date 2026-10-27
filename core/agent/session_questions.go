@@ -206,6 +206,32 @@ func (c *AgentController) onChatAbout(token string, now Millis, fx *[]Effect) {
 	c.answerSession(p, "chat", now, fx)
 }
 
+// menuPicked: the open session menu a request's words answer, and the option they name (#383):
+// exactly one menu that takes one pick, named by MenuChoice. None when no menu or several
+// fit, or the option pushes, merges, publishes or deploys (that one is picked in the bubble).
+func (c *AgentController) menuPicked(task string) (Pending, int, bool) {
+	var found Pending
+	pick := 0
+	for _, p := range c.confirms.Pending() {
+		if !p.Menu || p.Multi || p.Session == "" || len(p.Options) == 0 {
+			continue
+		}
+		n, ok := MenuChoice(p.Options, task)
+		if !ok {
+			continue
+		}
+		if pick != 0 {
+			return Pending{}, 0, false
+		}
+		found, pick = p, n
+	}
+	// "this or that" is no answer to act on unasked; nor is a push, a merge, a publish or a deploy.
+	if pick == 0 || slices.Contains(menuWords(task), "or") || len(GatedActions(found.Options[pick-1])) > 0 || len(GatedActions(task)) > 0 {
+		return Pending{}, 0, false
+	}
+	return found, pick, true
+}
+
 // answerMenu: what you said back to the session menu with token, asked last (#330): the
 // option it names (MenuChoice), else your words typed in when the menu takes them. An option or
 // words that push, merge, publish or deploy are still picked in the bubble, as is any answer
@@ -316,8 +342,12 @@ func MenuChoice(options []string, answer string) (int, bool) {
 	}
 	words := stripFillers(raw)
 	// Word for word first, then with fillers left out on both sides: "yes please" is the
-	// option "Yes please" before it is "Yes".
-	for _, form := range []func([]string) []string{func(w []string) []string { return w }, stripFillers} {
+	// option "Yes please" before it is "Yes"; then without its "and"s too: "create both and
+	// assign to me" is "Create both, assign to me" (#383).
+	withoutAnd := func(w []string) []string {
+		return slices.DeleteFunc(slices.Clone(stripFillers(w)), func(s string) bool { return s == "and" })
+	}
+	for _, form := range []func([]string) []string{func(w []string) []string { return w }, stripFillers, withoutAnd} {
 		said := strings.Join(form(raw), " ")
 		for k, o := range options {
 			if strings.Join(form(menuWords(o)), " ") == said {
