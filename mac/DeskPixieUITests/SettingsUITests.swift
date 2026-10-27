@@ -19,10 +19,18 @@ final class SettingsUITests: XCTestCase {
         harness = nil
     }
 
-    /// Settings… from the menu bar menu, and the window it opens.
+    /// Settings… from the menu bar menu, and the window it opens. Chosen by typing its name, as
+    /// `openChatFromMenuBar` does: the app menu has a Settings… too, and the menu bar's is
+    /// rebuilt while the core starts.
     private func openSettings(_ h: UITestApp) -> XCUIElement {
-        h.app.statusItems.firstMatch.click()
-        h.app.menuItems["Settings…"].click()
+        let status = h.app.statusItems.firstMatch
+        XCTAssertTrue(status.waitForExistence(timeout: 30), "no menu bar item")
+        let placed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: status)
+        XCTAssertEqual(XCTWaiter().wait(for: [placed], timeout: 30), .completed, "the menu bar item never took its place")
+        status.click()
+        XCTAssertTrue(status.menuItems["Settings…"].waitForExistence(timeout: 5), "no Settings… in the menu")
+        for key in "settings" { h.app.typeKey(String(key), modifierFlags: []) }
+        h.app.typeKey(.return, modifierFlags: [])
         let window = h.app.windows.matching(identifier: "settings").firstMatch
         XCTAssertTrue(window.waitForExistence(timeout: 15), "no Settings window")
         return window
