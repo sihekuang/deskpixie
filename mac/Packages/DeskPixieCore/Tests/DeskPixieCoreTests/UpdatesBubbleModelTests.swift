@@ -616,6 +616,14 @@ final class UpdatesBubbleModelTests: XCTestCase {
         XCTAssertFalse(p.canSend)
     }
 
+    /// A question gone takes its ticks, so its token, given to another question, starts clean.
+    func testTicksGoWithTheirQuestion() {
+        var hawk = MenuPicks(); hawk.toggle(3)
+        var owl = MenuPicks(); owl.toggle(1)
+        let kept = MenuPicks.waiting(["hawk": hawk, "owl": owl], in: [typedMenu(1, "owl")])
+        XCTAssertEqual(kept, ["owl": owl])
+    }
+
     /// While you type the answer the bubble stays open, even when the pointer leaves it.
     func testTypingKeepsTheBubbleOpen() {
         var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)

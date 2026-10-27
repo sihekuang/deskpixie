@@ -17,4 +17,11 @@ public struct MenuPicks: Equatable, Sendable {
 
     /// What `agent.pick` takes: the options ticked, in order.
     public var options: [Int] { picked.sorted() }
+
+    /// The ticks, by token, of the questions among `lines` still waiting: one gone (answered in
+    /// its terminal, say) takes its ticks, as its token comes back for another question.
+    public static func waiting(_ picked: [String: MenuPicks], in lines: [UpdateLine]) -> [String: MenuPicks] {
+        let tokens = Set(lines.compactMap(\.token))
+        return picked.filter { tokens.contains($0.key) }
+    }
 }

@@ -688,3 +688,43 @@ func TestACodexMenuOfSeveralQuestionsIsAnsweredInTurn(t *testing.T) {
 		t.Fatalf("%+v", q)
 	}
 }
+
+// Codex's "chat" is a note that answers its question: it goes on to the next one, so that one
+// is asked.
+func TestACodexChatGoesOnToTheNextQuestion(t *testing.T) {
+	h := pipeHarness(t, "codex")
+	h.s.Hook("PreToolUse", map[string]any{"tool_name": "request_user_input", "tool_input": map[string]any{"questions": []any{
+		map[string]any{"id": "color", "question": "Which color?", "options": []any{map[string]any{"label": "Red"}, map[string]any{"label": "Green"}}},
+		map[string]any{"id": "size", "question": "Which size?", "options": []any{map[string]any{"label": "Small"}, map[string]any{"label": "Large"}}}}}})
+	q := askedQuestion(t, h)
+	page := func(n int, question, notes string) string {
+		one, other := "› 1. A", "  3. None of the above"
+		if notes != "" {
+			one, other = "  1. A", "› 3. None of the above"
+		}
+		foot := map[int]string{1: "answer", 2: "all"}[n] // the last question's sends them all
+		return fmt.Sprintf("  Question %d/2\r\n  %s\r\n  %s\r\n    2. B\r\n  %s%s\r\n"+
+			"  tab to add notes | enter to submit %s | esc to interrupt", n, question, one, other, notes, foot)
+	}
+	draw(h, page(1, "Which color?", ""))
+	evs := answerSeen(h, q.ID, "chat")
+	waitTyped(t, h, "\x1b[B\x1b[B")
+	draw(h, page(1, "Which color?", " "))
+	waitTyped(t, h, "\x1b[B\x1b[B\t")
+	draw(h, page(1, "Which color?", "\r\n  › Add notes"))
+	for end := time.Now().Add(5 * time.Second); !strings.Contains(h.s.typedForTest(), "talk"); time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(end) {
+			t.Fatalf("typed %q", h.s.typedForTest())
+		}
+	}
+	draw(h, page(1, "Which color?", "\r\n  › I'd like to talk this over"))
+	for end := time.Now().Add(5 * time.Second); !strings.HasSuffix(h.s.typedForTest(), "\r"); time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(end) {
+			t.Fatalf("typed %q", h.s.typedForTest())
+		}
+	}
+	draw(h, page(2, "Which size?", ""))
+	if next := answered(t, <-evs, q.ID); next == nil || next.Text != "Which size? (2 of 2)" {
+		t.Fatalf("%+v", next)
+	}
+}

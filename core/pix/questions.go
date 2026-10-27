@@ -169,24 +169,28 @@ func (q *question) endsWith(p map[string]any) bool {
 // the next. picks: the keys that pick several of a question's options (nil: it takes no such
 // question, answered in the terminal); review: the agent ends a menu of tabs (several
 // questions, or one of several picks) with a review whose first option sends the answers.
-// last: what the last of several questions shows in place of marker ("" marker); tab: what the
+// chatEnds: talking a question over ends the menu (Claude's "Chat about this"; Codex's is a note
+// that answers it, and goes on to the next). last: what the last of several questions shows in
+// place of marker ("" marker); tab: what the
 // screen shows of question k (from 0) of several, by their headers, and only while it waits:
 // its text may show elsewhere too (your prompt), and the marker stays for the next one; ticked:
 // what it shows in its place once you ticked one of its several picks.
 type menuTool struct {
-	name   string
-	marker string
-	own    func(n int, text string) []step
-	chat   func(n int) []step
-	picks  func(labels []string, picks []int) []step
-	review bool
-	last   string
-	tab    func(headers []string, k int) string
-	ticked func(headers []string, k int) string
+	name     string
+	marker   string
+	own      func(n int, text string) []step
+	chat     func(n int) []step
+	picks    func(labels []string, picks []int) []step
+	review   bool
+	chatEnds bool
+	last     string
+	tab      func(headers []string, k int) string
+	ticked   func(headers []string, k int) string
 }
 
 var menuTools = map[string]menuTool{
-	"claude": {name: "AskUserQuestion", marker: claudeMenu, own: claudeOwn, chat: claudeChat, picks: claudePicks, review: true, tab: claudeTab, ticked: claudeTicked},
+	"claude": {name: "AskUserQuestion", marker: claudeMenu, own: claudeOwn, chat: claudeChat, picks: claudePicks, review: true, chatEnds: true,
+		tab: claudeTab, ticked: claudeTicked},
 	"codex": {name: "request_user_input", marker: codexMenu, own: codexOwn, chat: codexChat, last: "enter to submit all",
 		tab: func(headers []string, k int) string { return fmt.Sprintf("Question %d/%d", k+1, len(headers)) }},
 }
@@ -521,7 +525,7 @@ func (s *Session) answerOnce(id, choice string) wire.Msg {
 		close(s.landing.done)
 	}
 	l := &landing{marker: q.marker, detail: q.detail, done: make(chan struct{})}
-	next := q.nextPart(choice)
+	next := q.nextPart(s.o.tool, choice)
 	if next != nil && next.part.detail != "" {
 		l.nextMarker, l.nextDetail = next.part.shownAs(next.marker)
 	}
@@ -758,10 +762,10 @@ func (p menuPart) shownAs(marker string) (string, string) {
 	return marker, detail
 }
 
-// nextPart: the menu's next question once q was answered with choice, as its agent went on to
-// it (nil: none, or the answer ended the menu: talking it over first).
-func (q *question) nextPart(choice string) *question {
-	if q.kind != "menu" || len(q.next) == 0 || choice == "chat" {
+// nextPart: the menu's next question once q was answered with choice in tool's menu, as it went
+// on to it (nil: none, or the answer ended the menu: talking it over first, in Claude's).
+func (q *question) nextPart(tool, choice string) *question {
+	if q.kind != "menu" || len(q.next) == 0 || choice == "chat" && menuTools[tool].chatEnds {
 		return nil
 	}
 	said := append(slices.Clone(q.said), q.part.text+" → "+q.part.answer(choice))

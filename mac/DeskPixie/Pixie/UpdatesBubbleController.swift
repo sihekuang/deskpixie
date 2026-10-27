@@ -81,6 +81,8 @@ final class UpdatesBubbleController {
         eventsApplied += 1
         model.apply(lines, now: Self.now, pop: popPermission())
         if model.typing == nil { releaseKey() } // its question went while you typed
+        let waiting = MenuPicks.waiting(picks.picked, in: lines) // #364
+        if waiting.count != picks.picked.count { picks.picked = waiting }
         render()
     }
 
