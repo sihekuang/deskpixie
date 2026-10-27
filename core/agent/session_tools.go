@@ -31,17 +31,17 @@ func SessionCatalog() []map[string]any {
 			"inputSchema": objectSchema(map[string]any{
 				"name":  map[string]any{"type": "string", "description": name[1]},
 				"text":  map[string]any{"type": "string", "description": "The message. Quote the user's own words when relaying what they said."},
-				"force": map[string]any{"type": "boolean", "description": "Only when the user says to send it anyway: types it in now, with any messages still waiting, even if pix thinks they're typing there. A busy session still gets it with its next step."},
+				"force": map[string]any{"type": "boolean", "description": "Only when the user says to send it anyway: it goes in now, with any messages still waiting: a busy session is stopped for it, and it goes in even while they're typing there (their unsent text comes back after). A question on screen still holds it until it's answered."},
 			}, "name", "text"),
 		},
 		{
 			"name":        "flush_session",
-			"description": "Send a session's waiting messages in now, when the user says to send it anyway (\"push it through\", \"it's stuck\"): pix types them even if it thinks the user is typing there, setting the user's unsent text aside and putting it back. A busy session still gets them with its next step.",
+			"description": "Send a session's waiting messages in now, when the user says to send it anyway (\"push it through\", \"it's stuck\"): a busy session is stopped for them (its work in progress is cut short), and they go in even while the user is typing there, their unsent text set aside and put back. A question on screen still holds them until it's answered.",
 			"inputSchema": objectSchema(stringProps(name), "name"),
 		},
 		{
 			"name":        "stop_and_send_session",
-			"description": "Stop a busy session's current turn (like Esc) so its waiting messages go in now, only when the user says to stop it and send (\"stop it and send it\"). The work in progress is cut short. If they're typing there or a question is on screen, the messages still wait for that.",
+			"description": "Stop a busy session's current turn (like Esc) so its waiting messages go in now, only when the user says to stop it and send (\"stop it and send it\"). The work in progress is cut short. They go in even while the user is typing there (their unsent text comes back after); only a question on screen holds them until it's answered.",
 			"inputSchema": objectSchema(stringProps(name), "name"),
 		},
 		{
@@ -130,19 +130,23 @@ type DeliveryPrompter interface {
 	PromptDelivery(ctx context.Context, name, text string) (Delivery, error)
 }
 
-// Flusher sends a session's waiting messages in past the typing gate (#187): "typed", or still
-// "waiting" with why (a busy session gets them with its next step). Typed past your typing,
-// they start with note ("": none, #340).
+// Flusher forces a session's waiting messages in now (#187, #373): a busy turn is stopped and
+// they go past your typing. "typed", or still "waiting" with why (a question or a menu on screen,
+// or a turn that hasn't stopped yet); they go in once it's out of the way. They start with the
+// note for what was forced (#340).
 type Flusher interface {
-	Flush(ctx context.Context, name, note string) (Delivery, error)
+	Flush(ctx context.Context, name string, notes ForcedNotes) (Delivery, error)
 }
 
-// StopSender stops a session's busy turn so its waiting messages go in now (#320): "typed", or
-// still "waiting" with why (it didn't stop in time, a question, or you're typing there). Sent
-// in after a stop, they start with note ("": none, #340).
+// StopSender is the same forced send from stop_and_send_session (#320); a pix from before #373
+// stops a busy turn for it but doesn't go past your typing.
 type StopSender interface {
-	StopAndSend(ctx context.Context, name, note string) (Delivery, error)
+	StopAndSend(ctx context.Context, name string, notes ForcedNotes) (Delivery, error)
 }
+
+// ForcedNotes are what forced messages start with (#340): Typing when they went past your
+// typing, Stopped when a busy turn was stopped for them; "" for none.
+type ForcedNotes struct{ Typing, Stopped string }
 
 // The notes a message forced into your session starts with, so its terminal shows what
 // happened (#340).
@@ -151,20 +155,13 @@ const (
 	TypingNote  = "[sent while you were typing]"
 )
 
-// forcedNote is the note a forced send of call starts with: stop_and_send_session's, or a
-// flush's (flush_session, or message_session's force); "" with the setting off (call.Mark)
-// and for anything else. pix adds it only when it does force them in.
-func forcedNote(call McpCall) string {
+// forcedNotes are the notes a forced send of call starts with; none with the setting off
+// (call.Mark). pix adds one only when it does stop a turn or go past your typing.
+func forcedNotes(call McpCall) ForcedNotes {
 	if !call.Mark {
-		return ""
+		return ForcedNotes{}
 	}
-	switch call.Kind {
-	case CallStopAndSendSession:
-		return StoppedNote
-	case CallFlushSession, CallMessageSession:
-		return TypingNote
-	}
-	return ""
+	return ForcedNotes{Typing: TypingNote, Stopped: StoppedNote}
 }
 
 // deliveryReply is message_session's, flush_session's or stop_and_send_session's reply for d.
@@ -272,7 +269,7 @@ func sessionTool(ctx context.Context, host SessionHost, call McpCall, mask func(
 				return McpReply{Err: derr}
 			}
 			if f, ok := sec.(Flusher); ok && call.Force && d.Status == "waiting" {
-				if d, derr = f.Flush(ctx, call.Name, forcedNote(call)); derr != nil {
+				if d, derr = f.Flush(ctx, call.Name, forcedNotes(call)); derr != nil {
 					return McpReply{Err: derr}
 				}
 			}
@@ -284,7 +281,7 @@ func sessionTool(ctx context.Context, host SessionHost, call McpCall, mask func(
 		if !ok {
 			return McpReply{Err: errors.New("This session's pix can't send waiting messages in; restart it to update pix.")}
 		}
-		d, ferr := f.Flush(ctx, call.Name, forcedNote(call))
+		d, ferr := f.Flush(ctx, call.Name, forcedNotes(call))
 		if ferr != nil {
 			return McpReply{Err: ferr}
 		}
@@ -294,7 +291,7 @@ func sessionTool(ctx context.Context, host SessionHost, call McpCall, mask func(
 		if !ok {
 			return McpReply{Err: errors.New("This session's pix can't stop it to send; restart it to update pix.")}
 		}
-		d, serr := st.StopAndSend(ctx, call.Name, forcedNote(call))
+		d, serr := st.StopAndSend(ctx, call.Name, forcedNotes(call))
 		if serr != nil {
 			return McpReply{Err: serr}
 		}

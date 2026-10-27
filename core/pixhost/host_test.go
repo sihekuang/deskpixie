@@ -661,7 +661,7 @@ func TestFlushSaysTypedOrWhyItStillWaits(t *testing.T) {
 			res.Kind, res.ID = wire.KindResult, m.ID
 			wire.Encode(p.c, res)
 		}()
-		return h.Flush(context.Background(), r.Address, "")
+		return h.Flush(context.Background(), r.Address, agent.ForcedNotes{})
 	}
 	if d, err := flush(wire.Msg{Status: "typed"}); err != nil || d.Status != "typed" {
 		t.Fatalf("%+v %v", d, err)
@@ -689,7 +689,7 @@ func TestStopAndSendSaysTypedOrWhyItStillWaits(t *testing.T) {
 			res.Kind, res.ID = wire.KindResult, m.ID
 			wire.Encode(p.c, res)
 		}()
-		return h.StopAndSend(context.Background(), r.Address, "")
+		return h.StopAndSend(context.Background(), r.Address, agent.ForcedNotes{})
 	}
 	if d, err := stop(wire.Msg{Status: "typed"}); err != nil || d.Status != "typed" {
 		t.Fatalf("%+v %v", d, err)
@@ -751,7 +751,7 @@ func TestAnOlderPixIsMarkedOutdated(t *testing.T) {
 		t.Fatalf("%+v %v", d, err)
 	}
 	go po.answer("")
-	if d, err := h.Flush(context.Background(), unknown.Address, ""); err != nil || !d.Outdated {
+	if d, err := h.Flush(context.Background(), unknown.Address, agent.ForcedNotes{}); err != nil || !d.Outdated {
 		t.Fatalf("flush: %+v %v", d, err)
 	}
 
@@ -829,6 +829,34 @@ func TestDeliveredBecomesAPaneEvent(t *testing.T) {
 				t.Fatalf("%+v", ev)
 			}
 			break
+		}
+	}
+}
+
+// #373: a forced send hands pix both notes, and in Text the one a pix from before it knows.
+func TestForcedSendsCarryBothNotes(t *testing.T) {
+	h, sock := newHost(t)
+	p, r := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api"})
+	notes := agent.ForcedNotes{Typing: agent.TypingNote, Stopped: agent.StoppedNote}
+	for _, c := range []struct {
+		command, text string
+		send          func() (agent.Delivery, error)
+	}{
+		{"flush", agent.TypingNote, func() (agent.Delivery, error) { return h.Flush(context.Background(), r.Address, notes) }},
+		{"stop", agent.StoppedNote, func() (agent.Delivery, error) { return h.StopAndSend(context.Background(), r.Address, notes) }},
+	} {
+		got := make(chan wire.Msg, 1)
+		go func() {
+			m, _ := p.dec.Next()
+			got <- m
+			wire.Encode(p.c, wire.Msg{Kind: wire.KindResult, ID: m.ID, Status: "typed"})
+		}()
+		if _, err := c.send(); err != nil {
+			t.Fatal(err)
+		}
+		m := <-got
+		if m.Command != c.command || m.Text != c.text || m.TypingNote != agent.TypingNote || m.StoppedNote != agent.StoppedNote {
+			t.Fatalf("%s: %+v", c.command, m)
 		}
 	}
 }

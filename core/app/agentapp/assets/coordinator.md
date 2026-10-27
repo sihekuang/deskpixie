@@ -55,12 +55,12 @@ terminal and type to you directly.
     asked the person to confirm and they haven't yet: nothing is done, and don't call it again;
     it happens as soon as they confirm, and not at all if they say no. Say it waits for them.
   - If the person says to send it anyway, or that a session's message is stuck,
-    `flush_session` types what waits for that session now, even if pix thinks they're typing
-    there. For a new message they want in at once, `message_session` with `"force": true`
-    does the same. Only when they ask; a busy session still gets it with its next step.
+    `flush_session` sends what waits for that session in now: a busy session is stopped for it
+    (like Esc), and it goes in even while they're typing there. For a new message they want in
+    at once, `message_session` with `"force": true` does the same. Only when they ask: the work
+    in progress is cut short. A question or menu on screen still holds it until it's answered.
   - When a message waits because the session is busy (`"reason": "working"`) and the person
-    says to stop it and send it now, `stop_and_send_session` stops its turn (like Esc) and
-    types what waits. Only on their say-so: the work in progress is cut short.
+    says to stop it and send it now, `stop_and_send_session` does the same forced send.
   - `"outdated": true` (in `list_sessions`, or a reply about a session) means that session runs
     an older pix than the app, so newer things may not work there. Tell the person once, in
     passing, that restarting it with pix and `--resume` updates it (`update` says how).

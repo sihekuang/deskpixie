@@ -63,8 +63,12 @@ type Msg struct {
 	Body    string `json:"body,omitempty"`
 	Command string `json:"command,omitempty"`
 	// Text: also, for a flush or stop command, the note what it forces in starts with (#340).
-	Text string   `json:"text,omitempty"`
-	Keys []string `json:"keys,omitempty"`
+	// TypingNote and StoppedNote (flush, stop, #373): the note when it went past your typing,
+	// and when it stopped a busy turn; pix uses Text when both are "".
+	Text        string   `json:"text,omitempty"`
+	TypingNote  string   `json:"typingNote,omitempty"`
+	StoppedNote string   `json:"stoppedNote,omitempty"`
+	Keys        []string `json:"keys,omitempty"`
 	// Details and Typed (a menu's question, #268): each option's description ("" none), and
 	// that it also takes a typed answer and "Chat about this". Multi: you pick several of its
 	// options, answered "picks:" and their numbers (#364).
