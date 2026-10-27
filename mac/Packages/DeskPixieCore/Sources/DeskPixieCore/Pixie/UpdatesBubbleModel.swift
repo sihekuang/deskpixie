@@ -73,6 +73,11 @@ public struct UpdateLine: Codable, Sendable, Equatable, Identifiable {
         [session, job, worker, app].contains { !($0 ?? "").isEmpty }
     }
 
+    /// Its source is only an app: the footer's button brings that app forward, not a terminal.
+    public var sourceIsApp: Bool {
+        [session, job, worker].allSatisfy { ($0 ?? "").isEmpty } && !(app ?? "").isEmpty
+    }
+
     /// Its entry in the chat window: the thread keys a waiting request by its line (#388).
     public var chatEntryID: String { "req\(id)" }
 

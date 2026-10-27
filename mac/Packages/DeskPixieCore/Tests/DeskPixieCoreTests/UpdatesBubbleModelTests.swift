@@ -352,6 +352,11 @@ final class UpdatesBubbleModelTests: XCTestCase {
         XCTAssertTrue(worker.hasSource)
         let bare = UpdateLine(id: 15, text: "Run it?", kind: "question", at: 1, job: nil, worker: nil, token: "lark")
         XCTAssertFalse(bare.hasSource)
+        let app = UpdateLine(id: 16, text: "Allow?", kind: "question", at: 1, job: nil, worker: nil, token: "kite",
+                             app: "com.googlecode.iterm2")
+        XCTAssertTrue(app.hasSource)
+        XCTAssertTrue(app.sourceIsApp) // "Open app", not "Terminal"
+        XCTAssertFalse(menu.sourceIsApp)
     }
 
     func testTheGuardIsPerQuestion() {

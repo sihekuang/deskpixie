@@ -200,7 +200,9 @@ struct UpdatesBubbleView: View {
     private func cardFooter(_ line: UpdateLine) -> some View {
         HStack(spacing: 6) {
             if line.hasSource && !line.offersTerminal {
-                Button { onTerminal(line) } label: { Label("Terminal", systemImage: "terminal") }
+                Button { onTerminal(line) } label: {
+                    line.sourceIsApp ? Label("Open app", systemImage: "macwindow") : Label("Terminal", systemImage: "terminal")
+                }
             }
             Button { onOpenChat(line) } label: { Label("See in chat", systemImage: "bubble.left.and.bubble.right") }
             if line.offersDismiss {
