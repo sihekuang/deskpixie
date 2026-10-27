@@ -170,7 +170,8 @@ func (c *AgentController) SessionMenus() map[string]string {
 	menus := map[string]string{}
 	for _, p := range c.confirms.Pending() {
 		if p.Menu && p.Session != "" {
-			menus[p.Session] = MenuView(p)
+			// Masked as it is read: a confirm word given out since it was asked may be in it.
+			menus[p.Session] = maskPendingTokens(MenuView(p), c.pendingTokens())
 		}
 	}
 	return menus
@@ -178,12 +179,17 @@ func (c *AgentController) SessionMenus() map[string]string {
 
 // answerSessionMenu is answer_session_menu (#384): the coordinator picks the options the user
 // named of the menu session waits on, as a tap on them would.
-func (c *AgentController) answerSessionMenu(session string, options []int, now Millis, fx *[]Effect) (any, error) {
+func (c *AgentController) answerSessionMenu(session, menu string, options []int, now Millis, fx *[]Effect) (any, error) {
 	at := slices.IndexFunc(c.confirms.Pending(), func(p Pending) bool { return p.Menu && p.Session == session })
 	if at < 0 {
 		return nil, fmt.Errorf("%s isn't waiting on a menu.", session)
 	}
 	p := c.confirms.Pending()[at]
+	if p.Question != menu {
+		// The menu the person answered is gone; this is another one.
+		return nil, fmt.Errorf("That menu was answered. %s now asks: %s Ask the person about this one.", session,
+			maskPendingTokens(MenuView(p), c.pendingTokens()))
+	}
 	switch {
 	case len(options) == 0:
 		return nil, errors.New("Say which option, by its number.")
@@ -195,7 +201,16 @@ func (c *AgentController) answerSessionMenu(session string, options []int, now M
 			return nil, fmt.Errorf("Its options are 1 to %d, each once.", len(p.Options))
 		}
 		// As by voice (#330): one that pushes, merges, publishes or deploys is the person's tap.
-		if actions := GatedActions(p.Options[o-1]); len(actions) > 0 {
+		detail := ""
+		if o <= len(p.Details) {
+			detail = p.Details[o-1]
+		}
+		// The question counts too ("Push main to origin?" "Yes"), unless the option refuses it.
+		gated := p.Options[o-1] + " " + detail
+		if !refuses(p.Options[o-1]) {
+			gated = p.Text + " " + gated
+		}
+		if actions := GatedActions(gated); len(actions) > 0 {
 			return nil, fmt.Errorf("That option asks it to %s: the person picks it in the bubble. Tell them so.", spokenList(actions))
 		}
 	}
@@ -209,6 +224,12 @@ func (c *AgentController) answerSessionMenu(session string, options []int, now M
 		picked[i] = p.Options[o-1]
 	}
 	return map[string]any{"name": session, "status": "answered", "picked": picked}, nil
+}
+
+// refuses: a menu option that says no to its question ("No", "Don't push", "Cancel").
+func refuses(option string) bool {
+	w := menuWords(option)
+	return len(w) > 0 && (slices.Contains(refusals, w[0]) || negators[w[0]])
 }
 
 // onPicks: the options picked of a session menu question that takes several (#364).

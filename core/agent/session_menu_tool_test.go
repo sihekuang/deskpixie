@@ -9,8 +9,19 @@ import (
 // #384: the coordinator sees the menu a session waits on, and picks what the person named with
 // answer_session_menu, as a tap would; a message to it would only wait behind the menu.
 
+// menuTool picks of the menu the session waits on now, by its id as the coordinator saw it.
 func menuTool(c *AgentController, agent string, picks []int, now Millis) []Effect {
-	return c.Step(McpInput(agent, McpCall{Kind: CallAnswerSessionMenu, Name: sessionName, Picks: picks}), now)
+	menu := ""
+	for _, p := range c.confirms.Pending() {
+		if p.Menu && p.Session == sessionName {
+			menu = p.Question
+		}
+	}
+	return menuToolOf(c, agent, menu, picks, now)
+}
+
+func menuToolOf(c *AgentController, agent, menu string, picks []int, now Millis) []Effect {
+	return c.Step(McpInput(agent, McpCall{Kind: CallAnswerSessionMenu, Name: sessionName, Menu: menu, Picks: picks}), now)
 }
 
 func toolOutcome(fx []Effect) Effect {
@@ -23,7 +34,7 @@ func toolOutcome(fx []Effect) Effect {
 func TestTheCoordinatorSeesASessionsMenu(t *testing.T) {
 	c := ctl()
 	askSession(c, dbChoice, T0)
-	want := "Which database? Options (pick one): 1. Postgres | 2. SQLite | 3. MySQL"
+	want := "Menu q8: Which database? Options (pick one): 1. Postgres | 2. SQLite | 3. MySQL"
 	if got := c.SessionMenus(); len(got) != 1 || got[sessionName] != want {
 		t.Fatalf("%q", got)
 	}
@@ -145,15 +156,16 @@ func TestParseAnswerSessionMenu(t *testing.T) {
 		picks []int
 		err   string
 	}{
-		{map[string]any{"name": "api-claude", "options": []any{2.0}}, []int{2}, ""},
-		{map[string]any{"name": "api-claude", "options": []any{json.Number("2")}}, []int{2}, ""}, // as the MCP server decodes it
-		{map[string]any{"name": "api-claude", "options": []any{json.Number("2.5")}}, nil, "option numbers"},
-		{map[string]any{"name": "api-claude", "options": []any{"3", 1.0}}, []int{3, 1}, ""},
-		{map[string]any{"name": "api-claude", "options": 2.0}, []int{2}, ""},
-		{map[string]any{"name": "api-claude", "options": []any{}}, nil, "option numbers"},
-		{map[string]any{"name": "api-claude", "options": []any{1.5}}, nil, "option numbers"},
-		{map[string]any{"name": "api-claude", "options": []any{"SQLite"}}, nil, "option numbers"},
-		{map[string]any{"name": "api-claude"}, nil, "option numbers"},
+		{map[string]any{"name": "api-claude", "menu": "q1", "options": []any{2.0}}, []int{2}, ""},
+		{map[string]any{"name": "api-claude", "menu": "q1", "options": []any{json.Number("2")}}, []int{2}, ""}, // as the MCP server decodes it
+		{map[string]any{"name": "api-claude", "menu": "q1", "options": []any{json.Number("2.5")}}, nil, "option numbers"},
+		{map[string]any{"name": "api-claude", "menu": "q1", "options": []any{"3", 1.0}}, []int{3, 1}, ""},
+		{map[string]any{"name": "api-claude", "menu": "q1", "options": 2.0}, []int{2}, ""},
+		{map[string]any{"name": "api-claude", "menu": "q1", "options": []any{}}, nil, "option numbers"},
+		{map[string]any{"name": "api-claude", "menu": "q1", "options": []any{1.5}}, nil, "option numbers"},
+		{map[string]any{"name": "api-claude", "menu": "q1", "options": []any{"SQLite"}}, nil, "option numbers"},
+		{map[string]any{"name": "api-claude", "menu": "q1"}, nil, "option numbers"},
+		{map[string]any{"name": "api-claude", "options": []any{1.0}}, nil, "menu"}, // review of #387: which menu, always
 		{map[string]any{"options": []any{1.0}}, nil, "name"},
 	} {
 		call, err := ParseToolCall(RoleCoordinator, "answer_session_menu", tc.args)
@@ -162,7 +174,7 @@ func TestParseAnswerSessionMenu(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tc.err) {
 				t.Errorf("%v: %v", tc.args, err)
 			}
-		case err != nil || call.Kind != CallAnswerSessionMenu || call.Name != "api-claude" || !slicesEqual(call.Picks, tc.picks):
+		case err != nil || call.Kind != CallAnswerSessionMenu || call.Name != "api-claude" || call.Menu != "q1" || !slicesEqual(call.Picks, tc.picks):
 			t.Errorf("%v: %+v %v", tc.args, call, err)
 		}
 	}
@@ -181,4 +193,45 @@ func slicesEqual(a, b []int) bool {
 		}
 	}
 	return true
+}
+
+// Review of #387: a pick for a menu that has since been answered never lands on the newer menu
+// the session asks; a question that pushes, or an option whose description does, is the
+// person's tap; and the menu is masked as it is read, against confirm words given out since.
+func TestTheMenuToolPicksOnlyTheMenuItSaw(t *testing.T) {
+	c := ctl()
+	askSession(c, dbChoice, T0)
+	c.Step(PaneInput(PaneEvent{Kind: PaneEventQuestionGone, Agent: sessionName, Question: &SessionQuestion{ID: dbChoice.ID}}), T0+1)
+	drop := SessionQuestion{ID: "q9", Label: "api", Kind: "menu", Text: "Drop the old tables?", Options: []string{"Yes", "No"}}
+	askSession(c, drop, T0+2)
+	fx := menuToolOf(c, Coordinator, "q8", []int{1}, T0+3)
+	if r := toolOutcome(fx); !strings.Contains(r.Err, "That menu was answered") || !strings.Contains(r.Err, "Drop the old tables?") {
+		t.Fatalf("%+v", r)
+	}
+	if len(answers(fx)) != 0 || len(c.confirms.Pending()) != 1 {
+		t.Fatal("the newer menu was answered")
+	}
+}
+
+func TestTheMenuToolLeavesAPushInTheQuestionOrDescriptionToThePerson(t *testing.T) {
+	for _, q := range []SessionQuestion{
+		{ID: "q4", Label: "api", Kind: "menu", Text: "Push main to origin?", Options: []string{"Yes", "No"}},
+		{ID: "q5", Label: "api", Kind: "menu", Text: "Ready?", Options: []string{"Ship it", "Wait"}, Details: []string{"push and merge the PR", ""}},
+	} {
+		c := ctl()
+		askSession(c, q, T0)
+		fx := menuTool(c, Coordinator, []int{1}, T0+1)
+		if r := toolOutcome(fx); !strings.Contains(r.Err, "the person picks it in the bubble") {
+			t.Errorf("%s: %+v", q.Text, r)
+		}
+		if len(answers(fx)) != 0 {
+			t.Errorf("%s: answered", q.Text)
+		}
+	}
+	// The description is shown, so the coordinator knows what an option does.
+	c := ctl()
+	askSession(c, SessionQuestion{ID: "q6", Label: "api", Kind: "menu", Text: "Which?", Options: []string{"A", "B"}, Details: []string{"the fast one", ""}}, T0)
+	if got := c.SessionMenus()[sessionName]; !strings.Contains(got, "1. A (the fast one) | 2. B") {
+		t.Fatal(got)
+	}
 }

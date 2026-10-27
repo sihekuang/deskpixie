@@ -395,11 +395,15 @@ func ParseToolCall(role Role, name string, args any) (McpCall, error) {
 		if err != nil {
 			return McpCall{}, err
 		}
+		menu := strings.TrimSpace(fmt.Sprint(obj["menu"]))
+		if obj["menu"] == nil || menu == "" {
+			return McpCall{}, badArgs("menu must be the menu's id from list_sessions")
+		}
 		picks, err := optionNumbers(obj["options"])
 		if err != nil {
 			return McpCall{}, err
 		}
-		return McpCall{Kind: CallAnswerSessionMenu, Name: n, Picks: picks}, nil
+		return McpCall{Kind: CallAnswerSessionMenu, Name: n, Menu: menu, Picks: picks}, nil
 	case "interrupt_session", "close_session", "flush_session", "stop_and_send_session":
 		n, err := needName("name")
 		if err != nil {

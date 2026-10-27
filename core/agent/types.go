@@ -692,7 +692,8 @@ type McpCall struct {
 	Question string
 	Options  []string
 	Reason   string
-	Picks    []int // AnswerSessionMenu only (#384): the options picked, from 1.
+	Picks    []int  // AnswerSessionMenu only (#384): the options picked, from 1.
+	Menu     string // AnswerSessionMenu only: the menu they are of, its id as MenuView shows it
 }
 
 // McpReply is a tool's result (JSON value) or, when Err is set, the error text the calling

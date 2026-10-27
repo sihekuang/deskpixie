@@ -236,7 +236,7 @@ func (c *AgentController) onMcp(agent string, call McpCall, now Millis, fx *[]Ef
 			value = map[string]any{"ok": true}
 		}
 	case call.Kind == CallAnswerSessionMenu && coordinator:
-		value, err = c.answerSessionMenu(call.Name, call.Picks, now, fx)
+		value, err = c.answerSessionMenu(call.Name, call.Menu, call.Picks, now, fx)
 	case call.Kind == CallStartWorker && coordinator:
 		err = errors.New("start_worker is handled by the runtime.")
 	default:
