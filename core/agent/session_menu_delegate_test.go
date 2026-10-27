@@ -25,6 +25,7 @@ func TestADelegatedAnswerPicksTheOpenMenusOption(t *testing.T) {
 		{"Yeah, let's create both and assign to me.", "2"},
 		{"Create both unassigned. Three points each is fine", "1"},
 		{"change something first", "3"},
+		{"Create both assigned to me", "2"}, // 15:37, said back to the test menu
 	} {
 		c := ctl()
 		askSession(c, storiesMenu, T0)
@@ -108,5 +109,30 @@ func TestMenuChoiceAndIsAFiller(t *testing.T) {
 		if n, ok := MenuChoice(opts, tc.said); n != tc.want || ok != (tc.want != 0) {
 			t.Errorf("%q: %d %v", tc.said, n, ok)
 		}
+	}
+}
+
+// Word endings left out on both sides: "assigned" is "assign", but "unassigned" stays its own
+// word, so it never flips to the other option.
+func TestMenuChoiceLeavesOutWordEndings(t *testing.T) {
+	opts := storiesMenu.Options
+	for _, tc := range []struct {
+		said string
+		want int
+	}{
+		{"Create both assigned to me", 2},
+		{"create both, assigning to me", 2},
+		{"Create both unassigned", 1},
+		{"create both unassigning", 1},
+		{"changes something first", 3},
+		{"create both assigned to them", 0},
+		{"created both, unassigned", 1},
+	} {
+		if n, ok := MenuChoice(opts, tc.said); n != tc.want || ok != (tc.want != 0) {
+			t.Errorf("%q: %d %v", tc.said, n, ok)
+		}
+	}
+	if got := stems([]string{"yes", "me", "options", "2s", "assigned", "created", "create", "changes"}); strings.Join(got, " ") != "yes me option 2s assign creat creat chang" {
+		t.Fatal(got)
 	}
 }

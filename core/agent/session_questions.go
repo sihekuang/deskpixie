@@ -343,11 +343,13 @@ func MenuChoice(options []string, answer string) (int, bool) {
 	words := stripFillers(raw)
 	// Word for word first, then with fillers left out on both sides: "yes please" is the
 	// option "Yes please" before it is "Yes"; then without its "and"s too: "create both and
-	// assign to me" is "Create both, assign to me" (#383).
+	// assign to me" is "Create both, assign to me" (#383); then with word endings left out:
+	// "create both assigned to me" is it too.
 	withoutAnd := func(w []string) []string {
 		return slices.DeleteFunc(slices.Clone(stripFillers(w)), func(s string) bool { return s == "and" })
 	}
-	for _, form := range []func([]string) []string{func(w []string) []string { return w }, stripFillers, withoutAnd} {
+	stemmed := func(w []string) []string { return stems(withoutAnd(w)) }
+	for _, form := range []func([]string) []string{func(w []string) []string { return w }, stripFillers, withoutAnd, stemmed} {
 		said := strings.Join(form(raw), " ")
 		for k, o := range options {
 			if strings.Join(form(menuWords(o)), " ") == said {
@@ -404,6 +406,26 @@ func MenuChoice(options []string, answer string) (int, bool) {
 		}
 	}
 	return found, true
+}
+
+// stems are words without their endings (-ing, -ed or -s, then a final -e) while three letters
+// or more are left: "assigned", "assigning" and "assigns" are "assign", "create", "created" and
+// "creating" are "creat"; "unassigned" stays apart.
+func stems(words []string) []string {
+	out := make([]string, len(words))
+	for i, w := range words {
+		for _, end := range []string{"ing", "ed", "s"} {
+			if s, ok := strings.CutSuffix(w, end); ok && len(s) >= 3 {
+				w = s
+				break
+			}
+		}
+		if s, ok := strings.CutSuffix(w, "e"); ok && len(s) >= 3 {
+			w = s
+		}
+		out[i] = w
+	}
+	return out
 }
 
 // trimLeadFillers drops the fillers at the start and "please" or "thanks" at the end, but
