@@ -2,7 +2,7 @@ package agent
 
 import "github.com/sihekuang/deskpixie/core/voice"
 
-// Opening a conversation for an update (`agent.openConversationForUpdates`, a feature flag, off by
+// Opening a conversation for an update (`agent.openConversationForUpdates`, on by
 // default). With it on, a job's done or failed line, an agent question or a spoken worker
 // report that arrives while no conversation is open still gets today's chime, notification
 // and outbox line, and Pixie also opens a conversation the way the hotkey does. A coordinator

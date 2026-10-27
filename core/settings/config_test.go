@@ -126,6 +126,17 @@ func TestDefaultsMatchSpec(t *testing.T) {
 	}
 }
 
+// #366: Pixie starts a conversation for updates by default; a settings.json that turned it
+// off keeps it off.
+func TestOpenConversationForUpdatesIsOnByDefault(t *testing.T) {
+	if !Default().Agent.OpenConversationForUpdates {
+		t.Fatal("openConversationForUpdates is off by default")
+	}
+	if parseConfig(t, `{"agent":{"openConversationForUpdates":false}}`).Agent.OpenConversationForUpdates {
+		t.Fatal("a saved false was overridden")
+	}
+}
+
 func TestMissingFileGivesDefaultsAndCreatesIt(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "sub", "settings.json")
 	if !Load(p).Equal(Default()) {
@@ -245,7 +256,7 @@ func TestAgentDefaultsMatchTheSpec(t *testing.T) {
 	want := map[string]any{
 		"enabled": true, "sessionHost": "herdr", "session": "deskpixie", "terminal": "warp",
 		"herdrPath": nil, "tmuxPath": nil, "coordinatorKind": "claude", "coordinatorEffort": "low", "model": nil, "codexModel": nil, "warm": false, "port": float64(48217), "keepPanesOnQuit": true,
-		"holdOpenSecs": float64(180), "permissionTimeoutSecs": float64(120), "notifyPerMinute": float64(4), "narration": true, "openConversationForUpdates": false, "alwaysForceSend": false,
+		"holdOpenSecs": float64(180), "permissionTimeoutSecs": float64(120), "notifyPerMinute": float64(4), "narration": true, "openConversationForUpdates": true, "alwaysForceSend": false,
 		"markForcedSends": true, // #340
 		"editor":          "auto", "projectsRoot": "~/Documents/deskpixie",
 		"workers": map[string]any{"enabled": false, "max": float64(4), "kinds": []any{"claude", "codex"}, "speakResults": false},

@@ -172,7 +172,7 @@ type AgentSettings struct {
 	Narration             bool   `json:"narration"`
 	// OpenConversationForUpdates: a job finishing or failing, an agent question or a spoken
 	// worker report that comes while no conversation is open makes Pixie open one and say it
-	// (off by default: a feature flag).
+	// (on by default, #366).
 	OpenConversationForUpdates bool `json:"openConversationForUpdates"`
 	// AlwaysForceSend (#205): every message Pixie passes to a session you started with pix
 	// goes in at once, as message_session's force would send it (off by default).
@@ -193,7 +193,7 @@ type WorkerSettings struct {
 	Max     uint64   `json:"max"`
 	Kinds   []string `json:"kinds"`
 	// SpeakResults: Pixie says a worker's own done/failed/blocked report as soon as it comes
-	// (off by default: a feature flag).
+	// (on by default, #366).
 	SpeakResults bool `json:"speakResults"`
 }
 
@@ -223,6 +223,7 @@ func Default() Config {
 			CoordinatorKind: CoordinatorClaude, CoordinatorEffort: "low",
 			Port: 48217, HoldOpenSecs: 180, PermissionTimeoutSecs: 120, NotifyPerMinute: 4, Editor: richtext.EditorAuto,
 			Narration: true, ProjectsRoot: "~/Documents/deskpixie", MarkForcedSends: true,
+			OpenConversationForUpdates: true,
 			// Handed-off work keeps running when the app quits; the next start adopts it.
 			KeepPanesOnQuit: true,
 			Workers:         WorkerSettings{Max: 4, Kinds: []string{"claude", "codex"}},
