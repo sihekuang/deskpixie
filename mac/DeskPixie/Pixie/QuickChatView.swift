@@ -105,6 +105,8 @@ struct QuickChatCard: View {
 
     static let width: CGFloat = 260
     @FocusState private var focused: Bool
+    /// The space below the reply on show in the deck, when the deck is below Pixie (#369).
+    @State private var deckSlack: CGFloat = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -114,6 +116,9 @@ struct QuickChatCard: View {
                 DeckPager(ids: model.pages.map(\.id), selected: model.pageID, width: Self.width,
                           onSelect: onPage, onResize: onResize, onScroll: onScroll, bottomAligned: above) { id in
                     if let i = model.pages.firstIndex(where: { $0.id == id }) { replyCard(i) }
+                }
+                .onPreferenceChange(DeckSlack.self) { new in
+                    MainActor.assumeIsolated { deckSlack = new }
                 }
             } else if model.showsEarlierOnly {
                 HStack(spacing: 4) {
@@ -214,6 +219,11 @@ struct QuickChatCard: View {
                 }
                 .padding(6)
                 .deckCard()
+                // Under the reply on show, not under the deck's tallest card (#369). In front of
+                // the deck it now sits over, so it still takes clicks.
+                .offset(y: boxLift)
+                .zIndex(1)
+                .animation(DeckPager<Int, EmptyView>.slide, value: boxLift)
             }
         }
         .frame(width: Self.width, alignment: .leading)
@@ -224,6 +234,10 @@ struct QuickChatCard: View {
         .onChange(of: state.draft) { onResize() }
         .onChange(of: attachments.model) { onResize() }
     }
+
+    /// How far the box moves up onto the reply on show: the deck's slack, when the deck is below
+    /// Pixie (above it, shorter cards already sit at the deck's bottom, against the box).
+    private var boxLift: CGFloat { showsDeck && !above ? -deckSlack : 0 }
 
     /// Words to page through: what is up now, or a kept reply you went back to.
     private var showsDeck: Bool { model.pageID != nil && !(model.shownText.isEmpty && model.pages.count < 2) }
