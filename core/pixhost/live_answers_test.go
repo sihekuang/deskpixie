@@ -36,6 +36,7 @@ type livePix struct {
 	addr   string
 	term   *os.File // the terminal you would type in
 	work   string
+	screen string // the screen log
 }
 
 func startLivePix(t *testing.T, tool string, args ...string) *livePix {
@@ -83,6 +84,7 @@ func startLivePix(t *testing.T, tool string, args ...string) *livePix {
 	p := &livePix{host: host, events: host.Subscribe(), work: work}
 
 	screen, _ := os.Create(filepath.Join(root, "screen.log"))
+	p.screen = screen.Name()
 	ptmx, tty, err := pty.Open()
 	if err != nil {
 		t.Fatal(err)
