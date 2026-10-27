@@ -116,6 +116,7 @@ func (c *AgentController) onSessionQuestion(session string, q SessionQuestion, n
 	}
 	if pending.Menu {
 		c.askedBy(asker{menu: pending.ID, at: now})
+		c.reask = reask{at: now, line: line}
 	}
 	before := c.outbox.Len()
 	c.deliverOpening(line, now, fx)
