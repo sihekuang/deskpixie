@@ -165,26 +165,19 @@ func (takeClipboard) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)
 }
 
-func (t takeClipboard) Invoke(ctx context.Context, args json.RawMessage) voice.ToolOutcome {
-	return t.Begin(ctx, args)()
-}
+// WaitedFor: the delegate Pixie calls with take_clipboard waits for what it attaches (#367).
+func (takeClipboard) WaitedFor() {}
 
-// Begin holds back the attachments' Take until the read is over (#367): Pixie calls delegate
-// in the same turn, and it would otherwise go before what this attaches.
-func (t takeClipboard) Begin(ctx context.Context, _ json.RawMessage) func() voice.ToolOutcome {
+func (t takeClipboard) Invoke(ctx context.Context, _ json.RawMessage) voice.ToolOutcome {
 	s := t.a.attachments()
 	if s == nil {
-		return func() voice.ToolOutcome { return clipReply(map[string]any{"error": errNoCoordinator.Error()}) }
+		return clipReply(map[string]any{"error": errNoCoordinator.Error()})
 	}
-	end := s.BeginRead()
 	before := map[string]bool{}
 	for _, it := range s.Pending() {
 		before[it.ID] = true
 	}
-	return func() voice.ToolOutcome {
-		defer end()
-		return t.read(ctx, s, before)
-	}
+	return t.read(ctx, s, before)
 }
 
 // read asks the shell for the clipboard and says what it attached that wasn't in before.

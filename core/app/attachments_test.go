@@ -127,28 +127,11 @@ func TestTakeClipboardTimesOut(t *testing.T) {
 	}
 }
 
-// #367: Pixie calls take_clipboard and delegate in the same turn, and the runtime runs them
-// at once. Once take_clipboard has begun, the delegate's Take waits for what it attaches.
-func TestADelegateBegunAfterTakeClipboardCarriesTheScreenshot(t *testing.T) {
-	h, f := attachHarness(t)
-	run := h.app.clipboardTool().(voice.BeginningTool).Begin(context.Background(), json.RawMessage(`{}`))
-	took := make(chan []string, 1)
-	go func() { took <- f.attach.Take() }() // the delegate
-	done := make(chan voice.ToolOutcome, 1)
-	go func() { done <- run() }()
-	e := h.waitFor("clipboard.read", nil, time.Second)
-	h.call("attachments.add", map[string]string{"name": "shot.png", "data": b64([]byte("png"))})
-	h.call("clipboard.done", map[string]string{"request": e["request"].(string)})
-	if out := <-done; string(out.Output) != `{"attached":["shot.png"]}` {
-		t.Fatal(string(out.Output))
-	}
-	select {
-	case paths := <-took:
-		if len(paths) != 1 || filepath.Base(paths[0]) != "shot.png" {
-			t.Fatal(paths)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("the delegate never took the attachments")
+// #367: the delegate Pixie calls with take_clipboard waits for it in the voice runtime.
+func TestTakeClipboardIsWaitedFor(t *testing.T) {
+	h, _ := attachHarness(t)
+	if _, ok := h.app.clipboardTool().(voice.WaitedForTool); !ok {
+		t.Fatal("take_clipboard is not waited for")
 	}
 }
 
