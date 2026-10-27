@@ -20,13 +20,16 @@ struct SettingsWindowView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            sidebar
-                .safeAreaInset(edge: .top) {
-                    SettingsSearchField(text: Binding(get: { model.query }, set: { model.query = $0 }))
-                        .padding(.horizontal, 10)
-                        .padding(.bottom, 4)
-                }
-                .frame(width: 200)
+            // The field sits above the sidebar, not in it: the sidebar becomes the results on the
+            // first character typed, and a field inside it was built anew, losing its focus (#374).
+            VStack(spacing: 0) {
+                SettingsSearchField(text: Binding(get: { model.query }, set: { model.query = $0 }))
+                    .padding(.horizontal, 10)
+                    .padding(.top, 8)
+                    .padding(.bottom, 4)
+                sidebar
+            }
+            .frame(width: 200)
 
             SettingsDetailView(model: model, tab: SettingsLayout.tabs[selectedIndex])
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
