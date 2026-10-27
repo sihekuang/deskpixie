@@ -117,6 +117,23 @@ func TestASessionsQuestionIsSaidAgain(t *testing.T) {
 	}
 }
 
+// Review of #385: answered in its terminal meanwhile (the session went to work), it isn't
+// said again, and what you say next isn't typed into the busy session as its answer.
+func TestASessionsQuestionAnsweredInItsTerminalIsNotSaidAgain(t *testing.T) {
+	c := ctl()
+	c.Step(voiceOpened(), T0)
+	c.Step(PaneInput(PaneEvent{Kind: PaneEventTurn, Agent: sessionName, Turn: &SessionTurn{Label: "api",
+		Reply: "Should I also update the docs?", FromPixie: true}}), T0+1)
+	c.Step(PaneInput(PaneEvent{Kind: PaneEventStatus, Agent: sessionName, Status: PaneIdle}), T0+1)
+	c.Step(voiceClosed(), T0+2)
+	c.Step(PaneInput(PaneEvent{Kind: PaneEventStatus, Agent: sessionName, Status: PaneWorking}), T0+5_000)
+	for _, s := range injectsOf(c.Step(voiceOpened(), T0+20_000)) {
+		if strings.Contains(s, "update the docs") {
+			t.Fatalf("said again: %q", s)
+		}
+	}
+}
+
 // Dropped before Pixie said it (the notice comes back unsaid): the outbox's replay says it in
 // the next conversation, once; it isn't also said again.
 func TestAQuestionThatBouncedIsSaidOnceInTheNext(t *testing.T) {

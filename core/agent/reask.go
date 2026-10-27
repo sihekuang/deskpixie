@@ -74,7 +74,9 @@ func (c *AgentController) reaskWaiting() bool {
 	case a.menu != 0:
 		return c.menuAsked() != nil
 	case a.session != "":
-		return true // cleared once its session moves on
+		// Still asking: answered in its terminal, it went to work and asks no more.
+		_, ok := c.asking[a.session]
+		return ok
 	case a.job != "":
 		j, ok := c.jobs.Get(a.job)
 		return ok && j.Status == JobQuestion
