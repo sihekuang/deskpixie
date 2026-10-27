@@ -160,6 +160,7 @@ const (
 	InChoose                               // Token, Option: a tap on a session menu's option in the updates bubble (#105)
 	InTypedAnswer                          // Token, Text: an answer typed in the bubble for a session menu (#268)
 	InChatAbout                            // Token: "Chat about this" on a session menu (#268)
+	InPicks                                // Token, Picks: the options picked of a session menu question that takes several (#364)
 	InSessionAnswerFailed                  // Name, Text: EfAnswerSession could not be typed (#105)
 	InSessionAnswered                      // Name, Text: EfAnswerSession was taken by the session; Text is its Line (#268)
 	InSubmit                               // Agent, Message: a Claude agent took a prompt (its UserPromptSubmit hook); Message is the prompt
@@ -218,8 +219,9 @@ type Input struct {
 	// Token and Allow (InDecide): the confirm word tapped on, and the answer.
 	Token string
 	Allow bool
-	// Option (InChoose): the menu option tapped on, from 1.
+	// Option (InChoose): the menu option tapped on, from 1. Picks (InPicks): those picked.
 	Option int
+	Picks  []int
 }
 
 // RestoredInput: keep says the coordinator was kept running over the quit: its open jobs stay
@@ -308,6 +310,12 @@ func TypedAnswerInput(token, text string) Input {
 
 // ChatAboutInput is "Chat about this" on the session menu with token (#268).
 func ChatAboutInput(token string) Input { return Input{Kind: InChatAbout, Token: token} }
+
+// PicksInput is the options (from 1) picked of the session menu question with this token that
+// takes several (#364).
+func PicksInput(token string, options []int) Input {
+	return Input{Kind: InPicks, Token: token, Picks: options}
+}
 
 // ChooseInput is a tap on option (from 1) of the session menu with this token (#105).
 func ChooseInput(token string, option int) Input {
@@ -427,7 +435,8 @@ type Effect struct {
 	Agent    string
 	Manual   bool
 	// Answer (EfAnswerSession): "yes", "no", a menu option's number, or (a menu that takes
-	// them, #268) "text:" and the typed answer, or "chat".
+	// them, #268) "text:" and the typed answer, or "chat", or "picks:" and the options' numbers
+	// (#364).
 	Answer string
 	// Update (EfNotify): the bubble line the notification is about, nil when none (#199): a
 	// click on the notification does what a click on the line does.
@@ -1000,6 +1009,8 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 		c.onTypedAnswer(in.Token, in.Text, now, &fx)
 	case InChatAbout:
 		c.onChatAbout(in.Token, now, &fx)
+	case InPicks:
+		c.onPicks(in.Token, in.Picks, now, &fx)
 	case InSessionAnswered:
 		c.deliver(NewLine(LineInfo, in.Text), now, &fx)
 	case InSessionAnswerFailed:

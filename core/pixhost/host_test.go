@@ -702,20 +702,21 @@ func TestStopAndSendSaysTypedOrWhyItStillWaits(t *testing.T) {
 	}
 }
 
-// #268: a menu's option descriptions, and that it takes a typed answer, reach the core.
+// #268: a menu's option descriptions, and that it takes a typed answer, reach the core; so
+// does a question of several picks (#364).
 func TestAQuestionCarriesItsDetailsAndTypedAnswer(t *testing.T) {
 	h, sock := newHost(t)
 	events := h.Subscribe()
 	p, r := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/a"})
 	wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "question", ID: "q1", Source: "menu", Text: "Which?",
-		Keys: []string{"A", "B"}, Details: []string{"first", ""}, Typed: true})
+		Keys: []string{"A", "B"}, Details: []string{"first", ""}, Typed: true, Multi: true})
 	for {
 		select {
 		case ev := <-events:
 			if ev.Kind != agent.PaneEventQuestion {
 				continue
 			}
-			if q := ev.Question; ev.Agent != r.Address || !q.Typed || strings.Join(q.Details, "|") != "first|" {
+			if q := ev.Question; ev.Agent != r.Address || !q.Typed || !q.Multi || strings.Join(q.Details, "|") != "first|" {
 				t.Fatalf("%+v", q)
 			}
 			return

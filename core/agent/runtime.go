@@ -674,9 +674,10 @@ func (h *AgentHandle) UpdatesDismissed(ids []uint64) { h.Input(UpdatesDismissedI
 func (h *AgentHandle) Decide(token string, allow bool) { h.Input(DecideInput(token, allow)) }
 
 // Choose is a tap on option (from 1) of a session menu in the updates bubble (#105).
-func (h *AgentHandle) Choose(token string, option int) { h.Input(ChooseInput(token, option)) }
-func (h *AgentHandle) TypedAnswer(token, text string)  { h.Input(TypedAnswerInput(token, text)) }
-func (h *AgentHandle) ChatAbout(token string)          { h.Input(ChatAboutInput(token)) }
+func (h *AgentHandle) Choose(token string, option int)  { h.Input(ChooseInput(token, option)) }
+func (h *AgentHandle) TypedAnswer(token, text string)   { h.Input(TypedAnswerInput(token, text)) }
+func (h *AgentHandle) ChatAbout(token string)           { h.Input(ChatAboutInput(token)) }
+func (h *AgentHandle) Pick(token string, options []int) { h.Input(PicksInput(token, options)) }
 
 // answerSession types your answer into a pix session's prompt (#105): taken, said is told; a
 // failure is told instead. Both are logged (#268).

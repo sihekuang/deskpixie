@@ -95,6 +95,8 @@ type Agent interface {
 	// session menu that takes one (#268).
 	TypedAnswer(token, text string)
 	ChatAbout(token string)
+	// Pick: the options (from 1) picked of a session menu question that takes several (#364).
+	Pick(token string, options []int)
 	// UpdatesSeen: the updates bubble showed these lines long enough to count as heard.
 	UpdatesSeen(ids []uint64)
 	// RepliesShown: the deck showed the cards holding these outbox lines (line ids, not card

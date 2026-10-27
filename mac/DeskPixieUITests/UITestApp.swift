@@ -129,7 +129,9 @@ final class UITestApp {
             // noted in $TURNS.esc and answered with what claude shows then (its interrupt line over
             // the input box, #322), which ends the turn for pix; an Esc that a "[" or "O" follows
             // within 0.1 s starts an escape sequence (a bracketed paste, a key), not an interrupt.
-            // It stops with its pix.
+            // Every other key typed into it is noted in $TURNS.keys (in hex), and draws the next
+            // screen waiting in $TURNS.screens when that one is for this key (`askMenu`); a
+            // .screen file put in $TURNS is drawn as it comes. It stops with its pix.
             let script = """
             #!/bin/sh
             stty -icanon -echo min 1 time 0 2>/dev/null
@@ -145,10 +147,22 @@ final class UITestApp {
                     touch "$TURNS.esc"
                     printf '  ⎿  Interrupted · What should Claude do instead?\\r\\n────\\r\\n❯ \\r\\n────\\r\\n'
                   fi
+                elif [ -n "$c" ]; then
+                  printf '%s ' "$c" >> "$TURNS.keys"
+                  for s in "$TURNS".screens/*; do
+                    [ -e "$s" ] || break
+                    case "$s" in *-"$c") cat "$s"; rm -f "$s";; esac
+                    break
+                  done
                 fi
               done
             ) <&0 & # a job in the background reads /dev/null unless told otherwise
             while kill -0 $PPID 2>/dev/null; do
+              for f in "$TURNS"/*.screen; do
+                [ -e "$f" ] || continue
+                cat "$f"
+                rm -f "$f"
+              done
               for f in "$TURNS"/*.json; do
                 [ -e "$f" ] || continue
                 ev=$(basename "$f")
@@ -243,12 +257,36 @@ final class UITestApp {
         FileManager.default.fileExists(atPath: root.appendingPathComponent("turns-\(description).esc").path)
     }
 
-    private func hook(_ description: String, _ payload: [String: String]) throws {
+    /// The session `description` asks Claude's menu tool with `input`, its menu drawn as
+    /// `screen`; then each key typed into it, as `after` lists them in turn, draws the screen
+    /// beside it, as claude's own menu does (#364).
+    func askMenu(_ description: String, input: [String: Any], screen: String, after: [(key: Character, screen: String)]) throws {
+        let turns = root.appendingPathComponent("turns-\(description)", isDirectory: true)
+        let screens = root.appendingPathComponent("turns-\(description).screens", isDirectory: true)
+        try FileManager.default.createDirectory(at: screens, withIntermediateDirectories: true)
+        for (i, a) in after.enumerated() {
+            let hex = a.key.asciiValue.map { String(format: "%02x", $0) } ?? ""
+            try Data(("\u{1b}[2J\u{1b}[H" + a.screen).utf8).write(to: screens.appendingPathComponent(String(format: "%02d-%@", i, hex)))
+        }
+        let tmp = turns.appendingPathComponent(".draw")
+        try Data(("\u{1b}[2J\u{1b}[H" + screen).utf8).write(to: tmp)
+        try FileManager.default.moveItem(at: tmp, to: turns.appendingPathComponent("menu-\(UUID().uuidString).screen"))
+        try hook(description, ["hook_event_name": "PreToolUse", "tool_name": "AskUserQuestion", "tool_input": input])
+    }
+
+    /// The keys typed into the session `description` since it started, but Esc.
+    func keysTyped(_ description: String) -> String {
+        let file = root.appendingPathComponent("turns-\(description).keys")
+        let hex = (try? String(contentsOf: file, encoding: .utf8)) ?? ""
+        return String(decoding: hex.split(separator: " ").compactMap { UInt8($0, radix: 16) }, as: UTF8.self)
+    }
+
+    private func hook(_ description: String, _ payload: [String: Any]) throws {
         let turns = root.appendingPathComponent("turns-\(description)", isDirectory: true)
         let data = try JSONSerialization.data(withJSONObject: payload)
         let tmp = turns.appendingPathComponent(".turn")
         try data.write(to: tmp)
-        let event = payload["hook_event_name"] ?? "Stop"
+        let event = payload["hook_event_name"] as? String ?? "Stop"
         try FileManager.default.moveItem(at: tmp, to: turns.appendingPathComponent("\(event)-\(UUID().uuidString).json"))
     }
 

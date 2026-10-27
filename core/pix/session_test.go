@@ -975,10 +975,18 @@ func TestAPromptNoLongerDrawnIsNotTypedInto(t *testing.T) {
 	}
 }
 
-func TestAMenuOfSeveralQuestionsIsOnlyAnnounced(t *testing.T) {
+// #364: a menu of several questions asks its first, saying which of how many; one Pixie can't
+// show (a secret) has the whole menu only announced.
+func TestAMenuOfSeveralQuestionsAsksTheFirst(t *testing.T) {
 	h := keyHarness(t, "claude")
 	one := map[string]any{"question": "Which?", "options": []any{map[string]any{"label": "A"}}}
 	h.s.Hook("PreToolUse", map[string]any{"tool_name": "AskUserQuestion", "tool_input": map[string]any{"questions": []any{one, one}}})
+	if q := askedQuestion(t, h); q.Text != "Which? (1 of 2)" || strings.Join(q.Keys, "|") != "A" || !q.Typed {
+		t.Fatalf("%+v", q)
+	}
+	h.s.clearQuestion("test")
+	secret := map[string]any{"question": "Token?", "isSecret": true, "options": []any{map[string]any{"label": "A"}}}
+	h.s.Hook("PreToolUse", map[string]any{"tool_name": "AskUserQuestion", "tool_input": map[string]any{"questions": []any{one, secret}}})
 	if q := askedQuestion(t, h); q.Text != "Which? (and 1 more)" || len(q.Keys) != 0 {
 		t.Fatalf("%+v", q)
 	}

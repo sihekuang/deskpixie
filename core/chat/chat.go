@@ -33,6 +33,7 @@ type Request struct {
 	Kind    string   `json:"kind"` // permission | question
 	Options []string `json:"options,omitempty"`
 	Typed   bool     `json:"typed,omitempty"`
+	Multi   bool     `json:"multi,omitempty"` // several picks, with agent.pick (#364)
 	Outcome string   `json:"outcome,omitempty"`
 	// Job is the job asking ("" = a session's question or a permission no job owns).
 	Job string `json:"job,omitempty"`

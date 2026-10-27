@@ -35,6 +35,11 @@ public struct EngineChatClient: ChatClient, Sendable {
         let option: Int
     }
 
+    private struct PickArgs: Encodable {
+        let token: String
+        let options: [Int]
+    }
+
     private struct TypedArgs: Encodable {
         let token: String
         let text: String
@@ -70,6 +75,10 @@ public struct EngineChatClient: ChatClient, Sendable {
 
     public func choose(token: String, option: Int) throws {
         _ = try engine.call("agent.choose", ChooseArgs(token: token, option: option))
+    }
+
+    public func pick(token: String, options: [Int]) throws {
+        _ = try engine.call("agent.pick", PickArgs(token: token, options: options))
     }
 
     public func typedAnswer(token: String, text: String) throws {

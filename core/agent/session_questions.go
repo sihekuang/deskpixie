@@ -95,7 +95,7 @@ func (c *AgentController) onSessionQuestion(session string, q SessionQuestion, n
 	pending.Options = q.Options
 	if q.Kind == "menu" {
 		pending.Menu = true
-		pending.Typed = q.Typed
+		pending.Typed, pending.Multi = q.Typed, q.Multi
 		for _, d := range q.Details {
 			pending.Details = append(pending.Details, mask(d))
 		}
@@ -163,6 +163,23 @@ func (c *AgentController) onChoose(token string, option int, now Millis, fx *[]E
 	c.answerSession(p, strconv.Itoa(option), now, fx)
 }
 
+// onPicks: the options picked of a session menu question that takes several (#364).
+func (c *AgentController) onPicks(token string, options []int, now Millis, fx *[]Effect) {
+	p, ok := c.confirms.Picks(token, options)
+	if !ok {
+		c.tapNotWaiting(token, now, fx)
+		return
+	}
+	c.noteTap(token, now)
+	sorted := slices.Clone(options)
+	slices.Sort(sorted)
+	picks := make([]string, len(sorted))
+	for i, o := range sorted {
+		picks[i] = strconv.Itoa(o)
+	}
+	c.answerSession(p, "picks:"+strings.Join(picks, ","), now, fx)
+}
+
 // onTypedAnswer: an answer typed in the bubble for a session menu that takes one (#268).
 func (c *AgentController) onTypedAnswer(token, text string, now Millis, fx *[]Effect) {
 	text = strings.TrimSpace(text)
@@ -196,6 +213,10 @@ func (c *AgentController) onChatAbout(token string, now Millis, fx *[]Effect) {
 func (c *AgentController) answerMenu(p Pending, text string, now Millis, fx *[]Effect) {
 	text = strings.TrimSpace(text)
 	answer, said := "", text
+	if p.Multi {
+		*fx = append(*fx, Effect{Kind: EfAnswerResult, Err: "That one takes several picks: pick them in the bubble."})
+		return
+	}
 	if n, ok := MenuChoice(p.Options, text); ok {
 		answer, said = strconv.Itoa(n), p.Options[n-1]
 	} else if p.Typed && text != "" {
@@ -414,6 +435,15 @@ func (c *AgentController) answerSession(p Pending, answer string, now Millis, fx
 	if n, err := strconv.Atoi(answer); err == nil && n >= 1 && n <= len(p.Options) {
 		said = "picked " + p.Options[n-1]
 	}
+	if list, ok := strings.CutPrefix(answer, "picks:"); ok {
+		var names []string
+		for _, f := range strings.Split(list, ",") {
+			if n, err := strconv.Atoi(f); err == nil && n >= 1 && n <= len(p.Options) {
+				names = append(names, p.Options[n-1])
+			}
+		}
+		said = "picked " + andList(names)
+	}
 	if typed, ok := strings.CutPrefix(answer, "text:"); ok {
 		said = fmt.Sprintf("answered %q", typed)
 	} else if answer == "chat" {
@@ -421,6 +451,14 @@ func (c *AgentController) answerSession(p Pending, answer string, now Millis, fx
 	}
 	*fx = append(*fx, Effect{Kind: EfAnswerSession, Name: p.Session, Text: p.Question, Answer: answer,
 		Line: fmt.Sprintf("%s: %s", p.Label, said)})
+}
+
+// andList is "A", "A and B", "A, B and C".
+func andList(items []string) string {
+	if len(items) < 2 {
+		return strings.Join(items, "")
+	}
+	return strings.Join(items[:len(items)-1], ", ") + " and " + items[len(items)-1]
 }
 
 // orList is "A", "A or B", "A, B or C".

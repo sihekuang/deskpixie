@@ -593,6 +593,29 @@ final class UpdatesBubbleModelTests: XCTestCase {
         XCTAssertFalse(keys.offersTyped, "a menu answered by keys takes no typed answer")
     }
 
+    /// #364: a question of several picks offers boxes to tick, and no typed answer.
+    func testAQuestionOfSeveralPicksOffersBoxes() throws {
+        let line = try JSONDecoder().decode(UpdateLine.self, from: Data(
+            #"{"id":9,"text":"proj is asking: Which toppings?","kind":"question","at":9,"token":"hawk","options":["Cheese","Ham"],"multi":true}"#.utf8))
+        XCTAssertTrue(line.offersPicks)
+        XCTAssertTrue(line.offersOptions)
+        XCTAssertFalse(line.offersTyped)
+        XCTAssertFalse(typedMenu().offersPicks)
+    }
+
+    func testPicksTickAndUntick() {
+        var p = MenuPicks()
+        XCTAssertFalse(p.canSend, "nothing ticked")
+        p.toggle(3)
+        p.toggle(1)
+        XCTAssertTrue(p.isPicked(3))
+        XCTAssertEqual(p.options, [1, 3], "in order")
+        p.toggle(3)
+        XCTAssertEqual(p.options, [1])
+        p.toggle(1)
+        XCTAssertFalse(p.canSend)
+    }
+
     /// While you type the answer the bubble stays open, even when the pointer leaves it.
     func testTypingKeepsTheBubbleOpen() {
         var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)

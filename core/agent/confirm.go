@@ -49,8 +49,10 @@ type Pending struct {
 	Menu     bool
 	NoVoice  bool
 	// Details and Typed: a menu's option descriptions, and that it takes a typed answer (#268).
+	// Multi: you pick several of its options, with Picks (#364).
 	Details []string
 	Typed   bool
+	Multi   bool
 	// Asked: the prompt as the session asked it (askedAs), so one asked again is told from
 	// another under the same id (a new pix numbers its own from q1, #347).
 	Asked string
@@ -130,8 +132,23 @@ func (c *Confirmations) TakeSession(session, id string) bool {
 // Choose takes the menu with this token if option (from 1) is one of its choices.
 func (c *Confirmations) Choose(token string, option int) (Pending, bool) {
 	at := slices.IndexFunc(c.pending, func(p Pending) bool { return p.Token == token })
-	if at < 0 || option < 1 || option > len(c.pending[at].Options) {
+	if at < 0 || c.pending[at].Multi || option < 1 || option > len(c.pending[at].Options) {
 		return Pending{}, false
+	}
+	return c.take(token)
+}
+
+// Picks takes the menu question with token that takes several picks (#364), answered with
+// options (from 1, each once, at least one); false if none waits or they aren't its options.
+func (c *Confirmations) Picks(token string, options []int) (Pending, bool) {
+	at := slices.IndexFunc(c.pending, func(p Pending) bool { return p.Token == token })
+	if at < 0 || !c.pending[at].Multi || len(options) == 0 {
+		return Pending{}, false
+	}
+	for i, o := range options {
+		if o < 1 || o > len(c.pending[at].Options) || slices.Contains(options[:i], o) {
+			return Pending{}, false
+		}
 	}
 	return c.take(token)
 }

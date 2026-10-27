@@ -3,6 +3,8 @@ package pix
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -333,8 +335,13 @@ func TestAnEmptyOwnAnswerIsNone(t *testing.T) {
 // its terminal.
 func TestAMenuPixieCantShowIsOnlyAnnounced(t *testing.T) {
 	one := map[string]any{"question": "Which?", "options": []any{map[string]any{"label": "A"}}}
+	var nine []any
+	for i := range 9 {
+		nine = append(nine, map[string]any{"label": strconv.Itoa(i + 1)})
+	}
+	many := map[string]any{"question": "Which number?", "options": nine}
 	h := pipeHarness(t, "claude")
-	h.s.Hook("PreToolUse", map[string]any{"tool_name": "AskUserQuestion", "tool_input": map[string]any{"questions": []any{one, one}}})
+	h.s.Hook("PreToolUse", map[string]any{"tool_name": "AskUserQuestion", "tool_input": map[string]any{"questions": []any{one, many}}})
 	q := askedQuestion(t, h)
 	if len(q.Keys) != 0 || q.Typed {
 		t.Fatalf("%+v", q)
@@ -449,5 +456,235 @@ func TestAPermissionsDontAskAgainIsItsDigit(t *testing.T) {
 	}
 	if got := h.s.typedForTest(); got != "2" {
 		t.Fatalf("typed %q", got)
+	}
+}
+
+// #364: a menu of several questions, and a question of several picks, as Claude Code 2.1.311
+// and Codex 0.164 draw them: a tab each, then Claude's review.
+
+func claudeTwo() map[string]any {
+	return map[string]any{"tool_name": "AskUserQuestion", "tool_input": map[string]any{"questions": []any{
+		map[string]any{"question": "Which color?", "header": "Color", "options": []any{map[string]any{"label": "Red"}, map[string]any{"label": "Green"}}},
+		map[string]any{"question": "Which size?", "header": "Size", "options": []any{map[string]any{"label": "Small"}, map[string]any{"label": "Large"}}}}}}
+}
+
+func claudeToppings() map[string]any {
+	return map[string]any{"tool_name": "AskUserQuestion", "tool_input": map[string]any{"questions": []any{
+		map[string]any{"question": "Which toppings?", "header": "Pick", "multiSelect": true, "options": []any{
+			map[string]any{"label": "Cheese"}, map[string]any{"label": "Ham"}, map[string]any{"label": "Olives"}}}}}}
+}
+
+// claudeTabPage draws a tab of Claude's menu: its question, options (with their boxes when it
+// takes several picks) and the cursor on option at.
+func claudeTabPage(tabs, question string, options []string, ticked map[int]bool, multi bool, at int) string {
+	// Your prompt stays above it, naming every question (#364).
+	lines := []string{"❯ Ask me 'Which color?', 'Which size?' and 'Which toppings?'", "←  " + tabs + "  ✔ Submit  →", question}
+	for i, o := range options {
+		cursor := "  "
+		if i+1 == at {
+			cursor = "❯ "
+		}
+		if multi {
+			box := "[ ]"
+			if ticked[i+1] {
+				box = "[✔]"
+			}
+			o = box + " " + o
+		}
+		lines = append(lines, fmt.Sprintf("%s%d. %s", cursor, i+1, o))
+	}
+	n := len(options)
+	lines = append(lines, fmt.Sprintf("  %d. Type something.", n+1), "────────────────────", fmt.Sprintf("  %d. Chat about this", n+2),
+		"Enter to select · Tab/Arrow keys to navigate · Esc to cancel")
+	return strings.Join(lines, "\r\n")
+}
+
+func claudeReviewPage(answers ...string) string {
+	return "←  ☒ Color  ✔ Submit  →\r\nReview your answers\r\n" + strings.Join(answers, "\r\n") +
+		"\r\nReady to submit your answers?\r\n❯ 1. Submit answers\r\n  2. Cancel"
+}
+
+// answerSeen is answerAsync, handing back too the events pix sent before its reply: a menu's
+// next question comes then.
+func answerSeen(h *harness, id, choice string) chan []wire.Msg {
+	got := make(chan []wire.Msg, 1)
+	go func() {
+		wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "a-" + id + choice, Command: "answer", Text: id, Source: choice})
+		var evs []wire.Msg
+		for {
+			m := waitEventCh(h.d.events, func(wire.Msg) bool { return true })
+			evs = append(evs, m)
+			if m.ID == "a-"+id+choice || m.Err == "no reply" {
+				got <- evs
+				return
+			}
+		}
+	}()
+	return got
+}
+
+// answered: the reply to an answer took it, its question went, and the menu's next question
+// came (nil: none).
+func answered(t *testing.T, evs []wire.Msg, id string) *wire.Msg {
+	t.Helper()
+	if r := evs[len(evs)-1]; r.Err != "" {
+		t.Fatalf("answer %s: %q (%+v)", id, r.Err, evs)
+	}
+	var next *wire.Msg
+	gone := false
+	for _, m := range evs {
+		if m.Event == "question-gone" && m.ID == id {
+			gone = true
+		}
+		if m.Event == "question" {
+			next = &m
+		}
+	}
+	if !gone {
+		t.Fatalf("%s not gone: %+v", id, evs)
+	}
+	return next
+}
+
+// Each question is answered on its tab, as Claude goes on to the next; then its review, whose
+// Submit answers sends them, shows what each was answered.
+func TestAMenuOfSeveralQuestionsIsAnsweredInTurn(t *testing.T) {
+	h := pipeHarness(t, "claude")
+	h.s.Hook("PreToolUse", claudeTwo())
+	q := askedQuestion(t, h)
+	if q.Text != "Which color? (1 of 2)" || strings.Join(q.Keys, "|") != "Red|Green" || !q.Typed || q.Multi {
+		t.Fatalf("%+v", q)
+	}
+	draw(h, claudeTabPage("☐ Color  ☐ Size", "Which color?", []string{"Red", "Green"}, nil, false, 1))
+	evs := answerSeen(h, q.ID, "2")
+	waitTyped(t, h, "2")
+	size := claudeTabPage("☒ Color  ☐ Size", "Which size?", []string{"Small", "Large"}, nil, false, 1)
+	draw(h, size)
+	q2 := answered(t, <-evs, q.ID)
+	if q2 == nil || q2.Text != "Which size? (2 of 2)" || strings.Join(q2.Keys, "|") != "Small|Large" || !q2.Typed {
+		t.Fatalf("%+v", q2)
+	}
+	evs = answerSeen(h, q2.ID, "text:Medium")
+	waitTyped(t, h, "23")
+	draw(h, strings.Replace(size, "  3. Type something.", "❯ 3. Type something.", 1))
+	waitTyped(t, h, "23Medium")
+	draw(h, strings.Replace(size, "  3. Type something.", "❯ 3. Medium", 1))
+	waitTyped(t, h, "23Medium\r")
+	draw(h, claudeReviewPage(" ● Which color?", "   → Green", " ● Which size?", "   → Medium"))
+	q3 := answered(t, <-evs, q2.ID)
+	if q3 == nil || q3.Text != "Ready to submit your answers? Which color? → Green · Which size? → Medium" ||
+		strings.Join(q3.Keys, "|") != "Submit answers|Cancel" || q3.Typed {
+		t.Fatalf("%+v", q3)
+	}
+	if err := answer(t, h, q3.ID, "text:hi"); !strings.Contains(err, "isn't one of its answers") {
+		t.Fatalf("%q", err)
+	}
+	evs = answerSeen(h, q3.ID, "1")
+	waitTyped(t, h, "23Medium\r1")
+	draw(h, "⏺ User answered Claude's questions:")
+	if next := answered(t, <-evs, q3.ID); next != nil {
+		t.Fatalf("after the review: %+v", next)
+	}
+}
+
+// A question of several picks ticks each with its digit, then Tab goes on; a single digit isn't
+// its answer. Cancel on the review ends the menu.
+func TestAQuestionOfSeveralPicksTicksEach(t *testing.T) {
+	h := pipeHarness(t, "claude")
+	h.s.Hook("PreToolUse", claudeToppings())
+	q := askedQuestion(t, h)
+	if q.Text != "Which toppings?" || !q.Multi || q.Typed || strings.Join(q.Keys, "|") != "Cheese|Ham|Olives" {
+		t.Fatalf("%+v", q)
+	}
+	opts := []string{"Cheese", "Ham", "Olives"}
+	draw(h, claudeTabPage("☐ Pick", "Which toppings?", opts, nil, true, 1))
+	for _, bad := range []string{"2", "text:Ham", "chat", "picks:", "picks:4", "picks:1,1"} {
+		if err := answer(t, h, q.ID, bad); !strings.Contains(err, "isn't one of its answers") {
+			t.Fatalf("%s: %q", bad, err)
+		}
+	}
+	evs := answerSeen(h, q.ID, "picks:3,1")
+	waitTyped(t, h, "1")
+	// A tick marks its tab answered at once.
+	draw(h, claudeTabPage("☒ Pick", "Which toppings?", opts, map[int]bool{1: true}, true, 1))
+	waitTyped(t, h, "13")
+	draw(h, claudeTabPage("☒ Pick", "Which toppings?", opts, map[int]bool{1: true, 3: true}, true, 1))
+	waitTyped(t, h, "13\t")
+	draw(h, claudeReviewPage(" ● Which toppings?", "   → Cheese, Olives"))
+	q2 := answered(t, <-evs, q.ID)
+	if q2 == nil || q2.Text != "Ready to submit your answers? Which toppings? → Cheese, Olives" {
+		t.Fatalf("%+v", q2)
+	}
+	evs = answerSeen(h, q2.ID, "2")
+	waitTyped(t, h, "13\t2")
+	draw(h, "⏺ User declined to answer questions")
+	if next := answered(t, <-evs, q2.ID); next != nil {
+		t.Fatalf("after Cancel: %+v", next)
+	}
+}
+
+// A pick that doesn't tick leaves the question halfway: finished in its terminal.
+func TestAPickThatDoesntTickIsFinishedInTheTerminal(t *testing.T) {
+	h := pipeHarness(t, "claude")
+	h.s.Hook("PreToolUse", claudeToppings())
+	q := askedQuestion(t, h)
+	draw(h, claudeTabPage("☐ Pick", "Which toppings?", []string{"Cheese", "Ham", "Olives"}, nil, true, 1))
+	if err := answer(t, h, q.ID, "picks:1,2"); !strings.Contains(err, "finish it in its terminal") {
+		t.Fatalf("%q", err)
+	}
+	if got := h.s.typedForTest(); got != "1" {
+		t.Fatalf("typed %q", got)
+	}
+}
+
+// Talking a question over ends the menu: no question after it is asked.
+func TestChatOnAQuestionEndsTheMenu(t *testing.T) {
+	h := pipeHarness(t, "claude")
+	h.s.Hook("PreToolUse", claudeTwo())
+	q := askedQuestion(t, h)
+	draw(h, claudeTabPage("☐ Color  ☐ Size", "Which color?", []string{"Red", "Green"}, nil, false, 1))
+	evs := answerSeen(h, q.ID, "chat")
+	waitTyped(t, h, "4")
+	draw(h, "⏺ User wants to chat about this")
+	if next := answered(t, <-evs, q.ID); next != nil {
+		t.Fatalf("%+v", next)
+	}
+}
+
+// Codex asks its questions in turn too: answering the last sends them all, with no review.
+// One of several picks it doesn't take: the menu is only announced.
+func TestACodexMenuOfSeveralQuestionsIsAnsweredInTurn(t *testing.T) {
+	h := pipeHarness(t, "codex")
+	two := map[string]any{"tool_name": "request_user_input", "tool_input": map[string]any{"questions": []any{
+		map[string]any{"id": "color", "question": "Which color?", "options": []any{map[string]any{"label": "Red"}, map[string]any{"label": "Green"}}},
+		map[string]any{"id": "size", "question": "Which size?", "options": []any{map[string]any{"label": "Small"}, map[string]any{"label": "Large"}}}}}}
+	h.s.Hook("PreToolUse", two)
+	q := askedQuestion(t, h)
+	if q.Text != "Which color? (1 of 2)" || !q.Typed {
+		t.Fatalf("%+v", q)
+	}
+	page := func(n int, question, a, b, foot string) string {
+		return fmt.Sprintf("› Ask me 'Which color?' and 'Which size?'\r\n  Question %d/2\r\n  %s\r\n  › 1. %s\r\n    2. %s\r\n    3. None of the above  Optionally, add details in notes (tab)\r\n"+
+			"  tab to add notes | enter to submit %s | ←/→ to navigate questions | esc to interrupt", n, question, a, b, foot)
+	}
+	draw(h, page(1, "Which color?", "Red", "Green", "answer"))
+	evs := answerSeen(h, q.ID, "2")
+	waitTyped(t, h, "2")
+	draw(h, page(2, "Which size?", "Small", "Large", "all"))
+	q2 := answered(t, <-evs, q.ID)
+	if q2 == nil || q2.Text != "Which size? (2 of 2)" {
+		t.Fatalf("%+v", q2)
+	}
+	evs = answerSeen(h, q2.ID, "1")
+	waitTyped(t, h, "21")
+	draw(h, "  • Which color?\r\n    answer: Green\r\n  • Which size?\r\n    answer: Small")
+	if next := answered(t, <-evs, q2.ID); next != nil {
+		t.Fatalf("no review in Codex: %+v", next)
+	}
+
+	h.s.Hook("PreToolUse", map[string]any{"tool_name": "request_user_input", "tool_input": map[string]any{"questions": []any{
+		map[string]any{"question": "Which ones?", "multiSelect": true, "options": []any{map[string]any{"label": "A"}, map[string]any{"label": "B"}}}}}})
+	if q := askedQuestion(t, h); len(q.Keys) != 0 || q.Multi {
+		t.Fatalf("%+v", q)
 	}
 }

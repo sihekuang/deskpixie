@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -132,6 +133,11 @@ type question struct {
 	told *wire.Msg
 	// why: a menu Pixie shows no buttons for, why (for the log, #363).
 	why string
+	// part: the menu's question it is, next the ones after it (#364), and said what the ones
+	// before it were answered, for its review.
+	part menuPart
+	next []menuPart
+	said []string
 }
 
 // toolUse is the tool call a hook's payload is about: its name and input, as JSON (map keys
@@ -158,16 +164,115 @@ func (q *question) endsWith(p map[string]any) bool {
 // terminal (#359): with your own words, or saying you want to talk it over first (chat; nil:
 // it can't be). An option is its digit, which picks it in either agent's menu. Another
 // agent's is another entry.
+//
+// A menu of several questions asks them in turn (#364), each answered as its agent goes on to
+// the next. picks: the keys that pick several of a question's options (nil: it takes no such
+// question, answered in the terminal); review: the agent ends a menu of tabs (several
+// questions, or one of several picks) with a review whose first option sends the answers.
+// last: what the last of several questions shows in place of marker ("" marker); tab: what the
+// screen shows of question k (from 0) of several, by their headers, and only while it waits:
+// its text may show elsewhere too (your prompt), and the marker stays for the next one; ticked:
+// what it shows in its place once you ticked one of its several picks.
 type menuTool struct {
 	name   string
 	marker string
 	own    func(n int, text string) []step
 	chat   func(n int) []step
+	picks  func(labels []string, picks []int) []step
+	review bool
+	last   string
+	tab    func(headers []string, k int) string
+	ticked func(headers []string, k int) string
 }
 
 var menuTools = map[string]menuTool{
-	"claude": {name: "AskUserQuestion", marker: claudeMenu, own: claudeOwn, chat: claudeChat},
-	"codex":  {name: "request_user_input", marker: codexMenu, own: codexOwn, chat: codexChat},
+	"claude": {name: "AskUserQuestion", marker: claudeMenu, own: claudeOwn, chat: claudeChat, picks: claudePicks, review: true, tab: claudeTab, ticked: claudeTicked},
+	"codex": {name: "request_user_input", marker: codexMenu, own: codexOwn, chat: codexChat, last: "enter to submit all",
+		tab: func(headers []string, k int) string { return fmt.Sprintf("Question %d/%d", k+1, len(headers)) }},
+}
+
+// menuPart is one question of a menu as Pixie asks it: what it asks, as its menu shows it, and
+// title as Pixie shows it (which one of how many); its options and their descriptions; multi:
+// you pick several. marker and detail: what its page shows in place of its tool's marker and
+// its text ("" those); ticked: what it shows in place of detail once one of its boxes is ticked.
+type menuPart struct {
+	text, title     string
+	labels, details []string
+	multi, review   bool
+	marker, detail  string
+	ticked          string
+}
+
+// claudeTab: Claude Code 2.1.311's tabs, "←  ☒ Color  ☐ Size  ✔ Submit  →", up to question k's
+// while it waits: those before it answered (☒), its own not yet (☐). "" when one has no header.
+func claudeTab(headers []string, k int) string {
+	if slices.Contains(headers[:k+1], "") {
+		return ""
+	}
+	tab := "←"
+	for _, h := range headers[:k] {
+		tab += "☒" + h
+	}
+	return tab + "☐" + headers[k]
+}
+
+// claudeTicked: Claude marks a tab of several picks answered (☒) as soon as one is ticked.
+func claudeTicked(headers []string, k int) string {
+	tab := claudeTab(headers, k)
+	if tab == "" {
+		return ""
+	}
+	return strings.TrimSuffix(tab, "☐"+headers[k]) + "☒" + headers[k]
+}
+
+// claudeReview is Claude Code 2.1.311's page after a menu's tabs: "Submit answers" sends them,
+// "Cancel" drops the menu.
+var claudeReview = menuPart{text: "Ready to submit your answers?", title: "Ready to submit your answers?",
+	labels: []string{"Submit answers", "Cancel"}, details: []string{"", ""}, review: true, marker: "Review your answers",
+	detail: noSpace("Ready to submit your answers?")}
+
+// answer is choice as the part's review shows it: the option, the options, or your words.
+func (p menuPart) answer(choice string) string {
+	if typed, ok := strings.CutPrefix(choice, "text:"); ok {
+		return strings.Join(strings.Fields(typed), " ")
+	}
+	if picks, ok := strings.CutPrefix(choice, "picks:"); ok {
+		ns, _ := pickList(picks, len(p.labels))
+		names := make([]string, len(ns))
+		for i, n := range ns {
+			names[i] = p.labels[n-1]
+		}
+		return strings.Join(names, ", ")
+	}
+	if n, err := strconv.Atoi(choice); err == nil && n >= 1 && n <= len(p.labels) {
+		return p.labels[n-1]
+	}
+	return choice
+}
+
+// pickList reads "1,3" as the options picked, of n: each once, in order, at least one.
+func pickList(s string, n int) ([]int, bool) {
+	var ns []int
+	for _, f := range strings.Split(s, ",") {
+		k, err := strconv.Atoi(strings.TrimSpace(f))
+		if err != nil || k < 1 || k > n || slices.Contains(ns, k) {
+			return nil, false
+		}
+		ns = append(ns, k)
+	}
+	slices.Sort(ns)
+	return ns, len(ns) > 0
+}
+
+// claudePicks: in Claude's question of several picks a digit ticks its option, and Tab goes on
+// to the next question (or the review).
+func claudePicks(labels []string, picks []int) []step {
+	var steps []step
+	for _, n := range picks {
+		digit := strconv.Itoa(n)
+		steps = append(steps, step{[]byte(digit), noSpace(digit+". [✔] ") + drawn(labels[n-1])})
+	}
+	return append(steps, step{[]byte("\t"), ""})
 }
 
 // step is keys typed into a question, and what the screen (without spaces) shows once the
@@ -342,6 +447,8 @@ func (s *Session) logTold(q *question, ev wire.Msg) {
 		how = "no buttons (" + q.why + "): answered in its terminal"
 	case len(ev.Keys) == 0:
 		how = "no buttons: answered in its terminal"
+	case ev.Multi:
+		how += ", several picks"
 	case ev.Typed:
 		how += ", or your own words"
 	}
@@ -414,6 +521,10 @@ func (s *Session) answerOnce(id, choice string) wire.Msg {
 		close(s.landing.done)
 	}
 	l := &landing{marker: q.marker, detail: q.detail, done: make(chan struct{})}
+	next := q.nextPart(choice)
+	if next != nil && next.part.detail != "" {
+		l.nextMarker, l.nextDetail = next.part.shownAs(next.marker)
+	}
 	s.landing = l
 	keys := s.yourKeys
 	s.mu.Unlock()
@@ -457,6 +568,9 @@ func (s *Session) answerOnce(id, choice string) wire.Msg {
 		return still(len(steps))
 	}
 	s.client.Send(wire.Msg{Kind: wire.KindEvent, Event: "question-gone", ID: id})
+	if next != nil {
+		s.askPart(next) // its agent shows it now (#364)
+	}
 	return wire.Msg{}
 }
 
@@ -464,7 +578,7 @@ func (s *Session) answerOnce(id, choice string) wire.Msg {
 func (s *Session) untouched(q *question, keys int) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.yourKeys == keys && shows(s.screen, q.marker, q.detail)
+	return s.yourKeys == keys && (shows(s.screen, q.marker, q.detail) || q.part.ticked != "" && shows(s.screen, q.marker, q.part.ticked))
 }
 
 // leftHalfway: an answer typed in steps stopped part-way, so q's menu is no longer as Pixie
@@ -510,10 +624,20 @@ func (s *Session) screenShows(text string, d time.Duration) bool {
 // answerWait: how long an answer typed from Pixie has to take its prompt off the screen.
 var answerWait = 3 * time.Second
 
-// landing is an answer typed from Pixie: done closes when its prompt is off the screen.
+// landing is an answer typed from Pixie: done closes when its prompt is off the screen, or for
+// a menu's question with one after it whose page tells it, when that page shows (#364): a tab
+// may look answered while you still tick its boxes, and its mark stays on the next.
 type landing struct {
-	marker, detail string
-	done           chan struct{}
+	marker, detail         string
+	nextMarker, nextDetail string
+	done                   chan struct{}
+}
+
+func (l *landing) landed(screen string) bool {
+	if l.nextDetail != "" {
+		return shows(screen, l.nextMarker, l.nextDetail)
+	}
+	return !shows(screen, l.marker, l.detail)
 }
 
 // shows: screen (without spaces) has the prompt with marker and detail on it. The detail tells
@@ -531,7 +655,7 @@ func (s *Session) noteScreen(vt *screen) {
 	s.mu.Lock()
 	s.screen, s.prompt = text, prompt
 	s.sawQuestion(s.q, text)
-	if l := s.landing; l != nil && !shows(text, l.marker, l.detail) {
+	if l := s.landing; l != nil && l.landed(text) {
 		s.landing = nil
 		close(l.done)
 	}
@@ -577,6 +701,18 @@ func (q *question) keys(tool, choice string) ([]byte, bool) {
 func (q *question) steps(tool, choice string) ([]step, bool) {
 	if q.kind == "menu" && q.options > 0 {
 		t := menuTools[tool]
+		if q.part.multi {
+			// Several picks, "picks:1,3" (#364): a single digit only ticks one.
+			list, ok := strings.CutPrefix(choice, "picks:")
+			picks, ok2 := pickList(list, q.options)
+			if !ok || !ok2 || t.picks == nil {
+				return nil, false
+			}
+			return t.picks(q.part.labels, picks), true
+		}
+		if q.part.review && !digits(choice) {
+			return nil, false
+		}
 		if typed, ok := strings.CutPrefix(choice, "text:"); ok {
 			typed = strings.Join(strings.Fields(typed), " ")
 			return t.own(q.options, typed), typed != ""
@@ -588,6 +724,48 @@ func (q *question) steps(tool, choice string) ([]step, bool) {
 	}
 	keys, ok := q.keys(tool, choice)
 	return []step{{keys: keys}}, ok
+}
+
+// digits: choice is an option's number, not your words or "chat".
+func digits(choice string) bool {
+	_, err := strconv.Atoi(choice)
+	return err == nil
+}
+
+// askPart asks q, the menu question q.part (#364): what DeskPixie shows for it, and, on its
+// review, what the questions before it were answered.
+func (s *Session) askPart(q *question) {
+	p := q.part
+	q.options = len(p.labels)
+	q.marker, q.detail = p.shownAs(q.marker)
+	title := p.title
+	if p.review && len(q.said) > 0 {
+		title += " " + strings.Join(q.said, " · ")
+	}
+	s.ask(q, wire.Msg{Source: "menu", Text: title, Keys: p.labels, Details: p.details,
+		Typed: len(p.labels) > 0 && !p.multi && !p.review, Multi: p.multi})
+}
+
+// shownAs: what the screen shows while part p waits, its menu's marker being marker.
+func (p menuPart) shownAs(marker string) (string, string) {
+	detail := firstRunes(p.text, 24)
+	if p.detail != "" {
+		detail = p.detail
+	}
+	if p.marker != "" {
+		marker = p.marker
+	}
+	return marker, detail
+}
+
+// nextPart: the menu's next question once q was answered with choice, as its agent went on to
+// it (nil: none, or the answer ended the menu: talking it over first).
+func (q *question) nextPart(choice string) *question {
+	if q.kind != "menu" || len(q.next) == 0 || choice == "chat" {
+		return nil
+	}
+	said := append(slices.Clone(q.said), q.part.text+" → "+q.part.answer(choice))
+	return &question{kind: "menu", marker: q.marker, agent: q.agent, tool: q.tool, part: q.next[0], next: q.next[1:], said: said}
 }
 
 // questionWatch notes when the waiting prompt shows on screen: its marker and its detail, both
@@ -630,45 +808,81 @@ func (w *questionWatch) watch(s *Session, out string, vt *screen) {
 	}
 }
 
-// menuOf is the question of an AskUserQuestion input and its options when a digit answers it:
-// one question, one pick, at most 8 options (Claude adds "Type something" after them). Else
-// no options, and why (for the log, #363): you answer it in the terminal.
-func menuOf(input any) (text string, labels, details []string, why string) {
+// menuParts are the questions of a menu tool's input t (AskUserQuestion, request_user_input),
+// asked in turn with their options when digits answer them (#364): one pick, or several where
+// the agent takes them, of at most 8 options (Claude adds "Type something" after them), then
+// the agent's review. Else one, the first question, without options, and why (for the log,
+// #363): you answer it in the terminal.
+func menuParts(t menuTool, input any) ([]menuPart, string) {
 	m, _ := input.(map[string]any)
 	qs, _ := m["questions"].([]any)
 	if len(qs) == 0 {
-		return "", nil, nil, "no question"
+		return nil, "no question"
 	}
-	first, _ := qs[0].(map[string]any)
-	text, _ = first["question"].(string)
-	if len(qs) > 1 {
-		return fmt.Sprintf("%s (and %d more)", text, len(qs)-1), nil, nil, fmt.Sprintf("%d questions at once", len(qs))
-	}
-	multi, _ := first["multiSelect"].(bool)
-	secret, _ := first["isSecret"].(bool) // Codex: typed in its terminal only
-	switch {
-	case multi:
-		return text, nil, nil, "several picks"
-	case secret:
-		return text, nil, nil, "a secret"
-	}
-	opts, _ := first["options"].([]any)
-	for _, o := range opts {
-		om, _ := o.(map[string]any)
-		label, _ := om["label"].(string)
-		if label == "" {
-			return text, nil, nil, "an option without a label"
+	var parts []menuPart
+	var headers []string
+	tabs := len(qs) > 1
+	for i, x := range qs {
+		qm, _ := x.(map[string]any)
+		text, _ := qm["question"].(string)
+		header, _ := qm["header"].(string)
+		headers = append(headers, header)
+		multi, _ := qm["multiSelect"].(bool)
+		secret, _ := qm["isSecret"].(bool) // Codex: typed in its terminal only
+		p := menuPart{text: text, title: text, multi: multi}
+		if len(qs) > 1 {
+			p.title = fmt.Sprintf("%s (%d of %d)", text, i+1, len(qs))
 		}
-		detail, _ := om["description"].(string)
-		labels, details = append(labels, label), append(details, detail)
+		why := ""
+		switch {
+		case multi && t.picks == nil:
+			why = "several picks"
+		case secret:
+			why = "a secret"
+		}
+		opts, _ := qm["options"].([]any)
+		for _, o := range opts {
+			om, _ := o.(map[string]any)
+			label, _ := om["label"].(string)
+			if label == "" && why == "" {
+				why = "an option without a label"
+			}
+			detail, _ := om["description"].(string)
+			p.labels, p.details = append(p.labels, label), append(p.details, detail)
+		}
+		switch {
+		case why != "":
+		case len(p.labels) > 8:
+			why = fmt.Sprintf("%d options", len(p.labels))
+		case len(p.labels) == 0:
+			why = "no options"
+		}
+		if why != "" {
+			first, _ := qs[0].(map[string]any)
+			text, _ := first["question"].(string)
+			if len(qs) > 1 {
+				text = fmt.Sprintf("%s (and %d more)", text, len(qs)-1)
+			}
+			return []menuPart{{text: text, title: text}}, why
+		}
+		tabs = tabs || multi
+		parts = append(parts, p)
 	}
-	switch {
-	case len(labels) > 8:
-		return text, nil, nil, fmt.Sprintf("%d options", len(labels))
-	case len(labels) == 0:
-		return text, nil, nil, "no options"
+	if len(parts) > 1 {
+		parts[len(parts)-1].marker = t.last
 	}
-	return text, labels, details, ""
+	for k := range parts {
+		if tabs && t.tab != nil {
+			parts[k].detail = noSpace(t.tab(headers, k))
+		}
+		if parts[k].multi && t.ticked != nil {
+			parts[k].ticked = noSpace(t.ticked(headers, k))
+		}
+	}
+	if tabs && t.review {
+		parts = append(parts, claudeReview)
+	}
+	return parts, ""
 }
 
 // onlyReports: b is the terminal reporting focus or the mouse, not a key of yours.

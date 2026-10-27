@@ -240,3 +240,16 @@ func TestOrListOfNothingIsEmpty(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+// #364: several picks aren't said: they're ticked in the bubble.
+func TestASpokenAnswerDoesntPickSeveral(t *testing.T) {
+	c := ctl()
+	askSession(c, toppingsMenu, T0)
+	fx := c.Step(AnswerInput("", "Cheese"), T0+1)
+	if a := answers(fx); len(a) != 0 {
+		t.Fatalf("%+v", a)
+	}
+	if r := menuResult(fx); !strings.Contains(r.Err, "pick them in the bubble") {
+		t.Fatalf("%+v", r)
+	}
+}

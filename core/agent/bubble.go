@@ -38,6 +38,8 @@ type UpdateItem struct {
 	// typed answer (agent.typedAnswer) and "Chat about this" (agent.chatAbout).
 	Details []string `json:"details,omitempty"`
 	Typed   bool     `json:"typed,omitempty"`
+	// Multi: you pick several of its options and send them with agent.pick (#364).
+	Multi bool `json:"multi,omitempty"`
 	// Note: shown small under the line, never said (a session dialog's command, #105).
 	Note string `json:"note,omitempty"`
 }
@@ -139,7 +141,7 @@ func (c *AgentController) bubbleItems() []UpdateItem {
 			}
 			item.Token = *l.Token
 			if p, ok := c.confirms.PendingOf(*l.Token); ok {
-				item.Options, item.Details, item.Typed = p.Options, p.Details, p.Typed
+				item.Options, item.Details, item.Typed, item.Multi = p.Options, p.Details, p.Typed, p.Multi
 			}
 		}
 		items = append(items, item)

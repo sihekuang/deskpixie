@@ -308,6 +308,7 @@ func TestAllowingRecordsYouAllowed(t *testing.T) {
 		request(2, "t2", "delete build/"),
 		request(3, "t3", "Which branch?", "main", "dev"),
 		request(4, "t4", "Name it?", "Type something"),
+		request(5, "t5", "Which toppings?", "Cheese", "Ham", "Olives"),
 	})
 	h.take()
 	h.call("agent.decide", map[string]any{"token": "t1", "allow": true})
@@ -315,23 +316,24 @@ func TestAllowingRecordsYouAllowed(t *testing.T) {
 	if ent := h.kinds(evs, "chat.entry"); len(ent) != 1 || entryOf(t, ent[0]).Request.Outcome != "You allowed run make" {
 		t.Fatalf("chat.entry = %v", ent)
 	}
-	if needs := h.kinds(evs, "chat.needs"); len(needs) != 1 || len(needs[0]["entries"].([]any)) != 3 {
+	if needs := h.kinds(evs, "chat.needs"); len(needs) != 1 || len(needs[0]["entries"].([]any)) != 4 {
 		t.Fatalf("chat.needs = %v", needs)
 	}
-	if b := h.kinds(evs, "chat.badge"); len(b) != 1 || b[0]["needs"] != 3.0 {
+	if b := h.kinds(evs, "chat.badge"); len(b) != 1 || b[0]["needs"] != 4.0 {
 		t.Fatalf("chat.badge = %v", b)
 	}
 	h.call("agent.decide", map[string]any{"token": "t2", "allow": false})
 	h.call("agent.choose", map[string]any{"token": "t3", "option": 2})
 	h.call("agent.typedAnswer", map[string]any{"token": "t4", "text": "pixie"})
+	h.call("agent.pick", map[string]any{"token": "t5", "options": []int{1, 3}})
 	h.call("agent.decide", map[string]any{"token": "nope", "allow": true}) // no such request: nothing recorded
 	for id, want := range map[string]string{"req1": "You allowed run make", "req2": "You denied delete build/",
-		"req3": "You answered: dev", "req4": "You answered: pixie"} {
+		"req3": "You answered: dev", "req4": "You answered: pixie", "req5": "You answered: Cheese, Olives"} {
 		if got := outcomeOf(t, h, id); got != want {
 			t.Errorf("%s: %q, want %q", id, got, want)
 		}
 	}
-	if !slices.Equal(f.decided, []string{"t1:true", "t2:false", "t3:option 2", "t4:typed pixie", "nope:true"}) {
+	if !slices.Equal(f.decided, []string{"t1:true", "t2:false", "t3:option 2", "t4:typed pixie", "t5:picks [1 3]", "nope:true"}) {
 		t.Fatal(f.decided)
 	}
 }

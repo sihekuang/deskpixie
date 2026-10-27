@@ -404,10 +404,14 @@ func (s *Session) Hook(event string, p map[string]any) string {
 	switch event {
 	case "PreToolUse":
 		if tool, ok := menuTools[s.o.tool]; ok && p["tool_name"] == tool.name {
-			text, options, details, why := menuOf(p["tool_input"])
-			q := &question{kind: "menu", options: len(options), marker: tool.marker, detail: firstRunes(text, 24), agent: agentOf(p), tool: tool.name, why: why}
-			// Its menu shows in the terminal at once; Pixie answers it there as you would (#359).
-			s.ask(q, wire.Msg{Source: "menu", Text: text, Keys: options, Details: details, Typed: len(options) > 0})
+			parts, why := menuParts(tool, p["tool_input"])
+			if len(parts) == 0 {
+				parts = []menuPart{{}}
+			}
+			q := &question{kind: "menu", marker: tool.marker, agent: agentOf(p), tool: tool.name, why: why, part: parts[0], next: parts[1:]}
+			// Its menu shows in the terminal at once; Pixie answers it there as you would (#359),
+			// a question at a time (#364).
+			s.askPart(q)
 		}
 		return ""
 	case "PermissionRequest":

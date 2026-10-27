@@ -435,3 +435,39 @@ func TestATypedAnswerOnlyGoesToAMenuThatTakesOne(t *testing.T) {
 		t.Fatalf("still waiting after an empty answer: %s", fmtEffects(fx))
 	}
 }
+
+var toppingsMenu = SessionQuestion{ID: "q3", Label: "deskpixie", App: "dev.warp.Warp-Stable", Kind: "menu",
+	Text: "Which toppings?", Options: []string{"Cheese", "Ham", "Olives"}, Multi: true}
+
+// #364: a question of several picks offers its options to tick, and is answered with those
+// picked; one option alone, or picks that aren't its options, answer nothing.
+func TestAQuestionOfSeveralPicksIsAnsweredWithThem(t *testing.T) {
+	c := ctl()
+	b := bubbleOf(askSession(c, toppingsMenu, T0))
+	if len(b) != 1 || !b[0].Multi || b[0].Typed || strings.Join(b[0].Options, "|") != "Cheese|Ham|Olives" {
+		t.Fatalf("%+v", b)
+	}
+	token := b[0].Token
+	for _, in := range []Input{ChooseInput(token, 1), PicksInput(token, nil), PicksInput(token, []int{4}),
+		PicksInput(token, []int{1, 1}), PicksInput(token, []int{0})} {
+		if a := answers(c.Step(in, T0+1)); len(a) != 0 {
+			t.Fatalf("%+v: %+v", in, a)
+		}
+	}
+	a := answers(c.Step(PicksInput(token, []int{3, 1}), T0+2))
+	if len(a) != 1 || a[0].Text != "q3" || a[0].Answer != "picks:1,3" || a[0].Line != "deskpixie: picked Cheese and Olives" {
+		t.Fatalf("%+v", a)
+	}
+	if c.confirms.IsPendingToken(token) {
+		t.Fatal("still waiting")
+	}
+}
+
+// A menu of one pick takes no picks.
+func TestAMenuOfOnePickTakesNoPicks(t *testing.T) {
+	c := ctl()
+	token := bubbleOf(askSession(c, pushMenu, T0))[0].Token
+	if a := answers(c.Step(PicksInput(token, []int{1}), T0+1)); len(a) != 0 {
+		t.Fatalf("%+v", a)
+	}
+}

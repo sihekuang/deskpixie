@@ -93,7 +93,8 @@ final class ChatWindowController: NSObject, NSToolbarDelegate {
             },
             stopTarget: { [model] in model.stopTarget(for: $0) },
             liveWho: { [model] in model.liveWho($0) },
-            stop: { [model] target in Task { await model.stop(target) } })
+            stop: { [model] target in Task { await model.stop(target) } },
+            pick: { [model] token, options in Task { await model.pick(token: token, options: options) } })
         let view = ChatWindowView(model: model, state: state, attachments: attachments, actions: actions)
             .environmentObject(richText)
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: Self.defaultSize),

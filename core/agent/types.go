@@ -360,16 +360,17 @@ type SessionQuestion struct {
 	Input string
 	// Text: a menu's question; for a permission without Tool (Codex), what it asks to do.
 	Text string
-	// Options: what a menu's pick chooses from; none when pix can't answer it (several
-	// questions, or several picks): it is then only announced. A permission's: its dialog's
+	// Options: what a menu's pick chooses from; none when pix can't answer it (a secret, too
+	// many options): it is then only announced. A permission's: its dialog's
 	// options as shown (then Text is Claude's summary, Body its box, Prompt its question).
 	Options []string
 	Body    string
 	Prompt  string
 	// Details and Typed (a menu, #268): each option's description ("" none), and that it also
-	// takes a typed answer and "Chat about this".
+	// takes a typed answer and "Chat about this". Multi: you pick several of its options (#364).
 	Details []string
 	Typed   bool
+	Multi   bool
 }
 
 // Origin says who started an agent: Pixie (in Herdr or tmux) or you (with pix, #89).

@@ -44,6 +44,7 @@ final class UpdatesBubbleController {
     /// The typed answer's draft (#268), and the monitor that puts the field away on a click in
     /// another app.
     private let typed = BubbleTyping()
+    private let picks = BubblePicks()
     private var clickAway: Any?
     /// Counts `updates` events, so a slower `agent.updates` read never overwrites a newer list.
     private var eventsApplied = 0
@@ -319,6 +320,14 @@ final class UpdatesBubbleController {
                 self.call("agent.chatAbout", ChatArgs(token: token))
                 self.acted(token: token)
             },
+            picks: picks,
+            onPick: { [weak self] token, options in
+                guard let self, !options.isEmpty,
+                      self.model.acceptsDecision(token: token, now: Self.now, at: NSEvent.mouseLocation) else { return }
+                self.call("agent.pick", PickArgs(token: token, options: options))
+                self.picks.picked[token] = nil
+                self.acted(token: token)
+            },
             onTerminal: { [weak self] line in
                 self?.focus(line) // the card stays until it is answered there (#347)
             },
@@ -398,6 +407,7 @@ final class UpdatesBubbleController {
     private struct UpdatesReply: Decodable { var lines: [UpdateLine] }
     private struct DecideArgs: Encodable, Sendable { let token: String; let allow: Bool }
     private struct ChooseArgs: Encodable, Sendable { let token: String; let option: Int }
+    private struct PickArgs: Encodable, Sendable { let token: String; let options: [Int] }
     private struct TypedArgs: Encodable, Sendable { let token: String; let text: String }
     private struct ChatArgs: Encodable, Sendable { let token: String }
     private struct FocusJobArgs: Encodable, Sendable { let job: String; let worker: String }
