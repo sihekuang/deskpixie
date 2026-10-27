@@ -34,6 +34,15 @@ type Tool interface {
 	Invoke(ctx context.Context, args json.RawMessage) ToolOutcome
 }
 
+// BeginningTool is a Tool whose call must be under way before a later call in the same turn
+// runs (#367: take_clipboard holds back the delegate that sends what it attaches). The runtime
+// calls Begin on its loop, in call order, and runs what Begin returns on the tool's goroutine
+// in place of Invoke.
+type BeginningTool interface {
+	Tool
+	Begin(ctx context.Context, args json.RawMessage) func() ToolOutcome
+}
+
 // ToolRegistry holds tools by name. Safe for concurrent use.
 type ToolRegistry struct {
 	mu    sync.RWMutex

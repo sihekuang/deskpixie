@@ -165,12 +165,30 @@ func (takeClipboard) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)
 }
 
-func (t takeClipboard) Invoke(ctx context.Context, _ json.RawMessage) voice.ToolOutcome {
+func (t takeClipboard) Invoke(ctx context.Context, args json.RawMessage) voice.ToolOutcome {
+	return t.Begin(ctx, args)()
+}
+
+// Begin holds back the attachments' Take until the read is over (#367): Pixie calls delegate
+// in the same turn, and it would otherwise go before what this attaches.
+func (t takeClipboard) Begin(ctx context.Context, _ json.RawMessage) func() voice.ToolOutcome {
 	s := t.a.attachments()
 	if s == nil {
-		return clipReply(map[string]any{"error": errNoCoordinator.Error()})
+		return func() voice.ToolOutcome { return clipReply(map[string]any{"error": errNoCoordinator.Error()}) }
 	}
-	before := len(s.Pending())
+	end := s.BeginRead()
+	before := map[string]bool{}
+	for _, it := range s.Pending() {
+		before[it.ID] = true
+	}
+	return func() voice.ToolOutcome {
+		defer end()
+		return t.read(ctx, s, before)
+	}
+}
+
+// read asks the shell for the clipboard and says what it attached that wasn't in before.
+func (t takeClipboard) read(ctx context.Context, s *attach.Store, before map[string]bool) voice.ToolOutcome {
 	id, ch := t.a.clip.open()
 	defer t.a.clip.close(id)
 	t.a.emit("clipboard.read", map[string]any{"request": id})
@@ -185,13 +203,14 @@ func (t takeClipboard) Invoke(ctx context.Context, _ json.RawMessage) voice.Tool
 	if errText != "" {
 		return clipReply(map[string]any{"error": errText})
 	}
-	items := s.Pending()
-	if len(items) <= before {
-		return clipReply(map[string]any{"error": clipNothing})
+	var names []string
+	for _, it := range s.Pending() {
+		if !before[it.ID] {
+			names = append(names, it.Name)
+		}
 	}
-	names := make([]string, 0, len(items)-before)
-	for _, it := range items[before:] {
-		names = append(names, it.Name)
+	if len(names) == 0 {
+		return clipReply(map[string]any{"error": clipNothing})
 	}
 	return clipReply(map[string]any{"attached": names})
 }

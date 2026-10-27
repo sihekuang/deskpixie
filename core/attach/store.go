@@ -58,11 +58,34 @@ type Store struct {
 	emitMu   sync.Mutex
 	items    []Item
 	onChange func([]Item)
+	// reads are the clipboard reads in flight (BeginRead); readsDone wakes a Take waiting on them.
+	reads     int
+	readsDone *sync.Cond
 }
 
 // New is a store under root (created on the first Add), recording workers' copies in copiesLog.
 func New(root, copiesLog string, now func() time.Time) *Store {
-	return &Store{root: root, copiesLog: copiesLog, now: now}
+	s := &Store{root: root, copiesLog: copiesLog, now: now}
+	s.readsDone = sync.NewCond(&s.mu)
+	return s
+}
+
+// BeginRead marks a clipboard read in flight until the returned end is called: Take waits for
+// it, so a request sent in the same turn as take_clipboard carries what it attaches (#367).
+func (s *Store) BeginRead() (end func()) {
+	s.mu.Lock()
+	s.reads++
+	s.mu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			s.mu.Lock()
+			if s.reads--; s.reads == 0 {
+				s.readsDone.Broadcast()
+			}
+			s.mu.Unlock()
+		})
+	}
 }
 
 // Restore puts handed-over attachments back in the waiting set (the request couldn't go).
@@ -234,9 +257,12 @@ func (s *Store) Len() int {
 }
 
 // Take hands the waiting attachments over: they move to sent/ and their absolute paths are
-// returned (nil when none); the set is empty after.
+// returned (nil when none); the set is empty after. It waits for clipboard reads in flight.
 func (s *Store) Take() []string {
 	s.mu.Lock()
+	for s.reads > 0 {
+		s.readsDone.Wait()
+	}
 	items := s.items
 	s.items = nil
 	if len(items) == 0 {

@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -96,6 +97,7 @@ type rigOpts struct {
 	facts     voice.SessionFacts
 	recordDir string
 	cleaner   audio.Cleaner
+	tools     []voice.Tool
 }
 
 func newRig(t *testing.T, model *vt.ScriptedModel, o rigOpts) *rig {
@@ -105,6 +107,9 @@ func newRig(t *testing.T, model *vt.ScriptedModel, o rigOpts) *rig {
 	}
 	tools := voice.DefaultTools()
 	tools.Register(slowTool{})
+	for _, tl := range o.tools {
+		tools.Register(tl)
+	}
 	pl := &playLog{}
 	sink := &vt.Sink{}
 	cfg := voice.WithPlayHook(voice.RuntimeConfig{
@@ -754,6 +759,59 @@ func TestAnUnknownToolGetsAnErrorResult(t *testing.T) {
 		}
 		if len(res) != 1 || string(res[0].Output) != `{"error":"unknown tool nope"}` || !res[0].Respond {
 			t.Fatalf("results %+v", res)
+		}
+	})
+}
+
+// beginningTool records whether the runtime began it on its loop or called Invoke.
+type beginningTool struct {
+	mu    sync.Mutex
+	calls []string
+}
+
+func (*beginningTool) Name() string                { return "begins" }
+func (*beginningTool) Description() string         { return "Begins." }
+func (*beginningTool) Parameters() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (b *beginningTool) record(c string) {
+	b.mu.Lock()
+	b.calls = append(b.calls, c)
+	b.mu.Unlock()
+}
+func (b *beginningTool) Invoke(context.Context, json.RawMessage) voice.ToolOutcome {
+	b.record("invoke")
+	return voice.ToolOutcome{Output: json.RawMessage(`{"invoked":true}`)}
+}
+func (b *beginningTool) Begin(context.Context, json.RawMessage) func() voice.ToolOutcome {
+	b.record("begin")
+	return func() voice.ToolOutcome {
+		b.record("run")
+		return voice.ToolOutcome{Output: json.RawMessage(`{"begun":true}`)}
+	}
+}
+
+// #367: a BeginningTool is begun on the runtime's loop, in call order, and what Begin returns
+// runs in place of Invoke.
+func TestABeginningToolIsBegunNotInvoked(t *testing.T) {
+	run(t, func(t *testing.T) {
+		b := &beginningTool{}
+		r := newRig(t, vt.NewScriptedModel(vt.Tool("begins"), vt.Audio(2)), rigOpts{tools: []voice.Tool{b}})
+		r.r.Hotkey()
+		wait(100)
+		r.mic.Say(500)
+		wait(1000)
+		var res []voice.Command
+		for _, c := range r.model.NonAudio() {
+			if c.Kind == voice.CmdToolResult {
+				res = append(res, c)
+			}
+		}
+		if len(res) != 1 || string(res[0].Output) != `{"begun":true}` {
+			t.Fatalf("results %+v", res)
+		}
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		if strings.Join(b.calls, ",") != "begin,run" {
+			t.Fatal(b.calls)
 		}
 	})
 }

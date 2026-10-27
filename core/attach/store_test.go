@@ -176,6 +176,36 @@ func TestTakeMovesAndEmpties(t *testing.T) {
 	}
 }
 
+// #367: a Take while a clipboard read is in flight waits for it and hands over what it added;
+// ending a read twice doesn't release another one.
+func TestTakeWaitsForAClipboardRead(t *testing.T) {
+	s, _, _ := newStore(t)
+	end := s.BeginRead()
+	other := s.BeginRead()
+	took := make(chan []string, 1)
+	go func() { took <- s.Take() }()
+	time.Sleep(50 * time.Millisecond)
+	if _, err := s.Add("Screenshot.png", png); err != nil {
+		t.Fatal(err)
+	}
+	end()
+	end()
+	select {
+	case <-took:
+		t.Fatal("took with a read still in flight")
+	case <-time.After(50 * time.Millisecond):
+	}
+	other()
+	select {
+	case paths := <-took:
+		if len(paths) != 1 || filepath.Base(paths[0]) != "Screenshot.png" {
+			t.Fatal(paths)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Take never went")
+	}
+}
+
 func TestSweep(t *testing.T) {
 	s, root, _ := newStore(t)
 	_, _ = s.Add("left.png", png)

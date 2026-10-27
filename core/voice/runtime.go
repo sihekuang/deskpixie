@@ -915,6 +915,11 @@ func (r *Runtime) invokeTool(callID, name string, args json.RawMessage) {
 		return
 	}
 	ctx := r.ctx
+	if b, ok := tool.(BeginningTool); ok {
+		run := b.Begin(ctx, args)
+		go func() { deliver(run()) }()
+		return
+	}
 	go func() { deliver(tool.Invoke(ctx, args)) }()
 }
 
