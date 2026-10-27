@@ -14,6 +14,12 @@ var storiesMenu = SessionQuestion{ID: "q1", Label: "jira", App: "dev.warp.Warp-S
 	Text:    "Create these 2 stories under OVA-23377?",
 	Options: []string{"Create both, unassigned", "Create both, assign to me", "Change something first"}}
 
+var (
+	dbMenu    = SessionQuestion{ID: "q2", Label: "api", Kind: "menu", Text: "Which database?", Options: []string{"Postgres", "SQLite"}}
+	yesNoMenu = SessionQuestion{ID: "q3", Label: "api", Kind: "menu", Text: "Run the migration?", Options: []string{"Yes", "No"}}
+	pushYes   = SessionQuestion{ID: "q4", Label: "api", Kind: "menu", Text: "Push main to origin?", Options: []string{"Yes", "No"}}
+)
+
 // toCoordinator: the request went on to the coordinator (queued or in flight).
 func toCoordinator(c *AgentController, id JobID) bool {
 	return c.inbox.Queued(id) || c.inbox.Carries(id)
@@ -23,7 +29,6 @@ func TestADelegatedAnswerPicksTheOpenMenusOption(t *testing.T) {
 	for _, tc := range []struct{ said, want string }{
 		{"let's create both and assign to me.", "2"},
 		{"Yeah, let's create both and assign to me.", "2"},
-		{"Create both unassigned. Three points each is fine", "1"},
 		{"change something first", "3"},
 		{"Create both assigned to me", "2"}, // 15:37, said back to the test menu
 	} {
@@ -62,6 +67,12 @@ func TestADelegatedRequestThatPicksNoMenuGoesToTheCoordinator(t *testing.T) {
 		{"several picks", []SessionQuestion{several}, "create both, assign to me"},
 		{"a push", []SessionQuestion{pushMenu}, "push"},
 		{"says to push", []SessionQuestion{storiesMenu}, "create both and assign to me, then push it to main"},
+		// Review of #386: words of an option inside a new task, a question that pushes, and
+		// more said than the option.
+		{"a new task", []SessionQuestion{dbMenu}, "set up a Postgres db for billing"},
+		{"no rush", []SessionQuestion{yesNoMenu}, "no rush, look up flights to Tokyo"},
+		{"pushes on yes", []SessionQuestion{pushYes}, "yes"},
+		{"more than the option", []SessionQuestion{storiesMenu}, "Create both unassigned. Three points each is fine"},
 	} {
 		c := ctl()
 		for _, q := range tc.menus {
@@ -131,6 +142,10 @@ func TestMenuChoiceLeavesOutWordEndings(t *testing.T) {
 		if n, ok := MenuChoice(opts, tc.said); n != tc.want || ok != (tc.want != 0) {
 			t.Errorf("%q: %d %v", tc.said, n, ok)
 		}
+	}
+	// Two options alike once their endings go: neither, from the stems alone.
+	if n, ok := MenuChoice([]string{"Add test", "Add tests"}, "adding tests"); ok {
+		t.Errorf("adding tests: %d", n)
 	}
 	if got := stems([]string{"yes", "me", "options", "2s", "assigned", "created", "create", "changes"}); strings.Join(got, " ") != "yes me option 2s assign creat creat chang" {
 		t.Fatal(got)

@@ -216,7 +216,9 @@ func (c *AgentController) menuPicked(task string) (Pending, int, bool) {
 		if !p.Menu || p.Multi || p.Session == "" || len(p.Options) == 0 {
 			continue
 		}
-		n, ok := MenuChoice(p.Options, task)
+		// The whole request is the option, not only words of it: "set up a Postgres db" is a
+		// new task, not Postgres in a menu.
+		n, ok := menuNamed(p.Options, menuWords(task))
 		if !ok {
 			continue
 		}
@@ -225,9 +227,19 @@ func (c *AgentController) menuPicked(task string) (Pending, int, bool) {
 		}
 		found, pick = p, n
 	}
-	// "this or that" is no answer to act on unasked; nor is a push, a merge, a publish or a deploy.
-	if pick == 0 || slices.Contains(menuWords(task), "or") || len(GatedActions(found.Options[pick-1])) > 0 || len(GatedActions(task)) > 0 {
+	// "this or that" is no answer to act on unasked; nor is a push, a merge, a publish or a
+	// deploy, in the request, the option, its description or the question it answers.
+	if pick == 0 || slices.Contains(menuWords(task), "or") {
 		return Pending{}, 0, false
+	}
+	detail := ""
+	if pick <= len(found.Details) {
+		detail = found.Details[pick-1]
+	}
+	for _, s := range []string{task, found.Options[pick-1], detail, found.Asked} {
+		if len(GatedActions(s)) > 0 {
+			return Pending{}, 0, false
+		}
 	}
 	return found, pick, true
 }
@@ -326,6 +338,37 @@ func number(w string) string {
 // MenuChoice is the option (from 1) an answer picks: one said as it reads ("SQLite"), by its
 // place ("the second one", "option 3", "the last one"), or the only one named in it, with no
 // "not" besides ("let's go with Postgres"). false when it names none, several or one it rules out.
+// menuNamed: the option the words are, whole: word for word first, then with fillers left out
+// on both sides ("yes please" is the option "Yes please" before it is "Yes"), then without
+// their "and"s too ("create both and assign to me" is "Create both, assign to me", #383), then
+// with word endings left out ("create both assigned to me" is it too), when that fits only one.
+func menuNamed(options []string, raw []string) (int, bool) {
+	withoutAnd := func(w []string) []string {
+		return slices.DeleteFunc(slices.Clone(stripFillers(w)), func(s string) bool { return s == "and" })
+	}
+	stemmed := func(w []string) []string { return stems(withoutAnd(w)) }
+	for i, form := range []func([]string) []string{func(w []string) []string { return w }, stripFillers, withoutAnd, stemmed} {
+		said := strings.Join(form(raw), " ")
+		found := 0
+		for k, o := range options {
+			if strings.Join(form(menuWords(o)), " ") != said {
+				continue
+			}
+			if i < 3 {
+				return k + 1, true
+			}
+			if found != 0 {
+				return 0, false // "add tests" is "Add test" and "Add tests" alike
+			}
+			found = k + 1
+		}
+		if found != 0 {
+			return found, true
+		}
+	}
+	return 0, false
+}
+
 func MenuChoice(options []string, answer string) (int, bool) {
 	raw := menuWords(answer)
 	// An option named word for word first: "Option 2" is the option of that name, wherever it is.
@@ -341,21 +384,8 @@ func MenuChoice(options []string, answer string) (int, bool) {
 		}
 	}
 	words := stripFillers(raw)
-	// Word for word first, then with fillers left out on both sides: "yes please" is the
-	// option "Yes please" before it is "Yes"; then without its "and"s too: "create both and
-	// assign to me" is "Create both, assign to me" (#383); then with word endings left out:
-	// "create both assigned to me" is it too.
-	withoutAnd := func(w []string) []string {
-		return slices.DeleteFunc(slices.Clone(stripFillers(w)), func(s string) bool { return s == "and" })
-	}
-	stemmed := func(w []string) []string { return stems(withoutAnd(w)) }
-	for _, form := range []func([]string) []string{func(w []string) []string { return w }, stripFillers, withoutAnd, stemmed} {
-		said := strings.Join(form(raw), " ")
-		for k, o := range options {
-			if strings.Join(form(menuWords(o)), " ") == said {
-				return k + 1, true
-			}
-		}
+	if n, ok := menuNamed(options, raw); ok {
+		return n, true
 	}
 	if len(words) == 1 {
 		w := words[0]
