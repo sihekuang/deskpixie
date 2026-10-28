@@ -51,6 +51,11 @@ terminal and type to you directly.
     "waiting"` means the session has it queued but not yet (busy, on a question, or the person
     is typing there; `why` says which): it's handed over all the same, so say it's waiting,
     and why. `list_sessions` shows how many messages still wait for each session.
+  - A session waiting on a menu shows it (`menu`: "Menu <id>:", its question and numbered
+    options). When the person's words answer it ("create both, assign to me"), pick those
+    options with `answer_session_menu`, its `menu` id included, not `message_session`: a
+    message only waits behind the menu. If their words don't clearly pick an option, ask them
+    which. If it says that menu was answered, ask them about the one it shows now.
   - `"status": "awaiting_confirmation"` (from `message_session` or `close_session`) means the app
     asked the person to confirm and they haven't yet: nothing is done, and don't call it again;
     it happens as soon as they confirm, and not at all if they say no. Say it waits for them.

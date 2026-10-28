@@ -11,7 +11,7 @@ import (
 
 // SessionTools are the coordinator's tools for the sessions you start yourself with pix
 // (#89). They are available whether or not workers are on.
-var SessionTools = [8]string{"list_sessions", "message_session", "flush_session", "stop_and_send_session", "interrupt_session", "close_session", "describe_session", "set_session_verbatim"}
+var SessionTools = [9]string{"list_sessions", "message_session", "answer_session_menu", "flush_session", "stop_and_send_session", "interrupt_session", "close_session", "describe_session", "set_session_verbatim"}
 
 // IsSessionTool reports whether name is one of SessionTools.
 func IsSessionTool(name string) bool { return slices.Contains(SessionTools[:], name) }
@@ -33,6 +33,15 @@ func SessionCatalog() []map[string]any {
 				"text":  map[string]any{"type": "string", "description": "The message. Quote the user's own words when relaying what they said."},
 				"force": map[string]any{"type": "boolean", "description": "Only when the user says to send it anyway: it goes in now, with any messages still waiting: a busy session is stopped for it, and it goes in even while they're typing there (their unsent text comes back after). A question on screen still holds it until it's answered."},
 			}, "name", "text"),
+		},
+		{
+			"name":        "answer_session_menu",
+			"description": "Pick options of the menu a session the user started waits on (list_sessions shows it, with its numbered options), as a tap on them in the bubble would. Only the options the user chose in their own words (\"create both, assign to me\"); if their words don't clearly pick one, ask them which. A message to a session on a menu only waits behind it: this answers it.",
+			"inputSchema": objectSchema(map[string]any{
+				"name":    map[string]any{"type": "string", "description": name[1]},
+				"menu":    map[string]any{"type": "string", "description": "The menu's id, as list_sessions shows it (\"Menu q7: …\" is q7)."},
+				"options": map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "The option numbers picked, from 1: one, or several if the menu takes several."},
+			}, "name", "menu", "options"),
 		},
 		{
 			"name":        "flush_session",
@@ -87,6 +96,33 @@ type SessionRow struct {
 	LastTurn         string   `json:"last_turn,omitempty"`   // its last turn's gist, "Asked: …" for a question (#146)
 	Waiting          int      `json:"waiting,omitempty"`     // messages waiting to be delivered to it (#183)
 	Outdated         bool     `json:"outdated,omitempty"`    // it runs an older pix than the app's (#189)
+	Menu             string   `json:"menu,omitempty"`        // the menu it waits on, with its options (#384)
+}
+
+// MenuView is a session's open menu as the coordinator sees it (#384): its question and its
+// numbered options, which answer_session_menu picks.
+func MenuView(p Pending) string {
+	opts := make([]string, len(p.Options))
+	for i, o := range p.Options {
+		opts[i] = fmt.Sprintf("%d. %s", i+1, o)
+		if i < len(p.Details) && p.Details[i] != "" {
+			opts[i] += " (" + p.Details[i] + ")"
+		}
+	}
+	pick := "pick one"
+	if p.Multi {
+		pick = "pick one or more"
+	}
+	// Its id goes back with answer_session_menu, so a pick never lands on a newer menu.
+	return fmt.Sprintf("Menu %s: %s Options (%s): %s", p.Question, p.Text, pick, strings.Join(opts, " | "))
+}
+
+// withMenus fills in the menu each session waits on, from menus (session name -> MenuView).
+func withMenus(rows []SessionRow, menus map[string]string) []SessionRow {
+	for i := range rows {
+		rows[i].Menu = menus[rows[i].Name]
+	}
+	return rows
 }
 
 // ago is how long before now t was, as list_sessions shows it ("" for no time).
@@ -370,6 +406,9 @@ func RequestNote(sessions []SessionRow, workers []WorkerRow, task func(JobID) st
 			fmt.Fprintf(&b, "\n- %s: %q, %s repo, %s", r.Name, r.Description, r.Repo, r.Status)
 			if r.LastTurn != "" {
 				fmt.Fprintf(&b, ", last turn %q", clipRunes(r.LastTurn, maxNoteTurn))
+			}
+			if r.Menu != "" {
+				fmt.Fprintf(&b, ", waiting on its menu: %q", r.Menu)
 			}
 		}
 		b.WriteString("\n")

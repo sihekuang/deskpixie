@@ -53,6 +53,8 @@ type Pending struct {
 	Details []string
 	Typed   bool
 	Multi   bool
+	// Text: a menu's question, as asked (masked), for the coordinator's view of it (#384).
+	Text string
 	// Asked: the prompt as the session asked it (askedAs), so one asked again is told from
 	// another under the same id (a new pix numbers its own from q1, #347).
 	Asked string

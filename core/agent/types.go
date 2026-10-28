@@ -668,13 +668,14 @@ const (
 	CallFlushSession
 	CallCreateProject
 	CallStopAndSendSession // #320
+	CallAnswerSessionMenu  // #384
 )
 
 // McpCall is one pixie MCP tool call, arguments checked and cleaned. Only the fields of its
 // Kind are set: StartWorker → Worker; MessageWorker → Name, Text; StopWorker → Name; CreateProject → Name;
 // ReportProgress → Summary; ReportResult → Outcome, Summary, Evidence; AskCoordinator →
 // Question, Options; ReportBlocked → Reason; MessageSession → Name, Text;
-// SetSessionVerbatim → Name, Verbatim.
+// SetSessionVerbatim → Name, Verbatim; AnswerSessionMenu → Name, Picks.
 type McpCall struct {
 	Kind     McpCallKind
 	Worker   WorkerRequest
@@ -691,6 +692,8 @@ type McpCall struct {
 	Question string
 	Options  []string
 	Reason   string
+	Picks    []int  // AnswerSessionMenu only (#384): the options picked, from 1.
+	Menu     string // AnswerSessionMenu only: the menu they are of, its id as MenuView shows it
 }
 
 // McpReply is a tool's result (JSON value) or, when Err is set, the error text the calling
