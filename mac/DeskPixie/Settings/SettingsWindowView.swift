@@ -167,7 +167,7 @@ private struct SettingsSidebarRow: View {
     }
 }
 
-/// The selected page: the tab's rows, scrolling when taller than the window.
+/// The selected page: the tab's rows, in a form that scrolls when taller than the window.
 private struct SettingsDetailView: View {
     let model: SettingsModel
     let tab: SettingsLayout.Tab
@@ -177,12 +177,7 @@ private struct SettingsDetailView: View {
 
     var body: some View {
         ScrollViewReader { proxy in
-            ScrollView {
-                SettingsTabView(model: model, section: tab.section, highlighted: highlighted)
-                .padding(.horizontal, 24)
-                .padding(.vertical, 20)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
+            SettingsTabView(model: model, section: tab.section, highlighted: highlighted)
             // The page's name is the window's title, as in System Settings (#391).
             .navigationTitle(tab.title)
             // Runs again when the page changes, since a reveal can switch to another page first.
@@ -285,63 +280,56 @@ struct SettingsTabView: View {
     var highlighted: String? = nil
 
     var body: some View {
-        SettingsPane {
+        // Grouped rounded sections, as in System Settings (#393).
+        Form {
             if let banner = model.bannerText {
-                SettingsStrip(symbol: "exclamationmark.triangle.fill", text: banner, buttonTitle: "Open File",
-                              buttonHelp: "Shows settings.json in Finder.") { model.openFile() }
+                Section {
+                    SettingsStrip(symbol: "exclamationmark.triangle.fill", text: banner, buttonTitle: "Open File",
+                                  buttonHelp: "Shows settings.json in Finder.") { model.openFile() }
+                }
             }
             if model.snapshot == nil {
-                Text(model.loadError.map { "Couldn't read settings: \($0)" } ?? "Loading…")
-                    .foregroundStyle(.secondary)
+                Section {
+                    Text(model.loadError.map { "Couldn't read settings: \($0)" } ?? "Loading…")
+                        .foregroundStyle(.secondary)
+                }
             } else {
-                grid
+                let groups = model.groups(in: section)
+                ForEach(groups, id: \.title) { group in
+                    Section {
+                        ForEach(group.rows, id: \.id) { row in
+                            switch row {
+                            case .field(let field): fieldRow(field)
+                            case .extra(let extra): extraRow(extra)
+                            }
+                        }
+                    } header: {
+                        // A page of one group needs no heading: the page's title names it.
+                        if groups.count > 1 {
+                            Text(group.title)
+                        }
+                    }
+                }
             }
             if let notice = model.noticeText {
-                NoteText(text: notice, isError: true)
-                    .accessibilityAddTraits(.isStaticText)
+                Section {
+                    NoteText(text: notice, isError: true)
+                        .accessibilityAddTraits(.isStaticText)
+                }
             }
             if let restart = model.restartText {
-                SettingsStrip(symbol: nil, text: restart, buttonTitle: "Restart",
-                              buttonHelp: "Restarts DeskPixie to apply the changes.") { model.restart() }
+                Section {
+                    SettingsStrip(symbol: nil, text: restart, buttonTitle: "Restart",
+                                  buttonHelp: "Restarts DeskPixie to apply the changes.") { model.restart() }
+                }
             }
         }
+        .formStyle(.grouped)
         .alert(CoordinatorRestart.title, isPresented: $confirmRestart) {
             Button(CoordinatorRestart.confirm, role: .destructive) { model.restartCoordinator() }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text(CoordinatorRestart.message)
-        }
-    }
-
-    private var grid: some View {
-        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 8, verticalSpacing: 4) {
-            let groups = model.groups(in: section)
-            ForEach(Array(groups.enumerated()), id: \.element.title) { index, group in
-                // A page of one group needs no heading: the page's title names it.
-                if groups.count > 1 {
-                    groupHeader(group.title, first: index == 0)
-                }
-                ForEach(group.rows, id: \.id) { row in
-                    switch row {
-                    case .field(let field): fieldRow(field)
-                    case .extra(let extra): extraRow(extra)
-                    }
-                }
-            }
-        }
-    }
-
-    /// A group's heading across both columns, with a rule under it (#290).
-    private func groupHeader(_ title: String, first: Bool) -> some View {
-        GridRow {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.headline)
-                    .accessibilityAddTraits(.isHeader)
-                Divider()
-            }
-            .gridCellColumns(2)
-            .padding(.top, first ? 0 : 18)
         }
     }
 
@@ -373,14 +361,12 @@ struct SettingsTabView: View {
         }
     }
 
-    /// Under the projects folder: whether it is there, with Create when it is missing (#216).
+    /// The row under the projects folder: whether it is there, with Create when it is missing (#216).
     private func projectsFolderRow(_ folder: ProjectsFolderStatus) -> some View {
-        GridRow {
-            Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
-            VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 6) {
                 Label {
                     Text(folder.state == .ready ? "Found" : folder.detail)
-                        .font(.callout)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: 340, alignment: .leading)
@@ -398,9 +384,8 @@ struct SettingsTabView: View {
                 }
                 .controlSize(.small)
             }
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel("Projects folder: \(folder.state == .ready ? "found" : folder.detail)")
-        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Projects folder: \(folder.state == .ready ? "found" : folder.detail)")
     }
 
     /// Export Logs… (#225): where to save, then the core writes the zip; it is shown in Finder.
@@ -422,7 +407,7 @@ struct SettingsTabView: View {
     private func extraRow(_ extra: SettingsLayout.Extra) -> some View {
         switch extra {
         case .button(let label, let help, let title, let action):
-            row(label: SettingsLayout.labelText(label), id: extra.path) {
+            row(label: label, id: extra.path) {
                 Button(title) {
                     switch action {
                     case .resetPosition: model.resetPosition()
@@ -459,7 +444,7 @@ struct SettingsTabView: View {
             } note: {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(pix.stateText)
-                        .font(.callout)
+                        .font(.subheadline)
                         .accessibilityLabel("pix command: \(pix.stateText)")
                     if let error = pix.error {
                         NoteText(text: error, isError: true)
@@ -469,16 +454,19 @@ struct SettingsTabView: View {
                     }
                     NoteText(text: help, isError: false)
                     Link("How pix works", destination: URL(string: "https://github.com/sihekuang/deskpixie/blob/main/docs/pix.md")!)
-                        .font(.callout)
+                        .font(.subheadline)
                 }
             }
         case .secret(let id, let label, let help):
-            row(label: SettingsLayout.labelText(label), id: extra.path) {
+            row(label: label, id: extra.path) {
                 HStack(spacing: 6) {
                     // Never shows a stored key: the field starts empty and clears after a save.
-                    SecureField("Paste key", text: Binding(get: { model.keyDraft(id) },
-                                                           set: { model.setKeyDraft(id, $0) }))
-                        .frame(width: 220)
+                    SecureField(label, text: Binding(get: { model.keyDraft(id) },
+                                                     set: { model.setKeyDraft(id, $0) }),
+                                prompt: Text("Paste key"))
+                        .labelsHidden()
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 160)
                         .onSubmit { model.saveKey(id) }
                         .accessibilityLabel(label)
                         .accessibilityHint(help)
@@ -496,7 +484,7 @@ struct SettingsTabView: View {
                         NoteText(text: error, isError: true)
                     }
                     Text(model.secretText(id))
-                        .font(.callout)
+                        .font(.subheadline)
                         .accessibilityLabel("\(label): \(model.secretText(id))")
                     NoteText(text: help, isError: false)
                 }
@@ -504,26 +492,24 @@ struct SettingsTabView: View {
         }
     }
 
-    @ViewBuilder
+    /// One setting's row: its name with the note under it, and its control on the right.
     private func row<Control: View, Note: View>(label: String, id: String, @ViewBuilder control: () -> Control,
                                                 @ViewBuilder note: () -> Note) -> some View {
-        GridRow {
-            Text(label)
-                .padding(.horizontal, 4)
-                .background(
-                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .fill(Color.accentColor.opacity(highlighted == id ? 0.3 : 0))
-                )
-                .gridColumnAlignment(.trailing)
-                .accessibilityHidden(true)
+        LabeledContent {
             control()
-                .gridColumnAlignment(.leading)
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label)
+                    // Pointed out by a search or Pixie: a tint just around the name.
+                    .background(
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .fill(Color.accentColor.opacity(highlighted == id ? 0.3 : 0))
+                            .padding(.horizontal, -4)
+                    )
+                    .accessibilityHidden(true)
+                note()
+            }
         }
         .id(id)
-        .padding(.top, 10)
-        GridRow {
-            Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
-            note()
-        }
     }
 }

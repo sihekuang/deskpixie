@@ -172,8 +172,6 @@ public enum SettingsLayout {
         }
     }
 
-    public static func labelText(_ label: String) -> String { "\(label):" }
-
     /// Text shown for a value (web `toText`): null and missing are empty.
     public static func textOf(_ value: JSONValue?) -> String {
         switch value {
@@ -276,7 +274,7 @@ public enum SettingsLayout {
             let combo = textOf(value)
             control = .hotkey(combo: combo, title: formatHotkey(combo, platform: platform))
         }
-        return ControlSpec(path: field.path, label: labelText(field.label), a11yLabel: field.label, help: field.help,
+        return ControlSpec(path: field.path, label: field.label, a11yLabel: field.label, help: field.help,
                            error: error, control: control)
     }
 

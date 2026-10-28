@@ -55,7 +55,7 @@ final class SettingsLayoutTests: XCTestCase {
 
     func test_labels_end_in_a_colon_and_keep_their_text_for_accessibility() {
         let s = spec("scale", defaults)
-        XCTAssertEqual(s.label, "Size:")
+        XCTAssertEqual(s.label, "Size")
         XCTAssertEqual(s.a11yLabel, "Size")
         XCTAssertEqual(s.help, "Whole-number sizes keep the pixel art crisp.")
         XCTAssertEqual(s.note.text, "Whole-number sizes keep the pixel art crisp.")
