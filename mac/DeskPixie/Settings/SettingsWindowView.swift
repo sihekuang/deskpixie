@@ -159,7 +159,7 @@ private struct SettingsSidebarRow: View {
     }
 }
 
-/// The selected page: its header, then the tab's rows, scrolling when taller than the window.
+/// The selected page: the tab's rows, scrolling when taller than the window.
 private struct SettingsDetailView: View {
     let model: SettingsModel
     let tab: SettingsLayout.Tab
@@ -223,6 +223,19 @@ private final class WindowObservers {
         return view.subviews.lazy.compactMap(searchField).first
     }
 
+    /// The sidebar stays open, as in System Settings: there is no toggle to bring it back
+    /// (#391). The split view exists only once the window has laid out.
+    private static func keepSidebar(in window: NSWindow) {
+        guard let split = window.contentView.flatMap(splitView),
+              let controller = split.delegate as? NSSplitViewController else { return }
+        controller.splitViewItems.first?.canCollapse = false
+    }
+
+    private static func splitView(in view: NSView) -> NSSplitView? {
+        if let split = view as? NSSplitView { return split }
+        return view.subviews.lazy.compactMap(splitView).first
+    }
+
     func attach(_ window: NSWindow, model: SettingsModel) {
         guard self.window !== window else { return }
         tokens.forEach(NotificationCenter.default.removeObserver)
@@ -231,6 +244,7 @@ private final class WindowObservers {
         window.setFrameAutosaveName(SettingsWindowView.frameName)
         window.level = .normal
         window.collectionBehavior.insert([.moveToActiveSpace, .fullScreenAuxiliary])
+        DispatchQueue.main.async { Self.keepSidebar(in: window) }
         // First open: the window exists only now; bring it in front of other apps' windows.
         WindowFocus.bringForward(window, app: NSApp, showInDock: true)
         let center = NotificationCenter.default
