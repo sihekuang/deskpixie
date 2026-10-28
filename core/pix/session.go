@@ -1125,6 +1125,10 @@ func (s *Session) resend() []wire.Msg {
 	if s.agentDesc != "" {
 		out = append(out, wire.Msg{Kind: wire.KindEvent, Event: "description", Source: "agent", Description: s.agentDesc})
 	}
+	// A question asked while DeskPixie was away was dropped: ask it again (#400).
+	if s.q != nil && s.q.told != nil {
+		out = append(out, *s.q.told)
+	}
 	return out
 }
 
