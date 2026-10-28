@@ -53,41 +53,49 @@ struct SettingsWindowView: View {
         }
     }
 
-    /// The pages, or while searching, what the search found (#287).
-    @ViewBuilder
+    /// A sidebar row: a page, or a setting the search found.
+    private enum SidebarItem: Hashable {
+        case page(Int)
+        case hit(String)
+    }
+
+    /// The pages, or while searching, what the search found (#287). One list whose rows change,
+    /// not two lists: the search field belongs to the sidebar and is built again with a new
+    /// list, losing its focus after the first character (#374).
     private var sidebar: some View {
-        if model.searching {
-            List(selection: Binding<String?>(
-                get: { model.revealed?.path },
-                set: { path in
+        List(selection: Binding<SidebarItem?>(
+            get: {
+                if model.searching { return model.revealed.map { .hit($0.path) } }
+                return .page(selectedIndex)
+            },
+            set: { item in
+                switch item {
+                case .hit(let path):
                     if let hit = model.hits.first(where: { $0.path == path }) { model.reveal(hit) }
+                case .page(let new) where new != selectedIndex:
+                    tab = new
+                    model.recordingPath = nil
+                default:
+                    break
                 }
-            )) {
+            }
+        )) {
+            if model.searching {
                 if model.hits.isEmpty {
                     Text(SettingsLayout.noResultsText(model.query))
                         .foregroundStyle(.secondary)
                         .selectionDisabled()
                 }
                 ForEach(model.hits, id: \.path) { hit in
-                    SettingsHitRow(hit: hit).tag(hit.path)
+                    SettingsHitRow(hit: hit).tag(SidebarItem.hit(hit.path))
                 }
-            }
-            .listStyle(.sidebar)
-        } else {
-            List(selection: Binding<Int?>(
-                get: { selectedIndex },
-                set: { new in
-                    guard let new, new != selectedIndex else { return }
-                    tab = new
-                    model.recordingPath = nil
-                }
-            )) {
+            } else {
                 ForEach(Array(SettingsLayout.tabs.enumerated()), id: \.offset) { index, t in
-                    SettingsSidebarRow(tab: t).tag(index)
+                    SettingsSidebarRow(tab: t).tag(SidebarItem.page(index))
                 }
             }
-            .listStyle(.sidebar)
         }
+        .listStyle(.sidebar)
     }
 }
 
