@@ -155,7 +155,7 @@ public enum SettingsLayout {
     /// One row of a tab: the label column, the control, and the line under it.
     public struct ControlSpec: Equatable, Sendable {
         public var path: String
-        /// The label column's text, ending in a colon.
+        /// The row's name, as written.
         public var label: String
         /// The accessibility label: the field's label as written.
         public var a11yLabel: String
@@ -171,8 +171,6 @@ public enum SettingsLayout {
             return (help, false)
         }
     }
-
-    public static func labelText(_ label: String) -> String { "\(label):" }
 
     /// Text shown for a value (web `toText`): null and missing are empty.
     public static func textOf(_ value: JSONValue?) -> String {
@@ -276,7 +274,7 @@ public enum SettingsLayout {
             let combo = textOf(value)
             control = .hotkey(combo: combo, title: formatHotkey(combo, platform: platform))
         }
-        return ControlSpec(path: field.path, label: labelText(field.label), a11yLabel: field.label, help: field.help,
+        return ControlSpec(path: field.path, label: field.label, a11yLabel: field.label, help: field.help,
                            error: error, control: control)
     }
 
