@@ -19,25 +19,19 @@ struct SettingsWindowView: View {
     private var selectedIndex: Int { min(max(tab, 0), SettingsLayout.tabs.count - 1) }
 
     var body: some View {
-        HStack(spacing: 0) {
-            // The field sits above the sidebar, not in it: the sidebar becomes the results on the
-            // first character typed, and a field inside it was built anew, losing its focus (#374).
-            VStack(spacing: 0) {
-                SettingsSearchField(text: Binding(get: { model.query }, set: { model.query = $0 }))
-                    .padding(.horizontal, 10)
-                    .padding(.top, 8)
-                    .padding(.bottom, 4)
-                sidebar
-            }
-            .frame(width: 200)
-
+        // The system's sidebar and page (as System Settings and Finder): its materials, title
+        // bar and search field, nothing drawn by hand (#391). The field belongs to the split
+        // view, not the list, so the list turning into results keeps its focus (#374).
+        NavigationSplitView {
+            sidebar
+                .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
+                .toolbar(removing: .sidebarToggle)
+        } detail: {
             SettingsDetailView(model: model, tab: SettingsLayout.tabs[selectedIndex])
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(
-                    VisualEffectBackground(material: .sidebar, blendingMode: .behindWindow)
-                        .ignoresSafeArea()
-                )
         }
+        .searchable(text: Binding(get: { model.query }, set: { model.query = $0 }),
+                    placement: .sidebar, prompt: "Search")
+        .background(Button("") { observers.focusSearch() }.keyboardShortcut("f").opacity(0).accessibilityHidden(true))
         .frame(minWidth: 720, minHeight: 520)
         .background(WindowAccessor { window in observers.attach(window, model: model) })
         .onAppear {
@@ -94,38 +88,6 @@ struct SettingsWindowView: View {
             }
             .listStyle(.sidebar)
         }
-    }
-}
-
-/// The search field above the sidebar (#287): ⌘F focuses it, Escape clears it.
-private struct SettingsSearchField: View {
-    @Binding var text: String
-    @FocusState private var focused: Bool
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
-            TextField("Search", text: $text)
-                .textFieldStyle(.plain)
-                .focused($focused)
-                .onExitCommand { text = "" }
-                .accessibilityLabel("Search settings")
-            if !text.isEmpty {
-                Button {
-                    text = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Clear search")
-            }
-        }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 4)
-        .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary))
-        .background(Button("") { focused = true }.keyboardShortcut("f").opacity(0).accessibilityHidden(true))
     }
 }
 
@@ -208,20 +170,13 @@ private struct SettingsDetailView: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    HStack(spacing: 10) {
-                        SettingsIconTile(tab: tab, size: 28, glyph: 14, radius: 7)
-                        Text(tab.title)
-                            .font(.title2)
-                            .fontWeight(.semibold)
-                            .accessibilityAddTraits(.isHeader)
-                    }
-                    SettingsTabView(model: model, section: tab.section, highlighted: highlighted)
-                }
+                SettingsTabView(model: model, section: tab.section, highlighted: highlighted)
                 .padding(.horizontal, 24)
                 .padding(.vertical, 20)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            // The page's name is the window's title, as in System Settings (#391).
+            .navigationTitle(tab.title)
             // Runs again when the page changes, since a reveal can switch to another page first.
             .task(id: "\(model.revealCount)|\(tab.section.rawValue)") {
                 guard let hit = model.takeReveal(for: tab.section) else { return }
@@ -256,6 +211,18 @@ private final class WindowObservers {
     private var tokens: [NSObjectProtocol] = []
     private weak var window: NSWindow?
 
+    /// ⌘F: into the search field (#287), which the system puts in the window's title bar.
+    func focusSearch() {
+        guard let window, let frame = window.contentView?.superview,
+              let field = Self.searchField(in: frame) else { return }
+        window.makeFirstResponder(field)
+    }
+
+    private static func searchField(in view: NSView) -> NSSearchField? {
+        if let field = view as? NSSearchField { return field }
+        return view.subviews.lazy.compactMap(searchField).first
+    }
+
     func attach(_ window: NSWindow, model: SettingsModel) {
         guard self.window !== window else { return }
         tokens.forEach(NotificationCenter.default.removeObserver)
@@ -263,11 +230,6 @@ private final class WindowObservers {
         window.identifier = NSUserInterfaceItemIdentifier("settings")
         window.setFrameAutosaveName(SettingsWindowView.frameName)
         window.level = .normal
-        // The sidebar and the page run up under a clear title bar (no grey strip above them);
-        // the page header names the page, so the window title is hidden.
-        window.styleMask.insert(.fullSizeContentView)
-        window.titlebarAppearsTransparent = true
-        window.titleVisibility = .hidden
         window.collectionBehavior.insert([.moveToActiveSpace, .fullScreenAuxiliary])
         // First open: the window exists only now; bring it in front of other apps' windows.
         WindowFocus.bringForward(window, app: NSApp, showInDock: true)

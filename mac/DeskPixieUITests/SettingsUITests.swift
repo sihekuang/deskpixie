@@ -34,7 +34,7 @@ final class SettingsUITests: XCTestCase {
         harness = h
         h.launch()
         let window = openSettings(h)
-        let field = window.textFields["Search settings"]
+        let field = window.searchFields.firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 10), "no search field")
         field.click()
         field.typeText("always send")
