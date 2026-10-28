@@ -134,6 +134,11 @@ func (f *fakeAgent) ChatAbout(token string) {
 	f.decided = append(f.decided, token+":chat")
 	f.mu.Unlock()
 }
+func (f *fakeAgent) Dismiss(id uint64) {
+	f.mu.Lock()
+	f.decided = append(f.decided, fmt.Sprintf("%d:dismiss", id))
+	f.mu.Unlock()
+}
 func (f *fakeAgent) Decide(token string, allow bool) {
 	f.mu.Lock()
 	f.decided = append(f.decided, fmt.Sprintf("%s:%v", token, allow))
@@ -423,9 +428,10 @@ func TestTheBubbleTypedAnswerAndChatReachTheAgent(t *testing.T) {
 	h.call("agent.typedAnswer", map[string]any{"token": "hawk", "text": "MariaDB"})
 	h.call("agent.chatAbout", map[string]any{"token": "owl"})
 	h.call("agent.pick", map[string]any{"token": "lark", "options": []int{1, 3}}) // #364
+	h.call("agent.dismiss", map[string]any{"id": 42})                             // #388
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if !slices.Equal(f.decided, []string{"hawk:typed MariaDB", "owl:chat", "lark:picks [1 3]"}) {
+	if !slices.Equal(f.decided, []string{"hawk:typed MariaDB", "owl:chat", "lark:picks [1 3]", "42:dismiss"}) {
 		t.Fatal(f.decided)
 	}
 }
@@ -474,6 +480,7 @@ func TestTheUpdatesBubbleCallsAreNoOpsWithoutAnAgent(t *testing.T) {
 		"agent.choose":      map[string]any{"token": "hawk", "option": 1},
 		"agent.typedAnswer": map[string]any{"token": "hawk", "text": "x"},
 		"agent.chatAbout":   map[string]any{"token": "hawk"},
+		"agent.dismiss":     map[string]any{"id": 1},
 		"agent.pick":        map[string]any{"token": "hawk", "options": []int{1}},
 		"agent.focusJob":    map[string]any{"job": "job_000000000001"},
 		"presence.set":      map[string]any{"away": true},

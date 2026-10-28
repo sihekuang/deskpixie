@@ -98,6 +98,15 @@ func TestALineWithNoSessionIsTheCoordinators(t *testing.T) {
 	}
 }
 
+// #388: a session's own question the bubble can dismiss can be dismissed in the chat window too.
+func TestARequestCarriesWhetherItCanBeDismissed(t *testing.T) {
+	es := RequestEntries([]agent.UpdateItem{{ID: 6, Text: "Want me to?", Session: "api", Asking: true, Dismissible: true},
+		{ID: 7, Text: "Run it?", Token: "t7"}}, agent.EmptyRoster())
+	if !es[0].Request.Dismissible || es[1].Request.Dismissible {
+		t.Fatalf("%+v %+v", es[0].Request, es[1].Request)
+	}
+}
+
 func TestRequestsAreKeyedByTheirItem(t *testing.T) {
 	items := []agent.UpdateItem{{ID: 4, Text: "Run it?", Token: "abc", Session: "s"}, {ID: 9, Text: "Which?", Options: []string{"a"}}}
 	a := RequestEntries(items, agent.EmptyRoster())

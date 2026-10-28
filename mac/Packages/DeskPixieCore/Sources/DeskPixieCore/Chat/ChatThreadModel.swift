@@ -343,6 +343,12 @@ public final class ChatThreadModel {
         await call("agent.pick") { try client.pick(token: token, options: options) }
     }
 
+    /// Dismiss on a session's question (#388): the core marks it Dismissed and takes it away.
+    public func dismiss(item: UInt64) async {
+        let client = client
+        await call("agent.dismiss") { try client.dismiss(item: item) }
+    }
+
     public func typedAnswer(token: String, text: String) async {
         let client = client
         await call("agent.typedAnswer") { try client.typedAnswer(token: token, text: text) }
@@ -450,6 +456,11 @@ public final class ChatThreadModel {
 
     /// Reply…: a question that takes a typed answer, or one with no buttons, answered by a
     /// message to its session.
+    /// Whether the card shows Dismiss: a session's question with no buttons, still open (#388).
+    public static func offersDismiss(_ e: ChatEntry) -> Bool {
+        isOpen(e) && e.request?.dismissible == true
+    }
+
     public static func offersReply(_ e: ChatEntry) -> Bool {
         guard isOpen(e), let r = e.request, r.kind == "question" else { return false }
         if !r.token.isEmpty { return r.typed && !r.multi }

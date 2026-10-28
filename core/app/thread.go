@@ -232,6 +232,22 @@ func (a *App) threadAnswered(token string, outcome func(chat.Entry) string) {
 	}
 }
 
+// outcomeDismissed is a request you dismissed (#388): not answered, and no longer waiting.
+const outcomeDismissed = "Dismissed"
+
+// threadDismissed records Dismiss on the open request of outbox line item (#388), from the
+// bubble or the chat window. None open: nothing is recorded.
+func (a *App) threadDismissed(item uint64) {
+	op := a.beginThread()
+	defer op.end()
+	for _, e := range a.thread.Needs() {
+		if e.Request.Item == item && e.Request.Dismissible {
+			op.update(e.ID, func(e *chat.Entry) { e.Request.Outcome = outcomeDismissed })
+			return
+		}
+	}
+}
+
 // threadSentAnswer records a message sent in the box as the answer to the question it
 // answered: a request with no token that is the job's own (session "") or that session's. The
 // newest one still open, or marked answered elsewhere (the agent's new list may come before

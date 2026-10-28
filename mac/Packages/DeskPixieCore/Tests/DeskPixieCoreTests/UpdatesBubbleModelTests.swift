@@ -319,6 +319,46 @@ final class UpdatesBubbleModelTests: XCTestCase {
         XCTAssertFalse(line(5).offersTerminal)
     }
 
+    /// #388: Dismiss shows on a session's own question the core marks dismissible, never on a
+    /// card with buttons or a job's question, and decodes from the core's JSON.
+    func testDismissShowsOnASessionsDismissibleQuestionOnly() throws {
+        let asks = UpdateLine(id: 2, text: "Want me to push it?", kind: "session", at: 2, job: nil, worker: nil,
+                              session: "trader", title: "trader", asking: true, dismissible: true)
+        XCTAssertTrue(asks.offersDismiss)
+        let notMarked = UpdateLine(id: 3, text: "Want me to push it?", kind: "session", at: 3, job: nil, worker: nil,
+                                   session: "trader", title: "trader", asking: true)
+        XCTAssertFalse(notMarked.offersDismiss)
+        let jobQuestion = UpdateLine(id: 4, text: "Which branch?", kind: "question", at: 4, job: "job_1", worker: nil)
+        XCTAssertFalse(jobQuestion.offersDismiss)
+        let menu = UpdateLine(id: 5, text: "Push?", kind: "question", at: 5, job: nil, worker: nil,
+                              token: "owl", options: ["Push", "Don't"], dismissible: true)
+        XCTAssertFalse(menu.offersDismiss) // buttons first, whatever the flag says
+        let json = #"{"id":7,"text":"Want me to?","kind":"session","at":7,"session":"api","asking":true,"dismissible":true}"#
+        let decoded = try JSONDecoder().decode(UpdateLine.self, from: Data(json.utf8))
+        XCTAssertTrue(decoded.offersDismiss)
+    }
+
+    /// #388: every card can be seen in the chat window, at the request the thread keys by its
+    /// line; its terminal comes up when it says where it comes from.
+    func testACardOpensItsChatEntryAndItsSourcesTerminal() {
+        let menu = UpdateLine(id: 12, text: "Push?", kind: "question", at: 1, job: nil, worker: nil,
+                              token: "owl", session: "api", options: ["Push", "Don't"])
+        XCTAssertEqual(menu.chatEntryID, "req12")
+        XCTAssertTrue(menu.hasSource)
+        XCTAssertFalse(menu.offersTerminal) // its own buttons first; the terminal is a footer button
+        let job = UpdateLine(id: 13, text: "Which branch?", kind: "question", at: 1, job: "job_1", worker: nil)
+        XCTAssertTrue(job.hasSource)
+        let worker = UpdateLine(id: 14, text: "Allow?", kind: "question", at: 1, job: nil, worker: "w1", token: "hawk")
+        XCTAssertTrue(worker.hasSource)
+        let bare = UpdateLine(id: 15, text: "Run it?", kind: "question", at: 1, job: nil, worker: nil, token: "lark")
+        XCTAssertFalse(bare.hasSource)
+        let app = UpdateLine(id: 16, text: "Allow?", kind: "question", at: 1, job: nil, worker: nil, token: "kite",
+                             app: "com.googlecode.iterm2")
+        XCTAssertTrue(app.hasSource)
+        XCTAssertTrue(app.sourceIsApp) // "Open app", not "Terminal"
+        XCTAssertFalse(menu.sourceIsApp)
+    }
+
     func testTheGuardIsPerQuestion() {
         var m = UpdatesBubbleModel(); m.apply([], now: 0, pop: .allowed)
         m.apply([question(1, "hawk")], now: 10, pop: .allowed)

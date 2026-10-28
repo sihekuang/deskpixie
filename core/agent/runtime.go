@@ -678,6 +678,7 @@ func (h *AgentHandle) Decide(token string, allow bool) { h.Input(DecideInput(tok
 func (h *AgentHandle) Choose(token string, option int)  { h.Input(ChooseInput(token, option)) }
 func (h *AgentHandle) TypedAnswer(token, text string)   { h.Input(TypedAnswerInput(token, text)) }
 func (h *AgentHandle) ChatAbout(token string)           { h.Input(ChatAboutInput(token)) }
+func (h *AgentHandle) Dismiss(id uint64)                { h.Input(DismissInput(id)) }
 func (h *AgentHandle) Pick(token string, options []int) { h.Input(PicksInput(token, options)) }
 
 // answerSession types your answer into a pix session's prompt (#105): taken, said is told; a
