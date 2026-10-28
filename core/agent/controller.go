@@ -481,6 +481,9 @@ type AgentController struct {
 
 	// asked: the question Pixie relayed last, which an answer without a job id answers (#161).
 	asked asker
+	// reask: the question Pixie relayed last as it was said, to say again once in the next
+	// conversation when the one it was said in closed before you answered (#382).
+	reask reask
 
 	// modes: agent -> in Manual mode (Claude agents only); manualSaid: Pixie told the user once (#97).
 	modes      map[string]bool
@@ -919,6 +922,7 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 			for _, n := range in.Voice.Undelivered {
 				c.reroute(n, now, &fx)
 			}
+			c.reaskClosed()
 		case voice.SigUserSaid:
 			c.onUserSaid(in.Voice.Text, now, &fx)
 		}
@@ -1095,6 +1099,7 @@ func (c *AgentController) voiceOpened(fx *[]Effect) {
 		n := c.remember(Notice{Text: "Coordinator replies while you were away:\n- " + l.Kind.Prefix() + l.Text}, []Line{l})
 		*fx = append(*fx, Effect{Kind: EfInject, Notice: n})
 	}
+	c.reaskOpened(fx)
 }
 
 // ---------- jobs ----------
@@ -1767,7 +1772,9 @@ func (c *AgentController) onReply(id JobID, status SpokenStatus, text string, no
 		c.jobs.SetReply(id, text, now)
 		c.saveJob(id, fx)
 		c.askedBy(asker{job: id, at: now})
-		c.deliverOpening(NewJobLine(LineQuestion, text, id), now, fx)
+		line := NewJobLine(LineQuestion, text, id)
+		c.reask = reask{at: now, line: line}
+		c.deliverOpening(line, now, fx)
 	case SpokenDone:
 		_, _ = c.jobs.Transition(id, JobDone, now)
 		c.jobs.SetReply(id, text, now)
@@ -1902,6 +1909,7 @@ func (c *AgentController) onMode(agent, mode string, now Millis, fx *[]Effect) {
 }
 
 func (c *AgentController) onUserSaid(text string, now Millis, fx *[]Effect) {
+	c.reaskHeard()
 	for _, d := range c.confirms.OnTranscript(text) {
 		c.applyDecided(d, now, fx)
 	}
@@ -2228,6 +2236,9 @@ func (c *AgentController) onSessionTurn(name string, t SessionTurn, now Millis, 
 			return
 		}
 	}
+	if asking && c.asked.session == name && c.asked.at == now {
+		c.reask = reask{at: now, line: line}
+	}
 	c.deliverUpdate(line, now, fx)
 }
 
@@ -2359,6 +2370,7 @@ func (c *AgentController) remember(n Notice, lines []Line) Notice {
 		n.Held, n.HeldSeq = lines[0].Held, lines[0].HeldSeq
 		c.heldNoticed[n.Held] = max(c.heldNoticed[n.Held], n.HeldSeq)
 	}
+	c.reaskInjected(lines)
 	c.injected = append(c.injected, injectedNotice{n.Text, lines})
 	if len(c.injected) > 64 {
 		c.injected = c.injected[1:]
@@ -2386,6 +2398,7 @@ func (c *AgentController) reroute(n Notice, now Millis, fx *[]Effect) {
 	if !known {
 		lines = []Line{NewLine(LineInfo, stripPrefix(n.Text))}
 	}
+	c.reaskBounced(lines)
 	for _, line := range lines {
 		if line.Token != nil && !c.confirms.IsPendingToken(*line.Token) {
 			continue
