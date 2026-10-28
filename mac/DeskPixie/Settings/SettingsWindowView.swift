@@ -19,25 +19,19 @@ struct SettingsWindowView: View {
     private var selectedIndex: Int { min(max(tab, 0), SettingsLayout.tabs.count - 1) }
 
     var body: some View {
-        HStack(spacing: 0) {
-            // The field sits above the sidebar, not in it: the sidebar becomes the results on the
-            // first character typed, and a field inside it was built anew, losing its focus (#374).
-            VStack(spacing: 0) {
-                SettingsSearchField(text: Binding(get: { model.query }, set: { model.query = $0 }))
-                    .padding(.horizontal, 10)
-                    .padding(.top, 8)
-                    .padding(.bottom, 4)
-                sidebar
-            }
-            .frame(width: 200)
-
+        // The system's sidebar and page (as System Settings and Finder): its materials, title
+        // bar and search field, nothing drawn by hand (#391). The field belongs to the split
+        // view, not the list, so the list turning into results keeps its focus (#374).
+        NavigationSplitView {
+            sidebar
+                .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
+                .toolbar(removing: .sidebarToggle)
+        } detail: {
             SettingsDetailView(model: model, tab: SettingsLayout.tabs[selectedIndex])
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(
-                    VisualEffectBackground(material: .sidebar, blendingMode: .behindWindow)
-                        .ignoresSafeArea()
-                )
         }
+        .searchable(text: Binding(get: { model.query }, set: { model.query = $0 }),
+                    placement: .sidebar, prompt: "Search")
+        .background(Button("") { observers.focusSearch() }.keyboardShortcut("f").opacity(0).accessibilityHidden(true))
         .frame(minWidth: 720, minHeight: 520)
         .background(WindowAccessor { window in observers.attach(window, model: model) })
         .onAppear {
@@ -59,73 +53,49 @@ struct SettingsWindowView: View {
         }
     }
 
-    /// The pages, or while searching, what the search found (#287).
-    @ViewBuilder
+    /// A sidebar row: a page, or a setting the search found.
+    private enum SidebarItem: Hashable {
+        case page(Int)
+        case hit(String)
+    }
+
+    /// The pages, or while searching, what the search found (#287). One list whose rows change,
+    /// not two lists: the search field belongs to the sidebar and is built again with a new
+    /// list, losing its focus after the first character (#374).
     private var sidebar: some View {
-        if model.searching {
-            List(selection: Binding<String?>(
-                get: { model.revealed?.path },
-                set: { path in
+        List(selection: Binding<SidebarItem?>(
+            get: {
+                if model.searching { return model.revealed.map { .hit($0.path) } }
+                return .page(selectedIndex)
+            },
+            set: { item in
+                switch item {
+                case .hit(let path):
                     if let hit = model.hits.first(where: { $0.path == path }) { model.reveal(hit) }
+                case .page(let new) where new != selectedIndex:
+                    tab = new
+                    model.recordingPath = nil
+                default:
+                    break
                 }
-            )) {
+            }
+        )) {
+            if model.searching {
                 if model.hits.isEmpty {
                     Text(SettingsLayout.noResultsText(model.query))
                         .foregroundStyle(.secondary)
                         .selectionDisabled()
                 }
                 ForEach(model.hits, id: \.path) { hit in
-                    SettingsHitRow(hit: hit).tag(hit.path)
+                    SettingsHitRow(hit: hit).tag(SidebarItem.hit(hit.path))
                 }
-            }
-            .listStyle(.sidebar)
-        } else {
-            List(selection: Binding<Int?>(
-                get: { selectedIndex },
-                set: { new in
-                    guard let new, new != selectedIndex else { return }
-                    tab = new
-                    model.recordingPath = nil
-                }
-            )) {
+            } else {
                 ForEach(Array(SettingsLayout.tabs.enumerated()), id: \.offset) { index, t in
-                    SettingsSidebarRow(tab: t).tag(index)
+                    SettingsSidebarRow(tab: t).tag(SidebarItem.page(index))
                 }
             }
-            .listStyle(.sidebar)
         }
-    }
-}
-
-/// The search field above the sidebar (#287): ⌘F focuses it, Escape clears it.
-private struct SettingsSearchField: View {
-    @Binding var text: String
-    @FocusState private var focused: Bool
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
-            TextField("Search", text: $text)
-                .textFieldStyle(.plain)
-                .focused($focused)
-                .onExitCommand { text = "" }
-                .accessibilityLabel("Search settings")
-            if !text.isEmpty {
-                Button {
-                    text = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Clear search")
-            }
-        }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 4)
-        .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary))
-        .background(Button("") { focused = true }.keyboardShortcut("f").opacity(0).accessibilityHidden(true))
+        .listStyle(.sidebar)
     }
 }
 
@@ -197,7 +167,7 @@ private struct SettingsSidebarRow: View {
     }
 }
 
-/// The selected page: its header, then the tab's rows, scrolling when taller than the window.
+/// The selected page: the tab's rows, scrolling when taller than the window.
 private struct SettingsDetailView: View {
     let model: SettingsModel
     let tab: SettingsLayout.Tab
@@ -208,20 +178,13 @@ private struct SettingsDetailView: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    HStack(spacing: 10) {
-                        SettingsIconTile(tab: tab, size: 28, glyph: 14, radius: 7)
-                        Text(tab.title)
-                            .font(.title2)
-                            .fontWeight(.semibold)
-                            .accessibilityAddTraits(.isHeader)
-                    }
-                    SettingsTabView(model: model, section: tab.section, highlighted: highlighted)
-                }
+                SettingsTabView(model: model, section: tab.section, highlighted: highlighted)
                 .padding(.horizontal, 24)
                 .padding(.vertical, 20)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            // The page's name is the window's title, as in System Settings (#391).
+            .navigationTitle(tab.title)
             // Runs again when the page changes, since a reveal can switch to another page first.
             .task(id: "\(model.revealCount)|\(tab.section.rawValue)") {
                 guard let hit = model.takeReveal(for: tab.section) else { return }
@@ -256,6 +219,31 @@ private final class WindowObservers {
     private var tokens: [NSObjectProtocol] = []
     private weak var window: NSWindow?
 
+    /// ⌘F: into the search field (#287), which the system puts in the window's title bar.
+    func focusSearch() {
+        guard let window, let frame = window.contentView?.superview,
+              let field = Self.searchField(in: frame) else { return }
+        window.makeFirstResponder(field)
+    }
+
+    private static func searchField(in view: NSView) -> NSSearchField? {
+        if let field = view as? NSSearchField { return field }
+        return view.subviews.lazy.compactMap(searchField).first
+    }
+
+    /// The sidebar stays open, as in System Settings: there is no toggle to bring it back
+    /// (#391). The split view exists only once the window has laid out.
+    private static func keepSidebar(in window: NSWindow) {
+        guard let split = window.contentView.flatMap(splitView),
+              let controller = split.delegate as? NSSplitViewController else { return }
+        controller.splitViewItems.first?.canCollapse = false
+    }
+
+    private static func splitView(in view: NSView) -> NSSplitView? {
+        if let split = view as? NSSplitView { return split }
+        return view.subviews.lazy.compactMap(splitView).first
+    }
+
     func attach(_ window: NSWindow, model: SettingsModel) {
         guard self.window !== window else { return }
         tokens.forEach(NotificationCenter.default.removeObserver)
@@ -263,12 +251,8 @@ private final class WindowObservers {
         window.identifier = NSUserInterfaceItemIdentifier("settings")
         window.setFrameAutosaveName(SettingsWindowView.frameName)
         window.level = .normal
-        // The sidebar and the page run up under a clear title bar (no grey strip above them);
-        // the page header names the page, so the window title is hidden.
-        window.styleMask.insert(.fullSizeContentView)
-        window.titlebarAppearsTransparent = true
-        window.titleVisibility = .hidden
         window.collectionBehavior.insert([.moveToActiveSpace, .fullScreenAuxiliary])
+        DispatchQueue.main.async { Self.keepSidebar(in: window) }
         // First open: the window exists only now; bring it in front of other apps' windows.
         WindowFocus.bringForward(window, app: NSApp, showInDock: true)
         let center = NotificationCenter.default

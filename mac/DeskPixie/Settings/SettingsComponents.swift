@@ -22,26 +22,6 @@ struct SettingsPane<Content: View>: View {
     }
 }
 
-/// Translucent backing matching macOS preference panes; AppKit swaps in a solid background
-/// when Reduce Transparency is on.
-struct VisualEffectBackground: NSViewRepresentable {
-    var material: NSVisualEffectView.Material = .underWindowBackground
-    var blendingMode: NSVisualEffectView.BlendingMode = .behindWindow
-
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.material = material
-        view.blendingMode = blendingMode
-        view.state = .followsWindowActiveState
-        return view
-    }
-
-    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
-        nsView.material = material
-        nsView.blendingMode = blendingMode
-    }
-}
-
 /// Calls `onWindow` once with the NSWindow hosting this view.
 struct WindowAccessor: NSViewRepresentable {
     let onWindow: (NSWindow) -> Void
