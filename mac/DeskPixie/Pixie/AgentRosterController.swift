@@ -75,6 +75,7 @@ final class AgentRosterController {
         panel = PixiePanel(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
         hosting = RosterHostingView(rootView: AnyView(EmptyView()))
         panel.contentView = hosting
+        pixie.rosterPanel = panel
         pixie.observeFrame { [weak self] _ in self?.layout() }
         richText.onChange = { [weak self] in DispatchQueue.main.async { self?.layout() } }
         timer = Timer.scheduledTimer(withTimeInterval: Self.pollInterval, repeats: true) { [weak self] _ in
@@ -674,14 +675,19 @@ final class AgentRosterController {
             if !(s.width > 0 && s.height > 0) { hide(); return }
         }
         panel.setFrame(ScreenDisplays.appKitFrame(topLeft: rect.origin, size: rect.size), display: true)
-        if (model.open || cardUp) && panel.parent != nil && pixie.panel.childWindows?.last !== panel {
-            // Above the updates bubble (a sibling child panel): re-adding puts it last. Only
-            // when it isn't already: re-ordering on every layout made the windows flicker (#286).
-            pixie.panel.removeChildWindow(panel)
-        }
         if panel.parent == nil { pixie.panel.addChildWindow(panel, ordered: .above) }
         if !panel.isVisible { panel.orderFrontRegardless() }
         if panel.alphaValue != 1 { panel.alphaValue = 1 }
+        // Over the updates bubble (a sibling child panel) when the list or a card is up, unless
+        // you're using the bubble (#91, #398).
+        showing(open: model.open || chat.open, card: captionCard)
+    }
+
+    /// What the panel shows, for which of it and the updates bubble goes in front.
+    private func showing(open: Bool, card: Bool) {
+        pixie.overlays.rosterOpen = open
+        pixie.overlays.rosterCard = card
+        pixie.orderOverlays()
     }
 
     /// The card is drawn: the text box, or a caption on its own in voice mode (#224).
@@ -694,6 +700,7 @@ final class AgentRosterController {
         if panel.parent != nil { pixie.panel.removeChildWindow(panel) }
         if panel.isVisible { panel.orderOut(nil) }
         model.open = false
+        showing(open: false, card: false)
         setRoot()
     }
 

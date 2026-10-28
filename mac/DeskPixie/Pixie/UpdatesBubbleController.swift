@@ -60,6 +60,7 @@ final class UpdatesBubbleController {
         panel = PixiePanel(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
         hosting = BubbleHostingView(rootView: AnyView(EmptyView()))
         panel.contentView = hosting
+        pixie.bubblePanel = panel
         pixie.observeFrame { [weak self] _ in self?.layout() }
         richText.onChange = { [weak self] in DispatchQueue.main.async { self?.layout() } }
         timer = Timer.scheduledTimer(withTimeInterval: Self.pollInterval, repeats: true) { [weak self] _ in
@@ -233,7 +234,9 @@ final class UpdatesBubbleController {
         // A badge faded with Pixie is not looked at: a passing pointer doesn't open it.
         let mouse = NSEvent.mouseLocation
         keeper.pointer(at: pixie.hoverPointer, frames: pixie.hoverFrames, now: Self.now)
-        let onPanel = panel.isVisible && panel.frame.contains(mouse)
+        // Not where the roster's panel is in front of it (#398): passing over the text box would
+        // open the bubble under it and bring it over what you're typing.
+        let onPanel = panel.isVisible && panel.frame.contains(mouse) && !pixie.covers(bubbleAt: mouse)
         // Closed with Hide: it opens again on hover once the pointer has been away.
         if !keeper.inside { model.regionLeft() }
         // Opened only on the badge or bubble itself; once open, the whole region keeps it.
@@ -390,6 +393,17 @@ final class UpdatesBubbleController {
         }
         if !panel.isVisible { panel.orderFrontRegardless() }
         updateAlpha()
+        showing(model.phase)
+    }
+
+    /// What the bubble shows, for which of it and the roster's panel goes in front (#398).
+    private func showing(_ phase: UpdatesBubbleModel.Phase) {
+        switch phase {
+        case .expanded: (pixie.overlays.bubbleExpanded, pixie.overlays.bubblePopped) = (true, false)
+        case .popped: (pixie.overlays.bubbleExpanded, pixie.overlays.bubblePopped) = (false, true)
+        case .hidden, .badge: (pixie.overlays.bubbleExpanded, pixie.overlays.bubblePopped) = (false, false)
+        }
+        pixie.orderOverlays()
     }
 
     /// Layouts in a row that found the view unmeasured (see `layout`).
@@ -398,6 +412,7 @@ final class UpdatesBubbleController {
     private func hide() {
         if panel.parent != nil { pixie.panel.removeChildWindow(panel) }
         if panel.isVisible { panel.orderOut(nil) }
+        showing(.hidden)
         // Hidden under the pointer (bubble turned off, Pixie hidden): it was not looked at.
         if pointerInside {
             pointerInside = false
