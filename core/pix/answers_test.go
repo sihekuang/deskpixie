@@ -459,6 +459,44 @@ func TestAPermissionsDontAskAgainIsItsDigit(t *testing.T) {
 	}
 }
 
+// #400: a question asked while DeskPixie was away (quit, crashed, restarting) is asked again
+// once pix registers, as it was told; one answered isn't.
+func TestAQuestionAskedWhileDeskPixieWasAwayIsAskedOnReconnect(t *testing.T) {
+	h := screensHarness(t, bashDialog, "\x1b[2J\x1b[H* Bash(npm test)\r\n", 0)
+	if hasQuestion(h.s.resend(), "") {
+		t.Fatal("asked again with no question waiting")
+	}
+	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "npm test"}})
+	var q wire.Msg
+	waitEvent(t, h.d.events, "the dialog as shown", func(m wire.Msg) bool {
+		q = m
+		return m.Event == "question" && len(m.Keys) == 3
+	})
+	again := h.s.resend()
+	if !hasQuestion(again, q.ID) {
+		t.Fatalf("not asked again on reconnect: %+v", again)
+	}
+	for _, m := range again {
+		if m.Event == "question" && (m.Source != "permission" || len(m.Keys) != 3 || m.Keys[1] != q.Keys[1]) {
+			t.Fatalf("asked again as %+v, told %+v", m, q)
+		}
+	}
+	h.s.clearQuestion("UserPromptSubmit")
+	if hasQuestion(h.s.resend(), "") {
+		t.Fatal("an answered question asked again")
+	}
+}
+
+// hasQuestion: msgs asks question id (any, for "").
+func hasQuestion(msgs []wire.Msg, id string) bool {
+	for _, m := range msgs {
+		if m.Event == "question" && (id == "" || m.ID == id) {
+			return true
+		}
+	}
+	return false
+}
+
 // #364: a menu of several questions, and a question of several picks, as Claude Code 2.1.311
 // and Codex 0.164 draw them: a tab each, then Claude's review.
 

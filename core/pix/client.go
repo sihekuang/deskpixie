@@ -87,9 +87,13 @@ func (c *Client) connect(ctx context.Context) (registered, refused bool) {
 		c.OnRegistered(reply)
 	}
 	if c.Resend != nil {
+		// Taken and written under mu: a Send meanwhile (a question gone) waits and follows it.
+		c.mu.Lock()
 		for _, m := range c.Resend() {
-			c.Send(m)
+			c.conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
+			wire.Encode(c.conn, m)
 		}
+		c.mu.Unlock()
 	}
 	for {
 		m, err := dec.Next()

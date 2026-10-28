@@ -19,14 +19,17 @@ import (
 const sessionRequestBase RequestID = 1 << 62
 
 // onSessionQuestion asks you session's prompt q; a prompt it asked before is replaced. Asked
-// again while it waits with its buttons (pix's hook let go of it, #347), it changes in place:
-// it is not told twice.
+// again while it waits (pix's hook let go of it, #347, or pix reconnected, #400), it changes in
+// place: it is not told twice.
 func (c *AgentController) onSessionQuestion(session string, q SessionQuestion, now Millis, fx *[]Effect) {
 	if c.shutDown {
 		return
 	}
-	if len(q.Options) > 0 && c.confirms.RefreshSession(session, q.ID, askedAs(q), q.Typed) {
+	if c.confirms.RefreshSession(session, q.ID, askedAs(q), q.Typed) {
 		return
+	}
+	if a, ok := c.announced[session]; ok && a.question == q.ID && a.asked == askedAs(q) {
+		return // announced only, and said already
 	}
 	c.confirms.TakeSession(session, "")
 	delete(c.announced, session)
@@ -87,7 +90,7 @@ func (c *AgentController) onSessionQuestion(session string, q SessionQuestion, n
 		line.Text, line.Brief = describe("")
 		c.deliver(line, now, fx)
 		if id, ok := c.asking[session]; ok {
-			c.announced[session] = announcedQuestion{question: q.ID, line: id}
+			c.announced[session] = announcedQuestion{question: q.ID, asked: askedAs(q), line: id}
 		}
 		return
 	}
@@ -139,6 +142,7 @@ func askedAs(q SessionQuestion) string {
 // outbox line that asks it.
 type announcedQuestion struct {
 	question string
+	asked    string // askedAs: a new pix numbers its prompts from q1 again
 	line     uint64
 }
 

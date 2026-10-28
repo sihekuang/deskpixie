@@ -234,6 +234,33 @@ func TestAMenuAskedAgainWhileItWaitsChangesInPlace(t *testing.T) {
 	}
 }
 
+// #400: pix asks what still waits again each time it reconnects. A prompt the app still holds,
+// with buttons or without (Allow and Deny, a notice, a menu without options), stays one card and
+// isn't said again; another prompt under that id is.
+func TestAPromptAskedAgainOnReconnectIsntToldTwice(t *testing.T) {
+	for _, q := range []SessionQuestion{
+		bashAsk,
+		pushMenu,
+		{ID: "q4", Label: "api", Kind: "menu", Text: "Which files?"},
+		{ID: "q6", Label: "api", Kind: "notice", Tool: "ExitPlanMode", Input: `{"plan":"x"}`},
+	} {
+		c := ctl()
+		first := bubbleOf(askSession(c, q, T0))
+		fx := askSession(c, q, T0+1)
+		if n := len(effectsOfKind(fx, EfNotify)) + len(effectsOfKind(fx, EfInject)); n != 0 {
+			t.Fatalf("%s %s: told again: %s", q.Kind, q.ID, fmtEffects(fx))
+		}
+		if u := c.Updates(); len(u) != 1 || len(first) != 1 || u[0].ID != first[0].ID {
+			t.Fatalf("%s %s: %+v, was %+v", q.Kind, q.ID, u, first)
+		}
+		other := q
+		other.Text, other.Input = "Something else?", `{"command":"rm x"}`
+		if fx := askSession(c, other, T0+2); len(effectsOfKind(fx, EfNotify))+len(effectsOfKind(fx, EfInject)) == 0 {
+			t.Fatalf("%s %s: another prompt under its id not told: %s", q.Kind, q.ID, fmtEffects(fx))
+		}
+	}
+}
+
 // Review of #347: a new pix under the same name numbers its prompts from q1 again. Its q1 is
 // another prompt: it replaces the old card, options and all, and is told.
 func TestAnotherPromptUnderTheSameIDReplacesTheCard(t *testing.T) {
