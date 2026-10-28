@@ -34,6 +34,7 @@ import (
 	"github.com/sihekuang/deskpixie/core/tools"
 	"github.com/sihekuang/deskpixie/core/voice"
 	"github.com/sihekuang/deskpixie/core/voice/gemini"
+	"github.com/sihekuang/deskpixie/core/voice/openailive"
 )
 
 // handOff is one delegate call: its task and context, lowercased.
@@ -356,6 +357,52 @@ func TestLiveAnsweringARelayedQuestion(t *testing.T) {
 		if p.name == gemini.Name && !passed {
 			geminiFailed = true
 		}
+	}
+}
+
+// #377, live: the voice log's 14:06 menu, answered with a pause in the middle ("Create both
+// unassigned" … "three points each is fine"). GPT-Live hands the turn to the app after the
+// second piece; the joined words must still go through answer_job, not a new delegate.
+// GPT-Live with client delegation only: the other providers call answer_job themselves.
+//
+//	go test -count=1 -tags live -run TestLiveASplitAnswerIsStillAnAnswer -v ./voice/
+func TestLiveASplitAnswerIsStillAnAnswer(t *testing.T) {
+	secrets := liveSecrets(t)
+	if _, ok := secrets.APIKey(openailive.Name); !ok {
+		t.Skip("no GPT-Live key")
+	}
+	notice := "Coordinator replies while you were away:\n- Coordinator question: OVA-23377: convert four subtasks to stories is asking: Create these 2 stories under OVA-23377? Choose Create both, unassigned, Create both, assign to me or Change something first."
+	first, second := liveSpeech(t, "Create both unassigned."), liveSpeech(t, "Three points each is fine.")
+	lead, pause := make([]int16, audio.SampleRate/2), make([]int16, audio.SampleRate*3/2)
+	var mu sync.Mutex
+	var calls []handOff
+	var answers []string
+	reg := voice.NewToolRegistry()
+	reg.Register(recordingDelegate{mu: &mu, calls: &calls})
+	reg.Register(recordingAnswer{mu: &mu, answers: &answers})
+	cfg := voice.SessionConfig{Model: openailive.DefaultModel, Voice: openailive.DefaultVoice,
+		Instructions: app.Instructions(voice.DefaultPersona(), agent.DelegationPersona), ClientDelegation: true,
+		BackendModel: "gpt-6-luna"}
+	// The app's defaults: the claim check and the hand-off when unsure are on.
+	conv := voice.DefaultConversationConfig()
+	conv.HandOff, conv.CheckClaims = true, true
+	r := newLiveRigConv(t, openailive.New(""), cfg, secrets, reg, conv)
+	r.rt.Hotkey()
+	if !r.waitFor("Ready", 10*time.Second, func() bool { return r.liveSpy.count(voice.EvReady) > 0 }) {
+		return
+	}
+	r.rt.Inject(voice.Notice{Text: notice})
+	r.waitFor("Pixie asking the question", 30*time.Second, func() bool { return strings.Contains(r.liveSpy.assistant(), "?") })
+	time.Sleep(3 * time.Second) // its audio finishes playing
+	r.say(slices.Concat(lead, first, pause, second))
+	r.waitFor("a hand-off", 30*time.Second, func() bool { mu.Lock(); defer mu.Unlock(); return len(answers)+len(calls) > 0 })
+	time.Sleep(3 * time.Second)
+	r.rt.Hotkey()
+	mu.Lock()
+	defer mu.Unlock()
+	t.Logf("%s; answers %q; delegate calls %+v", r.liveSpy.summary(), answers, calls)
+	if len(answers) != 1 || len(calls) != 0 {
+		t.Errorf("want one answer_job and no delegate: answers %q, delegate %+v", answers, calls)
 	}
 }
 

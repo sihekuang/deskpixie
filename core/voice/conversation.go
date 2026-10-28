@@ -845,8 +845,10 @@ func (c *Conversation) newHandOffTurn() {
 	if n := len(c.hoHistory); n > handOffHistoryLines {
 		c.hoHistory = append([]string(nil), c.hoHistory[n-handOffHistoryLines:]...)
 	}
+	// A pause can split an answer into turns: it stays an answer until Pixie speaks or it goes.
+	carry := c.answerTurn && len(c.hoBot) == 0 && !c.hoHandedOff
 	c.hoUser, c.hoBot = "", nil
-	c.answerTurn, c.questionAsked = c.questionAsked, false
+	c.answerTurn, c.questionAsked = c.questionAsked || carry, false
 	c.hoTool, c.hoSettled, c.hoHandedOff = false, false, false
 	c.hoTools = nil
 	c.claimFix, c.claimFixTool = Notice{}, ""

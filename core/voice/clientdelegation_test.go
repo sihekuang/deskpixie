@@ -325,6 +325,26 @@ func TestClientDelegationJoinsASplitUtterance(t *testing.T) {
 	}
 }
 
+// A pause splits the user's answer to a relayed question into two turns ("Create both
+// unassigned" | "Three points each is fine"): the joined task is still an answer, so it picks
+// the session's option rather than going to it as a new message.
+func TestClientDelegationASplitAnswerIsStillAnAnswer(t *testing.T) {
+	c := newClientConv()
+	c.Step(InjectInput(Notice{Text: "Coordinator replies while you were away:\n- Coordinator question: jira is asking: Create these 2 stories? Choose Create both, unassigned or Change something first."}), ms(t0(), 100))
+	reply(c, "Should it create both unassigned, or change something first?", ms(t0(), 400))
+	userTurn(c, "Create both unassigned", ms(t0(), 2000))
+	userTurn(c, "Three points each is fine", ms(t0(), 3000))
+	if _, a := clientCall(c, "item_1", ms(t0(), 3100)); !a.Answer || a.Task != "Create both unassigned Three points each is fine" {
+		t.Fatalf("%+v", a)
+	}
+	// Once Pixie has answered, the user's next words are a new request.
+	reply(c, "Okay, passed on.", ms(t0(), 3500))
+	userTurn(c, "Also check the build", ms(t0(), 5000))
+	if _, a := clientCall(c, "item_2", ms(t0(), 5100)); a.Answer {
+		t.Fatalf("%+v", a)
+	}
+}
+
 // #95: GPT-Live says the usual acknowledgement without delegating; the claim check hands the
 // request off.
 func TestClientModeOnItWithoutAHandOffIsHandedOff(t *testing.T) {
