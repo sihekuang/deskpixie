@@ -366,5 +366,4 @@ final class PixieController {
         panel.removeChildWindow(w)
         panel.addChildWindow(w, ordered: .above)
     }
-
 }
