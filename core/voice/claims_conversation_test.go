@@ -524,3 +524,25 @@ func TestAGoodbyeStillEndsTheConversation(t *testing.T) {
 		t.Fatal("a goodbye didn't end it")
 	}
 }
+
+// #380: "I'll tell them to …" after the user answers a relayed question, with no hand-off, is
+// handed off as the answer; the same words reading back a "Coordinator reply:" are not.
+func TestClaimTellingTheSessionIsHandedOffAsTheAnswer(t *testing.T) {
+	c := newClaimConv(true, true)
+	c.Step(InjectInput(Notice{Text: "Coordinator question: jira is asking: Create both, unassigned, or change something first?"}), ms(t0(), 100))
+	reply(c, "Should it create both unassigned, or change something first?", ms(t0(), 400))
+	userTurn(c, "Create both unassigned", ms(t0(), 2000))
+	fx := reply(c, "Sure thing, I'll tell them to create both unassigned.", ms(t0(), 2500))
+	fx = append(fx, ticks(c, ms(t0(), 2500), 5*time.Second)...)
+	if h := handOffs(fx); len(h) != 1 || h[0].Text != "Create both unassigned" {
+		t.Fatalf("hand-offs: %+v", h)
+	}
+
+	c = newClaimConv(true, true)
+	c.Step(InjectInput(Notice{Text: "Coordinator reply: Passed on to your session on jira."}), ms(t0(), 100))
+	fx = reply(c, "I passed that on to your session, and I'll let them know.", ms(t0(), 400))
+	fx = append(fx, ticks(c, ms(t0(), 400), 5*time.Second)...)
+	if h := handOffs(fx); len(h) != 0 {
+		t.Fatalf("reading back a reply was handed off: %+v", h)
+	}
+}

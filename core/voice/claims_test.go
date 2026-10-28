@@ -32,6 +32,18 @@ func TestFindClaim(t *testing.T) {
 		{"I passed it to Claude.", nil, DelegateTool, false},
 		{"I've delegated that.", nil, DelegateTool, false},
 		{"I HAVE HANDED THAT OFF.", nil, DelegateTool, false},
+		// #380: passing it along or telling the session, without naming the agent
+		{"Alright, I'll pass that along and let you know when it's done.", nil, DelegateTool, false},
+		{"I've passed it on to your session.", nil, DelegateTool, false},
+		{"Sure thing, I'll tell them to create both unassigned at three points each.", nil, DelegateTool, false},
+		{"I've told the session to go ahead.", nil, DelegateTool, false},
+		{"I'll send it on Monday.", nil, "", false}, // review of #381: "on" a day
+		{"I sent it on Friday.", nil, "", false},
+		{"I'll send that along to them.", nil, DelegateTool, false},
+		{"Okay, I'll let them know.", nil, DelegateTool, false},
+		{"I'll send that along.", nil, DelegateTool, false},
+		{"I'll pass that along.", []string{"answer_job"}, "", false},
+		{"I'll tell them to go ahead.", []string{DelegateTool}, "", false},
 		// #95: the acknowledgement Pixie says after delegating claims a hand-off too
 		{"Sure, I'm on it. I'll let you know when it's done.", nil, DelegateTool, false},
 		{"On it, I'll let you know when it's done.", nil, DelegateTool, false},
@@ -95,6 +107,10 @@ func TestFindClaim(t *testing.T) {
 		{"The timer is set for ten minutes.", nil, "", false},
 		{"I love this song.", nil, "", false},
 		{"I'll let you know.", nil, "", false},
+		{"I'll tell you when it's ready.", nil, "", false},
+		{"I'll pass on that one, it's not my thing.", nil, "", false},
+		{"Should I tell them to go ahead?", nil, "", false},
+		{"I didn't tell them yet.", nil, "", false},
 		{"Paris is the capital of France.", nil, "", false},
 		{"", nil, "", false},
 	}
