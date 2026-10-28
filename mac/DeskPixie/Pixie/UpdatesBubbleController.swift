@@ -234,7 +234,9 @@ final class UpdatesBubbleController {
         // A badge faded with Pixie is not looked at: a passing pointer doesn't open it.
         let mouse = NSEvent.mouseLocation
         keeper.pointer(at: pixie.hoverPointer, frames: pixie.hoverFrames, now: Self.now)
-        let onPanel = panel.isVisible && panel.frame.contains(mouse)
+        // Not where the roster's panel is in front of it (#398): passing over the text box would
+        // open the bubble under it and bring it over what you're typing.
+        let onPanel = panel.isVisible && panel.frame.contains(mouse) && !pixie.covers(bubbleAt: mouse)
         // Closed with Hide: it opens again on hover once the pointer has been away.
         if !keeper.inside { model.regionLeft() }
         // Opened only on the badge or bubble itself; once open, the whole region keeps it.

@@ -357,6 +357,12 @@ final class PixieController {
         _ = gestures.expire(now: ProcessInfo.processInfo.systemUptime)
     }
 
+    /// The roster's panel is in front of the bubble at this point (AppKit screen coordinates).
+    func covers(bubbleAt point: NSPoint) -> Bool {
+        guard overlays.front == .roster, let r = rosterPanel, r.isVisible else { return false }
+        return r.frame.contains(point)
+    }
+
     /// Puts the panel `overlays` says goes in front over the other, if it isn't already: only
     /// then, as re-ordering on every layout made the windows flicker (#286).
     func orderOverlays() {
