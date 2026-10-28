@@ -1409,6 +1409,25 @@ func TestAClaudeDialogIsRelayedAsShownAndAnsweredByNumber(t *testing.T) {
 	typed(t, h, '2')
 }
 
+// Claude redraws only the cells that change: a dialog drawn over a row that already showed most
+// of its command writes only the rest, so pix's output never holds the command whole after the
+// hook. On the screen it is whole, and counts as shown (Oct 28: every tap was refused with "isn't
+// on screen yet" until the session was answered in its terminal).
+func TestADialogRedrawnOnlyWhereItChangedCountsAsShown(t *testing.T) {
+	h := keyHarness(t, "claude")
+	h.s.runner.OnOutput([]byte("\x1b[2J\x1b[H\x1b[6;1H npm run"))
+	h.s.Hook("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "npm test"}})
+	q := askedQuestion(t, h)
+	// Row 6 keeps " npm " and gets "test" over "run"; the rest is new.
+	h.s.runner.OnOutput([]byte("\x1b[1;1H────────────────────────────────────────\x1b[2;1H Bash command\x1b[3;1H Run the tests" +
+		"\x1b[5;1H╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\x1b[6;6Htest\x1b[7;1H╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\x1b[8;1H Do you want to proceed?" +
+		"\x1b[9;1H ❯ 1. Yes\x1b[10;1H   2. Yes, and switch to auto mode\x1b[11;1H   3. No\x1b[13;1H Esc to cancel"))
+	if err := answer(t, h, q.ID, "yes"); err != "" {
+		t.Fatalf("on screen, refused: %q", err)
+	}
+	typed(t, h, '1')
+}
+
 func TestADialogThatIsntReadIsAskedWithoutOptionsSoon(t *testing.T) {
 	h := keyHarness(t, "claude")
 	start := time.Now()

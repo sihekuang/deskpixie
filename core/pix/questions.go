@@ -773,7 +773,7 @@ func (q *question) nextPart(tool, choice string) *question {
 }
 
 // questionWatch notes when the waiting prompt shows on screen: its marker and its detail, both
-// shown after it was asked (PTY reader goroutine only).
+// shown after it was asked, or on the screen whole (PTY reader goroutine only).
 type questionWatch struct {
 	tail string
 	for_ *question
@@ -795,7 +795,13 @@ func (w *questionWatch) watch(s *Session, out string, vt *screen) {
 		if len(w.tail) > 8192 {
 			w.tail = w.tail[len(w.tail)-8192:]
 		}
-		if !strings.Contains(w.tail, noSpace(q.marker)) || !strings.Contains(w.tail, noSpace(q.detail)) {
+		// Claude redraws only the cells that change, so a dialog drawn over a row that showed
+		// most of its text may never be written whole: the screen shows it whole. Its marker
+		// still drawn since it was asked, and its own text (its detail) on the screen with it.
+		s.mu.Lock()
+		onScreen := q.detail != "" && strings.Contains(w.tail, noSpace(q.marker)) && shows(s.screen, q.marker, q.detail)
+		s.mu.Unlock()
+		if !onScreen && (!strings.Contains(w.tail, noSpace(q.marker)) || !strings.Contains(w.tail, noSpace(q.detail))) {
 			return
 		}
 		s.mu.Lock()
