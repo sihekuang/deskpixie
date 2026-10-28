@@ -155,7 +155,7 @@ public enum SettingsLayout {
     /// One row of a tab: the label column, the control, and the line under it.
     public struct ControlSpec: Equatable, Sendable {
         public var path: String
-        /// The label column's text, ending in a colon.
+        /// The row's name, as written.
         public var label: String
         /// The accessibility label: the field's label as written.
         public var a11yLabel: String

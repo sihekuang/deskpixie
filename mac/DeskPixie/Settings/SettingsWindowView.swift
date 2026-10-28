@@ -267,8 +267,8 @@ private final class WindowObservers {
     }
 }
 
-/// One tab: the file-error banner, a grid of label / control / note rows, the extra rows,
-/// the warning (or notice) line and the Restart bar.
+/// One tab, as a grouped form: the file-error banner, a section of name / note / control rows
+/// per group (the extra rows among them), the warning (or notice) line and the Restart bar.
 struct SettingsTabView: View {
     let model: SettingsModel
     /// The pix command row (#89); the login shell's PATH is read once, when Settings opens.
@@ -364,26 +364,26 @@ struct SettingsTabView: View {
     /// The row under the projects folder: whether it is there, with Create when it is missing (#216).
     private func projectsFolderRow(_ folder: ProjectsFolderStatus) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-                Label {
-                    Text(folder.state == .ready ? "Found" : folder.detail)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: 340, alignment: .leading)
-                } icon: {
-                    Image(systemName: folder.state == .ready ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                        .foregroundStyle(folder.state == .ready ? Color.green : Color.orange)
-                        .accessibilityHidden(true)
-                }
-                HStack(spacing: 8) {
-                    if folder.state == .missing {
-                        Button("Create") { model.createProjectsFolder() }
-                            .disabled(!model.enabled)
-                    }
-                    Button("Check Again") { model.refreshProjectsFolder() }
-                }
-                .controlSize(.small)
+            Label {
+                Text(folder.state == .ready ? "Found" : folder.detail)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 340, alignment: .leading)
+            } icon: {
+                Image(systemName: folder.state == .ready ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                    .foregroundStyle(folder.state == .ready ? Color.green : Color.orange)
+                    .accessibilityHidden(true)
             }
+            HStack(spacing: 8) {
+                if folder.state == .missing {
+                    Button("Create") { model.createProjectsFolder() }
+                        .disabled(!model.enabled)
+                }
+                Button("Check Again") { model.refreshProjectsFolder() }
+            }
+            .controlSize(.small)
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Projects folder: \(folder.state == .ready ? "found" : folder.detail)")
     }

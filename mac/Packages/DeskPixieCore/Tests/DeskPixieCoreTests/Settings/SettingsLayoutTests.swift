@@ -53,7 +53,7 @@ final class SettingsLayoutTests: XCTestCase {
                        ["hotkey", "pack", "scale", "proximityFade.enabled", "proximityFade.radius"])
     }
 
-    func test_labels_end_in_a_colon_and_keep_their_text_for_accessibility() {
+    func test_labels_keep_their_text_for_display_and_accessibility() {
         let s = spec("scale", defaults)
         XCTAssertEqual(s.label, "Size")
         XCTAssertEqual(s.a11yLabel, "Size")
