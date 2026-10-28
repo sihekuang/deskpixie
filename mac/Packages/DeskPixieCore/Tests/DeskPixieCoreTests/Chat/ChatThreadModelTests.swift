@@ -4,7 +4,7 @@ import XCTest
 /// A thread like the core's: newest first pages, an unknown `before` gives none, a refused
 /// call throws.
 final class FakeChatClient: ChatClient, @unchecked Sendable {
-    struct Sent: Equatable { let text: String; let attachments: [String]; let session: String? }
+    struct Sent: Equatable { let text: String; let session: String? }
     struct Failure: Error {}
 
     private let lock = NSLock()
@@ -45,7 +45,7 @@ final class FakeChatClient: ChatClient, @unchecked Sendable {
     }
     func needs() throws -> [ChatEntry] { try check(); return lock.withLock { open } }
     func read(upTo: String) throws { try check(); lock.withLock { _reads.append(upTo) } }
-    func send(_ text: String, attachments: [String], session: String?) throws {
+    func send(_ text: String, session: String?) throws {
         try check()
         lock.withLock { gate }?.wait()
         if let why = lock.withLock({ () -> String? in defer { _failNext = nil }; return _failNext }) {
@@ -54,7 +54,7 @@ final class FakeChatClient: ChatClient, @unchecked Sendable {
         if let why = lock.withLock({ () -> String? in defer { _refuse = nil }; return _refuse }) {
             throw DeskPixieEngineError.refused(why)
         }
-        lock.withLock { _sent.append(Sent(text: text, attachments: attachments, session: session)) }
+        lock.withLock { _sent.append(Sent(text: text, session: session)) }
     }
     func decide(token: String, allow: Bool) throws { try check() }
     func choose(token: String, option: Int) throws { try check() }
@@ -186,8 +186,8 @@ final class ChatThreadModelTests: XCTestCase {
         let client = FakeChatClient()
         let model = ChatThreadModel(client: client)
         model.replyTo = ChatWho(kind: "session", name: "herdr:1.2", label: "api")
-        await model.send("hi", attachments: ["/a.png"])
-        XCTAssertEqual(client.sent, [.init(text: "hi", attachments: ["/a.png"], session: "herdr:1.2")])
+        await model.send("hi")
+        XCTAssertEqual(client.sent, [.init(text: "hi", session: "herdr:1.2")])
         XCTAssertNil(model.replyTo)
         XCTAssertFalse(model.thinking, "a reply to a session is not Pixie working")
         await model.send("to pixie")
@@ -522,7 +522,7 @@ final class ChatThreadModelTests: XCTestCase {
         model.reply(to: update)
         XCTAssertEqual(model.placeholder, "Reply to api…")
         await model.send("rebase it")
-        XCTAssertEqual(client.sent, [.init(text: "rebase it", attachments: [], session: "herdr:1.2")])
+        XCTAssertEqual(client.sent, [.init(text: "rebase it", session: "herdr:1.2")])
         XCTAssertTrue(client.typed.isEmpty)
     }
 
@@ -546,9 +546,9 @@ final class ChatThreadModelTests: XCTestCase {
         XCTAssertTrue(model.canSend("", attachments: 1))
         XCTAssertFalse(model.canSend("  ", attachments: 0))
         client.holdSends()
-        let first = Task { await model.send("look", attachments: ["/a.png"]) }
+        let first = Task { await model.send("look") }
         await waitFor { MainActor.assumeIsolated { model.sending } }
-        let second = await model.send("look", attachments: ["/a.png"])
+        let second = await model.send("look")
         XCTAssertFalse(second, "refused while the first is on its way")
         client.release()
         let a = await first.value
@@ -682,7 +682,7 @@ final class ChatThreadModelTests: XCTestCase {
         model.applyNeeds([q])
         model.reply(to: q)
         await model.send("yes")
-        XCTAssertEqual(client.sent, [.init(text: "yes", attachments: [], session: "herdr:1.2")])
+        XCTAssertEqual(client.sent, [.init(text: "yes", session: "herdr:1.2")])
         XCTAssertTrue(client.typed.isEmpty)
     }
 

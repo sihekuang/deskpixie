@@ -240,7 +240,7 @@ final class ChatMentionsTests: XCTestCase {
         await model.loadRecipients()
         model.choose(Self.api)
         client.refuseNextSend("api-server isn't running anymore.")
-        let went = await model.send("ship it", attachments: ["/tmp/a.png"])
+        let went = await model.send("ship it")
         XCTAssertFalse(went, "the composer keeps the draft and the attachments when a send didn't go")
         XCTAssertEqual(model.notice(for: "ship it"), "api-server isn't running anymore.", "the core's words")
         XCTAssertNil(model.error, "not \"Couldn't reach Pixie\"")

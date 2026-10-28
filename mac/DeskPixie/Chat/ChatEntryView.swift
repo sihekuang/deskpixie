@@ -59,6 +59,8 @@ struct ChatActions {
     var pick: (String, [Int]) -> Void = { _, _ in }
     /// Dismiss on a session's question, by its line (#388).
     var dismiss: (UInt64) -> Void = { _ in }
+    /// A click on a file a message went with: Quick Look, at this one of them (#394).
+    var preview: ([String], Int) -> Void = { _, _ in }
 }
 
 /// One message in the thread, drawn by who said it (spec §4.1): your bubble on the right,
@@ -105,7 +107,7 @@ struct ChatEntryView: View {
                                                    bottomTrailingRadius: 4, topTrailingRadius: 18)
                     .fill(ChatColors.bubble))
             if !entry.attachments.isEmpty {
-                SentAttachments(paths: entry.attachments)
+                SentAttachments(paths: entry.attachments, onOpen: actions.preview)
             }
             if entry.spoken {
                 HStack(spacing: 4) {
@@ -332,29 +334,76 @@ private struct SessionChip: View {
     }
 }
 
-/// The files a message of yours went with: icon and name, nothing to remove.
+/// The files a message of yours went with (#394): pictures as thumbnails, other files as their
+/// icon and name; a click opens one in Quick Look. Nothing to remove.
 private struct SentAttachments: View {
     let paths: [String]
+    let onOpen: ([String], Int) -> Void
 
     var body: some View {
-        FlowLayout(spacing: 4) {
-            ForEach(paths, id: \.self) { path in
-                HStack(spacing: 4) {
-                    Image(nsImage: NSWorkspace.shared.icon(forFile: path))
-                        .resizable()
-                        .frame(width: 16, height: 16)
-                    Text((path as NSString).lastPathComponent)
-                        .font(.caption)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .frame(maxWidth: 160, alignment: .leading)
-                }
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
-                .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary))
+        FlowLayout(spacing: 6, trailing: true) {
+            ForEach(Array(paths.enumerated()), id: \.offset) { i, path in
+                Button { onOpen(paths, i) } label: { SentAttachmentView(path: path) }
+                    .buttonStyle(.plain)
+                    .help("Open \((path as NSString).lastPathComponent)")
+                    .accessibilityLabel("Open \((path as NSString).lastPathComponent)")
+                    .accessibilityIdentifier("chat.sentAttachment")
             }
         }
-        .frame(maxWidth: 360, alignment: .trailing)
+        .frame(maxWidth: 460, alignment: .trailing)
+    }
+}
+
+/// One sent file: a picture's thumbnail with its name under it, else (or when the picture is
+/// gone) the file's icon and name.
+private struct SentAttachmentView: View {
+    let path: String
+
+    var body: some View {
+        let name = (path as NSString).lastPathComponent
+        if SentAttachment.isImage(path), let image = Self.image(path),
+           let size = SentAttachment.thumbnailSize(image.size) {
+            VStack(alignment: .trailing, spacing: 3) {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: size.width, height: size.height)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.separator))
+                Text(name)
+                    .font(.caption)
+                    .foregroundStyle(ChatColors.faint)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: size.width, alignment: .trailing)
+            }
+            .contentShape(Rectangle())
+        } else {
+            HStack(spacing: 4) {
+                Image(nsImage: NSWorkspace.shared.icon(forFile: path))
+                    .resizable()
+                    .frame(width: 16, height: 16)
+                Text(name)
+                    .font(.caption)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: 160, alignment: .leading)
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary))
+            .contentShape(Rectangle())
+        }
+    }
+
+    /// Sent files never change, so each picture is read once, not on every redraw.
+    private static let images = NSCache<NSString, NSImage>()
+
+    private static func image(_ path: String) -> NSImage? {
+        if let image = images.object(forKey: path as NSString) { return image }
+        guard let image = NSImage(contentsOfFile: path) else { return nil }
+        images.setObject(image, forKey: path as NSString)
+        return image
     }
 }
 

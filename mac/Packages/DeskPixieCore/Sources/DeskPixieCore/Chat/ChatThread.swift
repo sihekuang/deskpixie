@@ -252,7 +252,8 @@ public protocol ChatClient: Sendable {
     /// `chat.read {upTo}`: marks every entry up to and including this one read.
     func read(upTo: String) throws
     /// Sends a message typed in the box; `session` is a session's address when it replies to one.
-    func send(_ text: String, attachments: [String], session: String?) throws
+    /// The attachments waiting go with it: the core takes them, and the entry lists them (#394).
+    func send(_ text: String, session: String?) throws
     func decide(token: String, allow: Bool) throws
     /// `option` counts from 1.
     func choose(token: String, option: Int) throws

@@ -22,9 +22,9 @@ var errNoCoordinator = errors.New("The coordinator is off.")
 
 func (a *App) registerChat(r Registrar) {
 	r.Register("chat.send", func(args json.RawMessage) (any, error) {
+		// The attachments waiting go with it: the core takes them, and the thread shows what it took.
 		var in struct {
-			Text        string   `json:"text"`
-			Attachments []string `json:"attachments"`
+			Text string `json:"text"`
 			// Session is the address of the one recipient chosen (#302): a session of yours or
 			// one of Pixie's workers, which the coordinator is asked to tell. Absent: Pixie.
 			Session *string `json:"session"`
@@ -67,18 +67,18 @@ func (a *App) registerChat(r Registrar) {
 		if in.Session != nil {
 			to := *in.Session
 			// Always a new job: never taken for the answer to a question waiting in the box.
-			job, err := a.agent.ChatDelegate("Tell the " + label + " " + kind + ": " + in.Text)
+			sent, err := a.agent.ChatDelegate("Tell the " + label + " " + kind + ": " + in.Text)
 			if err != nil {
 				return nil, err
 			}
-			a.threadSent(job, in.Text, in.Attachments, to)
-			return map[string]any{"job": job}, nil
+			a.threadSent(sent.Job, in.Text, sent.Attached, to)
+			return map[string]any{"job": sent.Job}, nil
 		}
 		sent, err := a.agent.ChatSend(in.Text)
 		if err != nil {
 			return nil, err
 		}
-		a.threadSent(sent.Job, in.Text, in.Attachments, "")
+		a.threadSent(sent.Job, in.Text, sent.Attached, "")
 		if sent.Answered {
 			a.threadSentAnswer(sent.Job, sent.Session, strings.TrimSpace(in.Text))
 		}

@@ -1,6 +1,7 @@
 package agent_test
 
 import (
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -71,8 +72,13 @@ func TestATypedRequestCarriesItsAttachments(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		r := newRig(t)
 		r.attach.set("/a/1.png", "/a/2.pdf")
-		if _, err := r.h.ChatSend("what's wrong?"); err != nil {
+		sent, err := r.h.ChatMessage("what's wrong?")
+		if err != nil {
 			t.Fatal(err)
+		}
+		// #394: the message says what it took, for the thread to show.
+		if !slices.Equal(sent.Attached, []string{"/a/1.png", "/a/2.pdf"}) {
+			t.Fatal(sent.Attached)
 		}
 		settle()
 		if got := lastPrompt(t, r); !strings.Contains(got, "what's wrong?\nAttached: /a/1.png\nAttached: /a/2.pdf") {
@@ -110,8 +116,9 @@ func TestAnAnswerCarriesThem(t *testing.T) {
 		r.host.SetStatus(Coordinator, PaneIdle)
 		settle()
 		r.attach.set("/a/1.png")
-		if _, err := r.h.ChatSend("this one"); err != nil {
-			t.Fatal(err)
+		sent, err := r.h.ChatMessage("this one")
+		if err != nil || !sent.Answered || !slices.Equal(sent.Attached, []string{"/a/1.png"}) {
+			t.Fatal(sent, err)
 		}
 		settle()
 		if got := lastPrompt(t, r); !strings.Contains(got, "this one\nAttached: /a/1.png") {
@@ -140,8 +147,11 @@ func TestAttachmentsWaitWhenDelegationIsOff(t *testing.T) {
 		r.h.Input(CoordinatorFailedInput(HostError{Kind: HostGaveUp}))
 		settle()
 		r.attach.set("/a/1.png")
-		if _, err := r.h.ChatSend("hello"); err == nil {
-			t.Fatal("sent")
+		if sent, err := r.h.ChatMessage("hello"); err == nil || sent.Attached != nil {
+			t.Fatal("sent", sent)
+		}
+		if sent, err := r.h.ChatDelegate("Tell the docs session: hello"); err == nil || sent.Attached != nil {
+			t.Fatal("sent", sent)
 		}
 		if r.attach.Takes() != 0 || r.attach.Len() != 1 {
 			t.Fatal("taken while delegation is off")
@@ -210,6 +220,25 @@ func TestAnAnswerThatCantGoGivesThemBack(t *testing.T) {
 		}
 		if r.attach.Len() != 1 {
 			t.Fatal("lost")
+		}
+	})
+}
+
+// #394: a reply to one session carries the attachments and says which it took.
+func TestAReplyToASessionCarriesThem(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRig(t)
+		r.attach.set("/a/1.png")
+		sent, err := r.h.ChatDelegate("Tell the docs session: look")
+		if err != nil || !slices.Equal(sent.Attached, []string{"/a/1.png"}) {
+			t.Fatal(sent, err)
+		}
+		settle()
+		if got := lastPrompt(t, r); !strings.Contains(got, "Tell the docs session: look\nAttached: /a/1.png") {
+			t.Fatal(got)
+		}
+		if sent, err := r.h.ChatDelegate("Tell the docs session: again"); err != nil || sent.Attached != nil {
+			t.Fatal("nothing was waiting", sent, err)
 		}
 	})
 }

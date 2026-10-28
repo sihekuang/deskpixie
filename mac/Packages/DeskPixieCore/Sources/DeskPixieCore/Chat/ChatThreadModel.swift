@@ -251,7 +251,7 @@ public final class ChatThreadModel {
     /// One at a time: while a send is on its way another is refused (a second Return would send
     /// the same attachments again). True when it went.
     @discardableResult
-    public func send(_ text: String, attachments: [String] = []) async -> Bool {
+    public func send(_ text: String) async -> Bool {
         guard !sending else { return false }
         sending = true
         defer { sending = false }
@@ -268,7 +268,7 @@ public final class ChatThreadModel {
                 if let answer {
                     try client.typedAnswer(token: answer, text: text)
                 } else {
-                    try client.send(text, attachments: attachments, session: session)
+                    try client.send(text, session: session)
                 }
             }
         }.value

@@ -31,9 +31,9 @@ final class EngineChatClientTests: XCTestCase {
         let e = Recorder()
         let c = EngineChatClient(engine: e)
         e.reply = #"{"job":"j1"}"#
-        try c.send("hi", attachments: [], session: nil)
-        try c.send("hi", attachments: ["/a.png"], session: "web-claude")
-        try c.send("hi", attachments: [], session: "")
+        try c.send("hi", session: nil)
+        try c.send("hi", session: "web-claude")
+        try c.send("hi", session: "")
         e.reply = #"{"entries":[]}"#
         _ = try c.entries(before: nil, limit: 50)
         _ = try c.entries(before: "e9", limit: 50)
@@ -50,14 +50,13 @@ final class EngineChatClientTests: XCTestCase {
         XCTAssertEqual(calls.map(\.0), ["chat.send", "chat.send", "chat.send", "chat.entries", "chat.entries",
                                         "chat.read", "agent.decide", "agent.choose", "agent.pick", "agent.typedAnswer",
                                         "chat.clear", "chat.stop"])
-        // The Go input structs' json names: text, attachments, session | before, limit | upTo | token, allow...
-        XCTAssertEqual(keys(calls[0].1), ["text", "attachments", "from"], "session is left out for Pixie")
+        // The Go input structs' json names: text, session | before, limit | upTo | token, allow...
+        // No attachments: the core sends the ones waiting and says which went (#394).
+        XCTAssertEqual(keys(calls[0].1), ["text", "from"], "session is left out for Pixie")
         XCTAssertEqual(calls[0].1["from"] as? String, "window", "the window's rule applies")
-        XCTAssertEqual(calls[0].1["attachments"] as? [String], [], "an empty list, not null")
-        XCTAssertEqual(keys(calls[1].1), ["text", "attachments", "session", "from"])
+        XCTAssertEqual(keys(calls[1].1), ["text", "session", "from"])
         XCTAssertEqual(calls[1].1["session"] as? String, "web-claude")
-        XCTAssertEqual(calls[1].1["attachments"] as? [String], ["/a.png"])
-        XCTAssertEqual(keys(calls[2].1), ["text", "attachments", "session", "from"], "an empty address goes, for the core to refuse")
+        XCTAssertEqual(keys(calls[2].1), ["text", "session", "from"], "an empty address goes, for the core to refuse")
         XCTAssertEqual(calls[2].1["session"] as? String, "")
         XCTAssertEqual(calls[3].1["before"] as? String, "")
         XCTAssertEqual(calls[3].1["limit"] as? Int, 50)

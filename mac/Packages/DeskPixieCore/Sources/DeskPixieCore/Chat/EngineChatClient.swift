@@ -18,7 +18,6 @@ public struct EngineChatClient: ChatClient, Sendable {
 
     private struct SendArgs: Encodable {
         let text: String
-        let attachments: [String]
         /// Left out when the message goes to Pixie; an empty one is the core's to refuse.
         let session: String?
         /// The chat window: the core applies its one-recipient rule (the box under Pixie doesn't).
@@ -69,8 +68,8 @@ public struct EngineChatClient: ChatClient, Sendable {
         _ = try engine.call("chat.read", ReadArgs(upTo: upTo))
     }
 
-    public func send(_ text: String, attachments: [String], session: String?) throws {
-        _ = try engine.call("chat.send", SendArgs(text: text, attachments: attachments, session: session))
+    public func send(_ text: String, session: String?) throws {
+        _ = try engine.call("chat.send", SendArgs(text: text, session: session))
     }
 
     public func decide(token: String, allow: Bool) throws {

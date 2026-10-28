@@ -27,6 +27,7 @@ final class ChatWindowController: NSObject, NSToolbarDelegate {
     /// Shown or not, for the button above Pixie.
     private let presence: ChatWindowPresence
     private let richText: RichTextStore
+    private let preview = SentPreview()
     private var window: NSWindow?
     private var tokens: [NSObjectProtocol] = []
     private var pasteMonitor: Any?
@@ -95,12 +96,14 @@ final class ChatWindowController: NSObject, NSToolbarDelegate {
             liveWho: { [model] in model.liveWho($0) },
             stop: { [model] target in Task { await model.stop(target) } },
             pick: { [model] token, options in Task { await model.pick(token: token, options: options) } },
-            dismiss: { [model] item in Task { await model.dismiss(item: item) } })
+            dismiss: { [model] item in Task { await model.dismiss(item: item) } },
+            preview: { [preview] paths, i in preview.show(paths, at: i) })
         let view = ChatWindowView(model: model, state: state, attachments: attachments, actions: actions)
             .environmentObject(richText)
-        let window = NSWindow(contentRect: NSRect(origin: .zero, size: Self.defaultSize),
-                              styleMask: [.titled, .closable, .miniaturizable, .resizable],
-                              backing: .buffered, defer: false)
+        let window = ChatWindow(contentRect: NSRect(origin: .zero, size: Self.defaultSize),
+                                styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                                backing: .buffered, defer: false)
+        window.preview = preview
         window.title = "Pixie"
         window.identifier = NSUserInterfaceItemIdentifier(Self.windowID)
         window.setAccessibilityIdentifier("chat.window")

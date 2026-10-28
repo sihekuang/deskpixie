@@ -693,17 +693,21 @@ func (a *Agent) ChatSend(text string) (app.ChatSent, error) {
 	if err == nil {
 		a.feed.sent(s.Job)
 	}
-	return app.ChatSent{Job: string(s.Job), Answered: s.Answered, Session: s.Session}, err
+	return chatSent(s), err
+}
+
+func chatSent(s agent.ChatSent) app.ChatSent {
+	return app.ChatSent{Job: string(s.Job), Answered: s.Answered, Session: s.Session, Attached: s.Attached}
 }
 
 // ChatDelegate is a message typed in the text box that is always a new job (a reply to a
 // session, #302).
-func (a *Agent) ChatDelegate(text string) (string, error) {
-	id, err := a.handle.ChatDelegate(text)
+func (a *Agent) ChatDelegate(text string) (app.ChatSent, error) {
+	s, err := a.handle.ChatDelegate(text)
 	if err == nil {
-		a.feed.sent(id)
+		a.feed.sent(s.Job)
 	}
-	return string(id), err
+	return chatSent(s), err
 }
 
 // ChatStop is Stop in the text box.

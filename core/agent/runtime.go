@@ -462,20 +462,23 @@ func (h *AgentHandle) Deliver(ev HookEvent) bool {
 
 // Delegate is the delegate tool: a new job id at once, or why delegation is off.
 func (h *AgentHandle) Delegate(task, context string) (JobID, error) {
-	return h.delegate(task, context, false)
+	id, _, err := h.delegate(task, context, false)
+	return id, err
 }
 
-func (h *AgentHandle) delegate(task, context string, typed bool) (JobID, error) {
+// delegate also returns the attachments it took.
+func (h *AgentHandle) delegate(task, context string, typed bool) (JobID, []string, error) {
 	if h.quitting() {
-		return "", errQuitting
+		return "", nil, errQuitting
 	}
 	h.ctlMu.Lock()
 	why, off := h.ctl.Disabled()
 	h.ctlMu.Unlock()
 	if off {
-		return "", fmt.Errorf("Delegation is off (%s).", why)
+		return "", nil, fmt.Errorf("Delegation is off (%s).", why)
 	}
-	task += h.attached() // only now that it can go
+	paths := h.take() // only now that it can go
+	task += attachedLines(paths)
 	id := h.deps.IDs.JobID()
 	if note := h.requestNote(); note != "" {
 		context = strings.TrimSpace(context + "\n" + note)
@@ -485,7 +488,7 @@ func (h *AgentHandle) delegate(task, context string, typed bool) (JobID, error) 
 	} else {
 		h.Input(DelegateInput(id, task, context))
 	}
-	return id, nil
+	return id, paths, nil
 }
 
 // RequestNoteLimit: the longest Delegate waits to list your sessions for a new request.
@@ -564,7 +567,7 @@ func (h *AgentHandle) CancelAsked(jobID string) (JobID, string, error) {
 		return id, "", err
 	}
 	// A stop isn't a message: the waiting attachments stay for the next one.
-	if _, _, err := h.answerAsked(string(id), stopAnswer, false); err != nil {
+	if _, _, _, err := h.answerAsked(string(id), stopAnswer, false); err != nil {
 		return "", "", err
 	}
 	return id, "the coordinator, to work out what to stop", nil
@@ -584,12 +587,13 @@ const toNewRequest = "the coordinator, as a new request"
 // session whose turn asked the question Pixie relayed last, or the coordinator, to work out
 // which of several waiting questions it answers.
 func (h *AgentHandle) AnswerAsked(jobID, text string) (JobID, string, error) {
-	return h.answerAsked(jobID, text, true)
+	id, where, _, err := h.answerAsked(jobID, text, true)
+	return id, where, err
 }
 
 // answerAsked is AnswerAsked; withAttachments: the waiting attachments go with the answer
-// (given back if it can't go).
-func (h *AgentHandle) answerAsked(jobID, text string, withAttachments bool) (_ JobID, _ string, err error) {
+// (given back if it can't go), and it also returns the ones it took.
+func (h *AgentHandle) answerAsked(jobID, text string, withAttachments bool) (_ JobID, _ string, _ []string, err error) {
 	var id JobID
 	if raw := strings.TrimSpace(jobID); raw != "" {
 		// A malformed id is ignored like an unknown one: the answer goes to whoever asked.
@@ -598,10 +602,11 @@ func (h *AgentHandle) answerAsked(jobID, text string, withAttachments bool) (_ J
 		}
 	}
 	if h.quitting() {
-		return "", "", errQuitting
+		return "", "", nil, errQuitting
 	}
+	var paths []string
 	if withAttachments {
-		paths := h.take()
+		paths = h.take()
 		defer func() {
 			if err != nil {
 				h.giveBack(paths)
@@ -611,26 +616,26 @@ func (h *AgentHandle) answerAsked(jobID, text string, withAttachments bool) (_ J
 	}
 	r := h.stepLocked(AnswerInput(id, text))
 	if r == nil || r.Kind != EfAnswerResult {
-		return "", "", errors.New("The answer was not processed.")
+		return "", "", nil, errors.New("The answer was not processed.")
 	}
 	if r.Err == noAnswerWaiting {
 		// Nobody is waiting: the coordinator works out what the words are about, like any request.
-		id, err := h.Delegate(text, "The user said this as an answer, but no question was waiting for one.")
+		id, more, err := h.delegate(text, "The user said this as an answer, but no question was waiting for one.", false)
 		if err != nil {
-			return "", "", err
+			return "", "", nil, err
 		}
-		return id, toNewRequest, nil
+		return id, toNewRequest, append(paths, more...), nil
 	}
 	if r.Err != "" {
-		return "", "", errors.New(r.Err)
+		return "", "", nil, errors.New(r.Err)
 	}
 	switch {
 	case r.Name != "":
-		return r.Job, "the session that asked", nil
+		return r.Job, "the session that asked", paths, nil
 	case r.Text == "coordinator":
-		return r.Job, "the coordinator, to work out which question it answers", nil
+		return r.Job, "the coordinator, to work out which question it answers", paths, nil
 	}
-	return r.Job, "", nil
+	return r.Job, "", paths, nil
 }
 
 // OpenTerminal is a single click on Pixie / Tray ▸ Open coordinator terminal: the session is running,

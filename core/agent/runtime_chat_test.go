@@ -149,7 +149,7 @@ func TestChatMessageSaysItAnsweredTheWaitingQuestion(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		r := newRig(t)
 		sent, err := r.h.ChatMessage("fix the flaky test")
-		if err != nil || sent != (ChatSent{Job: JobID("job_000000000001")}) {
+		if err != nil || !reflect.DeepEqual(sent, ChatSent{Job: JobID("job_000000000001")}) {
 			t.Fatal("a new job answers nothing", sent, err)
 		}
 		settle()
@@ -158,7 +158,7 @@ func TestChatMessageSaysItAnsweredTheWaitingQuestion(t *testing.T) {
 		r.host.SetStatus(Coordinator, PaneIdle)
 		settle()
 		sent, err = r.h.ChatMessage("deskpixie")
-		if err != nil || sent != (ChatSent{Job: JobID("job_000000000001"), Answered: true}) {
+		if err != nil || !reflect.DeepEqual(sent, ChatSent{Job: JobID("job_000000000001"), Answered: true}) {
 			t.Fatal(sent, err)
 		}
 	})
@@ -176,9 +176,9 @@ func TestChatDelegateIsANewJobWhileAQuestionWaits(t *testing.T) {
 		settle()
 		r.host.SetStatus(Coordinator, PaneIdle)
 		settle()
-		id, err := r.h.ChatDelegate("Tell the docs session: ship it")
-		if err != nil || id != JobID("job_000000000002") {
-			t.Fatal("a new job", id, err)
+		sent, err := r.h.ChatDelegate("Tell the docs session: ship it")
+		if err != nil || sent.Job != JobID("job_000000000002") {
+			t.Fatal("a new job", sent, err)
 		}
 		settle()
 		prompts := r.host.Prompts()
