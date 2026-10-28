@@ -620,11 +620,11 @@ func (h *AgentHandle) answerAsked(jobID, text string, withAttachments bool) (_ J
 	}
 	if r.Err == noAnswerWaiting {
 		// Nobody is waiting: the coordinator works out what the words are about, like any request.
-		id, err := h.Delegate(text, "The user said this as an answer, but no question was waiting for one.")
+		id, more, err := h.delegate(text, "The user said this as an answer, but no question was waiting for one.", false)
 		if err != nil {
 			return "", "", nil, err
 		}
-		return id, toNewRequest, paths, nil
+		return id, toNewRequest, append(paths, more...), nil
 	}
 	if r.Err != "" {
 		return "", "", nil, errors.New(r.Err)
