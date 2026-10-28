@@ -207,6 +207,44 @@ func (c *AgentController) onChatAbout(token string, now Millis, fx *[]Effect) {
 	c.answerSession(p, "chat", now, fx)
 }
 
+// menuPicked: the open session menu a request's words answer, and the option they name (#383):
+// exactly one menu that takes one pick, named by MenuChoice. None when no menu or several
+// fit, or the option pushes, merges, publishes or deploys (that one is picked in the bubble).
+func (c *AgentController) menuPicked(task string) (Pending, int, bool) {
+	var found Pending
+	pick := 0
+	for _, p := range c.confirms.Pending() {
+		if !p.Menu || p.Multi || p.Session == "" || len(p.Options) == 0 {
+			continue
+		}
+		// The whole request is the option, not only words of it: "set up a Postgres db" is a
+		// new task, not Postgres in a menu.
+		n, ok := menuNamed(p.Options, menuWords(task))
+		if !ok {
+			continue
+		}
+		if pick != 0 {
+			return Pending{}, 0, false
+		}
+		found, pick = p, n
+	}
+	// "this or that" is no answer to act on unasked; nor is a push, a merge, a publish or a
+	// deploy, in the request, the option, its description or the question it answers.
+	if pick == 0 || slices.Contains(menuWords(task), "or") {
+		return Pending{}, 0, false
+	}
+	detail := ""
+	if pick <= len(found.Details) {
+		detail = found.Details[pick-1]
+	}
+	for _, s := range []string{task, found.Options[pick-1], detail, found.Asked} {
+		if len(GatedActions(s)) > 0 {
+			return Pending{}, 0, false
+		}
+	}
+	return found, pick, true
+}
+
 // answerMenu: what you said back to the session menu with token, asked last (#330): the
 // option it names (MenuChoice), else your words typed in when the menu takes them. An option or
 // words that push, merge, publish or deploy are still picked in the bubble, as is any answer
@@ -301,6 +339,37 @@ func number(w string) string {
 // MenuChoice is the option (from 1) an answer picks: one said as it reads ("SQLite"), by its
 // place ("the second one", "option 3", "the last one"), or the only one named in it, with no
 // "not" besides ("let's go with Postgres"). false when it names none, several or one it rules out.
+// menuNamed: the option the words are, whole: word for word first, then with fillers left out
+// on both sides ("yes please" is the option "Yes please" before it is "Yes"), then without
+// their "and"s too ("create both and assign to me" is "Create both, assign to me", #383), then
+// with word endings left out ("create both assigned to me" is it too), when that fits only one.
+func menuNamed(options []string, raw []string) (int, bool) {
+	withoutAnd := func(w []string) []string {
+		return slices.DeleteFunc(slices.Clone(stripFillers(w)), func(s string) bool { return s == "and" })
+	}
+	stemmed := func(w []string) []string { return stems(withoutAnd(w)) }
+	for i, form := range []func([]string) []string{func(w []string) []string { return w }, stripFillers, withoutAnd, stemmed} {
+		said := strings.Join(form(raw), " ")
+		found := 0
+		for k, o := range options {
+			if strings.Join(form(menuWords(o)), " ") != said {
+				continue
+			}
+			if i < 3 {
+				return k + 1, true
+			}
+			if found != 0 {
+				return 0, false // "add tests" is "Add test" and "Add tests" alike
+			}
+			found = k + 1
+		}
+		if found != 0 {
+			return found, true
+		}
+	}
+	return 0, false
+}
+
 func MenuChoice(options []string, answer string) (int, bool) {
 	raw := menuWords(answer)
 	// An option named word for word first: "Option 2" is the option of that name, wherever it is.
@@ -316,15 +385,8 @@ func MenuChoice(options []string, answer string) (int, bool) {
 		}
 	}
 	words := stripFillers(raw)
-	// Word for word first, then with fillers left out on both sides: "yes please" is the
-	// option "Yes please" before it is "Yes".
-	for _, form := range []func([]string) []string{func(w []string) []string { return w }, stripFillers} {
-		said := strings.Join(form(raw), " ")
-		for k, o := range options {
-			if strings.Join(form(menuWords(o)), " ") == said {
-				return k + 1, true
-			}
-		}
+	if n, ok := menuNamed(options, raw); ok {
+		return n, true
 	}
 	if len(words) == 1 {
 		w := words[0]
@@ -375,6 +437,26 @@ func MenuChoice(options []string, answer string) (int, bool) {
 		}
 	}
 	return found, true
+}
+
+// stems are words without their endings (-ing, -ed or -s, then a final -e) while three letters
+// or more are left: "assigned", "assigning" and "assigns" are "assign", "create", "created" and
+// "creating" are "creat"; "unassigned" stays apart.
+func stems(words []string) []string {
+	out := make([]string, len(words))
+	for i, w := range words {
+		for _, end := range []string{"ing", "ed", "s"} {
+			if s, ok := strings.CutSuffix(w, end); ok && len(s) >= 3 {
+				w = s
+				break
+			}
+		}
+		if s, ok := strings.CutSuffix(w, "e"); ok && len(s) >= 3 {
+			w = s
+		}
+		out[i] = w
+	}
+	return out
 }
 
 // trimLeadFillers drops the fillers at the start and "please" or "thanks" at the end, but

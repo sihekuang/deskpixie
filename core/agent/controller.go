@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -1146,6 +1147,19 @@ func (c *AgentController) delegate(id JobID, task, context string, now Millis, f
 		return
 	}
 	c.jobs.Create(id, task, now)
+	if p, n, ok := c.menuPicked(task); ok {
+		// An answer to a session's open menu, whatever tool Pixie chose (#383): picked as a
+		// tap would, the job done at once; the coordinator could only type it in.
+		_, _ = c.jobs.Transition(id, JobDone, now)
+		c.jobs.SetReply(id, fmt.Sprintf("Picked %q in %s's menu.", p.Options[n-1], p.Label), now)
+		c.saveJob(id, fx)
+		c.confirms.take(p.Token)
+		if c.asked.menu == p.ID {
+			c.asked = asker{}
+		}
+		c.answerSession(p, strconv.Itoa(n), now, fx)
+		return
+	}
 	c.saveJob(id, fx)
 	text := newRequestPrefix + task
 	if ctx := strings.TrimSpace(context); ctx != "" {
