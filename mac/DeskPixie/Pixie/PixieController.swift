@@ -43,6 +43,11 @@ final class PixieController {
     /// The row of buttons under Pixie as last measured (the roster sets it), for the hover
     /// region (#286).
     var chipHeight: CGFloat = 40
+    /// The updates bubble's and the roster's panels, children of Pixie's, and what each shows:
+    /// the one in front is the one you're using (#398).
+    weak var bubblePanel: NSWindow?
+    weak var rosterPanel: NSWindow?
+    var overlays = OverlayOrder()
     private var moves = MoveDebounce()
     /// Set while the controller places the panel itself, so the move is not reported as the user's.
     private var placing = false
@@ -351,4 +356,15 @@ final class PixieController {
     private func expireClick() {
         _ = gestures.expire(now: ProcessInfo.processInfo.systemUptime)
     }
+
+    /// Puts the panel `overlays` says goes in front over the other, if it isn't already: only
+    /// then, as re-ordering on every layout made the windows flicker (#286).
+    func orderOverlays() {
+        guard let front = overlays.front,
+              let w = front == .bubble ? bubblePanel : rosterPanel,
+              w.parent === panel, panel.childWindows?.last !== w else { return }
+        panel.removeChildWindow(w)
+        panel.addChildWindow(w, ordered: .above)
+    }
+
 }
