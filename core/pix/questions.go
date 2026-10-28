@@ -796,10 +796,10 @@ func (w *questionWatch) watch(s *Session, out string, vt *screen) {
 			w.tail = w.tail[len(w.tail)-8192:]
 		}
 		// Claude redraws only the cells that change, so a dialog drawn over a row that showed
-		// most of its text may never be written whole: the screen shows it whole. As when it is
-		// asked, only by its own text there (its detail).
+		// most of its text may never be written whole: the screen shows it whole. Its marker
+		// still drawn since it was asked, and its own text (its detail) on the screen with it.
 		s.mu.Lock()
-		onScreen := q.detail != "" && shows(s.screen, q.marker, q.detail)
+		onScreen := q.detail != "" && strings.Contains(w.tail, noSpace(q.marker)) && shows(s.screen, q.marker, q.detail)
 		s.mu.Unlock()
 		if !onScreen && (!strings.Contains(w.tail, noSpace(q.marker)) || !strings.Contains(w.tail, noSpace(q.detail))) {
 			return
