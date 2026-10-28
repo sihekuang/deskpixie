@@ -75,10 +75,12 @@ var errEmptyChat = errors.New("Type a message first.")
 
 // ChatSent is where a message typed in the text box went (#302): its job, and whether it
 // answered a question waiting for one: the job's own, or (Session set) that session's.
+// Attached are the attachments it took, as handed over (#394).
 type ChatSent struct {
 	Job      JobID
 	Answered bool
 	Session  string
+	Attached []string
 }
 
 // ChatSend is a message typed in the text box: the answer to the last typed job's question
@@ -98,29 +100,30 @@ func (h *AgentHandle) ChatMessage(text string) (ChatSent, error) {
 	if session, job := h.ctl.takeBoxAnswer(); session != "" {
 		// #241: the box shows that session's question: the words are its answer.
 		h.ctlMu.Unlock()
-		_, where, err := h.AnswerAsked("", text)
-		return ChatSent{Job: job, Answered: err == nil && where != toNewRequest, Session: session}, err
+		_, where, paths, err := h.answerAsked("", text, true)
+		return ChatSent{Job: job, Answered: err == nil && where != toNewRequest, Session: session, Attached: paths}, err
 	}
 	last := h.ctl.LastTyped()
 	j, ok := h.ctl.jobs.Get(last)
 	waiting := last != "" && ok && j.Status == JobQuestion && h.ctl.jobs.IsOpen(last)
 	h.ctlMu.Unlock()
 	if waiting {
-		id, where, err := h.AnswerAsked(string(last), text)
-		return ChatSent{Job: id, Answered: err == nil && where != toNewRequest}, err
+		id, where, paths, err := h.answerAsked(string(last), text, true)
+		return ChatSent{Job: id, Answered: err == nil && where != toNewRequest, Attached: paths}, err
 	}
-	id, err := h.delegate(text, typedNote, true)
-	return ChatSent{Job: id}, err
+	id, paths, err := h.delegate(text, typedNote, true)
+	return ChatSent{Job: id, Attached: paths}, err
 }
 
 // ChatDelegate is a message typed in the text box that is always a new typed job, never an
 // answer to a waiting question: a reply to one session, told through the coordinator (#302).
-func (h *AgentHandle) ChatDelegate(text string) (JobID, error) {
+func (h *AgentHandle) ChatDelegate(text string) (ChatSent, error) {
 	text, err := h.chatText(text)
 	if err != nil {
-		return "", err
+		return ChatSent{}, err
 	}
-	return h.delegate(text, typedNote, true)
+	id, paths, err := h.delegate(text, typedNote, true)
+	return ChatSent{Job: id, Attached: paths}, err
 }
 
 // chatText is a typed message trimmed, or what stands for it when only attachments go.

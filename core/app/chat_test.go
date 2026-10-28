@@ -23,25 +23,33 @@ func (f *fakeAgent) ChatSend(text string) (ChatSent, error) {
 	}
 	f.sent = append(f.sent, text)
 	if f.asking != "" {
-		s := ChatSent{Job: f.asking, Answered: true, Session: f.askingSession}
+		s := ChatSent{Job: f.asking, Answered: true, Session: f.askingSession, Attached: f.takeAttached()}
 		f.asking, f.askingSession = "", ""
 		return s, nil
 	}
 	f.jobs++
-	return ChatSent{Job: fmt.Sprintf("job_%012d", f.jobs)}, nil
+	return ChatSent{Job: fmt.Sprintf("job_%012d", f.jobs), Attached: f.takeAttached()}, nil
 }
 
 // ChatDelegate always starts a new job.
-func (f *fakeAgent) ChatDelegate(text string) (string, error) {
+func (f *fakeAgent) ChatDelegate(text string) (ChatSent, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.chatErr != nil {
-		return "", f.chatErr
+		return ChatSent{}, f.chatErr
 	}
 	f.sent = append(f.sent, text)
 	f.delegated++
 	f.jobs++
-	return fmt.Sprintf("job_%012d", f.jobs), nil
+	return ChatSent{Job: fmt.Sprintf("job_%012d", f.jobs), Attached: f.takeAttached()}, nil
+}
+
+// takeAttached hands over the waiting attachments, as the real agent does when a message goes.
+func (f *fakeAgent) takeAttached() []string {
+	if f.attach == nil {
+		return nil
+	}
+	return f.attach.Take()
 }
 func (f *fakeAgent) ChatStop() { f.mu.Lock(); f.stops++; f.mu.Unlock() }
 

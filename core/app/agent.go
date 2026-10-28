@@ -137,7 +137,7 @@ type Agent interface {
 	ChatSend(text string) (ChatSent, error)
 	// ChatDelegate is a message typed in the text box that is always a new job, never the
 	// answer to a waiting question: a reply to a session, told through the coordinator (#302).
-	ChatDelegate(text string) (string, error)
+	ChatDelegate(text string) (ChatSent, error)
 	// ChatStop is Stop in the text box: cancel the typed job still running.
 	ChatStop()
 	// SetTextMode: replyMode is text (no conversation is opened for updates).
@@ -157,6 +157,8 @@ type ChatSent struct {
 	Job      string
 	Answered bool
 	Session  string
+	// Attached are the attachments that went with it, where the core handed them over (#394).
+	Attached []string
 }
 
 // SessionPlace is where one of your sessions runs (#277): its folder and its terminal app's

@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sihekuang/deskpixie/core/attach"
 	"github.com/sihekuang/deskpixie/core/chat"
 	"github.com/sihekuang/deskpixie/core/voice"
 )
@@ -77,6 +78,7 @@ func TestSendingAddsYourMessage(t *testing.T) {
 	f := &fakeAgent{tray: AgentTray{Enabled: true}}
 	h := newHarness(t, withAgent(f))
 	h.take()
+	// What the shell says went with it isn't taken for what did (#394): nothing was waiting.
 	h.call("chat.send", map[string]any{"text": "hello", "attachments": []string{"shot.png"}})
 	if !slices.Equal(f.sent, []string{"hello"}) {
 		t.Fatal(f.sent)
@@ -87,7 +89,7 @@ func TestSendingAddsYourMessage(t *testing.T) {
 	}
 	e := got[0]
 	if e.Who.Kind != "you" || e.Text != "hello" || !e.Read || e.Spoken || e.At == 0 ||
-		!slices.Equal(e.Attachments, []string{"shot.png"}) || len(e.Sessions) != 0 {
+		len(e.Attachments) != 0 || len(e.Sessions) != 0 {
 		t.Fatalf("your entry = %+v", e)
 	}
 	evs := h.take()
@@ -855,5 +857,40 @@ func TestLiveLinesComeAndGo(t *testing.T) {
 	}
 	if !bytes.Contains(b, []byte("Done.")) || (bytes.Contains(b, []byte("Hmm")) || bytes.Contains(b, []byte("again")) || bytes.Contains(b, []byte("Looking."))) {
 		t.Fatalf("a live line is in thread.jsonl: %s", b)
+	}
+}
+
+// #394: your message shows the attachments the core handed over, where they now are (sent/,
+// not pending/), whether it went to Pixie or to one session.
+func TestYourMessageShowsWhatWentWithIt(t *testing.T) {
+	store := attach.New(filepath.Join(t.TempDir(), "attachments"), filepath.Join(t.TempDir(), "copies.jsonl"), time.Now)
+	f := &fakeAgent{tray: AgentTray{Enabled: true}, attach: store, roster: rosterWith()}
+	h := newHarness(t, withAgent(f))
+	for _, to := range []map[string]any{{"text": "look"}, {"text": "look here", "session": "w1"}} {
+		h.take()
+		it, err := store.Add("Screenshot 12.30.png", []byte("\x89PNG"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.call("chat.send", to)
+		var e chat.Entry
+		for _, g := range h.entries(nil) {
+			if g.Who.Kind == "you" && g.Text == to["text"] {
+				e = g
+			}
+		}
+		if len(e.Attachments) != 1 {
+			t.Fatalf("%v: entry = %+v", to, e)
+		}
+		p := e.Attachments[0]
+		if p == it.Path || filepath.Base(p) != "Screenshot 12.30.png" || !strings.Contains(p, string(filepath.Separator)+"sent"+string(filepath.Separator)) {
+			t.Fatalf("%v: attachment = %s (pending was %s)", to, p, it.Path)
+		}
+		if _, err := os.Stat(p); err != nil {
+			t.Fatalf("%v: %v", to, err)
+		}
+		if store.Len() != 0 {
+			t.Fatalf("%v: still waiting", to)
+		}
 	}
 }

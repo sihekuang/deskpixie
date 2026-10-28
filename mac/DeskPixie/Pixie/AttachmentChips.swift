@@ -63,9 +63,11 @@ struct AttachmentChips: View {
     }
 }
 
-/// Lays its views out in rows, wrapping at the proposed width.
+/// Lays its views out in rows, wrapping at the proposed width; `trailing` lines each row up
+/// on the right.
 struct FlowLayout: SwiftUI.Layout {
     var spacing: CGFloat = 4
+    var trailing = false
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let rows = rows(width: proposal.width ?? .infinity, subviews)
@@ -76,7 +78,7 @@ struct FlowLayout: SwiftUI.Layout {
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         var y = bounds.minY
         for row in rows(width: bounds.width, subviews) {
-            var x = bounds.minX
+            var x = trailing ? bounds.maxX - row.width : bounds.minX
             for i in row.indices {
                 let size = subviews[i].sizeThatFits(.unspecified)
                 subviews[i].place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))

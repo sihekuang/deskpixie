@@ -19,11 +19,6 @@ type Attachments interface {
 // attachedOnly is the request when the user sent attachments with no words.
 const attachedOnly = "See the attached files."
 
-// attached takes the waiting attachments as the lines that end a request or an answer.
-func (h *AgentHandle) attached() string {
-	return attachedLines(h.take())
-}
-
 func (h *AgentHandle) take() []string {
 	if h.deps.Attachments == nil {
 		return nil

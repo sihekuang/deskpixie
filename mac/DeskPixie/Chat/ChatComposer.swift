@@ -214,16 +214,15 @@ struct ChatComposer: View {
         model.canSend(state.draft, attachments: attachments?.model.items.count ?? 0)
     }
 
-    /// The text and the attachments' paths go through `chat.send` (or the typed answer); a
-    /// failed send puts the words back and keeps the copy on offer. One at a time: the model
-    /// refuses a second while the first is on its way.
+    /// The text goes through `chat.send` (or the typed answer), and the core takes the
+    /// attachments waiting with it; a failed send puts the words back and keeps the copy on
+    /// offer. One at a time: the model refuses a second while the first is on its way.
     private func send(_ attachments: AttachmentUI?) {
         guard canSend(attachments) else { return }
         let text = state.draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        let paths = attachments?.model.items.map(\.path) ?? []
         state.draft = ""
         Task {
-            guard await model.send(text, attachments: paths) else {
+            guard await model.send(text) else {
                 if state.draft.isEmpty {
                     state.keptDraft = text
                     state.draft = text
