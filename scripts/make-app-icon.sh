@@ -4,7 +4,7 @@
 # Usage (any directory):  scripts/make-app-icon.sh
 #
 # Renders the 1024×1024 master (scripts/make-app-icon.swift: Bit's face from idle frame 0 filling a
-# pixel-art rounded square on the macOS 824 px icon grid) to mac/Icon/AppIcon-1024.png, then
+# pixel-art square edge to edge) to mac/Icon/AppIcon-1024.png, then
 # downsizes it with sips into mac/DeskPixie/Assets.xcassets/AppIcon.appiconset (16–512 pt, @1x
 # and @2x). The app target uses it via ASSETCATALOG_COMPILER_APPICON_NAME=AppIcon
 # (mac/project.yml). macOS tools only (swift, sips). Commit the regenerated files.
