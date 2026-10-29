@@ -1,10 +1,11 @@
 // Renders DeskPixie's 1024×1024 app icon master from Bit's sprite sheet.
 // Run via scripts/make-app-icon.sh:  swift make-app-icon.swift <pack dir> <out.png>
 //
-// The art is Bit's idle frame 0 with the closed mouth composited at the pack's mouth anchor —
-// the same face MenuBarIcon uses — trimmed to its opaque pixels, scaled up nearest-neighbour by
-// the largest whole factor that fits, and centred on an 824×824 rounded square (the macOS icon
-// grid: 100 px margin, ~185 px corner radius) with a soft drop shadow.
+// The icon is Bit's face filling the whole tile: a 22×22 pixel-art rounded square in Bit's
+// palette (dark outline, light highlight along the top-left edge, shade along the bottom-right),
+// with the face from idle frame 0 — eyes, blush and the closed mouth composited at the pack's
+// mouth anchor, the same face MenuBarIcon uses — copied onto it pixel for pixel. Each grid
+// pixel is a 37 px block, centred on the macOS 824 px icon grid, with a soft drop shadow.
 import AppKit
 import CoreGraphics
 import Foundation
@@ -12,13 +13,24 @@ import ImageIO
 import UniformTypeIdentifiers
 
 let canvas = 1024
-let tile = CGRect(x: 100, y: 100, width: 824, height: 824)
-let cornerRadius: CGFloat = 185.4
-/// The share of the tile Bit may fill (each side), so the art keeps breathing room.
-let artFraction: CGFloat = 0.72
-/// Deep navy from the design system's dark accent-soft, so Bit's green reads clearly.
-let bgTop = CGColor(srgbRed: 0x2b / 255, green: 0x3d / 255, blue: 0x66 / 255, alpha: 1)
-let bgBottom = CGColor(srgbRed: 0x14 / 255, green: 0x1d / 255, blue: 0x33 / 255, alpha: 1)
+/// Grid pixels per side, and the corner radius in grid pixels (~22% of the side, like macOS).
+let grid = 22
+let cornerRadius = 5.0
+/// How far in from the edge (grid pixels, outline included) the highlight and shade reach.
+let band = 3
+/// Screen pixels per grid pixel: the largest whole size that fits the 824 px icon grid.
+let block = 824 / grid
+/// Bit's face in the cell (eyes, blush, mouth): x 7…24, y 15…22, top-left origin.
+let faceRect = (x: 7, y: 15, w: 18, h: 8)
+
+/// Bit's body palette (pixies/bit/sheet.png).
+func rgb(_ hex: UInt32) -> CGColor {
+    CGColor(srgbRed: CGFloat((hex >> 16) & 0xff) / 255, green: CGFloat((hex >> 8) & 0xff) / 255,
+            blue: CGFloat(hex & 0xff) / 255, alpha: 1)
+}
+let outlineHex: UInt32 = 0x064e3b, highlightHex: UInt32 = 0x6ee7b7
+let baseHex: UInt32 = 0x10b981, shadeHex: UInt32 = 0x059669
+let bodyHexes: Set<UInt32> = [outlineHex, highlightHex, baseHex, shadeHex]
 
 func fail(_ msg: String) -> Never {
     FileHandle.standardError.write(Data("error: \(msg)\n".utf8))
@@ -60,49 +72,79 @@ if let m = pack.mouth, m.levels > 0,
     // CG's origin is bottom-left; the anchor is top-left in cell pixels.
     cell.draw(mouth, in: CGRect(x: m.anchor[0], y: h - m.anchor[1] - m.size[1], width: m.size[0], height: m.size[1]))
 }
-guard let face = cell.makeImage() else { fail("cell image") }
+guard faceRect.x + faceRect.w <= w, faceRect.y + faceRect.h <= h else { fail("face outside the cell") }
 
-// 2. Trim to opaque pixels (memory row 0 is the top of the image).
+// 2. The tile: a pixel-art rounded square, then its highlight, shade and outline.
+// grid[y][x] is a 0xRRGGBB colour, or nil outside the tile; y 0 is the top row.
+var tile = [[UInt32?]](repeating: [UInt32?](repeating: nil, count: grid), count: grid)
+let n = Double(grid)
+for y in 0..<grid { for x in 0..<grid {
+    let cx = Double(x) + 0.5, cy = Double(y) + 0.5
+    let qx = max(cornerRadius - cx, 0, cx - (n - cornerRadius))
+    let qy = max(cornerRadius - cy, 0, cy - (n - cornerRadius))
+    if qx * qx + qy * qy <= cornerRadius * cornerRadius { tile[y][x] = baseHex }
+} }
+func outside(_ x: Int, _ y: Int) -> Bool { x < 0 || y < 0 || x >= grid || y >= grid || tile[y][x] == nil }
+let shape = tile
+func isEdge(_ x: Int, _ y: Int) -> Bool {
+    [(1, 0), (-1, 0), (0, 1), (0, -1)].contains { d in
+        let nx = x + d.0, ny = y + d.1
+        return nx < 0 || ny < 0 || nx >= grid || ny >= grid || shape[ny][nx] == nil
+    }
+}
+/// Steps (up, down, left, right) to the nearest grid pixel outside the tile.
+func depth(_ x: Int, _ y: Int) -> Int {
+    var best = Int.max
+    for oy in -1...grid { for ox in -1...grid where outside(ox, oy) {
+        best = min(best, abs(x - ox) + abs(y - oy))
+    } }
+    return best
+}
+for y in 0..<grid { for x in 0..<grid where shape[y][x] != nil {
+    if isEdge(x, y) { tile[y][x] = outlineHex; continue }
+    guard depth(x, y) <= band else { continue }
+    if Double(x + y) < n * 0.75 { tile[y][x] = highlightHex }
+    else if Double(x + y) > n * 1.25 { tile[y][x] = shadeHex }
+} }
+
+// 3. The face, copied from the cell into the middle of the tile.
 let data = cell.data!.assumingMemoryBound(to: UInt8.self)
 let stride = cell.bytesPerRow
-var minX = w, minY = h, maxX = -1, maxY = -1
-for y in 0..<h { for x in 0..<w where data[y * stride + x * 4 + 3] > 0 {
-    minX = min(minX, x); maxX = max(maxX, x); minY = min(minY, y); maxY = max(maxY, y)
+let fx = (grid - faceRect.w) / 2, fy = (grid - faceRect.h) / 2
+for y in 0..<faceRect.h { for x in 0..<faceRect.w {
+    let i = (faceRect.y + y) * stride + (faceRect.x + x) * 4
+    guard data[i + 3] == 255 else { continue }
+    let hex = UInt32(data[i]) << 16 | UInt32(data[i + 1]) << 8 | UInt32(data[i + 2])
+    if !bodyHexes.contains(hex) { tile[fy + y][fx + x] = hex }
 } }
-guard maxX >= minX else { fail("empty frame") }
-let tw = maxX - minX + 1, th = maxY - minY + 1
-guard let art = face.cropping(to: CGRect(x: minX, y: minY, width: tw, height: th)) else { fail("trim") }
 
-// 3. The canvas.
+// 4. The canvas: the tile's shadow, then each grid pixel as a square block.
 guard let ctx = CGContext(data: nil, width: canvas, height: canvas, bitsPerComponent: 8, bytesPerRow: 0,
                           space: space, bitmapInfo: alphaInfo) else { fail("context") }
-let path = CGPath(roundedRect: tile, cornerWidth: cornerRadius, cornerHeight: cornerRadius, transform: nil)
+let margin = (canvas - grid * block) / 2
+func blockRect(_ x: Int, _ y: Int) -> CGRect {
+    // CG's origin is bottom-left; grid row 0 is the top.
+    CGRect(x: margin + x * block, y: margin + (grid - 1 - y) * block, width: block, height: block)
+}
+ctx.setShouldAntialias(false)
 
+let silhouette = CGMutablePath()
+for y in 0..<grid { for x in 0..<grid where tile[y][x] != nil { silhouette.addRect(blockRect(x, y)) } }
 ctx.saveGState()
 ctx.setShadow(offset: CGSize(width: 0, height: -10), blur: 28, color: CGColor(gray: 0, alpha: 0.35))
-ctx.addPath(path)
-ctx.setFillColor(bgBottom)
+ctx.addPath(silhouette)
+ctx.setFillColor(rgb(outlineHex))
 ctx.fillPath()
 ctx.restoreGState()
 
-ctx.saveGState()
-ctx.addPath(path)
-ctx.clip()
-let gradient = CGGradient(colorsSpace: space, colors: [bgTop, bgBottom] as CFArray, locations: [0, 1])!
-ctx.drawLinearGradient(gradient, start: CGPoint(x: 0, y: tile.maxY), end: CGPoint(x: 0, y: tile.minY), options: [])
-ctx.restoreGState()
-
-// Largest whole scale that fits, so every sprite pixel is an exact square block.
-let room = tile.width * artFraction
-let scale = max(1, Int(min(room / CGFloat(tw), room / CGFloat(th))))
-let aw = tw * scale, ah = th * scale
-let ax = (canvas - aw) / 2, ay = (canvas - ah) / 2
-ctx.interpolationQuality = .none
-ctx.setShouldAntialias(false)
-ctx.draw(art, in: CGRect(x: ax, y: ay, width: aw, height: ah))
+for y in 0..<grid { for x in 0..<grid {
+    guard let hex = tile[y][x] else { continue }
+    ctx.setFillColor(rgb(hex))
+    ctx.fill(blockRect(x, y))
+} }
 
 guard let out = ctx.makeImage(),
       let dest = CGImageDestinationCreateWithURL(outURL as CFURL, UTType.png.identifier as CFString, 1, nil) else { fail("output") }
 CGImageDestinationAddImage(dest, out, nil)
 guard CGImageDestinationFinalize(dest) else { fail("cannot write \(outURL.path)") }
-print("master: \(outURL.path) (Bit \(tw)×\(th) px × \(scale))")
+print("master: \(outURL.path) (Bit's face on a \(grid)×\(grid) grid × \(block) px)")
