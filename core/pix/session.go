@@ -231,20 +231,24 @@ func (s *Session) forceIn(msgs []string, note string) error {
 		return nil
 	}
 	prompt := strings.Join(withNote(note, msgs), "\n\n")
-	back := s.takeTakenBack()
-	if back != "" && s.promptHolds(back) {
-		prompt = "\n\n" + prompt // after the prompt the stop took back, in the input box (#416)
-	}
 	draft, known := s.gate.Draft()
 	empty := known && draft == ""
+	// After the prompt a stop took back, in the input box, so they go in together (#416). With
+	// a draft of yours there too, Claude sets the whole box aside, that prompt with it.
+	back := s.takeTakenBack()
+	if back != "" && empty && s.promptHolds(back) {
+		prompt = "\n\n" + prompt
+	}
 	typeIn := func() error { // a menu that stops it keeps the messages (#306)
-		if err := s.typeIn(prompt); err != nil && !s.holdBack(err, msgs, prompt, "", note) {
-			return err
-		}
-		if s.queue.Len() > 0 && back != "" { // queued again: the prompt taken back still leads
-			s.mu.Lock()
-			s.takenBack = back
-			s.mu.Unlock()
+		if err := s.typeIn(prompt); err != nil {
+			if !s.holdBack(err, msgs, prompt, "", note) {
+				return err
+			}
+			if back != "" && !s.hasUnsent() { // queued again: the prompt taken back still leads
+				s.mu.Lock()
+				s.takenBack = back
+				s.mu.Unlock()
+			}
 		}
 		return nil
 	}
@@ -408,10 +412,12 @@ func newSession(o sessionOpts) *Session {
 			// that already show the right letter, so its interrupt line can pass in pieces; and
 			// a turn stopped before it answered is taken back, its prompt in the input box again.
 			fresh := s.stopKeyFresh()
-			if fresh && s.currentStatus() == "working" && takenBack(vt.Lines(), s.currentTurnPrompt()) {
+			if _, latest, _ := interruptOnScreen(vt.Lines()); fresh && !latest && s.currentStatus() == "working" &&
+				takenBack(vt.Lines(), s.currentTurnPrompt()) {
 				armed, fresh = false, false
 				s.takeStopKey()
 				s.clearQuestion("interrupted")
+				s.noteScreen(vt) // what is typed next reads the prompt in the box off this screen
 				s.tookBack()
 				s.interrupted()
 			}
@@ -981,17 +987,21 @@ func (s *Session) stopKeyFresh() bool {
 	return !s.stopKeyAt.IsZero() && s.now().Sub(s.stopKeyAt) < pixieEscWindow
 }
 
-// takenBack: Claude's input box holds prompt again (its first paragraph, or the marker it
-// shows for a long paste): a stop took its turn back before it answered, and shows no
-// interrupt line (#416).
+// takenBack: Claude's input box holds prompt again, and only it (its first paragraph, or the
+// marker it shows for a long paste of one): a stop took its turn back before it answered, and
+// shows no interrupt line (#416).
 func takenBack(lines []string, prompt string) bool {
 	first, _, _ := strings.Cut(strings.TrimSpace(prompt), "\n\n")
 	box := promptOf("claude", lines)
 	if noSpace(first) == "" || box == "" {
 		return false
 	}
-	return strings.Contains(box, noSpace(first)) || strings.Contains(box, noSpace("[Pasted text"))
+	long := strings.Contains(strings.TrimSpace(prompt), "\n") || len(prompt) > pastedLong
+	return box == noSpace(first) || long && strings.HasPrefix(box, noSpace("[Pasted text")) && strings.HasSuffix(box, "]")
 }
+
+// pastedLong: a prompt this long may show as Claude's paste marker, not its text.
+const pastedLong = 800
 
 // tookBack: a stop took the turn back, its prompt in the input box again (#416). A forced
 // send's stop sends that prompt with what was forced; after yours or Pixie's stop button it
