@@ -1713,6 +1713,119 @@ func TestStopGoesInPastYourDraft(t *testing.T) {
 	h.s.finish()
 }
 
+// redrawsOnEsc is an agent whose screen already holds Claude's interrupt line but for one
+// letter; on Esc it writes only that letter and its input box (#416): Claude's redraw skips
+// the cells that already show the right letter, so the line never passes whole.
+const redrawsOnEsc = `stty raw -echo; printf '\033[2J\033[H⏺ An essay\r\n  ⎿  Interrupted · Wha_ should Claude do instead?\r\n'; ` +
+	`while [ "$(dd bs=1 count=1 2>/dev/null)" != "$(printf '\033')" ]; do :; done; ` +
+	`printf '\033[2;23Ht\033[3;1H────\r\n❯ \r\n────\r\n'; sleep 30`
+
+// #416: the interrupt a forced send's Esc brings counts though its line was drawn a letter at
+// a time: pix reads it off the screen, and the message goes in.
+func TestStopSeesAnInterruptDrawnInPieces(t *testing.T) {
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", redrawsOnEsc}})
+	waitScreen(t, h, "Wha_should")
+	h.s.setStatus("working")
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "from pixie"})
+	waitEvent(t, h.d.events, "waiting: working", func(m wire.Msg) bool { return m.ID == "1" && m.Reason == "working" })
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "2", Command: "flush", StoppedNote: "[stopped and sent]"})
+	waitEvent(t, h.d.events, "typed", func(m wire.Msg) bool { return m.ID == "2" && m.Status == "typed" })
+	if got := h.s.typedForTest(); !strings.Contains(got, "\x1b[200~[stopped and sent] from pixie\x1b[201~") || h.s.queue.Len() != 0 {
+		t.Fatalf("typed %q, %d queued", got, h.s.queue.Len())
+	}
+	h.s.runner.Hangup()
+	h.s.finish()
+}
+
+// takesBackOnEsc is Claude stopped before it answered (#416): it takes the turn back, its
+// prompt back in the input box, and shows no interrupt line.
+const takesBackOnEsc = `stty raw -echo; printf '\033[2J\033[H❯ Write a story\r\n✻ Thinking…\r\n────\r\n❯ \r\n────\r\n'; ` +
+	`while [ "$(dd bs=1 count=1 2>/dev/null)" != "$(printf '\033')" ]; do :; done; ` +
+	`printf '\033[2J\033[H Claude Code\r\n────\r\n❯ Write a story\r\n────\r\n'; sleep 30`
+
+// #416: a forced send's Esc that takes the turn back ends it all the same; the prompt it put
+// back goes in with the message, after a blank line, so neither is lost.
+func TestStopThatTakesTheTurnBackSendsItsPromptWithTheMessage(t *testing.T) {
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", takesBackOnEsc}})
+	waitScreen(t, h, "Thinking")
+	h.s.Hook("UserPromptSubmit", map[string]any{"prompt": "Write a story"})
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "from pixie"})
+	waitEvent(t, h.d.events, "waiting: working", func(m wire.Msg) bool { return m.ID == "1" && m.Reason == "working" })
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "2", Command: "flush", StoppedNote: "[stopped and sent]"})
+	waitEvent(t, h.d.events, "typed", func(m wire.Msg) bool { return m.ID == "2" && m.Status == "typed" })
+	if got := h.s.typedForTest(); !strings.HasSuffix(got, "\x1b[200~\n\n[stopped and sent] from pixie\x1b[201~\r") || h.s.queue.Len() != 0 {
+		t.Fatalf("typed %q, %d queued", got, h.s.queue.Len())
+	}
+	h.s.runner.Hangup()
+	h.s.finish()
+}
+
+// #416: your own Esc that takes the turn back ends it too; the prompt it put back is yours to
+// send, so what waits holds for it.
+func TestYourEscThatTakesTheTurnBackLeavesItsPromptYours(t *testing.T) {
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", takesBackOnEsc}})
+	waitScreen(t, h, "Thinking")
+	h.s.Hook("UserPromptSubmit", map[string]any{"prompt": "Write a story"})
+	waitEvent(t, h.d.events, "working", func(m wire.Msg) bool { return m.Event == "status" && m.Status == "working" })
+	h.stdinW.WriteString("\x1b")
+	waitEvent(t, h.d.events, "idle", func(m wire.Msg) bool { return m.Event == "status" && m.Status == "idle" })
+	if d, _ := h.s.gate.Draft(); d != "Write a story" {
+		t.Fatalf("draft %q", d)
+	}
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "from pixie"})
+	waitEvent(t, h.d.events, "waiting: typing", func(m wire.Msg) bool { return m.ID == "1" && m.Reason == "typing" })
+	h.s.runner.Hangup()
+	h.s.finish()
+}
+
+// A turn taken back is its prompt in the input box again, and only it: another prompt, or a
+// draft of yours that holds it or a paste, isn't (#416).
+func TestTakenBackIsThePromptItself(t *testing.T) {
+	box := []string{" Claude Code", "────", "❯ Write a story", "────"}
+	pasted := []string{"────", "❯ [Pasted text #1 +12 lines]", "────"}
+	cases := []struct {
+		name   string
+		lines  []string
+		prompt string
+		want   bool
+	}{
+		{"taken back", box, "Write a story", true},
+		{"another prompt", box, "Fix the bug", false},
+		{"no prompt known", box, "", false},
+		{"empty box", []string{"────", "❯ ", "────"}, "Write a story", false},
+		{"a long prompt's first paragraph", box, "Write a story\n\nAbout cats.", true},
+		{"a draft that holds a short prompt", []string{"────", "❯ ok then, also fix the tests", "────"}, "ok", false},
+		{"a draft after it", []string{"────", "❯ Write a story and more", "────"}, "Write a story", false},
+		{"a long prompt pasted", pasted, "line one\nline two", true},
+		{"a draft pasted, the prompt short", pasted, "go", false},
+	}
+	for _, c := range cases {
+		if got := takenBack(c.lines, c.prompt); got != c.want {
+			t.Errorf("%s: %t", c.name, got)
+		}
+	}
+}
+
+// #416: Pixie's stop button that takes the turn back holds what waits (#309); the prompt it
+// put back is yours.
+func TestPixiesStopThatTakesTheTurnBackLeavesItsPromptYours(t *testing.T) {
+	h := newHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", takesBackOnEsc}})
+	waitScreen(t, h, "Thinking")
+	h.s.Hook("UserPromptSubmit", map[string]any{"prompt": "Write a story"})
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "from pixie"})
+	waitEvent(t, h.d.events, "waiting: working", func(m wire.Msg) bool { return m.ID == "1" && m.Reason == "working" })
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "2", Command: "keys", Keys: []string{"Escape"}})
+	waitEvent(t, h.d.events, "idle", func(m wire.Msg) bool { return m.Event == "status" && m.Status == "idle" })
+	if d, _ := h.s.gate.Draft(); d != "Write a story" || !h.s.held() || h.s.queue.Len() != 1 {
+		t.Fatalf("draft %q, held %t, %d queued", d, h.s.held(), h.s.queue.Len())
+	}
+	if got := h.s.typedForTest(); got != "\x1b" {
+		t.Fatalf("typed %q", got)
+	}
+	h.s.runner.Hangup()
+	h.s.finish()
+}
+
 // #320: an agent that doesn't stop in time keeps the message, and says it's busy; with
 // nothing waiting there's nothing to stop.
 func TestStopWaitsWhenTheAgentKeepsWorking(t *testing.T) {

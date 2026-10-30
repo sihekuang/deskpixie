@@ -151,6 +151,12 @@ type Session struct {
 	// interrupt on screen counts only after one, once; Enter or a turn's end drops it. A
 	// redraw that brings back an earlier interrupt comes with no key.
 	stopKeyAt time.Time
+	// turnPrompt: the prompt of the turn now running ("" for none), which Claude puts back in
+	// its input box when a stop takes the turn back before it answered (#416).
+	turnPrompt string
+	// takenBack: a forced send's stop took the turn back: its prompt, back in the input box,
+	// goes in with what was forced, ahead of it (#416); "" for none.
+	takenBack string
 	// stopped: Pixie's stop ended the turn: what waits stays queued (still counted) until you
 	// type your next prompt here or Pixie sends a new message (#309).
 	stopped bool
@@ -227,9 +233,22 @@ func (s *Session) forceIn(msgs []string, note string) error {
 	prompt := strings.Join(withNote(note, msgs), "\n\n")
 	draft, known := s.gate.Draft()
 	empty := known && draft == ""
+	// After the prompt a stop took back, in the input box, so they go in together (#416). With
+	// a draft of yours there too, Claude sets the whole box aside, that prompt with it.
+	back := s.takeTakenBack()
+	if back != "" && empty && s.promptHolds(back) {
+		prompt = "\n\n" + prompt
+	}
 	typeIn := func() error { // a menu that stops it keeps the messages (#306)
-		if err := s.typeIn(prompt); err != nil && !s.holdBack(err, msgs, prompt, "", note) {
-			return err
+		if err := s.typeIn(prompt); err != nil {
+			if !s.holdBack(err, msgs, prompt, "", note) {
+				return err
+			}
+			if back != "" && !s.hasUnsent() { // queued again: the prompt taken back still leads
+				s.mu.Lock()
+				s.takenBack = back
+				s.mu.Unlock()
+			}
 		}
 		return nil
 	}
@@ -389,9 +408,22 @@ func newSession(o sessionOpts) *Session {
 			armed = watch.saw(out, claudeInterrupted) || armed
 			vt = s.screenFor(vt)
 			vt.Write(b)
+			// After a stop key the screen itself is read (#416): Claude's redraw skips cells
+			// that already show the right letter, so its interrupt line can pass in pieces; and
+			// a turn stopped before it answered is taken back, its prompt in the input box again.
+			fresh := s.stopKeyFresh()
+			if _, latest, _ := interruptOnScreen(vt.Lines()); fresh && !latest && s.currentStatus() == "working" &&
+				takenBack(vt.Lines(), s.currentTurnPrompt()) {
+				armed, fresh = false, false
+				s.takeStopKey()
+				s.clearQuestion("interrupted")
+				s.noteScreen(vt) // what is typed next reads the prompt in the box off this screen
+				s.tookBack()
+				s.interrupted()
+			}
 			// Working, or blocked: Esc at a permission prompt fires no Stop either. The line
 			// counts once the screen shows it last, not when a redraw brings back an earlier one.
-			if armed {
+			if armed || fresh {
 				switch at, latest, _ := interruptOnScreen(vt.Lines()); {
 				case latest:
 					armed = false
@@ -449,13 +481,14 @@ func (s *Session) Hook(event string, p map[string]any) string {
 		defer func() { s.keylog("UserPromptSubmit -> %s", s.gate.State()) }()
 		// A prompt while not working starts a new turn, even if the last one never ended with
 		// a Stop (an API error, an interrupt pix didn't see): its start doesn't carry over.
+		prompt, _ := p["prompt"].(string)
 		s.mu.Lock()
 		if s.status != "working" {
 			s.turnStart, s.turnFromPixie = time.Time{}, false
 		}
+		s.turnPrompt, s.takenBack = prompt, "" // one taken back went in with it, or was replaced
 		s.mu.Unlock()
 		s.setStatus("working")
-		prompt, _ := p["prompt"].(string)
 		s.submitted(prompt) // a message a menu stopped, sent from the terminal (#306)
 		pixie := s.fromPixie(prompt)
 		s.forgetEsc() // a prompt began a turn: a later interrupt isn't that Esc's
@@ -481,6 +514,9 @@ func (s *Session) Hook(event string, p map[string]any) string {
 	case "Stop":
 		s.clearQuestion(event)
 		s.dropStopKey() // the turn is over: a later interrupt line isn't that key's (#322)
+		s.mu.Lock()
+		s.turnPrompt = ""
+		s.mu.Unlock()
 		pixie := false
 		if s.o.tool == "codex" { // its notify carries the turn's prompts; there is no prompt hook
 			s.promptDrawn() // a turn ran, so its prompt is up (#306)
@@ -901,7 +937,7 @@ const pixieEscWindow = 30 * time.Second
 func (s *Session) interrupted() {
 	s.mu.Lock()
 	s.afterStop = true
-	s.turnStart, s.turnFromPixie = time.Time{}, false
+	s.turnStart, s.turnFromPixie, s.turnPrompt = time.Time{}, false, ""
 	pixie := !s.escAt.IsZero() && s.now().Sub(s.escAt) < pixieEscWindow
 	s.escAt = time.Time{}
 	if pixie {
@@ -942,6 +978,54 @@ func (s *Session) takeStopKey() bool {
 	ok := !s.stopKeyAt.IsZero() && s.now().Sub(s.stopKeyAt) < pixieEscWindow
 	s.stopKeyAt = time.Time{}
 	return ok
+}
+
+// stopKeyFresh is takeStopKey without using it up.
+func (s *Session) stopKeyFresh() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return !s.stopKeyAt.IsZero() && s.now().Sub(s.stopKeyAt) < pixieEscWindow
+}
+
+// takenBack: Claude's input box holds prompt again, and only it (its first paragraph, or the
+// marker it shows for a long paste of one): a stop took its turn back before it answered, and
+// shows no interrupt line (#416).
+func takenBack(lines []string, prompt string) bool {
+	first, _, _ := strings.Cut(strings.TrimSpace(prompt), "\n\n")
+	box := promptOf("claude", lines)
+	if noSpace(first) == "" || box == "" {
+		return false
+	}
+	long := strings.Contains(strings.TrimSpace(prompt), "\n") || len(prompt) > pastedLong
+	return box == noSpace(first) || long && strings.HasPrefix(box, noSpace("[Pasted text")) && strings.HasSuffix(box, "]")
+}
+
+// pastedLong: a prompt this long may show as Claude's paste marker, not its text.
+const pastedLong = 800
+
+// tookBack: a stop took the turn back, its prompt in the input box again (#416). A forced
+// send's stop sends that prompt with what was forced; after yours or Pixie's stop button it
+// is yours, a draft what waits holds for.
+func (s *Session) tookBack() {
+	s.mu.Lock()
+	prompt, pixie := s.turnPrompt, !s.escAt.IsZero() && s.now().Sub(s.escAt) < pixieEscWindow
+	forced := s.forced != nil && !pixie
+	if forced {
+		s.takenBack = prompt
+	}
+	s.mu.Unlock()
+	if !forced {
+		s.gate.Restore(prompt)
+	}
+}
+
+// takeTakenBack is the prompt a forced send's stop took back, and forgets it.
+func (s *Session) takeTakenBack() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t := s.takenBack
+	s.takenBack = ""
+	return t
 }
 
 // isStopKey: b holds Ctrl-C or an Esc of its own (not one starting an escape sequence), as you
@@ -1070,6 +1154,12 @@ func (s *Session) currentStatus() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.status
+}
+
+func (s *Session) currentTurnPrompt() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.turnPrompt
 }
 
 func (s *Session) setSessionID(id string) {
