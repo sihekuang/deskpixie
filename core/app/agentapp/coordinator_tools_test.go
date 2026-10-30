@@ -326,3 +326,16 @@ func TestTheCoordinatorPromptPassesAttachmentsOn(t *testing.T) {
 		}
 	}
 }
+
+// #419: a request that repeats a message still waiting for a session means the person wants it
+// in now: it isn't sent again, what waits is sent in with flush_session.
+func TestTheCoordinatorPromptSendsInARepeatOfAWaitingMessage(t *testing.T) {
+	for _, md := range []string{RenderClaudeMd("/data/canvas", ""), RenderClaudeMd("/data/canvas", "/Users/x/code")} {
+		for _, rule := range []string{"1 message waiting to go in", "repeats one still waiting there",
+			"don't send it again,\n    send what waits in with `flush_session`"} {
+			if !strings.Contains(md, rule) {
+				t.Errorf("coordinator.md does not mention %q", rule)
+			}
+		}
+	}
+}

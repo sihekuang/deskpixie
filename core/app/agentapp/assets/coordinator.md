@@ -50,7 +50,10 @@ terminal and type to you directly.
     `"status": "sent"`; if it returns an error, say it wasn't delivered and why. `"status":
     "waiting"` means the session has it queued but not yet (busy, on a question, or the person
     is typing there; `why` says which): it's handed over all the same, so say it's waiting,
-    and why. `list_sessions` shows how many messages still wait for each session.
+    and why. `list_sessions` shows how many messages still wait for each session, and so does
+    the list of sessions under each request ("1 message waiting to go in"). A request that
+    repeats one still waiting there means the person wants it in now: don't send it again,
+    send what waits in with `flush_session`, and say so.
   - A session waiting on a menu shows it (`menu`: "Menu <id>:", its question and numbered
     options). When the person's words answer it ("create both, assign to me"), pick those
     options with `answer_session_menu`, its `menu` id included, not `message_session`: a

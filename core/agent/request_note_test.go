@@ -39,3 +39,23 @@ func TestRequestNoteWithOnlyWorkersOrNothing(t *testing.T) {
 		t.Fatalf("nothing open, nothing said: %q", got)
 	}
 }
+
+// #419: a session's messages not typed in yet show under each request, so a request that
+// repeats one isn't taken for delivered.
+func TestRequestNoteSaysWhatStillWaits(t *testing.T) {
+	sessions := []SessionRow{
+		{Name: "icon-claude", Description: "app icon", Repo: "deskpixie", Status: "working", Waiting: 1},
+		{Name: "docs-claude", Description: "docs", Repo: "deskpixie", Status: "idle", Waiting: 3},
+		{Name: "web-claude", Description: "site", Repo: "web", Status: "idle"},
+	}
+	got := RequestNote(sessions, nil, nil)
+	for _, want := range []string{
+		`- icon-claude: "app icon", deskpixie repo, working, 1 message waiting to go in` + "\n",
+		`- docs-claude: "docs", deskpixie repo, idle, 3 messages waiting to go in` + "\n",
+		`- web-claude: "site", web repo, idle` + "\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("no %q in:\n%s", want, got)
+		}
+	}
+}

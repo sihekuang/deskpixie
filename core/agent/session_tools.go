@@ -404,6 +404,12 @@ func RequestNote(sessions []SessionRow, workers []WorkerRow, task func(JobID) st
 		b.WriteString("Your open pix sessions:")
 		for _, r := range sessions {
 			fmt.Fprintf(&b, "\n- %s: %q, %s repo, %s", r.Name, r.Description, r.Repo, r.Status)
+			switch { // not typed in yet: a request that repeats one isn't with it (#419)
+			case r.Waiting == 1:
+				b.WriteString(", 1 message waiting to go in")
+			case r.Waiting > 1:
+				fmt.Fprintf(&b, ", %d messages waiting to go in", r.Waiting)
+			}
 			if r.LastTurn != "" {
 				fmt.Fprintf(&b, ", last turn %q", clipRunes(r.LastTurn, maxNoteTurn))
 			}
