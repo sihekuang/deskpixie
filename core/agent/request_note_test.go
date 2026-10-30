@@ -40,18 +40,20 @@ func TestRequestNoteWithOnlyWorkersOrNothing(t *testing.T) {
 	}
 }
 
-// #419: a session's messages not typed in yet show under each request, so a request that
-// repeats one isn't taken for delivered.
+// #419: the messages a session hasn't been given yet show under each request, so a request
+// that repeats one of them isn't taken for delivered.
 func TestRequestNoteSaysWhatStillWaits(t *testing.T) {
 	sessions := []SessionRow{
-		{Name: "icon-claude", Description: "app icon", Repo: "deskpixie", Status: "working", Waiting: 1},
-		{Name: "docs-claude", Description: "docs", Repo: "deskpixie", Status: "idle", Waiting: 3},
+		{Name: "icon-claude", Description: "app icon", Repo: "deskpixie", Status: "working", Waiting: 1,
+			WaitingMessages: []string{"label the crate with the word medlar"}},
+		{Name: "docs-claude", Description: "docs", Repo: "deskpixie", Status: "idle", Waiting: 2,
+			WaitingMessages: []string{"fix the typo", "and the link"}},
 		{Name: "web-claude", Description: "site", Repo: "web", Status: "idle"},
 	}
 	got := RequestNote(sessions, nil, nil)
 	for _, want := range []string{
-		`- icon-claude: "app icon", deskpixie repo, working, 1 message waiting to go in` + "\n",
-		`- docs-claude: "docs", deskpixie repo, idle, 3 messages waiting to go in` + "\n",
+		`- icon-claude: "app icon", deskpixie repo, working, waiting to go in: "label the crate with the word medlar"` + "\n",
+		`- docs-claude: "docs", deskpixie repo, idle, waiting to go in: "fix the typo", "and the link"` + "\n",
 		`- web-claude: "site", web repo, idle` + "\n",
 	} {
 		if !strings.Contains(got, want) {

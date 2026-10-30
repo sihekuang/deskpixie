@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -858,5 +859,79 @@ func TestForcedSendsCarryBothNotes(t *testing.T) {
 		if m.Command != c.command || m.Text != c.text || m.TypingNote != agent.TypingNote || m.StoppedNote != agent.StoppedNote {
 			t.Fatalf("%s: %+v", c.command, m)
 		}
+	}
+}
+
+// #419: what pix holds is kept by the number pix gave each message, with its text: a delivered
+// report drops every one numbered up to it, and one that came before the waiting result (pix
+// typed it at once) leaves nothing counted. A pix that numbers nothing clears them all.
+func TestHeldMessagesGoByTheirNumbers(t *testing.T) {
+	var s session
+	s.hold(1, "first")
+	s.hold(2, "second")
+	s.deliveredUpTo(1)
+	if got := s.heldTexts(); !slices.Equal(got, []string{"second"}) {
+		t.Fatalf("after 1: %q", got)
+	}
+	s.deliveredUpTo(3) // 3 went in before its waiting result reached the host
+	s.hold(3, "third")
+	if len(s.held) != 0 {
+		t.Fatalf("a message already delivered counted: %q", s.heldTexts())
+	}
+	s.hold(4, "fourth")
+	s.deliveredUpTo(2) // an older report changes nothing
+	if got := s.heldTexts(); !slices.Equal(got, []string{"fourth"}) {
+		t.Fatalf("after an old report: %q", got)
+	}
+	var old session
+	old.hold(0, "a")
+	old.hold(0, "b")
+	old.deliveredUpTo(0)
+	if len(old.held) != 0 {
+		t.Fatalf("an unnumbered report left %q", old.heldTexts())
+	}
+}
+
+// #419: a session lists the text of what still waits for it, oldest first, and a new pix on
+// the same session starts with nothing held.
+func TestListShowsWhatStillWaits(t *testing.T) {
+	h, sock := newHost(t)
+	p, r := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api", Run: "r1", SessionID: "s-1"})
+	send := func(text string, seq uint64) {
+		t.Helper()
+		go func() {
+			m, _ := p.dec.Next()
+			wire.Encode(p.c, wire.Msg{Kind: wire.KindResult, ID: m.ID, Status: "waiting", Reason: "working", Seq: seq})
+		}()
+		if _, err := h.PromptDelivery(context.Background(), r.Address, text); err != nil {
+			t.Fatal(err)
+		}
+	}
+	send("label the crate", 1)
+	send("and the lid", 2)
+	if u := listed(t, h)[0].User; u.Waiting != 2 || !slices.Equal(u.WaitingMessages, []string{"label the crate", "and the lid"}) {
+		t.Fatalf("%d %q", u.Waiting, u.WaitingMessages)
+	}
+	wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "delivered", Seq: 1})
+	for deadline := time.Now().Add(2 * time.Second); listed(t, h)[0].User.Waiting != 1; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("still %q", listed(t, h)[0].User.WaitingMessages)
+		}
+	}
+	if u := listed(t, h)[0].User; !slices.Equal(u.WaitingMessages, []string{"and the lid"}) {
+		t.Fatalf("%q", u.WaitingMessages)
+	}
+	// The same pix back after a drop still holds it; another pix on the session holds nothing.
+	p.c.Close()
+	eventually(t, "drop not noticed", func() bool { return !listed(t, h)[0].User.Reachable })
+	p2, _ := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api", Run: "r1", SessionID: "s-1", Address: r.Address})
+	if u := listed(t, h)[0].User; !slices.Equal(u.WaitingMessages, []string{"and the lid"}) {
+		t.Fatalf("lost on reconnect: %q", u.WaitingMessages)
+	}
+	p2.c.Close()
+	eventually(t, "drop not noticed", func() bool { return !listed(t, h)[0].User.Reachable })
+	dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api", Run: "r2", SessionID: "s-1", Address: r.Address})
+	if u := listed(t, h)[0].User; u.Waiting != 0 || len(u.WaitingMessages) != 0 {
+		t.Fatalf("a new pix kept %q", u.WaitingMessages)
 	}
 }
