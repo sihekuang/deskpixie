@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -185,6 +186,19 @@ func (s *Session) fromPixie(prompt string) bool {
 		}
 	}
 	return false
+}
+
+// tookMidTurn: msgs went into the turn as context, not as a prompt, so the turn answers
+// Pixie too and no prompt of yours is taken for them later.
+func (s *Session) tookMidTurn(msgs []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.turnFromPixie = true
+	for _, m := range msgs {
+		if i := slices.Index(s.posted, norm(m)); i >= 0 {
+			s.posted = slices.Delete(s.posted, i, i+1)
+		}
+	}
 }
 
 // newWork records the description a new piece of work's prompt gives ("" for none).
@@ -531,6 +545,7 @@ func (s *Session) Hook(event string, p map[string]any) string {
 		}
 		if msgs := s.queue.Drain(); len(msgs) > 0 {
 			s.takeNote() // nothing is typed: they go in as context
+			s.tookMidTurn(msgs)
 			s.title()
 			s.delivered()
 			ctx := "Messages from Pixie:\n- " + strings.Join(msgs, "\n- ")

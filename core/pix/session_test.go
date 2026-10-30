@@ -1288,6 +1288,31 @@ func TestATurnPixieStartedSaysSo(t *testing.T) {
 	h.s.finish()
 }
 
+// A message Pixie sent while the session was busy goes in with its next tool, not as a
+// prompt: the turn that took it answers Pixie too, so it says so.
+func TestATurnThatTookPixiesMessageMidTurnSaysSo(t *testing.T) {
+	h := turnHarness(t, "claude", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}})
+	h.s.Hook("UserPromptSubmit", map[string]any{"prompt": "run the upload tests"})
+	task := "Task from the coordinator: also check the lint."
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "p", Command: "prompt", Text: task})
+	waitEvent(t, h.d.events, "prompt result", func(m wire.Msg) bool { return m.ID == "p" && m.Reason == "working" })
+	if reply := h.s.Hook("PostToolUse", map[string]any{"tool_name": "Bash"}); !strings.Contains(reply, task) {
+		t.Fatalf("not delivered with the tool: %q", reply)
+	}
+	h.s.Hook("Stop", map[string]any{"last_assistant_message": "Tests pass and the lint is clean."})
+	if m := turnEvent(t, h); m.Source != "pixie" {
+		t.Fatalf("%+v", m)
+	}
+	// It went in: a later prompt of yours with the same words is yours.
+	h.s.Hook("UserPromptSubmit", map[string]any{"prompt": task})
+	h.s.Hook("Stop", map[string]any{"last_assistant_message": "Clean."})
+	if m := turnEvent(t, h); m.Source != "you" {
+		t.Fatalf("%+v", m)
+	}
+	h.s.runner.Hangup()
+	h.s.finish()
+}
+
 func TestACodexTurnReportsItsLastMessage(t *testing.T) {
 	h := turnHarness(t, "codex", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}})
 	h.s.Hook("Stop", map[string]any{"type": "agent-turn-complete", "input-messages": []any{"rename foo to bar"},
