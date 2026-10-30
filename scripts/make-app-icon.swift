@@ -3,8 +3,8 @@
 //
 // The art is Bit's idle frame 0 with the closed mouth composited at the pack's mouth anchor —
 // the same face MenuBarIcon uses — trimmed to its opaque pixels, scaled up nearest-neighbour by
-// the largest whole factor that fits, and centred on an 824×824 rounded square (the macOS icon
-// grid: 100 px margin, ~185 px corner radius) with a soft drop shadow.
+// the largest whole factor that fits the macOS icon grid (an 824×824 square, 100 px margin), and
+// centred on a transparent canvas: no tile behind Bit.
 import AppKit
 import CoreGraphics
 import Foundation
@@ -12,13 +12,8 @@ import ImageIO
 import UniformTypeIdentifiers
 
 let canvas = 1024
+/// The macOS icon grid: Bit stands as tall as other apps' icons.
 let tile = CGRect(x: 100, y: 100, width: 824, height: 824)
-let cornerRadius: CGFloat = 185.4
-/// The share of the tile Bit may fill (each side), so the art keeps breathing room.
-let artFraction: CGFloat = 0.72
-/// Deep navy from the design system's dark accent-soft, so Bit's green reads clearly.
-let bgTop = CGColor(srgbRed: 0x2b / 255, green: 0x3d / 255, blue: 0x66 / 255, alpha: 1)
-let bgBottom = CGColor(srgbRed: 0x14 / 255, green: 0x1d / 255, blue: 0x33 / 255, alpha: 1)
 
 func fail(_ msg: String) -> Never {
     FileHandle.standardError.write(Data("error: \(msg)\n".utf8))
@@ -73,27 +68,12 @@ guard maxX >= minX else { fail("empty frame") }
 let tw = maxX - minX + 1, th = maxY - minY + 1
 guard let art = face.cropping(to: CGRect(x: minX, y: minY, width: tw, height: th)) else { fail("trim") }
 
-// 3. The canvas.
+// 3. The canvas, transparent.
 guard let ctx = CGContext(data: nil, width: canvas, height: canvas, bitsPerComponent: 8, bytesPerRow: 0,
                           space: space, bitmapInfo: alphaInfo) else { fail("context") }
-let path = CGPath(roundedRect: tile, cornerWidth: cornerRadius, cornerHeight: cornerRadius, transform: nil)
-
-ctx.saveGState()
-ctx.setShadow(offset: CGSize(width: 0, height: -10), blur: 28, color: CGColor(gray: 0, alpha: 0.35))
-ctx.addPath(path)
-ctx.setFillColor(bgBottom)
-ctx.fillPath()
-ctx.restoreGState()
-
-ctx.saveGState()
-ctx.addPath(path)
-ctx.clip()
-let gradient = CGGradient(colorsSpace: space, colors: [bgTop, bgBottom] as CFArray, locations: [0, 1])!
-ctx.drawLinearGradient(gradient, start: CGPoint(x: 0, y: tile.maxY), end: CGPoint(x: 0, y: tile.minY), options: [])
-ctx.restoreGState()
 
 // Largest whole scale that fits, so every sprite pixel is an exact square block.
-let room = tile.width * artFraction
+let room = tile.width
 let scale = max(1, Int(min(room / CGFloat(tw), room / CGFloat(th))))
 let aw = tw * scale, ah = th * scale
 let ax = (canvas - aw) / 2, ay = (canvas - ah) / 2
