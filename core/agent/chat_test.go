@@ -302,6 +302,22 @@ func TestASessionsReplyTheBoxDoesntShowTakesTheUsualRoute(t *testing.T) {
 	}
 }
 
+// #414: a message sent from the chat window was never in the box under Pixie, so the box
+// ignores its session's reply: the reply takes the usual route (a card), not the box.
+func TestASessionsReplyToAWindowMessageTakesTheUsualRoute(t *testing.T) {
+	c := handedOffTyped(t)
+	c.Step(WindowSentInput(job(1)), T0+11)
+	fx := sessionTurn(c, pixieTurn("The new build is running."), T0+20)
+	for _, l := range chats(fx) {
+		if l.Job == job(1) {
+			t.Fatalf("went to the box: %s", fmtEffects(fx))
+		}
+	}
+	if !anyKind(fx, EfReply) {
+		t.Fatalf("no card: %s", fmtEffects(fx))
+	}
+}
+
 func TestAnotherSessionsReplyIsNotTakenForTheTypedMessage(t *testing.T) {
 	c := handedOffTyped(t)
 	fx := c.Step(PaneInput(PaneEvent{Kind: PaneEventTurn, Agent: "web-claude", Turn: &SessionTurn{Label: "web", Reply: "Done.", Duration: 45_000, FromPixie: true}}), T0+20)

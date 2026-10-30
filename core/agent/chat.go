@@ -138,6 +138,10 @@ func (h *AgentHandle) chatText(text string) (string, error) {
 	return text, nil
 }
 
+// SentFromWindow: typed job id was sent from the chat window, so the box under Pixie never
+// shows it and its session's replies take the usual route (#414).
+func (h *AgentHandle) SentFromWindow(id JobID) { h.Input(WindowSentInput(id)) }
+
 // ChatStop is Stop in the text box: cancel the last typed job if it is still open.
 func (h *AgentHandle) ChatStop() {
 	h.ctlMu.Lock()

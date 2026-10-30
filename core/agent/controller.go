@@ -169,6 +169,7 @@ const (
 	InLateSessionSent                      // Job, Name, Text, Message, Reason: a session tool done after its call was answered (#246); Job: the request then in flight ("" = none); Reason: its error
 	InSessionSent                          // Name, Text, Message: the coordinator's message_session reached your session Name, described Text (#177); Message: why it waits ("" = typed, #183)
 	InTextMode                             // Away: text mode on (#221): no conversation is opened for updates
+	InWindowSent                           // Job: a typed job sent from the chat window, not the box under Pixie (#414)
 	InRepliesShown                         // IDs: the reply deck showed these lines (#286)
 	InInterruptTurn                        // the stop button by the working coordinator (#309); answered with EfToolResult (Value: whether a turn was stopped)
 	InWorkerInterrupted                    // Name: the stop button pressed Esc in this worker (#309); answered with EfToolResult (Value: whether it was Pixie's worker)
@@ -243,7 +244,10 @@ func TypedDelegateInput(id JobID, task, context string) Input {
 
 // TextModeInput: the user switched to text (on) or back to voice (#221).
 func TextModeInput(on bool) Input { return Input{Kind: InTextMode, Away: on} }
-func CancelInput(id JobID) Input  { return Input{Kind: InCancel, Job: id} }
+
+// WindowSentInput: typed job id was sent from the chat window (#414).
+func WindowSentInput(id JobID) Input { return Input{Kind: InWindowSent, Job: id} }
+func CancelInput(id JobID) Input     { return Input{Kind: InCancel, Job: id} }
 
 // InterruptTurnInput is the stop button by the coordinator while it works (#309).
 func InterruptTurnInput() Input { return Input{Kind: InInterruptTurn} }
@@ -477,7 +481,9 @@ type AgentController struct {
 	// is opened for updates.
 	typed     map[JobID]bool
 	lastTyped JobID
-	textMode  bool
+	// fromWindow: typed jobs sent from the chat window (#414), which the box never shows.
+	fromWindow map[JobID]bool
+	textMode   bool
 	// turnStopped: the turn that just ended was only about typed jobs the user stopped, so what
 	// it says (the coordinator confirming the stop) is dropped.
 	turnStopped bool
@@ -644,6 +650,7 @@ func NewAgentController(settings Settings) *AgentController {
 		asking:         map[string]uint64{},
 		announced:      map[string]announcedQuestion{},
 		typed:          map[JobID]bool{},
+		fromWindow:     map[JobID]bool{},
 		opener:         newOpener(settings.NotifyPerMinute),
 		modes:          map[string]bool{},
 	}
@@ -786,6 +793,8 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 		}
 	case InTextMode:
 		c.textMode = in.Away
+	case InWindowSent:
+		c.fromWindow[in.Job] = true
 	case InCancel:
 		c.cancel(in.Job, now, &fx)
 	case InInterruptTurn:
@@ -2370,7 +2379,7 @@ func (c *AgentController) takeBoxAnswer() (string, JobID) {
 
 // boxShows: the text box shows job (text mode, and it is the newest typed job).
 func (c *AgentController) boxShows(job JobID) bool {
-	return c.typed[job] && c.textMode && job == c.lastTyped
+	return c.typed[job] && !c.fromWindow[job] && c.textMode && job == c.lastTyped
 }
 
 // deliver routes a line; true if the user got it now (spoken or notified), not just outboxed.

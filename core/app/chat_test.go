@@ -68,6 +68,11 @@ func (f *fakeAgent) SetTextMode(on bool) {
 	f.textModes = append(f.textModes, on)
 	f.mu.Unlock()
 }
+func (f *fakeAgent) SentFromWindow(job string) {
+	f.mu.Lock()
+	f.fromWindow = append(f.fromWindow, job)
+	f.mu.Unlock()
+}
 func (f *fakeAgent) SetMarkForced(on bool) {
 	f.mu.Lock()
 	f.markForced = append(f.markForced, on)
@@ -91,6 +96,20 @@ func TestChatSendCallsTheAgent(t *testing.T) {
 	}
 	if !slices.Equal(f.sent, []string{"hello"}) {
 		t.Fatal(f.sent)
+	}
+}
+
+// #414: a message from the chat window is marked so its session's replies don't go to the box
+// under Pixie; one from the box, or one that answered a question, isn't.
+func TestAWindowMessageIsMarkedAsTheWindows(t *testing.T) {
+	f := &fakeAgent{tray: AgentTray{Enabled: true}}
+	h := newHarness(t, withAgent(f))
+	h.call("chat.send", map[string]any{"text": "from the window", "from": "window"})
+	h.call("chat.send", map[string]any{"text": "from the box"})
+	f.asking = "job_000000000009"
+	h.call("chat.send", map[string]any{"text": "yes", "from": "window"})
+	if !slices.Equal(f.fromWindow, []string{"job_000000000001"}) {
+		t.Fatal(f.fromWindow)
 	}
 }
 

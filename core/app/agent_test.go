@@ -21,6 +21,7 @@ import (
 
 type fakeAgent struct {
 	mu              sync.Mutex
+	fromWindow      []string
 	menu            []string
 	opened          int
 	mouths          []int

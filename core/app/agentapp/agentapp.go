@@ -719,6 +719,9 @@ func (a *Agent) SetTextMode(on bool) { a.handle.SetTextMode(on) }
 // SetMarkForced: agent.markForcedSends changed (#340).
 func (a *Agent) SetMarkForced(on bool) { a.handle.SetMarkForced(on) }
 
+// SentFromWindow: typed job was sent from the chat window (#414).
+func (a *Agent) SentFromWindow(job string) { a.handle.SentFromWindow(agent.JobID(job)) }
+
 // Roster is the roster beside Pixie (agent.RosterView).
 func (a *Agent) Roster() any { return a.handle.Roster() }
 
