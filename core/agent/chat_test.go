@@ -255,6 +255,21 @@ func TestASessionsReplyToATypedMessageGoesToTheBox(t *testing.T) {
 	noUsualRoute(t, fx)
 }
 
+// #408: the box shows the session's reply itself, not its one-sentence gist: the answer to
+// what you typed is often a later sentence. A very long one is cut, with "…".
+func TestTheBoxShowsTheSessionsWholeReply(t *testing.T) {
+	c := handedOffTyped(t)
+	reply := "I ran all five sleep 20 calls.\n\nOne message came in from Pixie: 23 × 3 = 69."
+	wantChat(t, sessionTurn(c, pixieTurn(reply), T0+20), ChatLine{Job: job(1), Status: "done", Text: reply})
+	long := strings.Repeat("All good. ", 600)
+	got := chats(sessionTurn(c, pixieTurn(long), T0+30))[0].Text
+	if len(got) > MaxBoxReplyBytes+len("…") || !strings.HasSuffix(got, "…") || !strings.HasPrefix(long, strings.TrimSuffix(got, "…")) {
+		t.Fatalf("%d bytes: %q", len(got), got[len(got)-20:])
+	}
+	// A reply with nothing to read still says it finished.
+	wantChat(t, sessionTurn(c, pixieTurn("  \n"), T0+40), ChatLine{Job: job(1), Status: "done", Text: "Finished."})
+}
+
 func TestASessionsQuestionAboutATypedMessageAsksInTheBox(t *testing.T) {
 	c := handedOffTyped(t)
 	fx := sessionTurn(c, pixieTurn("Should I also fix the logout page?"), T0+20)
