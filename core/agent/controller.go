@@ -2204,6 +2204,10 @@ func (c *AgentController) flushUpdates(now Millis, fx *[]Effect) {
 // MaxSessionDetailBytes caps the reply the voice model is given to sum up (#114).
 const MaxSessionDetailBytes = 2 << 10
 
+// MaxBoxReplyBytes caps a session's reply shown in the box (#408): under pix's own cut
+// (MaxTurnReplyBytes), so a reply cut there ends in "…" here.
+const MaxBoxReplyBytes = 3 << 10
+
 // onSessionTurn: a session you started with pix finished a turn (#114). Any turn Pixie
 // started (the coordinator was told its answer comes back, #229), or with the setting on a
 // turn of yours that ran long enough, is told like an update: its gist, or its question
@@ -2252,7 +2256,7 @@ func (c *AgentController) onSessionTurn(name string, t SessionTurn, now Millis, 
 				c.keepHeardAlert(line, now, fx) // on the badge too, until answered (#286 call 7)
 			}
 			c.boxAnswered = job
-			*fx = append(*fx, Effect{Kind: EfChat, Chat: ChatLine{Job: job, Status: status, Text: SessionTurnBrief(gist), Sessions: []string{name}, Session: name, Asking: asking}})
+			*fx = append(*fx, Effect{Kind: EfChat, Chat: ChatLine{Job: job, Status: status, Text: boxReply(reply, gist), Sessions: []string{name}, Session: name, Asking: asking}})
 			return
 		}
 	}
@@ -2260,6 +2264,19 @@ func (c *AgentController) onSessionTurn(name string, t SessionTurn, now Millis, 
 		c.reask = reask{at: now, line: line}
 	}
 	c.deliverUpdate(line, now, fx)
+}
+
+// boxReply is a session's reply as the box shows it (#408): the reply itself, since the answer
+// to what you typed is often past its gist's sentence; cut at MaxBoxReplyBytes.
+func boxReply(reply, gist string) string {
+	reply = strings.TrimSpace(reply)
+	if reply == "" {
+		return SessionTurnBrief(gist)
+	}
+	if cut := truncateBytes(reply, MaxBoxReplyBytes); cut != reply {
+		return strings.TrimRightFunc(cut, unicode.IsSpace) + "…"
+	}
+	return reply
 }
 
 func (c *AgentController) deliverUpdate(line Line, now Millis, fx *[]Effect) {

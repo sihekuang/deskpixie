@@ -85,6 +85,19 @@ final class QuickChatModelTests: XCTestCase {
         XCTAssertTrue(m.canSend("next"))
     }
 
+    /// #408: a session's whole reply types out in a few seconds, not a word every tick.
+    func test_a_long_answer_types_out_in_at_most_max_ticks() {
+        var m = QuickChatModel()
+        m.sent(job: "job_1")
+        let long = Array(repeating: "All good.", count: 300).joined(separator: " ") + "\n\nThe answer is 87."
+        m.apply(line("done", long))
+        var ticks = 0
+        while m.tick() { ticks += 1 }
+        XCTAssertLessThanOrEqual(ticks, QuickChatModel.maxTicks)
+        XCTAssertEqual(m.shown, long)
+        XCTAssertEqual(m.phase, .done)
+    }
+
     func test_another_jobs_line_is_ignored() {
         var m = QuickChatModel()
         m.sent(job: "job_2")
