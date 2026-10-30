@@ -2204,8 +2204,9 @@ func (c *AgentController) flushUpdates(now Millis, fx *[]Effect) {
 // MaxSessionDetailBytes caps the reply the voice model is given to sum up (#114).
 const MaxSessionDetailBytes = 2 << 10
 
-// MaxBoxReplyBytes caps a session's reply shown in the box (#408).
-const MaxBoxReplyBytes = 4 << 10
+// MaxBoxReplyBytes caps a session's reply shown in the box (#408): under pix's own cut
+// (MaxTurnReplyBytes), so a reply cut there ends in "…" here.
+const MaxBoxReplyBytes = 3 << 10
 
 // onSessionTurn: a session you started with pix finished a turn (#114). Any turn Pixie
 // started (the coordinator was told its answer comes back, #229), or with the setting on a
@@ -2273,7 +2274,7 @@ func boxReply(reply, gist string) string {
 		return SessionTurnBrief(gist)
 	}
 	if cut := truncateBytes(reply, MaxBoxReplyBytes); cut != reply {
-		return strings.TrimRight(cut, " \n") + "…"
+		return strings.TrimRightFunc(cut, unicode.IsSpace) + "…"
 	}
 	return reply
 }

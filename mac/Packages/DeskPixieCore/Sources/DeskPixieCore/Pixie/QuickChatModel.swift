@@ -710,7 +710,12 @@ public struct QuickChatModel: Equatable, Sendable {
         }
     }
 
-    /// Shows the next word of the answer; false when nothing changed. The last word ends it.
+    /// At most this many ticks type an answer out: a long one (a session's whole reply, #408)
+    /// shows several words a tick instead of taking a minute.
+    public static let maxTicks = 25
+
+    /// Shows the next word of the answer (or words, for a long one); false when nothing
+    /// changed. The last word ends it.
     public mutating func tick() -> Bool {
         guard phase == .answering else { return false }
         let words = full.split(separator: " ", omittingEmptySubsequences: true)
@@ -719,8 +724,9 @@ public struct QuickChatModel: Equatable, Sendable {
             phase = .done
             return false
         }
-        shown = words[0...have].joined(separator: " ")
-        if have + 1 == words.count {
+        let next = min(words.count, have + max(1, (words.count + Self.maxTicks - 1) / Self.maxTicks))
+        shown = words[0..<next].joined(separator: " ")
+        if next == words.count {
             shown = full
             phase = .done
         }
