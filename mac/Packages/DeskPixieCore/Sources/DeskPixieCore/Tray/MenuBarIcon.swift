@@ -16,14 +16,17 @@ public enum MenuBarIcon {
     /// Below this share of Pixie's pixels left after cutting, the plain silhouette is used: a
     /// pixie that is mostly "features" would fall apart into specks.
     static let minKeptShare = 0.6
+    /// Pixels at least this opaque are Pixie; fainter ones (a soft shadow or glow) are left out,
+    /// so they neither fill the template nor count as its edge.
+    static let solidAlpha: UInt8 = 128
 
     /// Black-on-clear mask of Pixie's face, trimmed to its pixels; nil when the pack has no
-    /// idle state, the sheet cannot be cropped or the frame is empty.
+    /// idle state, the sheet cannot be cropped or the frame has no solid pixels.
     public static func faceMask(pack: Pack, sheet: SpriteSheet) -> CGImage? {
         guard let face = PixieFace.render(pack: pack, sheet: sheet) else { return nil }
         let w = face.width, h = face.height
         var lum = [CGFloat?](repeating: nil, count: w * h)
-        for y in 0..<h { for x in 0..<w { lum[y * w + x] = face.luminance(x, y) } }
+        for y in 0..<h { for x in 0..<w where face.alpha(x, y) >= solidAlpha { lum[y * w + x] = face.luminance(x, y) } }
         let opaque = lum.compactMap { $0 }.sorted()
         guard !opaque.isEmpty else { return nil }
         let body = opaque[opaque.count / 2]
@@ -39,8 +42,12 @@ public enum MenuBarIcon {
         let kept = cut.filter { $0 }.count
         let on = Double(kept) >= minKeptShare * Double(opaque.count) ? cut : silhouette
 
-        // Cutting never touches the edge, so the face's bounds are the silhouette's.
-        guard let b = face.opaqueBounds else { return nil }
+        // Cutting never touches the edge, so the mask's bounds are the silhouette's.
+        var minX = w, minY = h, maxX = -1, maxY = -1
+        for y in 0..<h { for x in 0..<w where silhouette[y * w + x] {
+            minX = min(minX, x); maxX = max(maxX, x); minY = min(minY, y); maxY = max(maxY, y)
+        } }
+        let b = (x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1)
         var out = [UInt8](repeating: 0, count: b.width * b.height * 4)
         for y in 0..<b.height {
             for x in 0..<b.width where on[(y + b.y) * w + x + b.x] {

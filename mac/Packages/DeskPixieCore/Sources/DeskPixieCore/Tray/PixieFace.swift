@@ -1,8 +1,8 @@
 import CoreGraphics
 import Foundation
 
-/// Pixie at rest, as the icons show it: idle frame 0 with the closed mouth composited at the
-/// pack's mouth anchor, in cell pixels. Any pack that loads has both (`idle` and `mouth` are
+/// Pixie at rest, as the icons show it: idle frame 0 with the closed mouth composited where the
+/// pixie on screen has it (the anchor moved by that frame's faceDy), in cell pixels. Any pack that loads has both (`idle` and `mouth` are
 /// required), so this works for custom pixies of any cell size.
 public struct PixieFace: Equatable {
     public let width: Int
@@ -25,8 +25,9 @@ public struct PixieFace: Equatable {
             let m = pack.mouth
             let mw = m.size[0], mh = m.size[1]
             if m.levels > 0, let mouth = sheet.crop(CGRect(x: 0, y: m.row * h, width: mw, height: mh)) {
+                let at = PixiePlayer(state: "idle").mouthPos(pack: pack)
                 // CG's origin is bottom-left; the anchor is top-left in cell pixels.
-                ctx.draw(mouth, in: CGRect(x: m.anchor[0], y: h - m.anchor[1] - mh, width: mw, height: mh))
+                ctx.draw(mouth, in: CGRect(x: at.x, y: CGFloat(h) - at.y - CGFloat(mh), width: CGFloat(mw), height: CGFloat(mh)))
             }
             return true
         }
