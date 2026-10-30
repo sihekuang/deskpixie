@@ -68,6 +68,12 @@ func (f *fakeAgent) SetTextMode(on bool) {
 	f.textModes = append(f.textModes, on)
 	f.mu.Unlock()
 }
+func (f *fakeAgent) WindowSend(text string) (ChatSent, error) {
+	f.mu.Lock()
+	f.fromWindow = append(f.fromWindow, text)
+	f.mu.Unlock()
+	return f.ChatSend(text)
+}
 func (f *fakeAgent) SetMarkForced(on bool) {
 	f.mu.Lock()
 	f.markForced = append(f.markForced, on)
@@ -91,6 +97,17 @@ func TestChatSendCallsTheAgent(t *testing.T) {
 	}
 	if !slices.Equal(f.sent, []string{"hello"}) {
 		t.Fatal(f.sent)
+	}
+}
+
+// #414: a message from the chat window goes as the window's, one from the box as the box's.
+func TestAWindowMessageGoesAsTheWindows(t *testing.T) {
+	f := &fakeAgent{tray: AgentTray{Enabled: true}}
+	h := newHarness(t, withAgent(f))
+	h.call("chat.send", map[string]any{"text": "from the window", "from": "window"})
+	h.call("chat.send", map[string]any{"text": "from the box"})
+	if !slices.Equal(f.fromWindow, []string{"from the window"}) || !slices.Equal(f.sent, []string{"from the window", "from the box"}) {
+		t.Fatal(f.fromWindow, f.sent)
 	}
 }
 

@@ -47,7 +47,11 @@ func briefOr(brief, text string) string {
 
 // EntryForLine is a reply line as a thread entry.
 func EntryForLine(l agent.OutboxLine, r agent.RosterView) chat.Entry {
-	e := chat.Entry{At: int64(l.At), Who: whoFor(l.Session, l.Worker, l.Title, r), Text: briefOr(l.Brief, l.Text), Lines: []uint64{l.ID}}
+	text := briefOr(l.Brief, l.Text)
+	if l.Full != "" {
+		text = l.Full // a session's whole reply to what you sent from the window (#414)
+	}
+	e := chat.Entry{At: int64(l.At), Who: whoFor(l.Session, l.Worker, l.Title, r), Text: text, Lines: []uint64{l.ID}}
 	if l.Session != "" {
 		e.Sessions = []string{l.Session}
 	}

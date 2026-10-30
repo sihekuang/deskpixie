@@ -74,7 +74,11 @@ func (a *App) registerChat(r Registrar) {
 			a.threadSent(sent.Job, in.Text, sent.Attached, to)
 			return map[string]any{"job": sent.Job}, nil
 		}
-		sent, err := a.agent.ChatSend(in.Text)
+		send := a.agent.ChatSend
+		if in.From == fromWindow {
+			send = a.agent.WindowSend // the box under Pixie never shows it (#414)
+		}
+		sent, err := send(in.Text)
 		if err != nil {
 			return nil, err
 		}

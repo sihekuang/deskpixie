@@ -3,6 +3,7 @@ package agent
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -207,9 +208,10 @@ type Input struct {
 	Run string
 	// Keep (InRestored): the coordinator was kept running over the quit (agent.keepPanesOnQuit).
 	Keep bool
-	// Typed (InDelegate): the request was typed in the text box (#221).
-	Typed bool
-	Plan  WorkerPlan
+	// Typed (InDelegate): the request was typed in the text box (#221); Window: in the chat
+	// window, not the box under Pixie (#414).
+	Typed, Window bool
+	Plan          WorkerPlan
 	// Memories (InRestored): memories.jsonl's lines.
 	Memories []string
 	// IDs (InUpdatesSeen): outbox line ids. Clicked: the user dismissed them (a click on the line
@@ -241,9 +243,15 @@ func TypedDelegateInput(id JobID, task, context string) Input {
 	return Input{Kind: InDelegate, Job: id, Task: task, Context: context, Typed: true}
 }
 
+// WindowDelegateInput is TypedDelegateInput for a message sent from the chat window (#414).
+func WindowDelegateInput(id JobID, task, context string) Input {
+	return Input{Kind: InDelegate, Job: id, Task: task, Context: context, Typed: true, Window: true}
+}
+
 // TextModeInput: the user switched to text (on) or back to voice (#221).
 func TextModeInput(on bool) Input { return Input{Kind: InTextMode, Away: on} }
-func CancelInput(id JobID) Input  { return Input{Kind: InCancel, Job: id} }
+
+func CancelInput(id JobID) Input { return Input{Kind: InCancel, Job: id} }
 
 // InterruptTurnInput is the stop button by the coordinator while it works (#309).
 func InterruptTurnInput() Input { return Input{Kind: InInterruptTurn} }
@@ -477,7 +485,11 @@ type AgentController struct {
 	// is opened for updates.
 	typed     map[JobID]bool
 	lastTyped JobID
-	textMode  bool
+	// fromWindow: typed jobs sent from the chat window (#414), which the box never shows;
+	// lastWindow the newest.
+	fromWindow map[JobID]bool
+	lastWindow JobID
+	textMode   bool
 	// turnStopped: the turn that just ended was only about typed jobs the user stopped, so what
 	// it says (the coordinator confirming the stop) is dropped.
 	turnStopped bool
@@ -644,6 +656,7 @@ func NewAgentController(settings Settings) *AgentController {
 		asking:         map[string]uint64{},
 		announced:      map[string]announcedQuestion{},
 		typed:          map[JobID]bool{},
+		fromWindow:     map[JobID]bool{},
 		opener:         newOpener(settings.NotifyPerMinute),
 		modes:          map[string]bool{},
 	}
@@ -778,11 +791,20 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 		fx = append(fx, Effect{Kind: EfRewrite, File: MemoriesFile, Lines: c.memories.Lines()})
 	case InDelegate:
 		c.delegate(in.Job, in.Task, in.Context, now, &fx)
-		if in.Typed && !c.isDisabled() {
+		switch {
+		case !in.Typed || c.isDisabled():
+		case in.Window:
+			// The chat window's (#414): its lines go to the thread, never the box, whose
+			// message, question and Stop stay its own.
+			c.typed[in.Job] = true
+			c.fromWindow[in.Job] = true
+			c.lastWindow = in.Job
+		default:
 			c.typed[in.Job] = true
 			c.lastTyped = in.Job
 			c.boxAsker, c.boxAnswered = "", ""
-			clear(c.typedTo) // the box shows this message now
+			// The box shows this message now; the window's stay the window's.
+			maps.DeleteFunc(c.typedTo, func(_ string, j JobID) bool { return !c.fromWindow[j] })
 		}
 	case InTextMode:
 		c.textMode = in.Away
@@ -2247,6 +2269,9 @@ func (c *AgentController) onSessionTurn(name string, t SessionTurn, now Millis, 
 		Detail:  truncateBytes(strings.Join(strings.Fields(reply), " "), MaxSessionDetailBytes),
 	}
 	if job, ok := c.typedTo[name]; ok {
+		if c.fromWindow[job] {
+			line.Full = boxReply(reply, gist) // the window shows it whole, as the box would (#408)
+		}
 		if c.boxShows(job) {
 			// #241: the answer to a message typed in the box, so it goes there.
 			status := "done"

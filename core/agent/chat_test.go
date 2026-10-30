@@ -302,6 +302,46 @@ func TestASessionsReplyTheBoxDoesntShowTakesTheUsualRoute(t *testing.T) {
 	}
 }
 
+// #414: a message sent from the chat window was never in the box under Pixie, so the box
+// ignores its session's reply: the reply takes the usual route (a card), not the box.
+func TestASessionsReplyToAWindowMessageTakesTheUsualRoute(t *testing.T) {
+	c := ctlWith(func(*Settings) {})
+	c.Step(CoordinatorUpInput(PaneIdle), T0)
+	c.Step(TextModeInput(true), T0)
+	c.Step(WindowDelegateInput(job(1), "ask api what changed", ""), T0)
+	c.Step(SessionSentInput("api-claude", landing), T0+5)
+	stop(c, `<spoken ref="job_000000000001" status="done">Passed it on.</spoken>`, T0+10)
+	reply := "I rebuilt it.\n\nThe new build is running."
+	fx := sessionTurn(c, pixieTurn(reply), T0+20)
+	for _, l := range chats(fx) {
+		if l.Job == job(1) {
+			t.Fatalf("went to the box: %s", fmtEffects(fx))
+		}
+	}
+	if !anyKind(fx, EfReply) {
+		t.Fatalf("no card: %s", fmtEffects(fx))
+	}
+	// The thread shows the whole reply, as for one typed in the box (#408).
+	if l := c.outbox.lines[len(c.outbox.lines)-1]; l.Full != reply || l.Brief != "The new build is running." {
+		t.Fatalf("%+v", l)
+	}
+}
+
+// #414 review: a window message leaves the box be: the box's own message still gets its
+// session's reply, and the box's words still answer the question it shows.
+func TestAWindowMessageLeavesTheBoxBe(t *testing.T) {
+	c := handedOffTyped(t) // job 1, from the box, handed to api-claude
+	c.Step(WindowDelegateInput(job(2), "and what about the docs?", ""), T0+12)
+	if c.LastTyped() != job(1) {
+		t.Fatal(c.LastTyped())
+	}
+	fx := sessionTurn(c, pixieTurn("Should I also fix the logout page?"), T0+20)
+	wantChat(t, fx, ChatLine{Job: job(1), Status: "question", Text: "Should I also fix the logout page?"})
+	if s, j := c.takeBoxAnswer(); s != "api-claude" || j != job(1) {
+		t.Fatalf("%q %s", s, j)
+	}
+}
+
 func TestAnotherSessionsReplyIsNotTakenForTheTypedMessage(t *testing.T) {
 	c := handedOffTyped(t)
 	fx := c.Step(PaneInput(PaneEvent{Kind: PaneEventTurn, Agent: "web-claude", Turn: &SessionTurn{Label: "web", Reply: "Done.", Duration: 45_000, FromPixie: true}}), T0+20)

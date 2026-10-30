@@ -85,6 +85,9 @@ type Line struct {
 	// Title and Brief: the bubble's short form of a line Pixie builds (#197): who it is about,
 	// and the news in a few words. Empty: the bubble shows Text. Never said.
 	Title, Brief string
+	// Full: what the chat thread shows instead of Brief: a session's whole reply to a message
+	// you sent from the chat window (#414). Never said.
+	Full string
 	// Note: shown small under the line in the bubble, never said (a dialog's command, #105).
 	Note string
 	// Held: the session whose message the line says still waits (#183), HeldSeq that message's
