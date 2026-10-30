@@ -90,13 +90,14 @@ type SessionRow struct {
 	Where            string   `json:"where"`
 	Status           string   `json:"status"`
 	Reachable        bool     `json:"reachable"`
-	Verbatim         bool     `json:"verbatim"`              // messages are typed as given, not prefixed (#143)
-	Started          string   `json:"started,omitempty"`     // "1h30m ago"
-	LastActive       string   `json:"last_active,omitempty"` // "3m ago"
-	LastTurn         string   `json:"last_turn,omitempty"`   // its last turn's gist, "Asked: …" for a question (#146)
-	Waiting          int      `json:"waiting,omitempty"`     // messages waiting to be delivered to it (#183)
-	Outdated         bool     `json:"outdated,omitempty"`    // it runs an older pix than the app's (#189)
-	Menu             string   `json:"menu,omitempty"`        // the menu it waits on, with its options (#384)
+	Verbatim         bool     `json:"verbatim"`                   // messages are typed as given, not prefixed (#143)
+	Started          string   `json:"started,omitempty"`          // "1h30m ago"
+	LastActive       string   `json:"last_active,omitempty"`      // "3m ago"
+	LastTurn         string   `json:"last_turn,omitempty"`        // its last turn's gist, "Asked: …" for a question (#146)
+	Waiting          int      `json:"waiting,omitempty"`          // messages waiting to be delivered to it (#183)
+	WaitingMessages  []string `json:"waiting_messages,omitempty"` // their text, oldest first (#419)
+	Outdated         bool     `json:"outdated,omitempty"`         // it runs an older pix than the app's (#189)
+	Menu             string   `json:"menu,omitempty"`             // the menu it waits on, with its options (#384)
 }
 
 // MenuView is a session's open menu as the coordinator sees it (#384): its question and its
@@ -384,9 +385,13 @@ func userSessionRows(ctx context.Context, sec SessionHost, mask func(string) str
 		if last != "" && u.LastTurnAsks {
 			last = "Asked: " + last
 		}
+		held := make([]string, len(u.WaitingMessages))
+		for i, m := range u.WaitingMessages {
+			held[i] = mask(m)
+		}
 		rows = append(rows, SessionRow{Name: a.Name, Description: mask(u.Description), PastDescriptions: past,
 			Tool: u.Tool, Repo: u.Repo, Cwd: a.Cwd, Where: u.Where, Status: a.Status.String(), Reachable: u.Reachable, Verbatim: u.Verbatim,
-			Started: ago(u.Started, now), LastActive: ago(u.LastActive, now), LastTurn: last, Waiting: u.Waiting, Outdated: u.Outdated})
+			Started: ago(u.Started, now), LastActive: ago(u.LastActive, now), LastTurn: last, Waiting: u.Waiting, WaitingMessages: held, Outdated: u.Outdated})
 	}
 	return rows, nil
 }
@@ -404,6 +409,15 @@ func RequestNote(sessions []SessionRow, workers []WorkerRow, task func(JobID) st
 		b.WriteString("Your open pix sessions:")
 		for _, r := range sessions {
 			fmt.Fprintf(&b, "\n- %s: %q, %s repo, %s", r.Name, r.Description, r.Repo, r.Status)
+			// Not typed in yet: a request that repeats one of them isn't with it (#419).
+			for i, m := range r.WaitingMessages {
+				if i == 0 {
+					b.WriteString(", waiting to go in: ")
+				} else {
+					b.WriteString(", ")
+				}
+				fmt.Fprintf(&b, "%q", clipRunes(m, maxNoteTurn))
+			}
 			if r.LastTurn != "" {
 				fmt.Fprintf(&b, ", last turn %q", clipRunes(r.LastTurn, maxNoteTurn))
 			}

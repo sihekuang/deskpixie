@@ -40,9 +40,12 @@ type session struct {
 	active    time.Time // its last message
 	lastTurn  string    // its last turn's gist (#146)
 	asks      bool      // that turn ended asking you something
-	waiting   int       // Pixie's messages pix holds for it, until it reports them delivered (#183)
-	toldOld   bool      // Pixie was told it runs an older pix (#191)
-	conn      net.Conn  // nil while unreachable
+	// held: Pixie's messages pix holds for it, by the number pix gave each, until it reports
+	// them delivered (#183, #419); delivered: the last number it reported, this run.
+	held      []heldMessage
+	delivered uint64
+	toldOld   bool     // Pixie was told it runs an older pix (#191)
+	conn      net.Conn // nil while unreachable
 	wmu       sync.Mutex
 	pending   map[string]chan wire.Msg
 	dropTimer *time.Timer
@@ -205,6 +208,9 @@ func (h *Host) register(hello wire.Msg, c net.Conn) (*session, string) {
 				s.dropTimer.Stop()
 				s.dropTimer = nil
 			}
+			if hello.Run != s.hello.Run { // another pix: what the last one held went with it
+				s.held, s.delivered = nil, 0
+			}
 			s.conn, s.hello, s.active = c, hello, time.Now()
 			return s, ""
 		}
@@ -305,7 +311,7 @@ func (h *Host) onMsg(s *session, m wire.Msg) bool {
 			h.broadcast(agent.PaneEvent{Kind: agent.PaneEventTurn, Agent: s.addr, Turn: &t})
 		case "delivered":
 			h.mu.Lock()
-			s.waiting = 0
+			s.deliveredUpTo(m.Seq)
 			run := s.hello.Run
 			h.mu.Unlock()
 			h.broadcast(agent.PaneEvent{Kind: agent.PaneEventDelivered, Agent: s.addr, Seq: m.Seq, Run: run}) // a notice saying it waits goes (#339)
@@ -480,6 +486,42 @@ func (h *Host) Prompt(ctx context.Context, name, text string) error {
 	return err
 }
 
+// heldMessage is one message pix holds for a session: its number and text (#419).
+type heldMessage struct {
+	seq  uint64
+	text string
+}
+
+// hold counts a message pix said waits (h.mu held), unless a delivered report covering its
+// number came first: pix sends it as soon as the message goes in, maybe before this (#419).
+// A pix from before #339 numbers nothing.
+func (s *session) hold(seq uint64, text string) {
+	if seq != 0 && seq <= s.delivered {
+		return
+	}
+	s.held = append(s.held, heldMessage{seq, text})
+}
+
+// deliveredUpTo drops the messages pix delivered (h.mu held): every one numbered up to seq
+// (#339), or all of them from a pix that numbers nothing.
+func (s *session) deliveredUpTo(seq uint64) {
+	if seq == 0 {
+		s.held = nil
+		return
+	}
+	s.delivered = max(s.delivered, seq)
+	s.held = slices.DeleteFunc(s.held, func(m heldMessage) bool { return m.seq != 0 && m.seq <= seq })
+}
+
+// heldTexts is what pix holds for s, oldest first (h.mu held).
+func (s *session) heldTexts() []string {
+	var out []string
+	for _, m := range s.held {
+		out = append(out, m.text)
+	}
+	return out
+}
+
 // PromptDelivery is Prompt with what became of the message (#183): typed, or waiting and why.
 // A waiting one is counted until pix reports it delivered.
 func (h *Host) PromptDelivery(ctx context.Context, name, text string) (agent.Delivery, error) {
@@ -492,7 +534,7 @@ func (h *Host) PromptDelivery(ctx context.Context, name, text string) (agent.Del
 	if s := h.sessions[name]; s != nil {
 		outdated, run = h.outdated(s), s.hello.Run
 		if r.Status == "waiting" {
-			s.waiting++
+			s.hold(r.Seq, text)
 		}
 	}
 	h.mu.Unlock()
@@ -579,8 +621,8 @@ func (h *Host) List(context.Context) ([]agent.AgentInfo, error) {
 			Name: s.addr, Pane: "pix:" + s.addr, Cwd: s.hello.Cwd, Status: s.status, Origin: agent.OriginUser,
 			User: &agent.UserSession{Tool: s.hello.Tool, Repo: repo, Where: s.hello.Where, App: s.hello.App, Pid: s.hello.Pid,
 				Description: desc, PastDescriptions: s.desc.Past(), Reachable: s.conn != nil, Verbatim: !s.labeled,
-				Started: s.started, LastActive: s.active, LastTurn: s.lastTurn, LastTurnAsks: s.asks, Waiting: s.waiting,
-				Outdated: h.outdated(s)},
+				Started: s.started, LastActive: s.active, LastTurn: s.lastTurn, LastTurnAsks: s.asks, Waiting: len(s.held),
+				WaitingMessages: s.heldTexts(), Outdated: h.outdated(s)},
 		})
 	}
 	return out, nil
