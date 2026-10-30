@@ -1,71 +1,61 @@
 import AppKit
 import CoreGraphics
 
-/// The menu bar item: Pixie's face (idle frame 0 with the closed mouth) as an 18 pt template
-/// image, so macOS tints it for light and dark menu bars. Template images use alpha only, so
-/// the face's dark pixels (eyes, mouth, outline) are cut out of the silhouette to keep it
-/// readable. Scaled nearest-neighbour; `sparkles` when the pack cannot be read.
+/// The menu bar item: Pixie's face (`PixieFace`: idle frame 0 with the closed mouth) as an 18 pt
+/// template image, so macOS tints it for light and dark menu bars. Template images use alpha
+/// only, so the face's features are cut out of the silhouette to keep it readable: inner pixels
+/// that stand out from the body's usual brightness (eyes on a light body, or on a dark one). The
+/// silhouette's edge always stays, so outlines and thin parts (an antenna, eye stalks) survive.
+/// Scaled nearest-neighbour; `sparkles` when the pack cannot be read.
 public enum MenuBarIcon {
     public static let pointSize: CGFloat = 18
     public static let tooltip = "DeskPixie"
     public static let fallbackSymbol = "sparkles"
-    /// Below this luminance (0…1, unpremultiplied) a pixel is a feature, not body.
-    static let featureLuminance: CGFloat = 0.2
+    /// How far (0…1) a pixel's luminance must be from the body's median to count as a feature.
+    static let featureContrast: CGFloat = 0.3
+    /// Below this share of Pixie's pixels left after cutting, the plain silhouette is used: a
+    /// pixie that is mostly "features" would fall apart into specks.
+    static let minKeptShare = 0.6
+    /// Pixels at least this opaque are Pixie; fainter ones (a soft shadow or glow) are left out,
+    /// so they neither fill the template nor count as its edge.
+    static let solidAlpha: UInt8 = 128
 
-    /// Black-on-clear mask of Pixie's face, trimmed to its opaque pixels; nil when the pack has
-    /// no idle state or the sheet cannot be cropped.
+    /// Black-on-clear mask of Pixie's face, trimmed to its pixels; nil when the pack has no
+    /// idle state, the sheet cannot be cropped or the frame has no solid pixels.
     public static func faceMask(pack: Pack, sheet: SpriteSheet) -> CGImage? {
-        let w = pack.cellWidth, h = pack.cellHeight
-        guard w > 0, h > 0, let idle = pack.states["idle"],
-              let body = sheet.crop(CGRect(x: 0, y: idle.row * h, width: w, height: h)) else { return nil }
-        var rgba = [UInt8](repeating: 0, count: w * h * 4)
-        let drawn: Bool = rgba.withUnsafeMutableBytes { buf in
-            guard let ctx = CGContext(data: buf.baseAddress, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
-                                      space: CGColorSpaceCreateDeviceRGB(),
-                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
-            ctx.interpolationQuality = .none
-            ctx.draw(body, in: CGRect(x: 0, y: 0, width: w, height: h))
-            let m = pack.mouth
-            let mw = m.size[0], mh = m.size[1]
-            if m.levels > 0, let mouth = sheet.crop(CGRect(x: 0, y: m.row * h, width: mw, height: mh)) {
-                // CG's origin is bottom-left; the anchor is top-left in cell pixels.
-                ctx.draw(mouth, in: CGRect(x: m.anchor[0], y: h - m.anchor[1] - mh, width: mw, height: mh))
-            }
-            return true
-        }
-        guard drawn else { return nil }
+        guard let face = PixieFace.render(pack: pack, sheet: sheet) else { return nil }
+        let w = face.width, h = face.height
+        var lum = [CGFloat?](repeating: nil, count: w * h)
+        for y in 0..<h { for x in 0..<w where face.alpha(x, y) >= solidAlpha { lum[y * w + x] = face.luminance(x, y) } }
+        let opaque = lum.compactMap { $0 }.sorted()
+        guard !opaque.isEmpty else { return nil }
+        let body = opaque[opaque.count / 2]
+        func filled(_ x: Int, _ y: Int) -> Bool { x >= 0 && y >= 0 && x < w && y < h && lum[y * w + x] != nil }
 
-        var on = [Bool](repeating: false, count: w * h)
+        let silhouette = lum.map { $0 != nil }
+        var cut = silhouette
+        for y in 0..<h { for x in 0..<w {
+            guard let l = lum[y * w + x], abs(l - body) >= featureContrast else { continue }
+            // Only inner pixels: the edge keeps the outline.
+            if filled(x - 1, y), filled(x + 1, y), filled(x, y - 1), filled(x, y + 1) { cut[y * w + x] = false }
+        } }
+        let kept = cut.filter { $0 }.count
+        let on = Double(kept) >= minKeptShare * Double(opaque.count) ? cut : silhouette
+
+        // Cutting never touches the edge, so the mask's bounds are the silhouette's.
         var minX = w, minY = h, maxX = -1, maxY = -1
-        for i in 0..<(w * h) {
-            let a = rgba[i * 4 + 3]
-            guard a > 0 else { continue }
-            // Track Pixie's whole extent (features included) so the face stays centred.
-            let x = i % w, y = i / w
+        for y in 0..<h { for x in 0..<w where silhouette[y * w + x] {
             minX = min(minX, x); maxX = max(maxX, x); minY = min(minY, y); maxY = max(maxY, y)
-            let k = 255 / CGFloat(a)
-            let lum = (0.2126 * CGFloat(rgba[i * 4]) + 0.7152 * CGFloat(rgba[i * 4 + 1])
-                + 0.0722 * CGFloat(rgba[i * 4 + 2])) * k / 255
-            on[i] = lum >= featureLuminance
-        }
-        guard maxX >= minX, maxY >= minY else { return nil }
-        // Trim to the body pixels left after cutting (an outline-only edge would be empty).
-        var bx0 = maxX, by0 = maxY, bx1 = minX, by1 = minY
-        for y in minY...maxY {
-            for x in minX...maxX where on[y * w + x] {
-                bx0 = min(bx0, x); bx1 = max(bx1, x); by0 = min(by0, y); by1 = max(by1, y)
-            }
-        }
-        guard bx1 >= bx0, by1 >= by0 else { return nil }
-        let tw = bx1 - bx0 + 1, th = by1 - by0 + 1
-        var out = [UInt8](repeating: 0, count: tw * th * 4)
-        for y in 0..<th {
-            for x in 0..<tw where on[(y + by0) * w + x + bx0] {
-                out[(y * tw + x) * 4 + 3] = 255
+        } }
+        let b = (x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1)
+        var out = [UInt8](repeating: 0, count: b.width * b.height * 4)
+        for y in 0..<b.height {
+            for x in 0..<b.width where on[(y + b.y) * w + x + b.x] {
+                out[(y * b.width + x) * 4 + 3] = 255
             }
         }
         guard let provider = CGDataProvider(data: Data(out) as CFData) else { return nil }
-        return CGImage(width: tw, height: th, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: tw * 4,
+        return CGImage(width: b.width, height: b.height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: b.width * 4,
                        space: CGColorSpaceCreateDeviceRGB(),
                        bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
                        provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)

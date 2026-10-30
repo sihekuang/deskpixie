@@ -14,9 +14,10 @@ struct DeskPixieApp: App {
                 appDelegate.composition.coordinator.perform(id)
             }
         } label: {
-            // Pixie's face as a template image (tinted for light/dark menu bars); sparkles if
-            // the bundled pack cannot be read.
-            MenuBarLabel(image: Self.menuBarIcon, tooltip: MenuBarIcon.tooltip)
+            // The chosen pixie's face as a template image (tinted for light/dark menu bars);
+            // Bit's until the pixie loads, sparkles if the bundled pack cannot be read.
+            MenuBarLabel(appState: appDelegate.composition.appState, fallback: Self.menuBarIcon,
+                         tooltip: MenuBarIcon.tooltip)
         }
         .menuBarExtraStyle(.menu)
 

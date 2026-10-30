@@ -40,6 +40,13 @@ final class EngineCoordinator {
     private lazy var canvas = CanvasWindowController(engine: engine, worker: worker)
 
     private(set) var pixie: PixieController?
+    /// The pack and sheet the menu bar and Dock icons were drawn from (#412), so a Size change
+    /// does not redraw them.
+    private var iconSource: (pack: Pack, sheet: ObjectIdentifier)?
+    /// The Dock icon for the chosen pixie, set again whenever DeskPixie becomes active: the
+    /// app only gets a Dock tile while a window such as Settings is open.
+    private var dockIcon: NSImage?
+    private var activeObserver: NSObjectProtocol?
     /// The updates bubble beside Pixie, and the presence that holds its pops (both once Pixie is up).
     private var bubble: UpdatesBubbleController?
     /// The agent roster chip under Pixie (#91).
@@ -136,6 +143,7 @@ final class EngineCoordinator {
             let pixieSettings = snapshot.flatMap(PixieSettings.fromSnapshot) ?? .defaults
             if let m = PixieController.load(engine: engine, settings: pixieSettings) {
                 pixie = m
+                applyIcons()
                 m.onDoubleClick = { [weak self] in self?.talk() }
                 m.onSecondaryClick = { [weak self] event, view in
                     guard let self else { return }
@@ -264,6 +272,8 @@ final class EngineCoordinator {
         audioTask?.cancel()
         deviceObserver?.cancel()
         deviceObserver = nil
+        if let activeObserver { NotificationCenter.default.removeObserver(activeObserver) }
+        activeObserver = nil
         hotkeys.stop()
         pump.stop()
         voiceIO.stop()
@@ -558,6 +568,7 @@ final class EngineCoordinator {
             relaunch()
         case .pack(let p):
             pixie?.applyPack(p)
+            applyIcons()
         case .position(let x, let y):
             pixie?.moveTo(x: x, y: y)
         case .settingsChanged:
@@ -629,6 +640,28 @@ final class EngineCoordinator {
     }
 
     // MARK: Helpers
+
+    /// The menu bar and Dock icons follow the pixie on screen (#412): at launch, when another
+    /// pixie is chosen, and when Reload Pixies picks up a redrawn sheet. A face that cannot be
+    /// drawn falls back to the bundled icons.
+    private func applyIcons() {
+        guard let pixie else { return }
+        let source = (pack: pixie.pack, sheet: ObjectIdentifier(pixie.sheet))
+        if let shown = iconSource, shown.pack == source.pack, shown.sheet == source.sheet { return }
+        iconSource = source
+        appState.menuBarIcon = MenuBarIcon.image(pack: pixie.pack, sheet: pixie.sheet)
+        dockIcon = DockIcon.image(pack: pixie.pack, sheet: pixie.sheet)
+        NSApp.applicationIconImage = dockIcon
+        if activeObserver == nil {
+            activeObserver = NotificationCenter.default.addObserver(
+                forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    if let icon = self?.dockIcon { NSApp.applicationIconImage = icon }
+                }
+            }
+        }
+    }
 
     /// Reads the pixie's settings (`position`, `scale`, `proximityFade`) off main and applies
     /// them; config.rs defaults while the core does not serve them.

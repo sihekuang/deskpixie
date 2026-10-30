@@ -30,14 +30,15 @@ struct MenuBarMenu: View {
 /// The menu bar icon. It is drawn at launch (the menu's own view only when the menu opens), so
 /// it is where Pixie's menu (#207) gets SwiftUI's openSettings from.
 struct MenuBarLabel: View {
-    let image: NSImage
+    let appState: AppState
+    let fallback: NSImage
     let tooltip: String
 
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         let open = openSettings
-        Image(nsImage: image)
+        Image(nsImage: appState.menuBarIcon ?? fallback)
             .help(tooltip)
             .accessibilityLabel(tooltip)
             .onAppear {
