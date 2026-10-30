@@ -111,6 +111,14 @@ wider as the voice gets louder:
 
 Tip: draw the body frames without a mouth, so the mouth row is the only mouth you ever see.
 
+## Icons
+
+The pixie you pick is also the menu bar icon, and the Dock icon while DeskPixie is running.
+Both are drawn from the first `idle` frame with the closed mouth. The menu bar shows it in one
+colour, with the parts that stand out from the body (usually the eyes) cut out, so give your
+pixie a clear shape and eyes that differ from its body. Finder and Launchpad keep the app's own
+icon.
+
 ## pixie.json
 
 Dino's, in full:

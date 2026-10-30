@@ -136,6 +136,7 @@ final class EngineCoordinator {
             let pixieSettings = snapshot.flatMap(PixieSettings.fromSnapshot) ?? .defaults
             if let m = PixieController.load(engine: engine, settings: pixieSettings) {
                 pixie = m
+                applyIcons()
                 m.onDoubleClick = { [weak self] in self?.talk() }
                 m.onSecondaryClick = { [weak self] event, view in
                     guard let self else { return }
@@ -558,6 +559,7 @@ final class EngineCoordinator {
             relaunch()
         case .pack(let p):
             pixie?.applyPack(p)
+            applyIcons()
         case .position(let x, let y):
             pixie?.moveTo(x: x, y: y)
         case .settingsChanged:
@@ -629,6 +631,15 @@ final class EngineCoordinator {
     }
 
     // MARK: Helpers
+
+    /// The menu bar and Dock icons follow the pixie on screen (#412): at launch, when another
+    /// pixie is chosen, and when Reload Pixies picks up a redrawn sheet. A face that cannot be
+    /// drawn falls back to the bundled icons.
+    private func applyIcons() {
+        guard let pixie else { return }
+        appState.menuBarIcon = MenuBarIcon.image(pack: pixie.pack, sheet: pixie.sheet)
+        NSApp.applicationIconImage = DockIcon.image(pack: pixie.pack, sheet: pixie.sheet)
+    }
 
     /// Reads the pixie's settings (`position`, `scale`, `proximityFade`) off main and applies
     /// them; config.rs defaults while the core does not serve them.

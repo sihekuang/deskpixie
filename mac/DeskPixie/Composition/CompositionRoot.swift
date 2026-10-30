@@ -1,3 +1,4 @@
+import AppKit
 import DeskPixieCore
 import Foundation
 import Observation
@@ -15,6 +16,8 @@ final class AppState {
     var hotkeyError: String?
     var engineError: String?
     var audioError: String?
+    /// The chosen pixie's face for the menu bar (#412); nil until the pixie loads.
+    var menuBarIcon: NSImage?
 
     /// The Mic Mode picker seam (the tray row shows where it exists).
     let micModes: any MicModeSystem = AVMicModeSystem()
