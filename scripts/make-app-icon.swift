@@ -13,7 +13,7 @@ import UniformTypeIdentifiers
 
 let canvas = 1024
 /// The macOS icon grid: Bit stands as tall as other apps' icons.
-let tile = CGRect(x: 100, y: 100, width: 824, height: 824)
+let grid: CGFloat = 824
 
 func fail(_ msg: String) -> Never {
     FileHandle.standardError.write(Data("error: \(msg)\n".utf8))
@@ -73,8 +73,7 @@ guard let ctx = CGContext(data: nil, width: canvas, height: canvas, bitsPerCompo
                           space: space, bitmapInfo: alphaInfo) else { fail("context") }
 
 // Largest whole scale that fits, so every sprite pixel is an exact square block.
-let room = tile.width
-let scale = max(1, Int(min(room / CGFloat(tw), room / CGFloat(th))))
+let scale = max(1, Int(min(grid / CGFloat(tw), grid / CGFloat(th))))
 let aw = tw * scale, ah = th * scale
 let ax = (canvas - aw) / 2, ay = (canvas - ah) / 2
 ctx.interpolationQuality = .none
