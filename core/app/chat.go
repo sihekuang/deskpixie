@@ -71,19 +71,16 @@ func (a *App) registerChat(r Registrar) {
 			if err != nil {
 				return nil, err
 			}
-			if in.From == fromWindow {
-				a.agent.SentFromWindow(sent.Job)
-			}
 			a.threadSent(sent.Job, in.Text, sent.Attached, to)
 			return map[string]any{"job": sent.Job}, nil
 		}
-		sent, err := a.agent.ChatSend(in.Text)
+		send := a.agent.ChatSend
+		if in.From == fromWindow {
+			send = a.agent.WindowSend // the box under Pixie never shows it (#414)
+		}
+		sent, err := send(in.Text)
 		if err != nil {
 			return nil, err
-		}
-		if in.From == fromWindow && !sent.Answered {
-			// The box under Pixie never showed it: its session's replies go as cards (#414).
-			a.agent.SentFromWindow(sent.Job)
 		}
 		a.threadSent(sent.Job, in.Text, sent.Attached, "")
 		if sent.Answered {

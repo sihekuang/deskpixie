@@ -28,7 +28,7 @@ func (b *bridgeAgent) ChatStop()                                 {}
 func (b *bridgeAgent) Interrupt(string, string) error            { return nil }
 func (b *bridgeAgent) SetTextMode(bool)                          {}
 func (b *bridgeAgent) SetMarkForced(bool)                        {}
-func (b *bridgeAgent) SentFromWindow(string)                     {}
+func (b *bridgeAgent) WindowSend(string) (app.ChatSent, error)   { return app.ChatSent{}, nil }
 func (b *bridgeAgent) Attachments() *attach.Store                { return nil }
 func (b *bridgeAgent) OpenTerminal()                             { b.mu.Lock(); b.opened++; b.mu.Unlock() }
 func (b *bridgeAgent) AttachVoice(app.AgentVoice)                {}

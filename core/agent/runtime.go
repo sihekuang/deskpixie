@@ -462,12 +462,22 @@ func (h *AgentHandle) Deliver(ev HookEvent) bool {
 
 // Delegate is the delegate tool: a new job id at once, or why delegation is off.
 func (h *AgentHandle) Delegate(task, context string) (JobID, error) {
-	id, _, err := h.delegate(task, context, false)
+	id, _, err := h.delegate(task, context, spoken)
 	return id, err
 }
 
+// sentFrom is where a request came from: said, or typed in the box under Pixie or the chat
+// window (#221, #414).
+type sentFrom int
+
+const (
+	spoken sentFrom = iota
+	inBox
+	inWindow
+)
+
 // delegate also returns the attachments it took.
-func (h *AgentHandle) delegate(task, context string, typed bool) (JobID, []string, error) {
+func (h *AgentHandle) delegate(task, context string, from sentFrom) (JobID, []string, error) {
 	if h.quitting() {
 		return "", nil, errQuitting
 	}
@@ -483,9 +493,12 @@ func (h *AgentHandle) delegate(task, context string, typed bool) (JobID, []strin
 	if note := h.requestNote(); note != "" {
 		context = strings.TrimSpace(context + "\n" + note)
 	}
-	if typed && h.deps.Chat != nil {
+	switch {
+	case from == inBox && h.deps.Chat != nil:
 		h.Input(TypedDelegateInput(id, task, context))
-	} else {
+	case from == inWindow && h.deps.Chat != nil:
+		h.Input(WindowDelegateInput(id, task, context))
+	default:
 		h.Input(DelegateInput(id, task, context))
 	}
 	return id, paths, nil
@@ -620,7 +633,7 @@ func (h *AgentHandle) answerAsked(jobID, text string, withAttachments bool) (_ J
 	}
 	if r.Err == noAnswerWaiting {
 		// Nobody is waiting: the coordinator works out what the words are about, like any request.
-		id, more, err := h.delegate(text, "The user said this as an answer, but no question was waiting for one.", false)
+		id, more, err := h.delegate(text, "The user said this as an answer, but no question was waiting for one.", spoken)
 		if err != nil {
 			return "", "", nil, err
 		}

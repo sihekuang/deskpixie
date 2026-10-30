@@ -68,10 +68,11 @@ func (f *fakeAgent) SetTextMode(on bool) {
 	f.textModes = append(f.textModes, on)
 	f.mu.Unlock()
 }
-func (f *fakeAgent) SentFromWindow(job string) {
+func (f *fakeAgent) WindowSend(text string) (ChatSent, error) {
 	f.mu.Lock()
-	f.fromWindow = append(f.fromWindow, job)
+	f.fromWindow = append(f.fromWindow, text)
 	f.mu.Unlock()
+	return f.ChatSend(text)
 }
 func (f *fakeAgent) SetMarkForced(on bool) {
 	f.mu.Lock()
@@ -99,17 +100,14 @@ func TestChatSendCallsTheAgent(t *testing.T) {
 	}
 }
 
-// #414: a message from the chat window is marked so its session's replies don't go to the box
-// under Pixie; one from the box, or one that answered a question, isn't.
-func TestAWindowMessageIsMarkedAsTheWindows(t *testing.T) {
+// #414: a message from the chat window goes as the window's, one from the box as the box's.
+func TestAWindowMessageGoesAsTheWindows(t *testing.T) {
 	f := &fakeAgent{tray: AgentTray{Enabled: true}}
 	h := newHarness(t, withAgent(f))
 	h.call("chat.send", map[string]any{"text": "from the window", "from": "window"})
 	h.call("chat.send", map[string]any{"text": "from the box"})
-	f.asking = "job_000000000009"
-	h.call("chat.send", map[string]any{"text": "yes", "from": "window"})
-	if !slices.Equal(f.fromWindow, []string{"job_000000000001"}) {
-		t.Fatal(f.fromWindow)
+	if !slices.Equal(f.fromWindow, []string{"from the window"}) || !slices.Equal(f.sent, []string{"from the window", "from the box"}) {
+		t.Fatal(f.fromWindow, f.sent)
 	}
 }
 

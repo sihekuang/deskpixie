@@ -91,19 +91,30 @@ func (h *AgentHandle) ChatSend(text string) (JobID, error) {
 }
 
 // ChatMessage is ChatSend that also says what the message answered.
-func (h *AgentHandle) ChatMessage(text string) (ChatSent, error) {
+func (h *AgentHandle) ChatMessage(text string) (ChatSent, error) { return h.message(text, inBox) }
+
+// WindowMessage is ChatMessage for a message sent from the chat window (#414): it answers only
+// the window's own last request, never what the box under Pixie shows, and leaves the box be.
+func (h *AgentHandle) WindowMessage(text string) (ChatSent, error) { return h.message(text, inWindow) }
+
+func (h *AgentHandle) message(text string, from sentFrom) (ChatSent, error) {
 	text, err := h.chatText(text)
 	if err != nil {
 		return ChatSent{}, err
 	}
 	h.ctlMu.Lock()
-	if session, job := h.ctl.takeBoxAnswer(); session != "" {
-		// #241: the box shows that session's question: the words are its answer.
-		h.ctlMu.Unlock()
-		_, where, paths, err := h.answerAsked("", text, true)
-		return ChatSent{Job: job, Answered: err == nil && where != toNewRequest, Session: session, Attached: paths}, err
+	if from == inBox {
+		if session, job := h.ctl.takeBoxAnswer(); session != "" {
+			// #241: the box shows that session's question: the words are its answer.
+			h.ctlMu.Unlock()
+			_, where, paths, err := h.answerAsked("", text, true)
+			return ChatSent{Job: job, Answered: err == nil && where != toNewRequest, Session: session, Attached: paths}, err
+		}
 	}
 	last := h.ctl.LastTyped()
+	if from == inWindow {
+		last = h.ctl.lastWindow
+	}
 	j, ok := h.ctl.jobs.Get(last)
 	waiting := last != "" && ok && j.Status == JobQuestion && h.ctl.jobs.IsOpen(last)
 	h.ctlMu.Unlock()
@@ -111,18 +122,18 @@ func (h *AgentHandle) ChatMessage(text string) (ChatSent, error) {
 		id, where, paths, err := h.answerAsked(string(last), text, true)
 		return ChatSent{Job: id, Answered: err == nil && where != toNewRequest, Attached: paths}, err
 	}
-	id, paths, err := h.delegate(text, typedNote, true)
+	id, paths, err := h.delegate(text, typedNote, from)
 	return ChatSent{Job: id, Attached: paths}, err
 }
 
-// ChatDelegate is a message typed in the text box that is always a new typed job, never an
-// answer to a waiting question: a reply to one session, told through the coordinator (#302).
+// ChatDelegate is a message sent from the chat window to one session, told through the
+// coordinator (#302): always a new job, never an answer to a waiting question.
 func (h *AgentHandle) ChatDelegate(text string) (ChatSent, error) {
 	text, err := h.chatText(text)
 	if err != nil {
 		return ChatSent{}, err
 	}
-	id, paths, err := h.delegate(text, typedNote, true)
+	id, paths, err := h.delegate(text, typedNote, inWindow)
 	return ChatSent{Job: id, Attached: paths}, err
 }
 
@@ -137,10 +148,6 @@ func (h *AgentHandle) chatText(text string) (string, error) {
 	}
 	return text, nil
 }
-
-// SentFromWindow: typed job id was sent from the chat window, so the box under Pixie never
-// shows it and its session's replies take the usual route (#414).
-func (h *AgentHandle) SentFromWindow(id JobID) { h.Input(WindowSentInput(id)) }
 
 // ChatStop is Stop in the text box: cancel the last typed job if it is still open.
 func (h *AgentHandle) ChatStop() {
