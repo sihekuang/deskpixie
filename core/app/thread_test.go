@@ -935,3 +935,24 @@ func TestAReplyToAQuestionNoLongerWaitingTellsTheWorker(t *testing.T) {
 		t.Fatal("a failed answer was sent again as a message")
 	}
 }
+
+// #422: the coordinator relays a worker's question in its own words; Reply… on it sends the
+// job with no session: the words answer that job while it waits, else go to Pixie as usual.
+func TestAReplyToTheCoordinatorsQuestionAnswersItsJob(t *testing.T) {
+	f := &fakeAgent{tray: AgentTray{Enabled: true}, roster: rosterWith()}
+	h := newHarness(t, withAgent(f))
+	f.hooks.ThreadRequests([]chat.Entry{jobQuestion(1, "job_000000000007", "The worker asks: red or blue?")})
+	f.asking = "job_000000000007"
+	var out struct{ Job string }
+	json.Unmarshal(h.call("chat.send", map[string]any{"text": "blue", "job": "job_000000000007", "from": "window"}), &out)
+	if out.Job != "job_000000000007" || len(f.fromWindow) != 0 || !slices.Equal(f.jobAnswers, []string{"job_000000000007: blue"}) {
+		t.Fatalf("job %q, window sends %q, answers %q", out.Job, f.fromWindow, f.jobAnswers)
+	}
+	if o := outcomeOf(t, h, "req1"); o != "You answered: blue" {
+		t.Fatalf("the question's outcome = %q", o)
+	}
+	h.call("chat.send", map[string]any{"text": "and then?", "job": "job_000000000007", "from": "window"})
+	if !slices.Equal(f.fromWindow, []string{"and then?"}) || f.delegated != 0 {
+		t.Fatalf("window sends %q, delegated %d", f.fromWindow, f.delegated)
+	}
+}

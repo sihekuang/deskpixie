@@ -720,6 +720,40 @@ final class ChatThreadModelTests: XCTestCase {
         XCTAssertEqual(client.sent.last, .init(text: "and again", session: nil), "the reply was used up")
     }
 
+    /// #422: the coordinator relays a worker's question as its own ("The worker asks: …"): its
+    /// card offers Reply…, and the reply goes to Pixie with the job, which the core answers.
+    func testReplyToTheCoordinatorsQuestionOnAJobSendsItsJobToPixie() async {
+        let client = FakeChatClient()
+        let model = ChatThreadModel(client: client)
+        var q = ask(1, kind: "question", token: "")
+        q.who = ChatWho(kind: "coordinator")
+        q.request?.job = "job_000000000007"
+        XCTAssertTrue(ChatThreadModel.offersReply(q))
+        var noJob = q
+        noJob.request?.job = ""
+        XCTAssertFalse(ChatThreadModel.offersReply(noJob), "a coordinator's line with no job has nothing to answer")
+        model.applyNeeds([q])
+        model.reply(to: q)
+        XCTAssertEqual(model.placeholder, "Reply to Coordinator…")
+        XCTAssertNil(model.check("blue"), "a reply to the coordinator's question goes as it is")
+        await model.send("blue")
+        XCTAssertEqual(client.sent, [.init(text: "blue", session: nil, job: "job_000000000007")])
+    }
+
+    /// #422: once the coordinator's question is answered, a reply to it is a message to Pixie.
+    func testReplyToTheCoordinatorsQuestionAnsweredMeanwhileGoesToPixie() async {
+        let client = FakeChatClient()
+        let model = ChatThreadModel(client: client)
+        var q = ask(1, kind: "question", token: "")
+        q.who = ChatWho(kind: "coordinator")
+        q.request?.job = "job_000000000007"
+        model.applyNeeds([q])
+        model.reply(to: q)
+        model.applyNeeds([])
+        await model.send("late")
+        XCTAssertEqual(client.sent, [.init(text: "late", session: nil)])
+    }
+
     /// #422: a job's question no longer open sends no job: a plain message to its session.
     func testReplyToAJobsQuestionAnsweredMeanwhileSendsNoJob() async {
         let client = FakeChatClient()

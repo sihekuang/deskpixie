@@ -266,7 +266,8 @@ public final class ChatThreadModel {
         replyJob = nil
         if target == nil { thinking = true }
         let client = client
-        let session = target?.name
+        // The coordinator's question (#422) is answered through Pixie, not sent to an address.
+        let session = target.flatMap { $0.kind == "coordinator" ? nil : $0.name }
         let answer = token.flatMap { t in needs.contains { $0.request?.token == t } ? t : nil }
         let asked = job.flatMap { j in needs.contains { $0.request?.job == j && $0.request?.token.isEmpty == true } ? j : nil }
         let result = await Task.detached {
@@ -308,8 +309,9 @@ public final class ChatThreadModel {
     /// it, so neither does the box.
     public func check(_ text: String) -> String? {
         if let t = replyToken, needs.contains(where: { $0.request?.token == t }) { return nil }
-        return ChatRecipients.check(text, target: replyTo?.name,
-                                    label: replyTo.map(Self.name(of:)) ?? "",
+        let target = replyTo?.kind == "coordinator" ? nil : replyTo // goes to Pixie (#422)
+        return ChatRecipients.check(text, target: target?.name,
+                                    label: target.map(Self.name(of:)) ?? "",
                                     recipients: recipients, knowsRecipients: recipientsKnown)
     }
 
@@ -417,7 +419,11 @@ public final class ChatThreadModel {
     /// entry's own.
     public func reply(to entry: ChatEntry) {
         let shown = (entries + needs).contains { $0.who.name == entry.who.name && !$0.who.label.isEmpty }
-        replyTo = shown || entry.who.label.isEmpty ? who(forSession: entry.who.name) : entry.who
+        if entry.who.kind == "coordinator" {
+            replyTo = entry.who // its question on a job (#422): answered through Pixie
+        } else {
+            replyTo = shown || entry.who.label.isEmpty ? who(forSession: entry.who.name) : entry.who
+        }
         replyToken = nil
         replyJob = nil
         refusal = nil
@@ -472,8 +478,6 @@ public final class ChatThreadModel {
         return r.kind == "question" && !r.token.isEmpty && !r.options.isEmpty && r.multi
     }
 
-    /// Reply…: a question that takes a typed answer, or one with no buttons, answered by a
-    /// message to its session.
     /// Whether the card shows Dismiss: a session's question with no buttons, still open (#388).
     public static func offersDismiss(_ e: ChatEntry) -> Bool {
         isOpen(e) && e.request?.dismissible == true
@@ -485,9 +489,13 @@ public final class ChatThreadModel {
         return r.kind == "question" && !r.token.isEmpty && !r.options.isEmpty && r.typed && !r.multi
     }
 
+    /// Reply…: a question that takes a typed answer, or one with no buttons, answered by a
+    /// message to its session.
     public static func offersReply(_ e: ChatEntry) -> Bool {
         guard isOpen(e), let r = e.request, r.kind == "question" else { return false }
         if !r.token.isEmpty { return r.typed && !r.multi }
+        // The coordinator's question on a job: a worker's, relayed in its words (#422).
+        if e.who.kind == "coordinator" { return !r.job.isEmpty }
         return e.who.kind == "session" && !e.who.name.isEmpty
     }
 
