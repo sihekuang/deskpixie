@@ -57,6 +57,8 @@ struct ChatActions {
     var stop: (ChatStopTarget) -> Void = { _ in }
     /// Send on a question of several picks: the options ticked, from 1 (#364).
     var pick: (String, [Int]) -> Void = { _, _ in }
+    /// "Chat about this" on a menu card, by its token (#268).
+    var chatAbout: (String) -> Void = { _ in }
     /// Dismiss on a session's question, by its line (#388).
     var dismiss: (UInt64) -> Void = { _ in }
     /// A click on a file a message went with: Quick Look, at this one of them (#394).

@@ -354,6 +354,12 @@ public final class ChatThreadModel {
         await call("agent.typedAnswer") { try client.typedAnswer(token: token, text: text) }
     }
 
+    /// "Chat about this" on a menu card (#268): the session's menu is left for a talk in its terminal.
+    public func chatAbout(token: String) async {
+        let client = client
+        await call("agent.chatAbout") { try client.chatAbout(token: token) }
+    }
+
     public func stop() async {
         let client = client
         thinking = false
@@ -459,6 +465,12 @@ public final class ChatThreadModel {
     /// Whether the card shows Dismiss: a session's question with no buttons, still open (#388).
     public static func offersDismiss(_ e: ChatEntry) -> Bool {
         isOpen(e) && e.request?.dismissible == true
+    }
+
+    /// "Chat about this": a menu that takes a typed answer also takes this, as in the bubble (#268).
+    public static func offersChatAbout(_ e: ChatEntry) -> Bool {
+        guard isOpen(e), let r = e.request else { return false }
+        return r.kind == "question" && !r.token.isEmpty && !r.options.isEmpty && r.typed && !r.multi
     }
 
     public static func offersReply(_ e: ChatEntry) -> Bool {

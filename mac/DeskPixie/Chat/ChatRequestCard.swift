@@ -74,6 +74,12 @@ struct ChatRequestCard: View {
                     .accessibilityIdentifier("chat.request.reply")
                     .help("Answer in the message box")
             }
+            if ChatThreadModel.offersChatAbout(entry) {
+                Button("Chat about this") { actions.chatAbout(token) }
+                    .buttonStyle(CardButtonStyle())
+                    .accessibilityIdentifier("chat.request.chatAbout")
+                    .help("Talk it over with the session in its terminal")
+            }
             if ChatThreadModel.offersDismiss(entry), let item = entry.request?.item {
                 Button("Dismiss") { actions.dismiss(item) }
                     .buttonStyle(CardButtonStyle())

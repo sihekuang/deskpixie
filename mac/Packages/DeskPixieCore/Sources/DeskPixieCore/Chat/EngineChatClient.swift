@@ -43,6 +43,10 @@ public struct EngineChatClient: ChatClient, Sendable {
         let id: UInt64
     }
 
+    private struct TokenArgs: Encodable {
+        let token: String
+    }
+
     private struct TypedArgs: Encodable {
         let token: String
         let text: String
@@ -90,6 +94,10 @@ public struct EngineChatClient: ChatClient, Sendable {
 
     public func typedAnswer(token: String, text: String) throws {
         _ = try engine.call("agent.typedAnswer", TypedArgs(token: token, text: text))
+    }
+
+    public func chatAbout(token: String) throws {
+        _ = try engine.call("agent.chatAbout", TokenArgs(token: token))
     }
 
     private struct Recipients: Decodable { var recipients: [ChatRecipient] }

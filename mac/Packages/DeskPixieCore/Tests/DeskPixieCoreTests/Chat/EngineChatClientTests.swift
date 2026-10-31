@@ -43,12 +43,14 @@ final class EngineChatClientTests: XCTestCase {
         try c.choose(token: "t", option: 2)
         try c.pick(token: "t", options: [1, 3])
         try c.typedAnswer(token: "t", text: "x")
+        try c.chatAbout(token: "t")
         try c.clear()
         try c.stop()
 
         let calls = e.calls
         XCTAssertEqual(calls.map(\.0), ["chat.send", "chat.send", "chat.send", "chat.entries", "chat.entries",
                                         "chat.read", "agent.decide", "agent.choose", "agent.pick", "agent.typedAnswer",
+                                        "agent.chatAbout",
                                         "chat.clear", "chat.stop"])
         // The Go input structs' json names: text, session | before, limit | upTo | token, allow...
         // No attachments: the core sends the ones waiting and says which went (#394).
@@ -66,8 +68,9 @@ final class EngineChatClientTests: XCTestCase {
         XCTAssertEqual(calls[7].1 as NSDictionary, ["token": "t", "option": 2] as NSDictionary)
         XCTAssertEqual(calls[8].1 as NSDictionary, ["token": "t", "options": [1, 3]] as NSDictionary, "agent.pick (#364)")
         XCTAssertEqual(calls[9].1 as NSDictionary, ["token": "t", "text": "x"] as NSDictionary)
-        XCTAssertTrue(calls[10].1.isEmpty)
+        XCTAssertEqual(calls[10].1 as NSDictionary, ["token": "t"] as NSDictionary, "agent.chatAbout")
         XCTAssertTrue(calls[11].1.isEmpty)
+        XCTAssertTrue(calls[12].1.isEmpty)
     }
 
     func testChatClientDecodesReplies() throws {

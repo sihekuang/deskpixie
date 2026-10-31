@@ -78,6 +78,12 @@ final class FakeChatClient: ChatClient, @unchecked Sendable {
         try check()
         lock.withLock { _typed.append(Typed(token: token, text: text)) }
     }
+    private var _chatted: [String] = []
+    var chatted: [String] { lock.withLock { _chatted } }
+    func chatAbout(token: String) throws {
+        try check()
+        lock.withLock { _chatted.append(token) }
+    }
     func stop() throws { try check() }
     private var _interrupted: [String] = []
     var interrupted: [String] { lock.withLock { _interrupted } }
@@ -471,8 +477,12 @@ final class ChatThreadModelTests: XCTestCase {
         XCTAssertTrue(ChatThreadModel.offersOptions(menu))
         XCTAssertTrue(ChatThreadModel.offersReply(menu), "a typed answer")
 
+        XCTAssertTrue(ChatThreadModel.offersChatAbout(menu), "a menu that takes words also takes Chat about this")
+        XCTAssertFalse(ChatThreadModel.offersChatAbout(allow))
+
         let fixed = ask(3, kind: "question", options: ["a"])
         XCTAssertFalse(ChatThreadModel.offersReply(fixed), "only its options")
+        XCTAssertFalse(ChatThreadModel.offersChatAbout(fixed), "a menu that takes no words has no chat option")
 
         let noButtons = ask(4, kind: "question", token: "", options: ["a"])
         XCTAssertFalse(ChatThreadModel.offersOptions(noButtons), "no token, nothing to choose with")
@@ -484,6 +494,7 @@ final class ChatThreadModelTests: XCTestCase {
         XCTAssertTrue(ChatThreadModel.offersPicks(picks))
         XCTAssertFalse(ChatThreadModel.offersOptions(picks))
         XCTAssertFalse(ChatThreadModel.offersReply(picks))
+        XCTAssertFalse(ChatThreadModel.offersChatAbout(picks))
         XCTAssertFalse(ChatThreadModel.offersPicks(menu))
 
         var done = menu
@@ -610,6 +621,14 @@ final class ChatThreadModelTests: XCTestCase {
         XCTAssertTrue(client.sent.isEmpty)
         XCTAssertNil(model.replyTo)
         XCTAssertFalse(model.thinking)
+    }
+
+    /// "Chat about this" on a card reaches the core as `agent.chatAbout` with the card's token.
+    func testChatAboutThisGoesToTheCore() async {
+        let client = FakeChatClient()
+        let model = ChatThreadModel(client: client)
+        await model.chatAbout(token: "tk")
+        XCTAssertEqual(client.chatted, ["tk"])
     }
 
     /// The core sends a typed answer as `agent.typedAnswer`, without the one-recipient rule

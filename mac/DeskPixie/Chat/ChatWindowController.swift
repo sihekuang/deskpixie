@@ -96,6 +96,7 @@ final class ChatWindowController: NSObject, NSToolbarDelegate {
             liveWho: { [model] in model.liveWho($0) },
             stop: { [model] target in Task { await model.stop(target) } },
             pick: { [model] token, options in Task { await model.pick(token: token, options: options) } },
+            chatAbout: { [model] token in Task { await model.chatAbout(token: token) } },
             dismiss: { [model] item in Task { await model.dismiss(item: item) } },
             preview: { [preview] paths, i in preview.show(paths, at: i) })
         let view = ChatWindowView(model: model, state: state, attachments: attachments, actions: actions)

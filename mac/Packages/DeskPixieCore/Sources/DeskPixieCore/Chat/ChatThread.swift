@@ -260,6 +260,8 @@ public protocol ChatClient: Sendable {
     /// `agent.pick`: the options (from 1) ticked of a question that takes several (#364).
     func pick(token: String, options: [Int]) throws
     func typedAnswer(token: String, text: String) throws
+    /// `agent.chatAbout`: "Chat about this" on a session menu that takes words (#268).
+    func chatAbout(token: String) throws
     /// `agent.dismiss`: a session's question taken away unanswered, by its line (#388).
     func dismiss(item: UInt64) throws
     /// Stops what Pixie is working on.
