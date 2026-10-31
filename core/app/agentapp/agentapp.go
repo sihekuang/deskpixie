@@ -709,6 +709,15 @@ func chatSent(s agent.ChatSent) app.ChatSent {
 	return app.ChatSent{Job: string(s.Job), Answered: s.Answered, Session: s.Session, Attached: s.Attached}
 }
 
+// AnswerJob is Reply… on a job's question in the chat window (#422).
+func (a *Agent) AnswerJob(job, text string) (app.ChatSent, bool, error) {
+	s, ok, err := a.handle.AnswerJob(job, text)
+	if ok && err == nil {
+		a.feed.sent(s.Job)
+	}
+	return chatSent(s), ok, err
+}
+
 // ChatDelegate is a message typed in the text box that is always a new job (a reply to a
 // session, #302).
 func (a *Agent) ChatDelegate(text string) (app.ChatSent, error) {

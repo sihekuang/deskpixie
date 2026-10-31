@@ -22,6 +22,8 @@ import (
 type fakeAgent struct {
 	mu              sync.Mutex
 	fromWindow      []string
+	jobAnswers      []string // AnswerJob calls that answered: "job: text"
+	answerJobErr    error
 	menu            []string
 	opened          int
 	mouths          []int

@@ -4,7 +4,7 @@ import XCTest
 /// A thread like the core's: newest first pages, an unknown `before` gives none, a refused
 /// call throws.
 final class FakeChatClient: ChatClient, @unchecked Sendable {
-    struct Sent: Equatable { let text: String; let session: String? }
+    struct Sent: Equatable { let text: String; let session: String?; var job: String? = nil }
     struct Failure: Error {}
 
     private let lock = NSLock()
@@ -45,7 +45,7 @@ final class FakeChatClient: ChatClient, @unchecked Sendable {
     }
     func needs() throws -> [ChatEntry] { try check(); return lock.withLock { open } }
     func read(upTo: String) throws { try check(); lock.withLock { _reads.append(upTo) } }
-    func send(_ text: String, session: String?) throws {
+    func send(_ text: String, session: String?, job: String?) throws {
         try check()
         lock.withLock { gate }?.wait()
         if let why = lock.withLock({ () -> String? in defer { _failNext = nil }; return _failNext }) {
@@ -54,7 +54,7 @@ final class FakeChatClient: ChatClient, @unchecked Sendable {
         if let why = lock.withLock({ () -> String? in defer { _refuse = nil }; return _refuse }) {
             throw DeskPixieEngineError.refused(why)
         }
-        lock.withLock { _sent.append(Sent(text: text, session: session)) }
+        lock.withLock { _sent.append(Sent(text: text, session: session, job: job)) }
     }
     func decide(token: String, allow: Bool) throws { try check() }
     func choose(token: String, option: Int) throws { try check() }
@@ -77,6 +77,12 @@ final class FakeChatClient: ChatClient, @unchecked Sendable {
     func typedAnswer(token: String, text: String) throws {
         try check()
         lock.withLock { _typed.append(Typed(token: token, text: text)) }
+    }
+    private var _chatted: [String] = []
+    var chatted: [String] { lock.withLock { _chatted } }
+    func chatAbout(token: String) throws {
+        try check()
+        lock.withLock { _chatted.append(token) }
     }
     func stop() throws { try check() }
     private var _interrupted: [String] = []
@@ -471,8 +477,12 @@ final class ChatThreadModelTests: XCTestCase {
         XCTAssertTrue(ChatThreadModel.offersOptions(menu))
         XCTAssertTrue(ChatThreadModel.offersReply(menu), "a typed answer")
 
+        XCTAssertTrue(ChatThreadModel.offersChatAbout(menu), "a menu that takes words also takes Chat about this")
+        XCTAssertFalse(ChatThreadModel.offersChatAbout(allow))
+
         let fixed = ask(3, kind: "question", options: ["a"])
         XCTAssertFalse(ChatThreadModel.offersReply(fixed), "only its options")
+        XCTAssertFalse(ChatThreadModel.offersChatAbout(fixed), "a menu that takes no words has no chat option")
 
         let noButtons = ask(4, kind: "question", token: "", options: ["a"])
         XCTAssertFalse(ChatThreadModel.offersOptions(noButtons), "no token, nothing to choose with")
@@ -484,6 +494,7 @@ final class ChatThreadModelTests: XCTestCase {
         XCTAssertTrue(ChatThreadModel.offersPicks(picks))
         XCTAssertFalse(ChatThreadModel.offersOptions(picks))
         XCTAssertFalse(ChatThreadModel.offersReply(picks))
+        XCTAssertFalse(ChatThreadModel.offersChatAbout(picks))
         XCTAssertFalse(ChatThreadModel.offersPicks(menu))
 
         var done = menu
@@ -612,6 +623,14 @@ final class ChatThreadModelTests: XCTestCase {
         XCTAssertFalse(model.thinking)
     }
 
+    /// "Chat about this" on a card reaches the core as `agent.chatAbout` with the card's token.
+    func testChatAboutThisGoesToTheCore() async {
+        let client = FakeChatClient()
+        let model = ChatThreadModel(client: client)
+        await model.chatAbout(token: "tk")
+        XCTAssertEqual(client.chatted, ["tk"])
+    }
+
     /// The core sends a typed answer as `agent.typedAnswer`, without the one-recipient rule
     /// (#302 review M4): the box doesn't hold it back for an @name either.
     func testATypedAnswerSkipsTheMentionRule() async {
@@ -684,6 +703,84 @@ final class ChatThreadModelTests: XCTestCase {
         await model.send("yes")
         XCTAssertEqual(client.sent, [.init(text: "yes", session: "herdr:1.2")])
         XCTAssertTrue(client.typed.isEmpty)
+    }
+
+    /// #422: Reply… on a worker's question (a job's, no token) goes as that job's answer: the
+    /// core answers the job while it waits, else tells the worker.
+    func testReplyToAJobsQuestionSendsItsJob() async {
+        let client = FakeChatClient()
+        let model = ChatThreadModel(client: client)
+        var q = ask(1, kind: "question", token: "", who: "w2", label: "w2")
+        q.request?.job = "job_000000000007"
+        model.applyNeeds([q])
+        model.reply(to: q)
+        await model.send("deskpixie")
+        XCTAssertEqual(client.sent, [.init(text: "deskpixie", session: "w2", job: "job_000000000007")])
+        await model.send("and again")
+        XCTAssertEqual(client.sent.last, .init(text: "and again", session: nil), "the reply was used up")
+    }
+
+    /// #422: the coordinator relays a worker's question as its own ("The worker asks: …"): its
+    /// card offers Reply…, and the reply goes to Pixie with the job, which the core answers.
+    func testReplyToTheCoordinatorsQuestionOnAJobSendsItsJobToPixie() async {
+        let client = FakeChatClient()
+        let model = ChatThreadModel(client: client)
+        var q = ask(1, kind: "question", token: "")
+        q.who = ChatWho(kind: "coordinator")
+        q.request?.job = "job_000000000007"
+        XCTAssertTrue(ChatThreadModel.offersReply(q))
+        var noJob = q
+        noJob.request?.job = ""
+        XCTAssertFalse(ChatThreadModel.offersReply(noJob), "a coordinator's line with no job has nothing to answer")
+        model.applyNeeds([q])
+        model.reply(to: q)
+        XCTAssertEqual(model.placeholder, "Reply to Coordinator…")
+        XCTAssertNil(model.check("blue"), "a reply to the coordinator's question goes as it is")
+        await model.send("blue")
+        XCTAssertEqual(client.sent, [.init(text: "blue", session: nil, job: "job_000000000007")])
+        XCTAssertFalse(model.thinking, "an answer to the job: Pixie may say nothing back")
+    }
+
+    /// #422: once the coordinator's question is answered, a reply to it is a message to Pixie.
+    func testReplyToTheCoordinatorsQuestionAnsweredMeanwhileGoesToPixie() async {
+        let client = FakeChatClient()
+        let model = ChatThreadModel(client: client)
+        var q = ask(1, kind: "question", token: "")
+        q.who = ChatWho(kind: "coordinator")
+        q.request?.job = "job_000000000007"
+        model.applyNeeds([q])
+        model.reply(to: q)
+        model.applyNeeds([])
+        await model.send("late")
+        XCTAssertEqual(client.sent, [.init(text: "late", session: nil)])
+        XCTAssertTrue(model.thinking, "a message to Pixie, which works on it")
+    }
+
+    /// #422: a job's question no longer open sends no job: a plain message to its session.
+    func testReplyToAJobsQuestionAnsweredMeanwhileSendsNoJob() async {
+        let client = FakeChatClient()
+        let model = ChatThreadModel(client: client)
+        var q = ask(1, kind: "question", token: "", who: "w2", label: "w2")
+        q.request?.job = "job_000000000007"
+        model.applyNeeds([q])
+        model.reply(to: q)
+        model.applyNeeds([])
+        await model.send("late")
+        XCTAssertEqual(client.sent, [.init(text: "late", session: "w2")])
+    }
+
+    /// #422: a failed send keeps the job with the reply, for the next try.
+    func testAFailedReplyToAJobsQuestionKeepsItsJob() async {
+        let client = FakeChatClient()
+        let model = ChatThreadModel(client: client)
+        var q = ask(1, kind: "question", token: "", who: "w2", label: "w2")
+        q.request?.job = "job_000000000007"
+        model.applyNeeds([q])
+        model.reply(to: q)
+        client.failNextSend("The coordinator is off.")
+        await model.send("deskpixie")
+        await model.send("deskpixie")
+        XCTAssertEqual(client.sent, [.init(text: "deskpixie", session: "w2", job: "job_000000000007")])
     }
 
     func testAQuestionAnsweredMeanwhileFallsBackToItsSession() async {

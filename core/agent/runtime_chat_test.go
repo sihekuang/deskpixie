@@ -190,3 +190,60 @@ func TestChatDelegateIsANewJobWhileAQuestionWaits(t *testing.T) {
 		}
 	})
 }
+
+// #422: Reply… on a job's question in the chat window answers that job, even one asked by
+// voice: the words go to the coordinator as the answer, not as a new job.
+func TestWindowReplyAnswersTheJobsWaitingQuestion(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRig(t)
+		if _, err := r.h.Delegate("ask the docs worker to fix the flaky test", ""); err != nil {
+			t.Fatal(err)
+		}
+		settle()
+		stopHook(r, `<spoken ref="job_000000000001" status="question">Worker docs asks: which repo?</spoken>`)
+		settle()
+		r.host.SetStatus(Coordinator, PaneIdle)
+		settle()
+		sent, ok, err := r.h.AnswerJob("job_000000000001", "deskpixie")
+		if err != nil || !ok || sent.Job != JobID("job_000000000001") || !sent.Answered {
+			t.Fatal(sent, ok, err)
+		}
+		settle()
+		if n := len(r.h.JobStatus()); n != 1 {
+			t.Fatal("no new job for an answer", n)
+		}
+		prompts := r.host.Prompts()
+		if !strings.Contains(prompts[len(prompts)-1].Text, "The user answered: deskpixie") {
+			t.Fatal(prompts)
+		}
+	})
+}
+
+// #422: a job that no longer waits (answered, done, or unknown) takes no answer: nothing is
+// sent, and the caller tells the session instead.
+func TestWindowReplyToAJobThatNoLongerWaitsSendsNothing(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRig(t)
+		if _, err := r.h.Delegate("fix the flaky test", ""); err != nil {
+			t.Fatal(err)
+		}
+		settle()
+		stopHook(r, `<spoken ref="job_000000000001" status="done">Fixed it.</spoken>`)
+		settle()
+		r.host.SetStatus(Coordinator, PaneIdle)
+		settle()
+		before := len(r.host.Prompts())
+		for _, job := range []string{"job_000000000001", "job_000000000009", "not a job", ""} {
+			if sent, ok, err := r.h.AnswerJob(job, "deskpixie"); ok || err != nil || sent.Job != "" {
+				t.Fatal(job, sent, ok, err)
+			}
+		}
+		settle()
+		if n := len(r.host.Prompts()); n != before {
+			t.Fatal("sent", r.host.Prompts()[before:])
+		}
+		if n := len(r.h.JobStatus()); n != 1 {
+			t.Fatal("a new job", n)
+		}
+	})
+}

@@ -138,6 +138,9 @@ type Agent interface {
 	// ChatDelegate is a message typed in the text box that is always a new job, never the
 	// answer to a waiting question: a reply to a session, told through the coordinator (#302).
 	ChatDelegate(text string) (ChatSent, error)
+	// AnswerJob is Reply… on a job's question in the chat window (#422): the answer to it while
+	// it waits (true), else nothing is sent (false).
+	AnswerJob(job, text string) (ChatSent, bool, error)
 	// WindowSend is ChatSend for a message sent from the chat window (#414): it leaves the box
 	// under Pixie be, and its session's replies come as cards, not to the box.
 	WindowSend(text string) (ChatSent, error)

@@ -44,6 +44,22 @@ func (f *fakeAgent) ChatDelegate(text string) (ChatSent, error) {
 	return ChatSent{Job: fmt.Sprintf("job_%012d", f.jobs), Attached: f.takeAttached()}, nil
 }
 
+// AnswerJob answers the job's question while it is the one asking, as the real one does;
+// answerJobErr refuses it.
+func (f *fakeAgent) AnswerJob(job, text string) (ChatSent, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if job == "" || f.asking != job {
+		return ChatSent{}, false, nil
+	}
+	if f.answerJobErr != nil {
+		return ChatSent{}, true, f.answerJobErr
+	}
+	f.jobAnswers = append(f.jobAnswers, job+": "+text)
+	f.asking = ""
+	return ChatSent{Job: job, Answered: true, Attached: f.takeAttached()}, true, nil
+}
+
 // takeAttached hands over the waiting attachments, as the real agent does when a message goes.
 func (f *fakeAgent) takeAttached() []string {
 	if f.attach == nil {

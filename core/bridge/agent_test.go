@@ -24,6 +24,9 @@ func (b *bridgeAgent) Tray() app.AgentTray                       { return app.Ag
 func (b *bridgeAgent) Menu(string) bool                          { return true }
 func (b *bridgeAgent) ChatSend(string) (app.ChatSent, error)     { return app.ChatSent{}, nil }
 func (b *bridgeAgent) ChatDelegate(string) (app.ChatSent, error) { return app.ChatSent{}, nil }
+func (b *bridgeAgent) AnswerJob(string, string) (app.ChatSent, bool, error) {
+	return app.ChatSent{}, false, nil
+}
 func (b *bridgeAgent) ChatStop()                                 {}
 func (b *bridgeAgent) Interrupt(string, string) error            { return nil }
 func (b *bridgeAgent) SetTextMode(bool)                          {}

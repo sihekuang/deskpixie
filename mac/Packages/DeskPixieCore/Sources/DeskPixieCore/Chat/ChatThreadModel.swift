@@ -25,6 +25,9 @@ public final class ChatThreadModel {
     /// The question the box answers (its token), when Reply… was on a card that takes a typed
     /// answer: the message goes as `agent.typedAnswer` while the question is still open.
     public private(set) var replyToken: String?
+    /// The job whose question the box answers, when Reply… was on a job's question with no
+    /// token (a worker's, #422): it goes with the message while the question is still open.
+    public private(set) var replyJob: String?
     /// A message is on its way to the core.
     public private(set) var sending = false
     /// A typed message is being worked on; the coordinator's or Pixie's answer clears it.
@@ -257,18 +260,23 @@ public final class ChatThreadModel {
         defer { sending = false }
         let target = replyTo
         let token = target == nil ? nil : replyToken
+        let job = target == nil ? nil : replyJob
         replyTo = nil
         replyToken = nil
-        if target == nil { thinking = true }
+        replyJob = nil
         let client = client
-        let session = target?.name
+        // The coordinator's question (#422) is answered through Pixie, not sent to an address.
+        let session = target.flatMap { $0.kind == "coordinator" ? nil : $0.name }
         let answer = token.flatMap { t in needs.contains { $0.request?.token == t } ? t : nil }
+        let asked = job.flatMap { j in needs.contains { $0.request?.job == j && $0.request?.token.isEmpty == true } ? j : nil }
+        // A message to Pixie is worked on: so is a reply to the coordinator's question once closed.
+        if target == nil || (target?.kind == "coordinator" && asked == nil) { thinking = true }
         let result = await Task.detached {
             Result {
                 if let answer {
                     try client.typedAnswer(token: answer, text: text)
                 } else {
-                    try client.send(text, session: session)
+                    try client.send(text, session: session, job: asked)
                 }
             }
         }.value
@@ -281,6 +289,7 @@ public final class ChatThreadModel {
             if replyTo == nil {
                 replyTo = target
                 replyToken = token
+                replyJob = job
             }
             thinking = false
             if answer == nil, case DeskPixieEngineError.refused(let why) = err {
@@ -301,8 +310,9 @@ public final class ChatThreadModel {
     /// it, so neither does the box.
     public func check(_ text: String) -> String? {
         if let t = replyToken, needs.contains(where: { $0.request?.token == t }) { return nil }
-        return ChatRecipients.check(text, target: replyTo?.name,
-                                    label: replyTo.map(Self.name(of:)) ?? "",
+        let target = replyTo?.kind == "coordinator" ? nil : replyTo // goes to Pixie (#422)
+        return ChatRecipients.check(text, target: target?.name,
+                                    label: target.map(Self.name(of:)) ?? "",
                                     recipients: recipients, knowsRecipients: recipientsKnown)
     }
 
@@ -316,6 +326,7 @@ public final class ChatThreadModel {
     public func choose(_ r: ChatRecipient?) {
         replyTo = r?.who
         replyToken = nil
+        replyJob = nil
         refusal = nil
     }
 
@@ -352,6 +363,12 @@ public final class ChatThreadModel {
     public func typedAnswer(token: String, text: String) async {
         let client = client
         await call("agent.typedAnswer") { try client.typedAnswer(token: token, text: text) }
+    }
+
+    /// "Chat about this" on a menu card (#268): the session's menu is left for a talk in its terminal.
+    public func chatAbout(token: String) async {
+        let client = client
+        await call("agent.chatAbout") { try client.chatAbout(token: token) }
     }
 
     public func stop() async {
@@ -394,6 +411,7 @@ public final class ChatThreadModel {
     public func reply(toSession address: String) {
         replyTo = who(forSession: address)
         replyToken = nil
+        replyJob = nil
         refusal = nil
     }
 
@@ -402,16 +420,23 @@ public final class ChatThreadModel {
     /// entry's own.
     public func reply(to entry: ChatEntry) {
         let shown = (entries + needs).contains { $0.who.name == entry.who.name && !$0.who.label.isEmpty }
-        replyTo = shown || entry.who.label.isEmpty ? who(forSession: entry.who.name) : entry.who
+        if entry.who.kind == "coordinator" {
+            replyTo = entry.who // its question on a job (#422): answered through Pixie
+        } else {
+            replyTo = shown || entry.who.label.isEmpty ? who(forSession: entry.who.name) : entry.who
+        }
         replyToken = nil
+        replyJob = nil
         refusal = nil
         if let r = entry.request, Self.isOpen(entry), r.typed, !r.token.isEmpty { replyToken = r.token }
+        if let r = entry.request, Self.isOpen(entry), r.token.isEmpty, !r.job.isEmpty { replyJob = r.job }
     }
 
     /// × or Esc on the chip: back to messaging Pixie.
     public func cancelReply() {
         replyTo = nil
         replyToken = nil
+        replyJob = nil
         refusal = nil
     }
 
@@ -454,16 +479,24 @@ public final class ChatThreadModel {
         return r.kind == "question" && !r.token.isEmpty && !r.options.isEmpty && r.multi
     }
 
-    /// Reply…: a question that takes a typed answer, or one with no buttons, answered by a
-    /// message to its session.
     /// Whether the card shows Dismiss: a session's question with no buttons, still open (#388).
     public static func offersDismiss(_ e: ChatEntry) -> Bool {
         isOpen(e) && e.request?.dismissible == true
     }
 
+    /// "Chat about this": a menu that takes a typed answer also takes this, as in the bubble (#268).
+    public static func offersChatAbout(_ e: ChatEntry) -> Bool {
+        guard isOpen(e), let r = e.request else { return false }
+        return r.kind == "question" && !r.token.isEmpty && !r.options.isEmpty && r.typed && !r.multi
+    }
+
+    /// Reply…: a question that takes a typed answer, or one with no buttons, answered by a
+    /// message to its session.
     public static func offersReply(_ e: ChatEntry) -> Bool {
         guard isOpen(e), let r = e.request, r.kind == "question" else { return false }
         if !r.token.isEmpty { return r.typed && !r.multi }
+        // The coordinator's question on a job: a worker's, relayed in its words (#422).
+        if e.who.kind == "coordinator" { return !r.job.isEmpty }
         return e.who.kind == "session" && !e.who.name.isEmpty
     }
 
