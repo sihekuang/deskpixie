@@ -129,6 +129,7 @@ const (
 	InDelegate                             // Job, Task, Context ("" = none)
 	InCancel                               // Job
 	InAnswer                               // Job ("" = the only job waiting on an answer), Text; answered with EfAnswerResult
+	InAnswerJob                            // Job, Text: that job's answer or none (#422); EfAnswerResult, Err jobNotWaiting when it doesn't wait
 	InEnsureCoordinator                    // start the coordinator now if it isn't running
 	InCoordinatorUp                        // Status: SessionHost ensure_coordinator succeeded
 	InCoordinatorFailed                    // HostErr
@@ -261,7 +262,10 @@ func WorkerInterruptedInput(name string) Input { return Input{Kind: InWorkerInte
 
 // AnswerInput: id "" means the only job waiting on an answer.
 func AnswerInput(id JobID, text string) Input { return Input{Kind: InAnswer, Job: id, Text: text} }
-func EnsureCoordinatorInput() Input           { return Input{Kind: InEnsureCoordinator} }
+func JobAnswerInput(id JobID, text string) Input {
+	return Input{Kind: InAnswerJob, Job: id, Text: text}
+}
+func EnsureCoordinatorInput() Input { return Input{Kind: InEnsureCoordinator} }
 func CoordinatorUpInput(status PaneStatus) Input {
 	return Input{Kind: InCoordinatorUp, Status: status}
 }
@@ -816,6 +820,8 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 		fx = append(fx, Effect{Kind: EfToolResult, Value: c.workerInterrupted(in.Name, now, &fx)})
 	case InAnswer:
 		c.answer(in.Job, in.Text, now, &fx)
+	case InAnswerJob:
+		c.answerJob(in.Job, in.Text, now, &fx)
 	case InEnsureCoordinator:
 		c.ensureCoordinator(&fx)
 	case InCoordinatorUp:
@@ -2495,6 +2501,19 @@ func (c *AgentController) AskedLast(id JobID) bool {
 // noAnswerWaiting: an answer with no question waiting for it.
 const noAnswerWaiting = "No job is waiting for an answer."
 
+// jobNotWaiting: a job's answer for a job that isn't waiting on one (#422).
+const jobNotWaiting = "That job isn't waiting for an answer."
+
+// answerJob is the answer to job's question and nothing else (#422): unlike answer, a job
+// that no longer waits never passes the words on to whoever asked last.
+func (c *AgentController) answerJob(id JobID, text string, now Millis, fx *[]Effect) {
+	if j, ok := c.jobs.Get(id); !ok || j.Status != JobQuestion || !c.jobs.IsOpen(id) {
+		*fx = append(*fx, Effect{Kind: EfAnswerResult, Err: jobNotWaiting})
+		return
+	}
+	c.answerWaiting(id, text, now, fx)
+}
+
 func (c *AgentController) answer(jobID JobID, text string, now Millis, fx *[]Effect) {
 	waiting := func(id JobID) bool {
 		j, ok := c.jobs.Get(id)
@@ -2537,11 +2556,17 @@ func (c *AgentController) answer(jobID JobID, text string, now Millis, fx *[]Eff
 			return
 		}
 	}
-	if err == "" && slices.ContainsFunc(c.confirms.Pending(), func(p Pending) bool { return p.Job == id }) {
-		err = "That job is waiting for a confirm word."
-	}
 	if err != "" {
 		*fx = append(*fx, Effect{Kind: EfAnswerResult, Err: err})
+		return
+	}
+	c.answerWaiting(id, text, now, fx)
+}
+
+// answerWaiting gives job id, waiting on a question, the user's answer.
+func (c *AgentController) answerWaiting(id JobID, text string, now Millis, fx *[]Effect) {
+	if slices.ContainsFunc(c.confirms.Pending(), func(p Pending) bool { return p.Job == id }) {
+		*fx = append(*fx, Effect{Kind: EfAnswerResult, Err: "That job is waiting for a confirm word."})
 		return
 	}
 	if _, e := c.jobs.Transition(id, JobWorking, now); e == nil {

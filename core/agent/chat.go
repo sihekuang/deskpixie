@@ -138,15 +138,24 @@ func (h *AgentHandle) AnswerJob(job, text string) (ChatSent, bool, error) {
 	if err != nil {
 		return ChatSent{}, false, err
 	}
-	h.ctlMu.Lock()
-	j, known := h.ctl.jobs.Get(id)
-	waiting := known && j.Status == JobQuestion && h.ctl.jobs.IsOpen(id)
-	h.ctlMu.Unlock()
-	if !waiting {
-		return ChatSent{}, false, nil
+	if h.quitting() {
+		return ChatSent{}, false, errQuitting
 	}
-	got, where, paths, err := h.answerAsked(string(id), text, true)
-	return ChatSent{Job: got, Answered: err == nil && where != toNewRequest, Attached: paths}, true, err
+	// Checked and answered in one step: a job that stopped waiting meanwhile takes nothing.
+	paths := h.take()
+	r := h.stepLocked(JobAnswerInput(id, text+attachedLines(paths)))
+	switch {
+	case r == nil || r.Kind != EfAnswerResult:
+		h.giveBack(paths)
+		return ChatSent{}, true, errors.New("The answer was not processed.")
+	case r.Err == jobNotWaiting:
+		h.giveBack(paths)
+		return ChatSent{}, false, nil
+	case r.Err != "":
+		h.giveBack(paths)
+		return ChatSent{}, true, errors.New(r.Err)
+	}
+	return ChatSent{Job: r.Job, Answered: true, Attached: paths}, true, nil
 }
 
 // ChatDelegate is a message sent from the chat window to one session, told through the

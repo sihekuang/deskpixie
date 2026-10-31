@@ -462,3 +462,39 @@ func TestStoppingATypedJobSaysItEnded(t *testing.T) {
 		t.Fatalf("a job not typed: %s", fmtEffects(fx))
 	}
 }
+
+// #422 review: a reply to one job's question in the chat window answers that job or nothing:
+// once it no longer waits, the words never go to the session or the job that asked last.
+func TestAJobAnswerForAJobNoLongerWaitingGoesNowhere(t *testing.T) {
+	c := handedOffTyped(t) // job 1 is done
+	sessionTurn(c, pixieTurn("Should I also fix the logout page?"), T0+20)
+	if c.asked.session != "api-claude" {
+		t.Fatalf("asked %+v", c.asked)
+	}
+	fx := c.Step(JobAnswerInput(job(1), "blue"), T0+30)
+	want := Effect{Kind: EfAnswerResult, Err: jobNotWaiting}
+	if len(fx) != 1 || fx[0].Kind != want.Kind || fx[0].Err != want.Err {
+		t.Fatalf("%s", fmtEffects(fx))
+	}
+	if c.asked.session != "api-claude" {
+		t.Fatal("the session's question was taken", c.asked)
+	}
+}
+
+func TestAJobAnswerSkipsAnotherJobsQuestion(t *testing.T) {
+	c := ctl()
+	c.Step(CoordinatorUpInput(PaneIdle), T0)
+	c.Step(DelegateInput(job(1), "a", ""), T0)
+	c.Step(DelegateInput(job(2), "b", ""), T0)
+	stop(c, `<spoken ref="job_000000000002" status="question">Which repo?</spoken>`, T0+10)
+	fx := c.Step(JobAnswerInput(job(1), "deskpixie"), T0+20)
+	if len(fx) != 1 || fx[0].Err != jobNotWaiting {
+		t.Fatalf("%s", fmtEffects(fx))
+	}
+	wantJobStatus(t, c, 2, JobQuestion)
+	fx = c.Step(JobAnswerInput(job(2), "deskpixie"), T0+30)
+	if !slices.ContainsFunc(fx, func(e Effect) bool { return e.Kind == EfAnswerResult && e.Job == job(2) && e.Err == "" }) {
+		t.Fatalf("%s", fmtEffects(fx))
+	}
+	wantJobStatus(t, c, 2, JobWorking)
+}
