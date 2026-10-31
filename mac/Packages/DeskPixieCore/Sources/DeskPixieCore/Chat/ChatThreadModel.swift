@@ -264,12 +264,13 @@ public final class ChatThreadModel {
         replyTo = nil
         replyToken = nil
         replyJob = nil
-        if target == nil { thinking = true }
         let client = client
         // The coordinator's question (#422) is answered through Pixie, not sent to an address.
         let session = target.flatMap { $0.kind == "coordinator" ? nil : $0.name }
         let answer = token.flatMap { t in needs.contains { $0.request?.token == t } ? t : nil }
         let asked = job.flatMap { j in needs.contains { $0.request?.job == j && $0.request?.token.isEmpty == true } ? j : nil }
+        // A message to Pixie is worked on: so is a reply to the coordinator's question once closed.
+        if target == nil || (target?.kind == "coordinator" && asked == nil) { thinking = true }
         let result = await Task.detached {
             Result {
                 if let answer {

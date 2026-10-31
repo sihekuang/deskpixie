@@ -738,6 +738,7 @@ final class ChatThreadModelTests: XCTestCase {
         XCTAssertNil(model.check("blue"), "a reply to the coordinator's question goes as it is")
         await model.send("blue")
         XCTAssertEqual(client.sent, [.init(text: "blue", session: nil, job: "job_000000000007")])
+        XCTAssertFalse(model.thinking, "an answer to the job: Pixie may say nothing back")
     }
 
     /// #422: once the coordinator's question is answered, a reply to it is a message to Pixie.
@@ -752,6 +753,7 @@ final class ChatThreadModelTests: XCTestCase {
         model.applyNeeds([])
         await model.send("late")
         XCTAssertEqual(client.sent, [.init(text: "late", session: nil)])
+        XCTAssertTrue(model.thinking, "a message to Pixie, which works on it")
     }
 
     /// #422: a job's question no longer open sends no job: a plain message to its session.
