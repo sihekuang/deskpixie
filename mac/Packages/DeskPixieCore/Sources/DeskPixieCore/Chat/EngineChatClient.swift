@@ -20,6 +20,8 @@ public struct EngineChatClient: ChatClient, Sendable {
         let text: String
         /// Left out when the message goes to Pixie; an empty one is the core's to refuse.
         let session: String?
+        /// The job whose question this replies to (#422); left out when none.
+        var job: String?
         /// The chat window: the core applies its one-recipient rule (the box under Pixie doesn't).
         var from = "window"
     }
@@ -72,8 +74,8 @@ public struct EngineChatClient: ChatClient, Sendable {
         _ = try engine.call("chat.read", ReadArgs(upTo: upTo))
     }
 
-    public func send(_ text: String, session: String?) throws {
-        _ = try engine.call("chat.send", SendArgs(text: text, session: session))
+    public func send(_ text: String, session: String?, job: String?) throws {
+        _ = try engine.call("chat.send", SendArgs(text: text, session: session, job: job))
     }
 
     public func decide(token: String, allow: Bool) throws {

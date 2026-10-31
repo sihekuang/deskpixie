@@ -25,6 +25,9 @@ public final class ChatThreadModel {
     /// The question the box answers (its token), when Reply… was on a card that takes a typed
     /// answer: the message goes as `agent.typedAnswer` while the question is still open.
     public private(set) var replyToken: String?
+    /// The job whose question the box answers, when Reply… was on a job's question with no
+    /// token (a worker's, #422): it goes with the message while the question is still open.
+    public private(set) var replyJob: String?
     /// A message is on its way to the core.
     public private(set) var sending = false
     /// A typed message is being worked on; the coordinator's or Pixie's answer clears it.
@@ -257,18 +260,21 @@ public final class ChatThreadModel {
         defer { sending = false }
         let target = replyTo
         let token = target == nil ? nil : replyToken
+        let job = target == nil ? nil : replyJob
         replyTo = nil
         replyToken = nil
+        replyJob = nil
         if target == nil { thinking = true }
         let client = client
         let session = target?.name
         let answer = token.flatMap { t in needs.contains { $0.request?.token == t } ? t : nil }
+        let asked = job.flatMap { j in needs.contains { $0.request?.job == j && $0.request?.token.isEmpty == true } ? j : nil }
         let result = await Task.detached {
             Result {
                 if let answer {
                     try client.typedAnswer(token: answer, text: text)
                 } else {
-                    try client.send(text, session: session)
+                    try client.send(text, session: session, job: asked)
                 }
             }
         }.value
@@ -281,6 +287,7 @@ public final class ChatThreadModel {
             if replyTo == nil {
                 replyTo = target
                 replyToken = token
+                replyJob = job
             }
             thinking = false
             if answer == nil, case DeskPixieEngineError.refused(let why) = err {
@@ -316,6 +323,7 @@ public final class ChatThreadModel {
     public func choose(_ r: ChatRecipient?) {
         replyTo = r?.who
         replyToken = nil
+        replyJob = nil
         refusal = nil
     }
 
@@ -400,6 +408,7 @@ public final class ChatThreadModel {
     public func reply(toSession address: String) {
         replyTo = who(forSession: address)
         replyToken = nil
+        replyJob = nil
         refusal = nil
     }
 
@@ -410,14 +419,17 @@ public final class ChatThreadModel {
         let shown = (entries + needs).contains { $0.who.name == entry.who.name && !$0.who.label.isEmpty }
         replyTo = shown || entry.who.label.isEmpty ? who(forSession: entry.who.name) : entry.who
         replyToken = nil
+        replyJob = nil
         refusal = nil
         if let r = entry.request, Self.isOpen(entry), r.typed, !r.token.isEmpty { replyToken = r.token }
+        if let r = entry.request, Self.isOpen(entry), r.token.isEmpty, !r.job.isEmpty { replyJob = r.job }
     }
 
     /// × or Esc on the chip: back to messaging Pixie.
     public func cancelReply() {
         replyTo = nil
         replyToken = nil
+        replyJob = nil
         refusal = nil
     }
 

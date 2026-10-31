@@ -4,7 +4,7 @@ import XCTest
 /// A thread like the core's: newest first pages, an unknown `before` gives none, a refused
 /// call throws.
 final class FakeChatClient: ChatClient, @unchecked Sendable {
-    struct Sent: Equatable { let text: String; let session: String? }
+    struct Sent: Equatable { let text: String; let session: String?; var job: String? = nil }
     struct Failure: Error {}
 
     private let lock = NSLock()
@@ -45,7 +45,7 @@ final class FakeChatClient: ChatClient, @unchecked Sendable {
     }
     func needs() throws -> [ChatEntry] { try check(); return lock.withLock { open } }
     func read(upTo: String) throws { try check(); lock.withLock { _reads.append(upTo) } }
-    func send(_ text: String, session: String?) throws {
+    func send(_ text: String, session: String?, job: String?) throws {
         try check()
         lock.withLock { gate }?.wait()
         if let why = lock.withLock({ () -> String? in defer { _failNext = nil }; return _failNext }) {
@@ -54,7 +54,7 @@ final class FakeChatClient: ChatClient, @unchecked Sendable {
         if let why = lock.withLock({ () -> String? in defer { _refuse = nil }; return _refuse }) {
             throw DeskPixieEngineError.refused(why)
         }
-        lock.withLock { _sent.append(Sent(text: text, session: session)) }
+        lock.withLock { _sent.append(Sent(text: text, session: session, job: job)) }
     }
     func decide(token: String, allow: Bool) throws { try check() }
     func choose(token: String, option: Int) throws { try check() }
@@ -703,6 +703,48 @@ final class ChatThreadModelTests: XCTestCase {
         await model.send("yes")
         XCTAssertEqual(client.sent, [.init(text: "yes", session: "herdr:1.2")])
         XCTAssertTrue(client.typed.isEmpty)
+    }
+
+    /// #422: Reply… on a worker's question (a job's, no token) goes as that job's answer: the
+    /// core answers the job while it waits, else tells the worker.
+    func testReplyToAJobsQuestionSendsItsJob() async {
+        let client = FakeChatClient()
+        let model = ChatThreadModel(client: client)
+        var q = ask(1, kind: "question", token: "", who: "w2", label: "w2")
+        q.request?.job = "job_000000000007"
+        model.applyNeeds([q])
+        model.reply(to: q)
+        await model.send("deskpixie")
+        XCTAssertEqual(client.sent, [.init(text: "deskpixie", session: "w2", job: "job_000000000007")])
+        await model.send("and again")
+        XCTAssertEqual(client.sent.last, .init(text: "and again", session: nil), "the reply was used up")
+    }
+
+    /// #422: a job's question no longer open sends no job: a plain message to its session.
+    func testReplyToAJobsQuestionAnsweredMeanwhileSendsNoJob() async {
+        let client = FakeChatClient()
+        let model = ChatThreadModel(client: client)
+        var q = ask(1, kind: "question", token: "", who: "w2", label: "w2")
+        q.request?.job = "job_000000000007"
+        model.applyNeeds([q])
+        model.reply(to: q)
+        model.applyNeeds([])
+        await model.send("late")
+        XCTAssertEqual(client.sent, [.init(text: "late", session: "w2")])
+    }
+
+    /// #422: a failed send keeps the job with the reply, for the next try.
+    func testAFailedReplyToAJobsQuestionKeepsItsJob() async {
+        let client = FakeChatClient()
+        let model = ChatThreadModel(client: client)
+        var q = ask(1, kind: "question", token: "", who: "w2", label: "w2")
+        q.request?.job = "job_000000000007"
+        model.applyNeeds([q])
+        model.reply(to: q)
+        client.failNextSend("The coordinator is off.")
+        await model.send("deskpixie")
+        await model.send("deskpixie")
+        XCTAssertEqual(client.sent, [.init(text: "deskpixie", session: "w2", job: "job_000000000007")])
     }
 
     func testAQuestionAnsweredMeanwhileFallsBackToItsSession() async {

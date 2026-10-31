@@ -253,7 +253,9 @@ public protocol ChatClient: Sendable {
     func read(upTo: String) throws
     /// Sends a message typed in the box; `session` is a session's address when it replies to one.
     /// The attachments waiting go with it: the core takes them, and the entry lists them (#394).
-    func send(_ text: String, session: String?) throws
+    /// `job` is the job whose question it replies to (#422): the core answers that job while it
+    /// waits, else sends it to `session` as a message.
+    func send(_ text: String, session: String?, job: String?) throws
     func decide(token: String, allow: Bool) throws
     /// `option` counts from 1.
     func choose(token: String, option: Int) throws
@@ -271,4 +273,11 @@ public protocol ChatClient: Sendable {
     func interrupt(name: String) throws
     /// `chat.recipients`: who a message can go to on its own now.
     func recipients() throws -> [ChatRecipient]
+}
+
+extension ChatClient {
+    /// A message that replies to no job's question.
+    public func send(_ text: String, session: String?) throws {
+        try send(text, session: session, job: nil)
+    }
 }

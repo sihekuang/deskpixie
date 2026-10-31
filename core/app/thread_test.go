@@ -894,3 +894,44 @@ func TestYourMessageShowsWhatWentWithIt(t *testing.T) {
 		}
 	}
 }
+
+// #422: Reply… on a worker's question in the chat window sends the words as that job's answer,
+// not as a new job asking the coordinator to tell the worker; the question is answered.
+func TestAReplyToAWorkersQuestionAnswersItsJob(t *testing.T) {
+	f := &fakeAgent{tray: AgentTray{Enabled: true}, roster: rosterWith()}
+	h := newHarness(t, withAgent(f))
+	asks := jobQuestion(1, "job_000000000007", "Which repo?")
+	asks.Who = chat.Who{Kind: "session", Name: "w2", Label: "w2"}
+	f.hooks.ThreadRequests([]chat.Entry{asks})
+	f.asking = "job_000000000007"
+	var out struct{ Job string }
+	json.Unmarshal(h.call("chat.send", map[string]any{"text": " deskpixie ", "session": "w2", "job": "job_000000000007", "from": "window"}), &out)
+	if out.Job != "job_000000000007" || f.delegated != 0 || !slices.Equal(f.jobAnswers, []string{"job_000000000007:  deskpixie "}) {
+		t.Fatalf("job %q, delegated %d, answers %q, sent %q", out.Job, f.delegated, f.jobAnswers, f.sent)
+	}
+	if o := outcomeOf(t, h, "req1"); o != "You answered: deskpixie" {
+		t.Fatalf("the question's outcome = %q", o)
+	}
+	if got := h.entries(nil); got[0].Who.Kind != "you" || got[0].Text != " deskpixie " || !slices.Equal(got[0].Sessions, []string{"w2"}) {
+		t.Fatalf("your reply = %+v", got[0])
+	}
+}
+
+// #422: once the job no longer waits, the reply goes to the worker as a message, as before.
+func TestAReplyToAQuestionNoLongerWaitingTellsTheWorker(t *testing.T) {
+	f := &fakeAgent{tray: AgentTray{Enabled: true}, roster: rosterWith()}
+	h := newHarness(t, withAgent(f))
+	h.call("chat.send", map[string]any{"text": "hi", "session": "w2", "job": "job_000000000007", "from": "window"})
+	if f.delegated != 1 || !slices.Equal(f.sent, []string{"Tell the w2 worker: hi"}) || len(f.jobAnswers) != 0 {
+		t.Fatalf("delegated %d, sent %q, answers %q", f.delegated, f.sent, f.jobAnswers)
+	}
+	f.answerJobErr = errors.New("The coordinator is off.")
+	f.asking = "job_000000000007"
+	if _, err := h.callErr("chat.send", map[string]any{"text": "hi", "session": "w2", "job": "job_000000000007", "from": "window"}); err == nil ||
+		err.Error() != "The coordinator is off." {
+		t.Fatal(err)
+	}
+	if f.delegated != 1 {
+		t.Fatal("a failed answer was sent again as a message")
+	}
+}

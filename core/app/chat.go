@@ -32,6 +32,9 @@ func (a *App) registerChat(r Registrar) {
 			// message go to one recipient by rule. The box under Pixie leaves it out and sends
 			// as it always has.
 			From string `json:"from"`
+			// Job is the job whose question this replies to (#422): while it waits, the words
+			// are its answer; once it doesn't, they go to Session as a message.
+			Job string `json:"job"`
 		}
 		if err := decodeArgs("chat.send", args, &in); err != nil {
 			return nil, err
@@ -66,6 +69,19 @@ func (a *App) registerChat(r Registrar) {
 		}
 		if in.Session != nil {
 			to := *in.Session
+			if in.Job != "" {
+				sent, ok, err := a.agent.AnswerJob(in.Job, in.Text)
+				if err != nil {
+					return nil, err
+				}
+				if ok {
+					a.threadSent(sent.Job, in.Text, sent.Attached, to)
+					if sent.Answered {
+						a.threadSentAnswer(sent.Job, "", strings.TrimSpace(in.Text))
+					}
+					return map[string]any{"job": sent.Job}, nil
+				}
+			}
 			// Always a new job: never taken for the answer to a question waiting in the box.
 			sent, err := a.agent.ChatDelegate("Tell the " + label + " " + kind + ": " + in.Text)
 			if err != nil {

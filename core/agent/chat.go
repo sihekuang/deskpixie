@@ -126,6 +126,29 @@ func (h *AgentHandle) message(text string, from sentFrom) (ChatSent, error) {
 	return ChatSent{Job: id, Attached: paths}, err
 }
 
+// AnswerJob is Reply… on a job's question in the chat window (#422): the answer to that job's
+// question while it waits for one, however the job was asked for. False when it doesn't wait
+// (answered, ended, unknown): nothing is sent.
+func (h *AgentHandle) AnswerJob(job, text string) (ChatSent, bool, error) {
+	id, ok := ParseJobID(strings.TrimSpace(job))
+	if !ok {
+		return ChatSent{}, false, nil
+	}
+	text, err := h.chatText(text)
+	if err != nil {
+		return ChatSent{}, false, err
+	}
+	h.ctlMu.Lock()
+	j, known := h.ctl.jobs.Get(id)
+	waiting := known && j.Status == JobQuestion && h.ctl.jobs.IsOpen(id)
+	h.ctlMu.Unlock()
+	if !waiting {
+		return ChatSent{}, false, nil
+	}
+	got, where, paths, err := h.answerAsked(string(id), text, true)
+	return ChatSent{Job: got, Answered: err == nil && where != toNewRequest, Attached: paths}, true, err
+}
+
 // ChatDelegate is a message sent from the chat window to one session, told through the
 // coordinator (#302): always a new job, never an answer to a waiting question.
 func (h *AgentHandle) ChatDelegate(text string) (ChatSent, error) {
