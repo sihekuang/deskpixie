@@ -317,6 +317,9 @@ const (
 	// PaneEventDelivered: the messages that waited for one of your pix sessions reached it
 	// (#183, #339).
 	PaneEventDelivered
+	// PaneEventOff: you turned Pixie off for one of your pix sessions (#431). It runs on;
+	// Pixie forgets what it asked and waits on from it.
+	PaneEventOff
 )
 
 // PaneEvent is a status change (Status set), an exit of a named agent, a prompt one of your
@@ -411,6 +414,7 @@ type UserSession struct {
 	Waiting          int       // Pixie's messages pix holds for it, not yet delivered (#183)
 	WaitingMessages  []string  // their text, oldest first (#419)
 	Outdated         bool      // it runs another pix than the app's: restart it to update (#189)
+	Off              bool      // you turned Pixie off for it (#431): it runs on, Pixie hears and sends nothing
 }
 
 // EnvVar is one environment entry (Rust's (String, String) pair).

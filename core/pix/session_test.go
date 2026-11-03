@@ -1624,6 +1624,29 @@ func TestFlushTypesWhatWaitsDespiteTheGate(t *testing.T) {
 	h.s.finish()
 }
 
+// #431: turned off in DeskPixie, a session drops what waits from Pixie: nothing of it is typed,
+// and DeskPixie hears it all went (none waits).
+func TestDropForgetsWhatWaits(t *testing.T) {
+	h := newHarness(t, "codex", Launch{Path: "/bin/sh", Args: []string{"-c", "read x; echo seen:$x; sleep 30"}})
+	h.stdinW.WriteString("half a sent") // the gate holds the message
+	time.Sleep(100 * time.Millisecond)
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "from pixie"})
+	waitEvent(t, h.d.events, "waiting", func(m wire.Msg) bool { return m.ID == "1" && m.Status == "waiting" })
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "2", Command: "drop"})
+	// Told before its result: DeskPixie counts nothing waiting by the time the call returns.
+	waitEvent(t, h.d.events, "delivered", func(m wire.Msg) bool { return m.Event == "delivered" && m.Seq == 1 })
+	waitEvent(t, h.d.events, "dropped", func(m wire.Msg) bool { return m.ID == "2" && m.Err == "" })
+	if h.s.queue.Len() != 0 {
+		t.Fatalf("still queued: %d", h.s.queue.Len())
+	}
+	time.Sleep(TypingQuiet + 200*time.Millisecond)
+	if got := h.s.typedForTest(); strings.Contains(got, "from pixie") {
+		t.Fatalf("typed after all: %q", got)
+	}
+	h.s.runner.Hangup()
+	h.s.finish()
+}
+
 // stopsOnEsc is an agent that reads until an Esc, then shows Claude Code's interrupt over its
 // input box (#320, #322).
 const stopsOnEsc = `stty raw -echo; while [ "$(dd bs=1 count=1 2>/dev/null)" != "$(printf '\033')" ]; do :; done; ` +

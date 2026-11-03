@@ -176,3 +176,14 @@ func TestAnAddressFirstThenALabel(t *testing.T) {
 		}
 	}
 }
+
+// #431: a session you turned Pixie off for gets no messages from the chat window.
+func TestAnOffSessionIsNoRecipient(t *testing.T) {
+	yours := []RosterRow{
+		{Name: "api-codex", Label: "api-server", Kind: "session", Reachable: true, Off: true},
+		{Name: "web-claude", Label: "web", Kind: "session", Reachable: true},
+	}
+	if got := Recipients(nil, yours); len(got) != 1 || got[0].Name != "web-claude" {
+		t.Fatalf("%+v", got)
+	}
+}

@@ -127,6 +127,10 @@ type Agent interface {
 	// ("roster" or "chat"): a failure comes back there, as the StopFailed hook. An error now
 	// (no name) is a sentence for the user.
 	Interrupt(name, surface string) error
+	// SetSessionOff turns Pixie off for one of your sessions, or back on (#431): the switch on
+	// its row in the roster. Off, it runs on, and Pixie hears and sends it nothing. An error is
+	// a sentence for the user.
+	SetSessionOff(name string, off bool) error
 	// SessionPlaces are where your sessions named run (#277), in order, from one listing: their
 	// folders and terminal apps, for the paths in their replies. Names not yours are left out.
 	SessionPlaces(names []string) []SessionPlace

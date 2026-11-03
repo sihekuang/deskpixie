@@ -98,6 +98,7 @@ type SessionRow struct {
 	WaitingMessages  []string `json:"waiting_messages,omitempty"` // their text, oldest first (#419)
 	Outdated         bool     `json:"outdated,omitempty"`         // it runs an older pix than the app's (#189)
 	Menu             string   `json:"menu,omitempty"`             // the menu it waits on, with its options (#384)
+	TurnedOff        bool     `json:"turned_off,omitempty"`       // the person turned Pixie off for it: leave it alone (#431)
 }
 
 // MenuView is a session's open menu as the coordinator sees it (#384): its question and its
@@ -251,6 +252,12 @@ type VerbatimSetter interface {
 	SetVerbatim(name string, on bool) error
 }
 
+// SessionSwitch turns Pixie off for a session you started, or back on (#431).
+type SessionSwitch interface {
+	Off(name string) bool
+	SetOff(name string, off bool) error
+}
+
 func isSessionCall(k McpCallKind) bool {
 	switch k {
 	case CallListSessions, CallMessageSession, CallFlushSession, CallStopAndSendSession, CallInterruptSession, CallCloseSession, CallDescribeSession, CallSetSessionVerbatim:
@@ -277,6 +284,9 @@ func sessionTool(ctx context.Context, host SessionHost, call McpCall, mask func(
 			return McpReply{Err: err}
 		}
 		return McpReply{Value: map[string]any{"sessions": rows}}
+	}
+	if off, ok := sec.(SessionSwitch); ok && off.Off(call.Name) {
+		return McpReply{Err: fmt.Errorf("The person turned Pixie off for %s: leave it alone until they turn it back on.", call.Name)}
 	}
 	if !sec.Owns(call.Name) {
 		if list, err := c.Primary().List(ctx); err == nil && slices.ContainsFunc(list, func(a AgentInfo) bool { return a.Name == call.Name }) {
@@ -389,6 +399,13 @@ func userSessionRows(ctx context.Context, sec SessionHost, mask func(string) str
 		for i, m := range u.WaitingMessages {
 			held[i] = mask(m)
 		}
+		if u.Off {
+			// You turned Pixie off for it (#431): listed so the coordinator can say so, with
+			// nothing it said since.
+			rows = append(rows, SessionRow{Name: a.Name, Description: mask(u.Description), Tool: u.Tool, Repo: u.Repo, Cwd: a.Cwd,
+				Where: u.Where, Status: a.Status.String(), Reachable: u.Reachable, TurnedOff: true})
+			continue
+		}
 		rows = append(rows, SessionRow{Name: a.Name, Description: mask(u.Description), PastDescriptions: past,
 			Tool: u.Tool, Repo: u.Repo, Cwd: a.Cwd, Where: u.Where, Status: a.Status.String(), Reachable: u.Reachable, Verbatim: u.Verbatim,
 			Started: ago(u.Started, now), LastActive: ago(u.LastActive, now), LastTurn: last, Waiting: u.Waiting, WaitingMessages: held, Outdated: u.Outdated})
@@ -408,6 +425,10 @@ func RequestNote(sessions []SessionRow, workers []WorkerRow, task func(JobID) st
 	if len(sessions) > 0 {
 		b.WriteString("Your open pix sessions:")
 		for _, r := range sessions {
+			if r.TurnedOff {
+				fmt.Fprintf(&b, "\n- %s: %q, %s repo, turned off by the person: leave it alone", r.Name, r.Description, r.Repo)
+				continue
+			}
 			fmt.Fprintf(&b, "\n- %s: %q, %s repo, %s", r.Name, r.Description, r.Repo, r.Status)
 			// Not typed in yet: a request that repeats one of them isn't with it (#419).
 			for i, m := range r.WaitingMessages {

@@ -498,3 +498,32 @@ func TestAJobAnswerSkipsAnotherJobsQuestion(t *testing.T) {
 	}
 	wantJobStatus(t, c, 2, JobWorking)
 }
+
+// #431: a session you turn off while the box waits on its question lets the box go: the
+// question closes there, and your next words aren't its answer. Pixie forgets what it asked.
+func TestTurningASessionOffClosesItsQuestionInTheBox(t *testing.T) {
+	c := handedOffTyped(t)
+	sessionTurn(c, pixieTurn("Should I also fix the logout page?"), T0+20)
+	fx := c.Step(PaneInput(PaneEvent{Kind: PaneEventOff, Agent: "api-claude"}), T0+30)
+	wantChat(t, fx, ChatLine{Job: job(1), Status: "done", Text: "You turned Pixie off for this session.", Session: "api-claude"})
+	noUsualRoute(t, fx)
+	if s, _ := c.takeBoxAnswer(); s != "" {
+		t.Fatalf("still the box's answer: %q", s)
+	}
+	// Back on, its next turn takes the usual route: the box let it go.
+	fx = sessionTurn(c, pixieTurn("The logout page is fixed too."), T0+40)
+	for _, l := range chats(fx) {
+		if l.Job == job(1) {
+			t.Fatalf("went to the box: %s", fmtEffects(fx))
+		}
+	}
+}
+
+// #431: off with nothing waiting in the box says nothing there.
+func TestTurningASessionOffWithNothingInTheBoxSaysNothing(t *testing.T) {
+	c := handedOffTyped(t)
+	sessionTurn(c, pixieTurn("The redirect loop is fixed."), T0+20)
+	if fx := c.Step(PaneInput(PaneEvent{Kind: PaneEventOff, Agent: "api-claude"}), T0+30); len(chats(fx)) != 0 {
+		t.Fatalf("%s", fmtEffects(fx))
+	}
+}

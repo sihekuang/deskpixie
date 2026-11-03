@@ -887,6 +887,8 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 			}
 		case ev.Kind == PaneEventDelivered:
 			c.heldDelivered(ev.Agent, ev.Seq, ev.Run, &fx)
+		case ev.Kind == PaneEventOff:
+			c.sessionOff(ev.Agent, &fx)
 		case ev.Kind == PaneEventQuestion || ev.Kind == PaneEventQuestionGone:
 		case ev.Kind == PaneEventStatus:
 			if a, ok := c.announced[ev.Agent]; ev.Status == PaneWorking && c.sessionIdle[ev.Agent] && (!ok || c.asking[ev.Agent] != a.line) {
@@ -2295,6 +2297,25 @@ func (c *AgentController) onSessionTurn(name string, t SessionTurn, now Millis, 
 		c.reask = reask{at: now, line: line}
 	}
 	c.deliverUpdate(line, now, fx)
+}
+
+// sessionOff: you turned Pixie off for session name (#431). It runs on, but Pixie hears nothing
+// more from it: what it asked is forgotten (your next words aren't its answer), and a question
+// of its waiting in the box closes there.
+func (c *AgentController) sessionOff(name string, fx *[]Effect) {
+	delete(c.sentTurn, name)
+	c.confirms.TakeSession(name, "")
+	c.dropAsking(name, fx)
+	if c.asked.session == name {
+		c.asked = asker{}
+	}
+	if job, ok := c.typedTo[name]; ok {
+		delete(c.typedTo, name)
+		if c.boxAsker == name && c.boxShows(job) {
+			c.boxAsker = ""
+			*fx = append(*fx, Effect{Kind: EfChat, Chat: ChatLine{Job: job, Status: "done", Text: "You turned Pixie off for this session.", Session: name}})
+		}
+	}
 }
 
 // boxReply is a session's reply as the box shows it (#408): the reply itself, since the answer

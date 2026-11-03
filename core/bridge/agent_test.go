@@ -29,6 +29,7 @@ func (b *bridgeAgent) AnswerJob(string, string) (app.ChatSent, bool, error) {
 }
 func (b *bridgeAgent) ChatStop()                                 {}
 func (b *bridgeAgent) Interrupt(string, string) error            { return nil }
+func (b *bridgeAgent) SetSessionOff(string, bool) error          { return nil }
 func (b *bridgeAgent) SetTextMode(bool)                          {}
 func (b *bridgeAgent) SetMarkForced(bool)                        {}
 func (b *bridgeAgent) WindowSend(string) (app.ChatSent, error)   { return app.ChatSent{}, nil }

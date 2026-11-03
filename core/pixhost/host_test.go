@@ -935,3 +935,250 @@ func TestListShowsWhatStillWaits(t *testing.T) {
 		t.Fatalf("a new pix kept %q", u.WaitingMessages)
 	}
 }
+
+// #431: a session you turn off stays open, but Pixie hears nothing from it: its turns and
+// questions don't reach the controller, and a question on screen when it went off goes away.
+// Turned back on, the question still waiting shows again.
+func TestASessionTurnedOffSendsPixieNothing(t *testing.T) {
+	h, sock := newHost(t)
+	events := h.Subscribe()
+	p, r := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api"})
+	wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "question", ID: "q1", Source: "menu", Text: "Push main?", Keys: []string{"Push", "Don't push"}})
+	if ev := <-events; ev.Kind != agent.PaneEventQuestion {
+		t.Fatalf("%+v", ev)
+	}
+	if err := h.SetOff(r.Address, true); err != nil {
+		t.Fatal(err)
+	}
+	if ev := <-events; ev.Kind != agent.PaneEventQuestionGone || ev.Question == nil || ev.Question.ID != "q1" {
+		t.Fatalf("its question should go: %+v", ev)
+	}
+	if ev := <-events; ev.Kind != agent.PaneEventOff || ev.Agent != r.Address {
+		t.Fatalf("the controller is told it's off: %+v", ev)
+	}
+	if l := listed(t, h); len(l) != 1 || !l[0].User.Off {
+		t.Fatalf("listed as off: %+v", l)
+	}
+	wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "turn", Text: "Done."})
+	wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "question", ID: "q2", Source: "menu", Text: "Deploy?", Keys: []string{"Yes", "No"}})
+	wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "status", Status: "idle"})
+	for ev := range events {
+		if ev.Kind == agent.PaneEventStatus {
+			break // its status still comes: the list shows it
+		}
+		t.Fatalf("nothing but its status while off: %+v", ev)
+	}
+	if l := listed(t, h); l[0].User.LastTurn != "Done." {
+		t.Fatalf("its last turn is still kept: %+v", l[0].User)
+	}
+	if err := h.SetOff(r.Address, false); err != nil {
+		t.Fatal(err)
+	}
+	if ev := <-events; ev.Kind != agent.PaneEventQuestion || ev.Question.ID != "q2" || ev.Question.Text != "Deploy?" {
+		t.Fatalf("the question waiting shows again: %+v", ev)
+	}
+	wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "turn", Text: "Deployed."})
+	if ev := nextTurn(t, events); ev.Turn.Reply != "Deployed." {
+		t.Fatalf("%+v", ev.Turn)
+	}
+}
+
+// #431: a question answered while the session was off isn't shown when it's turned back on.
+func TestAQuestionGoneWhileOffIsntShownAgain(t *testing.T) {
+	h, sock := newHost(t)
+	p, r := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api"})
+	h.SetOff(r.Address, true)
+	wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "question", ID: "q1", Source: "menu", Text: "Deploy?"})
+	wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "question-gone", ID: "q1"})
+	wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "status", Status: "working"})
+	eventually(t, "status never came", func() bool { l := listed(t, h); return l[0].Status == agent.PaneWorking })
+	events := h.Subscribe()
+	h.SetOff(r.Address, false)
+	select {
+	case ev := <-events:
+		t.Fatalf("nothing to show again: %+v", ev)
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+// #431 review: turning a session off while its question arrives never leaves that question
+// with Pixie: whatever order they run in, the last word Pixie has on it is "gone" (or nothing).
+func TestTurningOffRacingAQuestionLeavesNoQuestion(t *testing.T) {
+	for i := 0; i < 50; i++ {
+		h, sock := newHost(t)
+		events := h.Subscribe()
+		p, r := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api"})
+		go wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "question", ID: "q1", Source: "menu", Text: "Deploy?"})
+		h.SetOff(r.Address, true)
+		wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "status", Status: "idle"})
+		shown := false
+		for ev := range events {
+			if ev.Kind == agent.PaneEventStatus {
+				break
+			}
+			switch ev.Kind {
+			case agent.PaneEventQuestion:
+				shown = true
+			case agent.PaneEventQuestionGone:
+				shown = false
+			}
+		}
+		if shown {
+			t.Fatalf("run %d: a question of a session that is off was left with Pixie", i)
+		}
+	}
+}
+
+// #431: Pixie sends nothing to a session that is off; you are told how to turn it back on.
+// Closing it still works.
+func TestASessionTurnedOffTakesNoMessages(t *testing.T) {
+	h, sock := newHost(t)
+	p, r := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api"})
+	h.SetOff(r.Address, true)
+	ctx := context.Background()
+	_, ferr := h.Flush(ctx, r.Address, agent.ForcedNotes{})
+	_, serr := h.StopAndSend(ctx, r.Address, agent.ForcedNotes{})
+	for _, err := range []error{
+		h.Prompt(ctx, r.Address, "hi"),
+		h.AnswerQuestion(ctx, r.Address, "q1", "1"),
+		h.SendKeys(ctx, r.Address, []string{"Escape"}),
+		ferr, serr,
+	} {
+		if err == nil || !strings.Contains(err.Error(), "turned Pixie off") {
+			t.Fatalf("refused while off: %v", err)
+		}
+	}
+	done := make(chan error, 1)
+	go func() { done <- h.Close(ctx, r.Address) }()
+	if m := p.answer(""); m.Command != "close" {
+		t.Fatalf("%+v", m)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	h.SetOff(r.Address, false)
+	go func() { done <- h.Prompt(ctx, r.Address, "hi") }()
+	if m := p.answer(""); m.Command != "prompt" {
+		t.Fatalf("%+v", m)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if err := h.SetOff("nobody", true); !agent.IsHostError(err, agent.HostNoAgent) {
+		t.Fatalf("no such session: %v", err)
+	}
+}
+
+// #431 review: what pix holds for a session from Pixie is dropped when it's turned off, so
+// none of it is typed into a session Pixie leaves alone.
+func TestTurningOffDropsWhatPixHolds(t *testing.T) {
+	h, sock := newHost(t)
+	p, r := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api"})
+	done := make(chan error, 1)
+	go func() { _, err := h.PromptDelivery(context.Background(), r.Address, "run the tests"); done <- err }()
+	m, _ := p.dec.Next()
+	wire.Encode(p.c, wire.Msg{Kind: wire.KindResult, ID: m.ID, Status: "waiting", Seq: 1})
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	go func() { done <- h.SetOff(r.Address, true) }()
+	if m := p.answer(""); m.Command != "drop" {
+		t.Fatalf("pix is told to drop what it holds: %+v", m)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if l := listed(t, h); l[0].User.Waiting != 0 {
+		t.Fatalf("nothing waits: %+v", l[0].User)
+	}
+	// Nothing held: nothing to drop.
+	h.SetOff(r.Address, false)
+	if err := h.SetOff(r.Address, true); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// #431: a session stays off when its pix reconnects, even after it was dropped from the list.
+func TestASessionStaysOffWhenItsPixReconnects(t *testing.T) {
+	h, sock := newHost(t)
+	h.unreachableFor = 20 * time.Millisecond
+	p, r := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api", SessionID: "s-1"})
+	h.SetOff(r.Address, true)
+	p.c.Close()
+	eventually(t, "never dropped", func() bool { return len(listed(t, h)) == 0 })
+	dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api", SessionID: "s-1", Address: r.Address})
+	if l := listed(t, h); len(l) != 1 || !l[0].User.Off {
+		t.Fatalf("still off: %+v", l)
+	}
+	// Another conversation is on.
+	dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api", SessionID: "s-2"})
+	for _, a := range listed(t, h) {
+		if a.User.Off != (a.Name == r.Address) {
+			t.Fatalf("%+v", a)
+		}
+	}
+}
+
+// #431 review: turned off before its conversation's id came (it comes at the first hook), it
+// still stays off when its pix reconnects; so after the id changes (/clear).
+func TestOffBeforeTheIDCameStaysOff(t *testing.T) {
+	h, sock := newHost(t)
+	h.unreachableFor = 20 * time.Millisecond
+	p, r := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api"})
+	h.SetOff(r.Address, true)
+	wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "session", SessionID: "s-9"})
+	time.Sleep(50 * time.Millisecond)
+	p.c.Close()
+	eventually(t, "never dropped", func() bool { return len(listed(t, h)) == 0 })
+	dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api", SessionID: "s-9", Address: r.Address})
+	if l := listed(t, h); len(l) != 1 || !l[0].User.Off {
+		t.Fatalf("still off: %+v", l)
+	}
+}
+
+// #431 review: a session that is off says nothing about running an older pix either.
+func TestAnOffSessionsOldPixIsntToldOf(t *testing.T) {
+	h, sock := newHost(t)
+	h.SetBuild("new")
+	h.unreachableFor = 20 * time.Millisecond
+	events := h.Subscribe()
+	p, r := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api", SessionID: "s-1", Build: "new"})
+	h.SetOff(r.Address, true)
+	p.c.Close()
+	eventually(t, "never dropped", func() bool { return len(listed(t, h)) == 0 })
+	dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api", SessionID: "s-1", Address: r.Address, Build: "old"})
+	eventually(t, "never listed", func() bool { return len(listed(t, h)) == 1 })
+	for {
+		select {
+		case ev := <-events:
+			if ev.Kind == agent.PaneEventOutdated {
+				t.Fatalf("told of: %+v", ev)
+			}
+			continue
+		case <-time.After(200 * time.Millisecond):
+		}
+		break
+	}
+}
+
+// #431 review: a new pix on the conversation (another run) brings its own question, if any:
+// the old one's isn't shown when the session is turned back on.
+func TestANewPixsSessionShowsNoOldQuestion(t *testing.T) {
+	h, sock := newHost(t)
+	p, r := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api", SessionID: "s-1", Run: "r1"})
+	h.SetOff(r.Address, true)
+	wire.Encode(p.c, wire.Msg{Kind: wire.KindEvent, Event: "question", ID: "q1", Source: "menu", Text: "Deploy?"})
+	time.Sleep(50 * time.Millisecond)
+	p.c.Close()
+	eventually(t, "drop not noticed", func() bool { l := listed(t, h); return len(l) == 1 && !l[0].User.Reachable })
+	dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api", SessionID: "s-1", Address: r.Address, Run: "r2"})
+	events := h.Subscribe()
+	h.SetOff(r.Address, false)
+	select {
+	case ev := <-events:
+		if ev.Kind == agent.PaneEventQuestion {
+			t.Fatalf("an old question shown: %+v", ev)
+		}
+	case <-time.After(200 * time.Millisecond):
+	}
+}

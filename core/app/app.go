@@ -1492,6 +1492,22 @@ func (a *App) Register(r Registrar) {
 		}
 		return map[string]any{"sent": true}, nil
 	})
+	r.Register("agent.setSessionOff", func(args json.RawMessage) (any, error) {
+		var in struct {
+			Name string `json:"name"`
+			Off  bool   `json:"off"`
+		}
+		if err := decodeArgs("agent.setSessionOff", args, &in); err != nil {
+			return nil, err
+		}
+		if a.agent == nil {
+			return nil, &chat.Refusal{Text: errNoCoordinator.Error()}
+		}
+		if err := a.agent.SetSessionOff(in.Name, in.Off); err != nil {
+			return nil, &chat.Refusal{Text: err.Error()}
+		}
+		return map[string]any{"off": in.Off}, nil
+	})
 	r.Register("agent.reportFocusOutcome", func(args json.RawMessage) (any, error) {
 		var in struct {
 			Success bool   `json:"success"`
