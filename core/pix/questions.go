@@ -186,11 +186,14 @@ type menuTool struct {
 	last     string
 	tab      func(headers []string, k int) string
 	ticked   func(headers []string, k int) string
+
+	previewOwn  func(n int, text string) []step
+	previewChat func(n int) []step
 }
 
 var menuTools = map[string]menuTool{
 	"claude": {name: "AskUserQuestion", marker: claudeMenu, own: claudeOwn, chat: claudeChat, picks: claudePicks, review: true, chatEnds: true,
-		tab: claudeTab, ticked: claudeTicked},
+		tab: claudeTab, ticked: claudeTicked, previewOwn: claudePreviewOwn, previewChat: claudePreviewChat},
 	"codex": {name: "request_user_input", marker: codexMenu, own: codexOwn, chat: codexChat, last: "enter to submit all",
 		tab: func(headers []string, k int) string { return fmt.Sprintf("Question %d/%d", k+1, len(headers)) }},
 }
@@ -198,11 +201,13 @@ var menuTools = map[string]menuTool{
 // menuPart is one question of a menu as Pixie asks it: what it asks, as its menu shows it, and
 // title as Pixie shows it (which one of how many); its options and their descriptions; multi:
 // you pick several. marker and detail: what its page shows in place of its tool's marker and
-// its text ("" those); ticked: what it shows in place of detail once one of its boxes is ticked.
+// its text ("" those); ticked: what it shows in place of detail once one of its boxes is ticked;
+// preview: its options have previews (#425).
 type menuPart struct {
 	text, title     string
 	labels, details []string
 	multi, review   bool
+	preview         bool
 	marker, detail  string
 	ticked          string
 }
@@ -301,6 +306,19 @@ func claudeChat(n int) []step {
 		return nil
 	}
 	return []step{{[]byte(strconv.Itoa(n + 2)), ""}}
+}
+
+// claudePreviewOwn: Claude Code 2.1.317 draws a question whose options have previews beside
+// them, with no "Type something.": your words go in its notes, which n opens, and Enter sends
+// them as the answer (#425).
+func claudePreviewOwn(n int, text string) []step {
+	return []step{{[]byte("n"), noSpace("Notes: Add notes")}, {[]byte(text), noSpace("Notes: ") + drawn(text)}, {[]byte("\r"), ""}}
+}
+
+// claudePreviewChat: there "Chat about this" has no digit: Down once per option moves to it
+// from the first, and Enter picks it.
+func claudePreviewChat(n int) []step {
+	return []step{{[]byte(strings.Repeat("\x1b[B", n)), noSpace("❯ Chat about this")}, {[]byte("\r"), ""}}
 }
 
 // codexOwn: Codex 0.164 adds "None of the above" after a menu's options, its digit picking it
@@ -719,10 +737,18 @@ func (q *question) steps(tool, choice string) ([]step, bool) {
 		}
 		if typed, ok := strings.CutPrefix(choice, "text:"); ok {
 			typed = strings.Join(strings.Fields(typed), " ")
-			return t.own(q.options, typed), typed != ""
+			own := t.own
+			if q.part.preview && t.previewOwn != nil {
+				own = t.previewOwn
+			}
+			return own(q.options, typed), typed != ""
 		}
 		if choice == "chat" {
-			chat := t.chat(q.options)
+			talk := t.chat
+			if q.part.preview && t.previewChat != nil {
+				talk = t.previewChat
+			}
+			chat := talk(q.options)
 			return chat, chat != nil
 		}
 	}
@@ -858,6 +884,9 @@ func menuParts(t menuTool, input any) ([]menuPart, string) {
 				why = "an option without a label"
 			}
 			detail, _ := om["description"].(string)
+			if preview, _ := om["preview"].(string); preview != "" {
+				p.preview = true
+			}
 			p.labels, p.details = append(p.labels, label), append(p.details, detail)
 		}
 		switch {

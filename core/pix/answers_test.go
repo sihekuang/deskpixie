@@ -766,3 +766,95 @@ func TestACodexChatGoesOnToTheNextQuestion(t *testing.T) {
 		t.Fatalf("%+v", next)
 	}
 }
+
+// #425: a menu whose options have previews, as Claude Code 2.1.317 draws it: side by side, no
+// "Type something." row, "Chat about this" without a digit, your words in its notes.
+var previewMenu = map[string]any{"tool_name": "AskUserQuestion", "tool_input": map[string]any{"questions": []any{
+	map[string]any{"question": "Where should the opt-in live?", "header": "Opt-in", "options": []any{
+		map[string]any{"label": "Settings file", "preview": "{\"autoReplenish\": true}"},
+		map[string]any{"label": "Dashboard toggle", "preview": "A switch on the book page"},
+		map[string]any{"label": "Both", "preview": "settings default plus dashboard override"}}}}}}
+
+// claudePreviewMenu: the menu with the cursor at option at (0: Chat about this) and notes.
+func claudePreviewMenu(at int, notes string) string {
+	cur := func(n int) string {
+		if n == at {
+			return "❯ "
+		}
+		return "  "
+	}
+	return " ☐ Opt-in\r\nWhere should the opt-in live?\r\n" +
+		cur(1) + "1. Settings file                ┌──────────────────────────┐\r\n" +
+		cur(2) + "2. Dashboard toggle             │ {\"autoReplenish\": true}  │\r\n" +
+		cur(3) + "3. Both                         └──────────────────────────┘\r\n" +
+		"                                  Notes: " + notes + "\r\n" +
+		"────────────────────\r\n" + cur(0) + "Chat about this\r\n" +
+		"Enter to select · ↑/↓ to navigate · n to add notes · Esc to cancel"
+}
+
+// Its options still take their digits.
+func TestAPreviewMenuTakesAnOptionsDigit(t *testing.T) {
+	h := pipeHarness(t, "claude")
+	h.s.Hook("PreToolUse", previewMenu)
+	q := askedQuestion(t, h)
+	if !q.Typed {
+		t.Fatal("a preview menu takes your words")
+	}
+	draw(h, claudePreviewMenu(1, "press n to add notes"))
+	errs := answerAsync(h, q.ID, "2")
+	waitTyped(t, h, "2")
+	draw(h, "⏺ User answered Claude's questions:\r\n")
+	if err := <-errs; err != "" {
+		t.Fatal(err)
+	}
+}
+
+// "Chat about this" has no digit: Down once per option moves to it, Enter picks it.
+func TestAPreviewMenusChatIsDownToChatAboutThis(t *testing.T) {
+	h := pipeHarness(t, "claude")
+	h.s.Hook("PreToolUse", previewMenu)
+	q := askedQuestion(t, h)
+	draw(h, claudePreviewMenu(1, "press n to add notes"))
+	errs := answerAsync(h, q.ID, "chat")
+	down := strings.Repeat("\x1b[B", 3)
+	waitTyped(t, h, down)
+	draw(h, claudePreviewMenu(0, "press n to add notes"))
+	waitTyped(t, h, down+"\r")
+	draw(h, "⏺ User declined to answer questions\r\n")
+	if err := <-errs; err != "" {
+		t.Fatal(err)
+	}
+}
+
+// Your own words go in its notes: n opens them, then the words, then Enter.
+func TestAPreviewMenuTakesYourOwnWordsAsNotes(t *testing.T) {
+	h := pipeHarness(t, "claude")
+	h.s.Hook("PreToolUse", previewMenu)
+	q := askedQuestion(t, h)
+	draw(h, claudePreviewMenu(1, "press n to add notes"))
+	errs := answerAsync(h, q.ID, "text:per-book setting please")
+	waitTyped(t, h, "n")
+	draw(h, claudePreviewMenu(1, "Add notes on this design…"))
+	waitTyped(t, h, "nper-book setting please")
+	draw(h, claudePreviewMenu(1, "per-book setting please"))
+	waitTyped(t, h, "nper-book setting please\r")
+	draw(h, "⏺ User answered Claude's questions:\r\n")
+	if err := <-errs; err != "" {
+		t.Fatal(err)
+	}
+}
+
+// Notes that never open: the answer isn't taken.
+func TestAPreviewMenuWhoseNotesDontOpenRefusesTheAnswer(t *testing.T) {
+	defer func(w time.Duration) { stepWait = w }(stepWait)
+	stepWait = 200 * time.Millisecond
+	h := pipeHarness(t, "claude")
+	h.s.Hook("PreToolUse", previewMenu)
+	q := askedQuestion(t, h)
+	draw(h, claudePreviewMenu(1, "press n to add notes"))
+	errs := answerAsync(h, q.ID, "text:per-book")
+	waitTyped(t, h, "n")
+	if err := <-errs; err == "" {
+		t.Fatal("notes that never opened took the answer")
+	}
+}
