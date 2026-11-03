@@ -317,6 +317,9 @@ const (
 	// PaneEventDelivered: the messages that waited for one of your pix sessions reached it
 	// (#183, #339).
 	PaneEventDelivered
+	// PaneEventOff: you turned Pixie off for one of your pix sessions (#431). It runs on;
+	// Pixie forgets what it asked and waits on from it.
+	PaneEventOff
 )
 
 // PaneEvent is a status change (Status set), an exit of a named agent, a prompt one of your

@@ -710,6 +710,12 @@ func (s *Session) runCommand(m wire.Msg) wire.Msg {
 	case "close":
 		go s.runner.Hangup()
 		return wire.Msg{}
+	case "drop":
+		// DeskPixie turned Pixie off for this session (#431): what waits from Pixie is never
+		// typed. DeskPixie hears it went, so it no longer counts it as waiting.
+		s.queue.Drain()
+		s.client.Send(wire.Msg{Kind: wire.KindEvent, Event: "delivered", Seq: s.queue.Delivered(s.hasUnsent())})
+		return wire.Msg{}
 	case "answer":
 		return s.answer(m.Text, m.Source)
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -63,6 +64,9 @@ type Host struct {
 	taken          func() []string
 	unreachableFor time.Duration
 
+	// emu keeps a session's question and turn events in order with SetOff (#431): reading
+	// whether it's off and broadcasting what follows is one step. Taken before mu.
+	emu      sync.Mutex
 	mu       sync.Mutex
 	l        net.Listener
 	sessions map[string]*session // by address
@@ -171,7 +175,7 @@ func (h *Host) serve(c net.Conn) {
 	h.changed()
 	h.mu.Lock()
 	outdated := h.outdated(s)
-	tell := outdated && !s.toldOld
+	tell := outdated && !s.toldOld && !s.off // one you turned off tells Pixie nothing (#431)
 	s.toldOld = s.toldOld || outdated
 	old := agent.SessionOutdated{Label: s.label(), Tool: s.hello.Tool, App: s.hello.App}
 	h.mu.Unlock()
@@ -216,7 +220,7 @@ func (h *Host) register(hello wire.Msg, c net.Conn) (*session, string) {
 				s.dropTimer = nil
 			}
 			if hello.Run != s.hello.Run { // another pix: what the last one held went with it
-				s.held, s.delivered = nil, 0
+				s.held, s.delivered, s.open = nil, 0, nil
 			}
 			s.conn, s.hello, s.active = c, hello, time.Now()
 			return s, ""
@@ -289,6 +293,9 @@ func (h *Host) onMsg(s *session, m wire.Msg) bool {
 			if !dup {
 				s.sessionID = m.SessionID
 				s.off = s.off || h.offIDs[m.SessionID]
+				if s.off && m.SessionID != "" { // turned off before its id came, or under another
+					h.offIDs[m.SessionID] = true
+				}
 			}
 			conn := s.conn
 			h.mu.Unlock()
@@ -302,6 +309,8 @@ func (h *Host) onMsg(s *session, m wire.Msg) bool {
 				return true
 			}
 		case "question":
+			h.emu.Lock()
+			defer h.emu.Unlock()
 			h.mu.Lock()
 			q := agent.SessionQuestion{ID: m.ID, Label: s.label(), App: s.hello.App, Kind: m.Source,
 				Tool: m.ToolName, Input: m.Input, Text: m.Text, Options: m.Keys, Body: m.Body, Prompt: m.Prompt,
@@ -313,6 +322,8 @@ func (h *Host) onMsg(s *session, m wire.Msg) bool {
 				h.broadcast(agent.PaneEvent{Kind: agent.PaneEventQuestion, Agent: s.addr, Question: &q})
 			}
 		case "question-gone":
+			h.emu.Lock()
+			defer h.emu.Unlock()
 			h.mu.Lock()
 			if s.open != nil && s.open.ID == m.ID {
 				s.open = nil
@@ -323,6 +334,8 @@ func (h *Host) onMsg(s *session, m wire.Msg) bool {
 				h.broadcast(agent.PaneEvent{Kind: agent.PaneEventQuestionGone, Agent: s.addr, Question: &agent.SessionQuestion{ID: m.ID}})
 			}
 		case "turn":
+			h.emu.Lock()
+			defer h.emu.Unlock()
 			h.mu.Lock()
 			t := agent.SessionTurn{Label: s.label(), Reply: m.Text, App: s.hello.App,
 				Duration: agent.Millis(max(m.DurationMs, 0)), FromPixie: m.Source == "pixie"}
@@ -363,6 +376,7 @@ func (h *Host) lost(s *session, c net.Conn) {
 		return // replaced by a re-registration, or already removed
 	}
 	s.conn = nil
+	s.open = nil // a pix that comes back sends the question on its screen again
 	dropped = true
 	for id, ch := range s.pending {
 		close(ch)
@@ -417,7 +431,7 @@ func (h *Host) commandResult(ctx context.Context, name string, m wire.Msg) (wire
 		h.mu.Unlock()
 		return wire.Msg{}, agent.ErrNoAgent(name)
 	}
-	if s.off && m.Command != "close" {
+	if s.off && m.Command != "close" && m.Command != "drop" {
 		h.mu.Unlock()
 		return wire.Msg{}, ErrTurnedOff
 	}
@@ -495,10 +509,12 @@ var ErrTurnedOff = agent.HostError{Kind: agent.HostOther, Detail: "you turned Pi
 // untouched: its turns and questions don't reach Pixie, and Pixie sends it nothing. The
 // question on its screen goes away from Pixie, and shows again when it's turned back on.
 func (h *Host) SetOff(name string, off bool) error {
+	h.emu.Lock()
 	h.mu.Lock()
 	s := h.sessions[name]
 	if s == nil {
 		h.mu.Unlock()
+		h.emu.Unlock()
 		return agent.ErrNoAgent(name)
 	}
 	was := s.off
@@ -515,16 +531,33 @@ func (h *Host) SetOff(name string, off bool) error {
 		c := *s.open
 		q = &c
 	}
+	held := len(s.held) > 0
 	h.mu.Unlock()
-	switch {
-	case was == off:
-		return nil
-	case q != nil && off:
-		h.broadcast(agent.PaneEvent{Kind: agent.PaneEventQuestionGone, Agent: name, Question: &agent.SessionQuestion{ID: q.ID}})
-	case q != nil:
-		h.broadcast(agent.PaneEvent{Kind: agent.PaneEventQuestion, Agent: name, Question: q})
-	default:
+	if was != off {
+		if q != nil && off {
+			h.broadcast(agent.PaneEvent{Kind: agent.PaneEventQuestionGone, Agent: name, Question: &agent.SessionQuestion{ID: q.ID}})
+		}
+		if off {
+			h.broadcast(agent.PaneEvent{Kind: agent.PaneEventOff, Agent: name})
+		} else if q != nil {
+			h.broadcast(agent.PaneEvent{Kind: agent.PaneEventQuestion, Agent: name, Question: q})
+		}
 		h.changed()
+	}
+	h.emu.Unlock()
+	if off && held {
+		// What pix holds from Pixie isn't typed into a session Pixie leaves alone. A pix from
+		// before #431 doesn't know the command: what it holds still goes in.
+		ctx, cancel := context.WithTimeout(context.Background(), CommandLimit)
+		defer cancel()
+		if _, err := h.commandResult(ctx, name, wire.Msg{Command: "drop"}); err != nil {
+			log.Printf("pix %s: drop what waits: %v", name, err)
+		} else {
+			h.mu.Lock()
+			s.held = nil
+			h.mu.Unlock()
+			h.changed()
+		}
 	}
 	return nil
 }
