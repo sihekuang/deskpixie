@@ -233,13 +233,13 @@ func (a *App) threadAnswered(token string, outcome func(chat.Entry) string) {
 }
 
 // threadSessionAnswered records a message you sent to session as the answer to the question
-// its last turn asked, while that is still open (#427): the message is its next turn. A menu
-// or a permission (a token) is answered only by its buttons.
+// its last turn asked, while that is still open (#427): the message is its next turn. A menu,
+// a permission or a dialog it shows is answered only by its buttons or in its terminal.
 func (a *App) threadSessionAnswered(session, text string) {
 	op := a.beginThread()
 	defer op.end()
 	for _, e := range a.thread.Needs() {
-		if e.Request.Token == "" && e.Request.Job == "" && e.Who.Kind == "session" && e.Who.Name == session {
+		if e.Request.Turn && e.Who.Kind == "session" && e.Who.Name == session {
 			op.update(e.ID, func(e *chat.Entry) { e.Request.Outcome = "You answered: " + text })
 		}
 	}

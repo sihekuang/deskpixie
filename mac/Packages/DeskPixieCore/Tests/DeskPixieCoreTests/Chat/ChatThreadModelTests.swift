@@ -542,6 +542,7 @@ final class ChatThreadModelTests: XCTestCase {
     /// outcome line.
     func testAClosedSessionQuestionKeepsItsWords() {
         var asked = ask(1, kind: "question", token: "")
+        asked.request?.turn = true
         XCTAssertFalse(ChatThreadModel.keepsWords(asked), "open: its card")
         asked.request?.outcome = "You answered: hi"
         XCTAssertTrue(ChatThreadModel.keepsWords(asked))
@@ -555,9 +556,15 @@ final class ChatThreadModelTests: XCTestCase {
         var permission = ask(3, kind: "permission")
         permission.request?.outcome = "You allowed it"
         XCTAssertFalse(ChatThreadModel.keepsWords(permission))
+        var notice = ask(5, kind: "question", token: "")
+        notice.request?.outcome = "Answered elsewhere"
+        XCTAssertFalse(ChatThreadModel.keepsWords(notice), "a dialog it showed, not its turn: the outcome line")
+        let decoded = try? JSONDecoder().decode(ChatRequest.self, from: Data(#"{"item":1,"kind":"question","turn":true}"#.utf8))
+        XCTAssertEqual(decoded?.turn, true)
         var job = ask(4, kind: "question", token: "")
         job.who = ChatWho(kind: "coordinator")
         job.request?.job = "job_000000000001"
+        job.request?.turn = true
         job.request?.outcome = "You answered: blue"
         XCTAssertFalse(ChatThreadModel.keepsWords(job), "the coordinator's question on a job keeps its outcome line")
     }

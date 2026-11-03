@@ -107,6 +107,16 @@ func TestARequestCarriesWhetherItCanBeDismissed(t *testing.T) {
 	}
 }
 
+// #427: a request says whether its session's turn asked it (a message answers that), not a
+// dialog it announces (a notice) or a menu without options.
+func TestARequestCarriesWhetherItsSessionsTurnAskedIt(t *testing.T) {
+	es := RequestEntries([]agent.UpdateItem{{ID: 6, Text: "Want me to?", Session: "api", Asking: true, Dismissible: true},
+		{ID: 7, Text: "Wants to run rm. Answer it in its terminal.", Session: "api", Dismissible: true}}, agent.EmptyRoster())
+	if !es[0].Request.Turn || es[1].Request.Turn {
+		t.Fatalf("%+v %+v", es[0].Request, es[1].Request)
+	}
+}
+
 func TestRequestsAreKeyedByTheirItem(t *testing.T) {
 	items := []agent.UpdateItem{{ID: 4, Text: "Run it?", Token: "abc", Session: "s"}, {ID: 9, Text: "Which?", Options: []string{"a"}}}
 	a := RequestEntries(items, agent.EmptyRoster())

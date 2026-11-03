@@ -571,12 +571,12 @@ public final class ChatThreadModel {
         (e.request == nil || keepsWords(e)) && e.who.kind == "session" && !e.who.name.isEmpty
     }
 
-    /// A session's own question once closed (#427): its turn asked something, with no buttons,
-    /// so its words stay as its reply, the outcome under them. A menu, a permission or a job's
-    /// question shrinks to its outcome line.
+    /// A session's own question once closed (#427): its turn asked something (`turn`), so its
+    /// words stay as its reply, the outcome under them. A menu, a permission, a dialog it
+    /// showed or a job's question shrinks to its outcome line.
     public static func keepsWords(_ e: ChatEntry) -> Bool {
         guard let r = e.request, !isOpen(e) else { return false }
-        return e.who.kind == "session" && r.kind == "question" && r.token.isEmpty && r.options.isEmpty && r.job.isEmpty
+        return e.who.kind == "session" && r.turn && r.token.isEmpty && r.job.isEmpty
     }
 
     /// The thread's end is in view: the bottom marker's lower edge, in the scroll view's own
