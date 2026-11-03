@@ -189,11 +189,13 @@ type menuTool struct {
 
 	previewOwn  func(n int, text string) []step
 	previewChat func(n int) []step
+	previewPick func(option int) []step
 }
 
 var menuTools = map[string]menuTool{
 	"claude": {name: "AskUserQuestion", marker: claudeMenu, own: claudeOwn, chat: claudeChat, picks: claudePicks, review: true, chatEnds: true,
-		tab: claudeTab, ticked: claudeTicked, previewOwn: claudePreviewOwn, previewChat: claudePreviewChat},
+		tab: claudeTab, ticked: claudeTicked, previewOwn: claudePreviewOwn, previewChat: claudePreviewChat,
+		previewPick: claudePreviewPick},
 	"codex": {name: "request_user_input", marker: codexMenu, own: codexOwn, chat: codexChat, last: "enter to submit all",
 		tab: func(headers []string, k int) string { return fmt.Sprintf("Question %d/%d", k+1, len(headers)) }},
 }
@@ -311,14 +313,33 @@ func claudeChat(n int) []step {
 // claudePreviewOwn: Claude Code 2.1.317 draws a question whose options have previews beside
 // them, with no "Type something.": your words go in its notes, which n opens, and Enter sends
 // them as the answer (#425).
+// A narrow pane shows only the end of the notes, wrapped under the preview, so the end of your
+// words is what is looked for.
 func claudePreviewOwn(n int, text string) []step {
-	return []step{{[]byte("n"), noSpace("Notes: Add notes")}, {[]byte(text), noSpace("Notes: ") + drawn(text)}, {[]byte("\r"), ""}}
+	return []step{{[]byte("n"), noSpace("Notes: Add notes")}, {[]byte(text), drawnEnd(text, 8)}, {[]byte("\r"), ""}}
+}
+
+// drawnEnd is how the screen (without spaces) shows the last n runes of text it draws.
+func drawnEnd(text string, n int) string {
+	shown := []rune(noSpace(strings.Map(func(r rune) rune {
+		if runeWidth(r) == 0 {
+			return -1
+		}
+		return r
+	}, text)))
+	return string(shown[max(0, len(shown)-n):])
 }
 
 // claudePreviewChat: there "Chat about this" has no digit: Down once per option moves to it
 // from the first, and Enter picks it.
 func claudePreviewChat(n int) []step {
 	return []step{{[]byte(strings.Repeat("\x1b[B", n)), noSpace("❯ Chat about this")}, {[]byte("\r"), ""}}
+}
+
+// claudePreviewPick: there an option's digit only moves to it (❯ on it); Enter picks it.
+func claudePreviewPick(option int) []step {
+	digit := strconv.Itoa(option)
+	return []step{{[]byte(digit), noSpace("❯ " + digit + ".")}, {[]byte("\r"), ""}}
 }
 
 // codexOwn: Codex 0.164 adds "None of the above" after a menu's options, its digit picking it
@@ -742,6 +763,9 @@ func (q *question) steps(tool, choice string) ([]step, bool) {
 				own = t.previewOwn
 			}
 			return own(q.options, typed), typed != ""
+		}
+		if n, err := strconv.Atoi(choice); err == nil && n >= 1 && n <= q.options && q.part.preview && t.previewPick != nil {
+			return t.previewPick(n), true
 		}
 		if choice == "chat" {
 			talk := t.chat

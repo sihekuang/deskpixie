@@ -792,8 +792,8 @@ func claudePreviewMenu(at int, notes string) string {
 		"Enter to select · ↑/↓ to navigate · n to add notes · Esc to cancel"
 }
 
-// Its options still take their digits.
-func TestAPreviewMenuTakesAnOptionsDigit(t *testing.T) {
+// An option's digit only moves to it there (Claude Code 2.1.317); Enter picks it.
+func TestAPreviewMenuTakesAnOptionsDigitThenEnter(t *testing.T) {
 	h := pipeHarness(t, "claude")
 	h.s.Hook("PreToolUse", previewMenu)
 	q := askedQuestion(t, h)
@@ -803,6 +803,8 @@ func TestAPreviewMenuTakesAnOptionsDigit(t *testing.T) {
 	draw(h, claudePreviewMenu(1, "press n to add notes"))
 	errs := answerAsync(h, q.ID, "2")
 	waitTyped(t, h, "2")
+	draw(h, claudePreviewMenu(2, "press n to add notes"))
+	waitTyped(t, h, "2\r")
 	draw(h, "⏺ User answered Claude's questions:\r\n")
 	if err := <-errs; err != "" {
 		t.Fatal(err)
@@ -856,5 +858,33 @@ func TestAPreviewMenuWhoseNotesDontOpenRefusesTheAnswer(t *testing.T) {
 	waitTyped(t, h, "n")
 	if err := <-errs; err == "" {
 		t.Fatal("notes that never opened took the answer")
+	}
+}
+
+// In a narrow pane its notes wrap under the preview, scrolled to their end (Claude Code 2.1.317
+// in a 45-column herdr pane, 2026-11-02): your words still go in.
+func TestANarrowPreviewMenuTakesYourOwnWords(t *testing.T) {
+	narrow := func(notes ...string) string {
+		return " ☐ Opt-in\r\nWhere should the opt-in live?\r\n" +
+			"❯ 1. Settings file      ┌─────────┐\r\n" +
+			"  2. Dashboard toggle   │ {\"autoR │\r\n" +
+			"  3. Both               │ eplenish │\r\n" +
+			"                        └─────────┘\r\n" +
+			"                        " + strings.Join(notes, "\r\n                               ") + "\r\n" +
+			"────────────────────\r\n  Chat about this\r\nEnter to select · ↑/↓ to navigate · n to add\r\nnotes · Esc to cancel"
+	}
+	h := pipeHarness(t, "claude")
+	h.s.Hook("PreToolUse", previewMenu)
+	q := askedQuestion(t, h)
+	draw(h, narrow("Notes: press n to", "add notes"))
+	errs := answerAsync(h, q.ID, "text:per-book setting please")
+	waitTyped(t, h, "n")
+	draw(h, narrow("Notes: Add notes on", "this design…"))
+	waitTyped(t, h, "nper-book setting please")
+	draw(h, narrow("Notes: set", "tin", "g", "ple", "ase"))
+	waitTyped(t, h, "nper-book setting please\r")
+	draw(h, "⏺ User answered Claude's questions:\r\n")
+	if err := <-errs; err != "" {
+		t.Fatal(err)
 	}
 }
