@@ -83,6 +83,8 @@ struct ChatEntryView: View {
             } else if entry.request != nil {
                 if ChatThreadModel.isOpen(entry) {
                     ChatRequestCard(entry: entry, actions: actions)
+                } else if ChatThreadModel.keepsWords(entry) {
+                    session // its question stays as its reply (#427)
                 } else {
                     outcome
                 }
@@ -151,13 +153,19 @@ struct ChatEntryView: View {
         }
     }
 
-    /// A session's update: its header (with the terminal button), its words, and Reply…,
-    /// which points the box at the session.
+    /// A session's update: its header (with the terminal button), its words, what became of
+    /// the question they asked (#427), and Reply…, which points the box at the session.
     private var session: some View {
         VStack(alignment: .leading, spacing: 4) {
             ChatWhoHeader(who: actions.liveWho(entry), terminal: ChatThreadModel.terminalTarget(for: entry), onTerminal: actions.focus,
                           stop: actions.stopTarget(entry), onStop: actions.stop)
             RichMessage(text: entry.text, sessions: entry.sessions, font: Self.font, selectable: true)
+            if let outcome = entry.request?.outcome, !outcome.isEmpty {
+                Text(outcome)
+                    .font(.system(size: 12))
+                    .foregroundStyle(ChatColors.faint)
+                    .accessibilityIdentifier("chat.entry.outcome")
+            }
             if ChatThreadModel.offersSessionReply(entry) {
                 Button("Reply…") { actions.reply(entry) }
                     .buttonStyle(.plain)

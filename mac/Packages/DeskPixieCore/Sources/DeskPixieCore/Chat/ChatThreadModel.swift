@@ -568,7 +568,15 @@ public final class ChatThreadModel {
 
     /// Reply… under a session's own message (not a card): the box then messages that session.
     public static func offersSessionReply(_ e: ChatEntry) -> Bool {
-        e.request == nil && e.who.kind == "session" && !e.who.name.isEmpty
+        (e.request == nil || keepsWords(e)) && e.who.kind == "session" && !e.who.name.isEmpty
+    }
+
+    /// A session's own question once closed (#427): its turn asked something, with no buttons,
+    /// so its words stay as its reply, the outcome under them. A menu, a permission or a job's
+    /// question shrinks to its outcome line.
+    public static func keepsWords(_ e: ChatEntry) -> Bool {
+        guard let r = e.request, !isOpen(e) else { return false }
+        return e.who.kind == "session" && r.kind == "question" && r.token.isEmpty && r.options.isEmpty && r.job.isEmpty
     }
 
     /// The thread's end is in view: the bottom marker's lower edge, in the scroll view's own

@@ -93,6 +93,7 @@ func (a *App) registerChat(r Registrar) {
 				return nil, err
 			}
 			a.threadSent(sent.Job, in.Text, sent.Attached, to)
+			a.threadSessionAnswered(to, strings.TrimSpace(in.Text))
 			return map[string]any{"job": sent.Job}, nil
 		}
 		send := a.agent.ChatSend
