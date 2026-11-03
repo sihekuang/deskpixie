@@ -26,6 +26,7 @@ type userFake struct {
 	// unreachable: pix no longer reaches the sessions; keysErr: pix refuses keys with it.
 	unreachable bool
 	keysErr     error
+	off         map[string]bool // sessions you turned Pixie off for (#431)
 }
 
 func (u *userFake) SendKeys(ctx context.Context, n string, keys []string) error {
@@ -55,10 +56,17 @@ func (u *userFake) List(ctx context.Context) ([]agent.AgentInfo, error) {
 		desc, past := cmp.Or(u.desc, "login bug"), cmp.Or(u.past, "auth")
 		l[i].User = &agent.UserSession{Tool: "claude", Repo: "focus", Where: "WebStorm", Description: desc,
 			PastDescriptions: []string{past}, Reachable: !u.unreachable, Verbatim: !u.labeled[l[i].Name],
-			LastTurn: u.lastTurn, LastTurnAsks: u.asks,
+			LastTurn: u.lastTurn, LastTurnAsks: u.asks, Off: u.off[l[i].Name],
 			Started: time.Now().Add(-90 * time.Minute), LastActive: time.Now().Add(-3 * time.Minute)}
 	}
 	return l, err
+}
+func (u *userFake) Off(n string) bool { u.mu.Lock(); defer u.mu.Unlock(); return u.off[n] }
+func (u *userFake) SetOff(n string, off bool) error {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.off[n] = off
+	return nil
 }
 func (u *userFake) SetDescription(n, t string) error    { u.described[n] = t; return nil }
 func (u *userFake) Verbatim(n string) (bool, error)     { return !u.labeled[n], nil }
@@ -68,7 +76,7 @@ func newSessionHarness(t *testing.T) (*agent.CompositeHost, *userFake, *agenttes
 	t.Helper()
 	ctx := context.Background()
 	primary := agenttest.NewFakeSessionHost()
-	user := &userFake{FakeSessionHost: agenttest.NewFakeSessionHost(), described: map[string]string{}, labeled: map[string]bool{}}
+	user := &userFake{FakeSessionHost: agenttest.NewFakeSessionHost(), described: map[string]string{}, labeled: map[string]bool{}, off: map[string]bool{}}
 	user.FakeSessionHost.StartAgent(ctx, agent.AgentSpec{Name: "focus-claude"})
 	primary.StartAgent(ctx, agent.AgentSpec{Name: "focus-fix"})
 	return agent.NewCompositeHost(primary, user), user, primary
@@ -508,5 +516,41 @@ func TestForcedSendsAskForTheirNote(t *testing.T) {
 				t.Fatalf("mark=%v: the message itself changed: %q", mark, p.Text)
 			}
 		}
+	}
+}
+
+// #431: the coordinator sees a session you turned Pixie off for only as that, with nothing it
+// said, and can't reach it: it is told why, so it can say so.
+func TestAnOffSessionIsLeftAloneByTheCoordinator(t *testing.T) {
+	c, user, _ := newSessionHarness(t)
+	ctx := context.Background()
+	user.FakeSessionHost.StartAgent(ctx, agent.AgentSpec{Name: "api-codex"})
+	user.setTurn("Deployed to staging.", false)
+	user.mu.Lock()
+	user.off["focus-claude"] = true
+	user.mu.Unlock()
+	r := agent.SessionToolForTest(ctx, c, agent.McpCall{Kind: agent.CallListSessions})
+	rows, _ := r.Value.(map[string]any)["sessions"].([]agent.SessionRow)
+	if r.Err != nil || len(rows) != 2 {
+		t.Fatalf("%+v %v", rows, r.Err)
+	}
+	for _, row := range rows {
+		if off := row.Name == "focus-claude"; row.TurnedOff != off || (off && row.LastTurn != "") || (!off && row.LastTurn == "") {
+			t.Fatalf("%+v", row)
+		}
+	}
+	for _, k := range []agent.McpCallKind{agent.CallMessageSession, agent.CallCloseSession, agent.CallDescribeSession, agent.CallInterruptSession} {
+		r := agent.SessionToolForTest(ctx, c, agent.McpCall{Kind: k, Name: "focus-claude", Text: "hi"})
+		if r.Err == nil || !strings.Contains(r.Err.Error(), "turned Pixie off") {
+			t.Fatalf("%v: %v", k, r.Err)
+		}
+	}
+	if len(user.Prompts()) != 0 || len(user.Closed()) != 0 || len(user.described) != 0 {
+		t.Fatal("nothing reaches it")
+	}
+	note := agent.RequestNote(rows, nil, nil)
+	if !strings.Contains(note, `- focus-claude: "login bug", focus repo, turned off by the person: leave it alone`) ||
+		strings.Count(note, "Deployed to staging.") != 1 {
+		t.Fatal(note)
 	}
 }

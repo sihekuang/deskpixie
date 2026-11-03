@@ -12,6 +12,8 @@ struct AgentRosterView: View {
     let onRow: (RosterRow) -> Void
     /// The stop button on a working row (#309).
     var onStopRow: (RosterRow) -> Void = { _ in }
+    /// The switch on your session's row (#431): true turns Pixie off for it.
+    var onSwitchRow: (RosterRow, Bool) -> Void = { _, _ in }
     /// The text box and its toggle (#221).
     let chat: QuickChatModel
     let chatState: QuickChatState
@@ -41,7 +43,7 @@ struct AgentRosterView: View {
     let chatWindow: ChatWindowPresence
     let onChatWindow: () -> Void
 
-    static let listWidth: CGFloat = 260
+    static let listWidth: CGFloat = 290
     /// The space above the reply on show in the deck, when the deck is above Pixie (#334).
     @State private var deckSlack: CGFloat = 0
 
@@ -138,6 +140,8 @@ struct AgentRosterView: View {
                 if model.busy { BusyDot() }
                 if model.view.agentCount > 0 { count("gearshape.fill", model.view.agentCount) }
                 if model.view.yourCount > 0 { count("keyboard", model.view.yourCount) }
+                // Your sessions Pixie is off for (#431): the chip stays so you can turn them back on.
+                if model.offCount > 0 { count("moon.zzz", model.offCount).foregroundStyle(.secondary) }
             }
                 .font(.title3.weight(.semibold))
                 .monospacedDigit()
@@ -151,6 +155,7 @@ struct AgentRosterView: View {
         .buttonStyle(.plain)
         .frame(maxWidth: maxChipWidth)
         .accessibilityLabel("\(model.view.agentCount) of Pixie's agents, \(model.view.yourCount) of your sessions"
+                            + (model.offCount > 0 ? ", \(model.offCount) turned off" : "")
                             + (model.busy ? ", working" : ""))
         .accessibilityIdentifier("roster.chip")
     }
@@ -200,14 +205,17 @@ struct AgentRosterView: View {
     /// not one inside the other, so each gets its own clicks.
     private func row(_ r: RosterRow) -> some View {
         let clickable = AgentRosterModel.clickable(r)
+        let off = model.isOff(r)
         return HStack(spacing: 6) {
             Button { onRow(r) } label: {
                 HStack(spacing: 6) {
                     Text(AgentRosterModel.dot(r.status))
                         .foregroundStyle(r.status == "working" ? .green : r.status == "blocked" ? .orange : .secondary)
                     Text(r.label).font(.callout).lineLimit(1).truncationMode(.tail)
+                        .foregroundStyle(off ? .secondary : .primary)
                     Spacer(minLength: 4)
-                    Text(r.status).font(.caption).foregroundStyle(.secondary)
+                    // Off, Pixie hears nothing from it (#431): that, not its status, is the news.
+                    Text(off ? "off" : r.status).font(.caption).foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
@@ -236,6 +244,16 @@ struct AgentRosterView: View {
             }
             if let d = r.detail, !d.isEmpty {
                 Text(d).font(.caption).foregroundStyle(.tertiary).lineLimit(1)
+            }
+            if AgentRosterModel.showsSwitch(r) {
+                // On: Pixie hears it and can talk to it. Off, it runs on untouched (#431).
+                Toggle("", isOn: Binding(get: { !off }, set: { onSwitchRow(r, !$0) }))
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .labelsHidden()
+                    .help(AgentRosterModel.switchLabel(r))
+                    .accessibilityLabel(AgentRosterModel.switchLabel(r))
+                    .accessibilityIdentifier("roster.switch")
             }
         }
         .opacity(r.reachable ? 1 : 0.45)

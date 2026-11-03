@@ -75,3 +75,15 @@ func TestRosterIsBusyWhileAnythingWorks(t *testing.T) {
 		}
 	}
 }
+
+// #431: a session you turned off is listed, marked off, but not counted, busy or stoppable.
+func TestRosterAnOffSessionIsListedButNotCounted(t *testing.T) {
+	list := []AgentInfo{
+		{Name: "focus-claude", Status: PaneWorking, Origin: OriginUser, User: &UserSession{Tool: "claude", Repo: "focus", Reachable: true, Off: true}},
+		{Name: "api-codex", Status: PaneIdle, Origin: OriginUser, User: &UserSession{Tool: "codex", Repo: "api", Reachable: true}},
+	}
+	v := BuildRoster(list, nil, "herdr")
+	if len(v.Yours) != 2 || !v.Yours[0].Off || v.Yours[1].Off || v.YourCount != 1 || v.Busy || v.Yours[0].Stoppable {
+		t.Fatalf("%+v", v)
+	}
+}

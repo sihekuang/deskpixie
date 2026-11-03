@@ -3,6 +3,7 @@ package agent_test
 import (
 	"context"
 	"reflect"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -31,6 +32,22 @@ type pixFake struct {
 	ctx context.Context
 	// about: a session's repo and description, by name (none: repo "api", no description).
 	about map[string][2]string
+	mu    sync.Mutex
+	off   map[string]bool // turned off (#431)
+}
+
+func (p *pixFake) Off(n string) bool { p.mu.Lock(); defer p.mu.Unlock(); return p.off[n] }
+func (p *pixFake) SetOff(n string, off bool) error {
+	if !p.Owns(n) {
+		return ErrNoAgent(n)
+	}
+	p.mu.Lock()
+	if p.off == nil {
+		p.off = map[string]bool{}
+	}
+	p.off[n] = off
+	p.mu.Unlock()
+	return nil
 }
 
 // endingSubscribe is the fake's event stream that closes when ctx ends: the fake never closes
@@ -74,6 +91,7 @@ func (p *pixFake) List(ctx context.Context) ([]AgentInfo, error) {
 		if a, ok := p.about[l[i].Name]; ok {
 			l[i].User.Repo, l[i].User.Description = a[0], a[1]
 		}
+		l[i].User.Off = p.Off(l[i].Name)
 	}
 	return l, err
 }
@@ -422,6 +440,34 @@ func TestSessionPlaceIsYourSessionsFolderAndApp(t *testing.T) {
 		r.host.FailList(true)
 		if got := r.h.SessionPlaces(context.Background(), []string{"api-claude"}); len(got) != 1 {
 			t.Fatal("Pixie's host failing to list doesn't hide your session")
+		}
+	})
+}
+
+// #431: turning a session off from the roster shows at once, and only your own sessions can be.
+func TestTurningASessionOffShowsInTheRoster(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRosterRig(t, false)
+		r.user.connect(t, "api-claude")
+		time.Sleep(time.Second)
+		if err := r.h.SetSessionOff(context.Background(), "api-claude", true); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(time.Second)
+		if v := lastRoster(t, r.roster); len(v.Yours) != 1 || !v.Yours[0].Off || v.YourCount != 0 {
+			t.Fatalf("%+v", v)
+		}
+		if err := r.h.SetSessionOff(context.Background(), "api-claude", false); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(time.Second)
+		if v := lastRoster(t, r.roster); v.Yours[0].Off || v.YourCount != 1 {
+			t.Fatalf("%+v", v)
+		}
+		for _, n := range []string{Coordinator, "nobody-claude", ""} {
+			if err := r.h.SetSessionOff(context.Background(), n, true); err == nil {
+				t.Fatalf("%q isn't a session of yours", n)
+			}
 		}
 	})
 }

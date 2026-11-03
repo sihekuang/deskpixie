@@ -24,14 +24,16 @@ type RosterRow struct {
 	Status    string `json:"status"`
 	Kind      string `json:"kind"`
 	Reachable bool   `json:"reachable"`
+	Off       bool   `json:"off,omitempty"` // you turned Pixie off for it (#431)
 }
 
-// Recipients are the roster's rows a message can go to: your sessions that pix still reaches,
+// Recipients are the roster's rows a message can go to: your sessions that pix still reaches
+// and you haven't turned Pixie off for,
 // then Pixie's workers. The coordinator and panes no job owns can't be told anything.
 func Recipients(agents, yours []RosterRow) []Recipient {
 	out := []Recipient{}
 	for _, r := range yours {
-		if r.Kind == "session" && r.Reachable && r.Name != "" {
+		if r.Kind == "session" && r.Reachable && !r.Off && r.Name != "" {
 			out = append(out, Recipient{Name: r.Name, Label: labelOr(r), Kind: "session", Yours: true, Status: r.Status, Color: ColorFor(r.Name)})
 		}
 	}

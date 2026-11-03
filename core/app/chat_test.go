@@ -69,6 +69,17 @@ func (f *fakeAgent) takeAttached() []string {
 }
 func (f *fakeAgent) ChatStop() { f.mu.Lock(); f.stops++; f.mu.Unlock() }
 
+// SetSessionOff records "name:off" or "name:on"; switchErr refuses it.
+func (f *fakeAgent) SetSessionOff(name string, off bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.switchErr != nil {
+		return f.switchErr
+	}
+	f.switched = append(f.switched, name+map[bool]string{true: ":off", false: ":on"}[off])
+	return nil
+}
+
 // Interrupt records the name; interruptErr refuses it.
 func (f *fakeAgent) Interrupt(name, surface string) error {
 	f.mu.Lock()

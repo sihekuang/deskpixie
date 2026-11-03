@@ -794,6 +794,13 @@ func (a *Agent) Interrupt(name, surface string) error {
 	return nil
 }
 
+// SetSessionOff turns Pixie off for one of your sessions, or back on (#431).
+func (a *Agent) SetSessionOff(name string, off bool) error {
+	ctx, cancel := context.WithTimeout(a.ctx, 2*time.Second)
+	defer cancel()
+	return a.handle.SetSessionOff(ctx, name, off)
+}
+
 // SessionPlaces: where your sessions named run, for the paths in their replies (#277).
 func (a *Agent) SessionPlaces(names []string) []app.SessionPlace {
 	if len(names) == 0 {

@@ -14,10 +14,12 @@ public struct RosterRow: Decodable, Sendable, Equatable, Identifiable {
     public let app: String?
     /// It is working and can be reached: the core offers a stop button for it (#309).
     public let stoppable: Bool
+    /// A session of yours you turned Pixie off for (#431): it runs on, Pixie leaves it alone.
+    public let off: Bool
     public var id: String { name }
 
     public init(name: String, label: String, detail: String?, status: String, kind: String, reachable: Bool, app: String?,
-                stoppable: Bool = false) {
+                stoppable: Bool = false, off: Bool = false) {
         self.name = name
         self.label = label
         self.detail = detail
@@ -26,6 +28,7 @@ public struct RosterRow: Decodable, Sendable, Equatable, Identifiable {
         self.reachable = reachable
         self.app = app
         self.stoppable = stoppable
+        self.off = off
     }
 
     public init(from decoder: Decoder) throws {
@@ -35,10 +38,11 @@ public struct RosterRow: Decodable, Sendable, Equatable, Identifiable {
                   kind: try c.decode(String.self, forKey: .kind), reachable: try c.decode(Bool.self, forKey: .reachable),
                   app: try c.decodeIfPresent(String.self, forKey: .app),
                   // Left out when false.
-                  stoppable: try c.decodeIfPresent(Bool.self, forKey: .stoppable) ?? false)
+                  stoppable: try c.decodeIfPresent(Bool.self, forKey: .stoppable) ?? false,
+                  off: try c.decodeIfPresent(Bool.self, forKey: .off) ?? false)
     }
 
-    private enum CodingKeys: String, CodingKey { case name, label, detail, status, kind, reachable, app, stoppable }
+    private enum CodingKeys: String, CodingKey { case name, label, detail, status, kind, reachable, app, stoppable, off }
 }
 
 /// Where a stop button was (#309): its failure shows there only.
@@ -57,6 +61,17 @@ public struct InterruptArgs: Encodable, Sendable {
     public init(name: String, surface: StopSurface) {
         self.name = name
         self.surface = surface.rawValue
+    }
+}
+
+/// `agent.setSessionOff`'s arguments (#431): your session's name, and whether Pixie is off for it.
+public struct SetSessionOffArgs: Encodable, Sendable {
+    public let name: String
+    public let off: Bool
+
+    public init(name: String, off: Bool) {
+        self.name = name
+        self.off = off
     }
 }
 
@@ -117,16 +132,28 @@ public struct AgentRosterModel: Sendable, Equatable {
     /// The rows whose stop call is on its way: their button waits (a second Esc would open a
     /// menu in the agent, #309).
     public private(set) var stopping: Set<String> = []
+    /// Switches clicked (#431), by row: what the click asked for, shown at once and kept until
+    /// the roster says the same, or the call fails.
+    public private(set) var switching: [String: Bool] = [:]
+    /// The rows whose switch call is on its way.
+    private var switchCalls: Set<String> = []
 
     public init() {}
 
     public mutating func apply(_ v: RosterView) {
         view = v
+        for (name, off) in switching where !switchCalls.contains(name) {
+            if v.yours.first(where: { $0.name == name })?.off ?? off == off { switching[name] = nil }
+        }
         if !visible { open = false }
     }
 
-    /// Anything counted: the coordinator alone shows no chip.
-    public var visible: Bool { view.agentCount + view.yourCount > 0 }
+    /// Anything counted, or a session you turned off (its switch is in the list): the
+    /// coordinator alone shows no chip.
+    public var visible: Bool { view.agentCount + view.yourCount + offCount > 0 }
+
+    /// Your reachable sessions you turned Pixie off for (#431): `⏾ n` on the chip.
+    public var offCount: Int { view.yours.filter { $0.kind == "session" && $0.reachable && $0.off }.count }
 
     /// The chip's pulsing dot (#234): something is working, while the chip shows.
     public var busy: Bool { visible && view.busy }
@@ -136,6 +163,7 @@ public struct AgentRosterModel: Sendable, Equatable {
         var parts: [String] = []
         if view.agentCount > 0 { parts.append("⚙ \(view.agentCount)") }
         if view.yourCount > 0 { parts.append("⌨ \(view.yourCount)") }
+        if offCount > 0 { parts.append("⏾ \(offCount)") }
         return parts.joined(separator: " · ")
     }
 
@@ -165,6 +193,36 @@ public struct AgentRosterModel: Sendable, Equatable {
     /// Pixie's agents always; your sessions only when reachable with a known app.
     public static func clickable(_ r: RosterRow) -> Bool {
         r.kind != "session" || r.reachable
+    }
+
+    /// The switch on a row (#431): your sessions that pix still reaches.
+    public static func showsSwitch(_ r: RosterRow) -> Bool { r.kind == "session" && r.reachable }
+
+    /// "Turn Pixie off for api" / "Turn Pixie back on for api": the switch's tooltip and VoiceOver name.
+    public static func switchLabel(_ r: RosterRow) -> String {
+        let who = r.label.isEmpty ? r.name : r.label
+        return r.off ? "Turn Pixie back on for \(who)" : "Turn Pixie off for \(who)"
+    }
+
+    /// Whether r shows as off: a click on its way wins over the roster.
+    public func isOff(_ r: RosterRow) -> Bool { switching[r.name] ?? r.off }
+
+    /// A click on a row's switch: true if its call should go now (none is on its way).
+    public mutating func beginSwitch(_ name: String, off: Bool) -> Bool {
+        guard switchCalls.insert(name).inserted else { return false }
+        switching[name] = off
+        return true
+    }
+
+    /// The switch's call came back: a refusal turns it back and shows under the list.
+    public mutating func endSwitch(_ name: String, _ result: Result<Void, Error>) {
+        switchCalls.remove(name)
+        if case .failure(let err) = result {
+            switching[name] = nil
+            show(Self.stopFailure(err))
+        } else if view.yours.first(where: { $0.name == name })?.off == switching[name] {
+            switching[name] = nil
+        }
     }
 
     /// The square stop button on a row (#309): only while the core says it can be stopped.

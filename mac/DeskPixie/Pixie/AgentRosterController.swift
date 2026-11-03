@@ -498,6 +498,23 @@ final class AgentRosterController {
     /// The stop button on a working row (#309): the core decides what it calls, and answers at
     /// once (off the core worker's queue all the same). The row changes once the core's roster
     /// says it stopped; a refusal, or `agent.stopFailed` later, shows under the list.
+    /// The switch on your session's row (#431): Pixie off for it, or back on. It shows the
+    /// click at once; a refusal turns it back and says why under the list.
+    private func setOff(_ r: RosterRow, _ off: Bool) {
+        let engine = engine, name = r.name
+        guard model.beginSwitch(name, off: off) else { return }
+        render()
+        Task { @MainActor [weak self] in
+            let result = await Task.detached { Result { _ = try engine.call("agent.setSessionOff", SetSessionOffArgs(name: name, off: off)) } }.value
+            if case .failure(let err) = result {
+                Self.log.error("agent.setSessionOff: \(String(describing: err), privacy: .public)")
+            }
+            guard let self else { return }
+            self.model.endSwitch(name, result)
+            self.render()
+        }
+    }
+
     private func stop(_ r: RosterRow) {
         let engine = engine, name = r.name
         guard model.beginStop(name) else { return }
@@ -594,6 +611,7 @@ final class AgentRosterController {
             },
             onRow: { [weak self] in self?.clicked($0) },
             onStopRow: { [weak self] in self?.stop($0) },
+            onSwitchRow: { [weak self] in self?.setOff($0, $1) },
             chat: chat, chatState: chatState, captionCard: captionCard,
             earlier: chat.earlier, earlierPhase: chat.earlierPhase(now: Date()),
             onMode: { [weak self] in self?.pick($0) },

@@ -877,6 +877,25 @@ func (h *AgentHandle) yourSessions(ctx context.Context) ([]AgentInfo, error) {
 	return slices.DeleteFunc(list, func(a AgentInfo) bool { return a.Origin != OriginUser || a.User == nil }), nil
 }
 
+// SetSessionOff turns Pixie off for one of your sessions, or back on (#431): the switch on its
+// row in the roster. Off, it runs on untouched, and Pixie hears and sends nothing. An error is
+// a sentence for the user.
+func (h *AgentHandle) SetSessionOff(ctx context.Context, name string, off bool) error {
+	c, ok := h.deps.Host.Session().(*CompositeHost)
+	if !ok || name == "" {
+		return fmt.Errorf("No session %s.", name)
+	}
+	sw, ok := c.Secondary().(SessionSwitch)
+	if !ok || !c.Secondary().Owns(name) {
+		return fmt.Errorf("No session %s.", name)
+	}
+	if err := sw.SetOff(name, off); err != nil {
+		return err
+	}
+	h.pokeRoster()
+	return nil
+}
+
 // SessionPlace is where one of your sessions runs (#277): its folder and its terminal app's
 // bundle id ("" = unknown).
 type SessionPlace struct {

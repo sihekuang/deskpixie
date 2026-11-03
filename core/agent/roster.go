@@ -17,6 +17,8 @@ type RosterRow struct {
 	// Stoppable: it is working and can be reached, so its row and its chat header show a
 	// stop button (agent.interrupt, #309).
 	Stoppable bool `json:"stoppable,omitempty"`
+	// Off: a session of yours you turned Pixie off for (#431). It is listed, not counted.
+	Off bool `json:"off,omitempty"`
 }
 
 // RosterView is the whole roster. AgentCount excludes the coordinator; YourCount counts only
@@ -62,8 +64,8 @@ func BuildRoster(list []AgentInfo, workers []WorkerRow, hostName string) RosterV
 			}
 			u := a.User
 			v.Yours = append(v.Yours, RosterRow{Name: a.Name, Label: u.Label(), Detail: u.Where, Status: a.Status.String(),
-				Kind: "session", Reachable: u.Reachable, App: u.App})
-			if u.Reachable {
+				Kind: "session", Reachable: u.Reachable, App: u.App, Off: u.Off})
+			if u.Reachable && !u.Off {
 				v.YourCount++
 			}
 		case a.Name == Coordinator:
@@ -83,7 +85,7 @@ func BuildRoster(list []AgentInfo, workers []WorkerRow, hostName string) RosterV
 	}
 	for _, rows := range [][]RosterRow{v.Agents, v.Yours} {
 		for i := range rows {
-			rows[i].Stoppable = rows[i].Reachable && rows[i].Status == PaneWorking.String()
+			rows[i].Stoppable = rows[i].Reachable && !rows[i].Off && rows[i].Status == PaneWorking.String()
 		}
 	}
 	v.Busy = v.IsBusy()
@@ -99,7 +101,7 @@ func (v RosterView) IsBusy() bool {
 		}
 	}
 	for _, r := range v.Yours {
-		if r.Reachable && r.Status == working {
+		if r.Reachable && !r.Off && r.Status == working {
 			return true
 		}
 	}

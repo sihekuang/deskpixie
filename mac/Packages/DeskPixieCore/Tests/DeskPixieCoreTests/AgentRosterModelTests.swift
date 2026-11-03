@@ -162,4 +162,65 @@ final class AgentRosterModelTests: XCTestCase {
         XCTAssertEqual(m.notice, "Couldn't stop a: it didn't answer in time.")
         XCTAssertEqual(AgentRosterModel.stopFailure(DeskPixieEngineError.notInitialized), "Couldn't reach Pixie. Try again.")
     }
+
+    // MARK: Turning Pixie off for a session (#431)
+
+    private func session(_ name: String, off: Bool, reachable: Bool = true) -> RosterRow {
+        RosterRow(name: name, label: name, detail: nil, status: "idle", kind: "session", reachable: reachable, app: nil, off: off)
+    }
+
+    func testAnOffSessionDecodesAndIsOnWhenLeftOut() throws {
+        let json = #"{"agents":[],"yours":[{"name":"a","label":"a","status":"idle","kind":"session","reachable":true,"off":true},{"name":"b","label":"b","status":"idle","kind":"session","reachable":true}],"agent_count":0,"your_count":1}"#
+        let v = try JSONDecoder().decode(RosterView.self, from: Data(json.utf8))
+        XCTAssertEqual(v.yours.map(\.off), [true, false])
+    }
+
+    func testTheChipStaysWhileOnlyOffSessionsAreLeftSoYouCanTurnThemBackOn() {
+        var m = AgentRosterModel()
+        m.apply(RosterView(agents: [row("coordinator", kind: "coordinator")], yours: [session("a", off: true)], agentCount: 0, yourCount: 0))
+        XCTAssertTrue(m.visible)
+        XCTAssertEqual(m.offCount, 1)
+        XCTAssertEqual(m.chipText, "⏾ 1")
+        m.apply(RosterView(agents: [], yours: [session("a", off: true), session("b", off: false), session("c", off: true, reachable: false)],
+                           agentCount: 0, yourCount: 1))
+        XCTAssertEqual(m.offCount, 1, "an unreachable session isn't counted")
+        XCTAssertEqual(m.chipText, "⌨ 1 · ⏾ 1")
+    }
+
+    func testOnlyYourReachableSessionsHaveASwitch() {
+        XCTAssertTrue(AgentRosterModel.showsSwitch(session("a", off: false)))
+        XCTAssertTrue(AgentRosterModel.showsSwitch(session("a", off: true)))
+        XCTAssertFalse(AgentRosterModel.showsSwitch(session("a", off: false, reachable: false)))
+        XCTAssertFalse(AgentRosterModel.showsSwitch(row("w")))
+        XCTAssertFalse(AgentRosterModel.showsSwitch(row("coordinator", kind: "coordinator")))
+    }
+
+    func testTheSwitchSaysWhatAClickDoes() {
+        XCTAssertEqual(AgentRosterModel.switchLabel(session("api", off: false)), "Turn Pixie off for api")
+        XCTAssertEqual(AgentRosterModel.switchLabel(session("api", off: true)), "Turn Pixie back on for api")
+    }
+
+    func testAClickOnTheSwitchShowsAtOnceAndAFailureTurnsItBack() {
+        var m = AgentRosterModel()
+        m.open = true
+        m.apply(RosterView(agents: [], yours: [session("a", off: false)], agentCount: 0, yourCount: 1))
+        XCTAssertTrue(m.beginSwitch("a", off: true))
+        XCTAssertFalse(m.beginSwitch("a", off: false), "one call at a time")
+        XCTAssertEqual(m.isOff(m.view.yours[0]), true, "shown off before the core says so")
+        m.endSwitch("a", .failure(DeskPixieEngineError.refused("No session a.")))
+        XCTAssertEqual(m.isOff(m.view.yours[0]), false)
+        XCTAssertEqual(m.notice, "No session a.")
+        XCTAssertTrue(m.beginSwitch("a", off: true))
+        m.endSwitch("a", .success(()))
+        XCTAssertEqual(m.isOff(m.view.yours[0]), true, "kept until the roster catches up")
+        m.apply(RosterView(agents: [], yours: [session("a", off: true)], agentCount: 0, yourCount: 0))
+        XCTAssertEqual(m.isOff(m.view.yours[0]), true)
+        m.apply(RosterView(agents: [], yours: [session("a", off: false)], agentCount: 0, yourCount: 1))
+        XCTAssertEqual(m.isOff(m.view.yours[0]), false, "the core's word once it has caught up")
+    }
+
+    func testSetSessionOffArgsEncode() throws {
+        let data = try JSONEncoder().encode(SetSessionOffArgs(name: "api-claude", off: true))
+        XCTAssertEqual(try JSONSerialization.jsonObject(with: data) as? [String: AnyHashable], ["name": "api-claude", "off": true])
+    }
 }

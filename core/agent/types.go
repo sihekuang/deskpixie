@@ -411,6 +411,7 @@ type UserSession struct {
 	Waiting          int       // Pixie's messages pix holds for it, not yet delivered (#183)
 	WaitingMessages  []string  // their text, oldest first (#419)
 	Outdated         bool      // it runs another pix than the app's: restart it to update (#189)
+	Off              bool      // you turned Pixie off for it (#431): it runs on, Pixie hears and sends nothing
 }
 
 // EnvVar is one environment entry (Rust's (String, String) pair).

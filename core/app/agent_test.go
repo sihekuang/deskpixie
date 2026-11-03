@@ -50,6 +50,8 @@ type fakeAgent struct {
 	chatErr         error
 	stops           int
 	interrupted     []string
+	switched        []string // SetSessionOff calls: "name:off" or "name:on" (#431)
+	switchErr       error
 	interruptErr    error
 	textModes       []bool
 	markForced      []bool // SetMarkForced calls (#340)
