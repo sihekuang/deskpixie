@@ -380,6 +380,12 @@ func ParseToolCall(role Role, name string, args any) (McpCall, error) {
 	case "list_sessions":
 		return McpCall{Kind: CallListSessions}, nil
 	case "message_session":
+		// #428: the names the coordinator reaches for first ("session", "message") take it too.
+		for alias, k := range map[string]string{"session": "name", "message": "text"} {
+			if _, ok := obj[k]; !ok && obj[alias] != nil {
+				obj[k] = obj[alias]
+			}
+		}
 		n, err := needName("name")
 		if err != nil {
 			return McpCall{}, err
