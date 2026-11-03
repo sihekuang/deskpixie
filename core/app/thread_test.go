@@ -956,3 +956,36 @@ func TestAReplyToTheCoordinatorsQuestionAnswersItsJob(t *testing.T) {
 		t.Fatalf("window sends %q, delegated %d", f.fromWindow, f.delegated)
 	}
 }
+
+// #427: a message to a session from the chat window answers the question its last turn asked
+// (it takes your message as its next turn), so the card says you answered, not "Answered
+// elsewhere" once the session moves on. Another session's question stays open, and a menu
+// (a token) is never answered by a message.
+func TestAMessageToASessionAnswersItsOpenQuestion(t *testing.T) {
+	f := &fakeAgent{tray: AgentTray{Enabled: true}, roster: rosterWith()}
+	h := newHarness(t, withAgent(f))
+	asks := request(1, "", "What would you like to clarify?")
+	asks.Request.Kind, asks.Request.Turn = "question", true
+	other := request(2, "", "Which branch?")
+	other.Request.Kind, other.Request.Turn = "question", true
+	other.Who.Name, other.Sessions = "w2", []string{"w2"}
+	menu := request(3, "t3", "Which color?", "Red", "Blue")
+	// A dialog pix mustn't answer, on screen until you answer it in the terminal: no message does.
+	notice := request(4, "", "Wants to run rm -rf build. Answer it in its terminal.")
+	notice.Request.Kind = "question"
+	f.hooks.ThreadRequests([]chat.Entry{asks, other, menu, notice})
+	h.call("chat.send", map[string]any{"text": " hi ", "session": "w1"})
+	f.hooks.ThreadRequests([]chat.Entry{other, menu, notice}) // its next turn took it
+	if o := outcomeOf(t, h, "req1"); o != "You answered: hi" {
+		t.Fatalf("the session's question = %q", o)
+	}
+	if o := outcomeOf(t, h, "req2"); o != "" {
+		t.Fatal("another session's question was answered:", o)
+	}
+	if o := outcomeOf(t, h, "req3"); o != "" {
+		t.Fatal("a menu was answered by a message:", o)
+	}
+	if o := outcomeOf(t, h, "req4"); o != "" {
+		t.Fatal("a dialog still on screen was answered by a message:", o)
+	}
+}

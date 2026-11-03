@@ -40,6 +40,9 @@ type Request struct {
 	// Dismissible: a session's own question with no buttons, which agent.dismiss takes away
 	// (#388).
 	Dismissible bool `json:"dismissible,omitempty"`
+	// Turn: its session's own turn asked it (#427), so your next message to the session answers
+	// it; not a dialog the session shows (answered in its terminal) or a menu.
+	Turn bool `json:"turn,omitempty"`
 }
 
 // Entry is one message in the thread.

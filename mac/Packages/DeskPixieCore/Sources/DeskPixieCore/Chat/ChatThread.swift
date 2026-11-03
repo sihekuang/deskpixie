@@ -50,10 +50,12 @@ public struct ChatRequest: Codable, Equatable, Sendable {
     public var job: String
     /// A session's own question with no buttons: Dismiss takes it away (`agent.dismiss`, #388).
     public var dismissible: Bool
+    /// Its session's own turn asked it (#427): not a dialog the session shows, or a menu.
+    public var turn: Bool
 
     public init(token: String = "", item: UInt64, kind: String, options: [String] = [],
                 typed: Bool = false, multi: Bool = false, outcome: String = "", job: String = "",
-                dismissible: Bool = false) {
+                dismissible: Bool = false, turn: Bool = false) {
         self.token = token
         self.item = item
         self.kind = kind
@@ -63,6 +65,7 @@ public struct ChatRequest: Codable, Equatable, Sendable {
         self.outcome = outcome
         self.job = job
         self.dismissible = dismissible
+        self.turn = turn
     }
 
     public init(from decoder: Decoder) throws {
@@ -75,10 +78,11 @@ public struct ChatRequest: Codable, Equatable, Sendable {
                   multi: try c.decodeIfPresent(Bool.self, forKey: .multi) ?? false,
                   outcome: try c.decodeIfPresent(String.self, forKey: .outcome) ?? "",
                   job: try c.decodeIfPresent(String.self, forKey: .job) ?? "",
-                  dismissible: try c.decodeIfPresent(Bool.self, forKey: .dismissible) ?? false)
+                  dismissible: try c.decodeIfPresent(Bool.self, forKey: .dismissible) ?? false,
+                  turn: try c.decodeIfPresent(Bool.self, forKey: .turn) ?? false)
     }
 
-    private enum CodingKeys: String, CodingKey { case token, item, kind, options, typed, multi, outcome, job, dismissible }
+    private enum CodingKeys: String, CodingKey { case token, item, kind, options, typed, multi, outcome, job, dismissible, turn }
 }
 
 /// One message in the thread. The `id` is opaque (never parse it); an entry with an ID already

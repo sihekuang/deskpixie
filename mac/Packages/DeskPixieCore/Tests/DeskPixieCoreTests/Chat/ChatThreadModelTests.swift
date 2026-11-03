@@ -537,6 +537,38 @@ final class ChatThreadModelTests: XCTestCase {
         XCTAssertTrue(client.typed.isEmpty)
     }
 
+    /// #427: a session's own question (its turn asked something, no buttons) keeps its words
+    /// once closed, as its reply, with Reply… under it; a menu or a permission shrinks to its
+    /// outcome line.
+    func testAClosedSessionQuestionKeepsItsWords() {
+        var asked = ask(1, kind: "question", token: "")
+        asked.request?.turn = true
+        XCTAssertFalse(ChatThreadModel.keepsWords(asked), "open: its card")
+        asked.request?.outcome = "You answered: hi"
+        XCTAssertTrue(ChatThreadModel.keepsWords(asked))
+        XCTAssertTrue(ChatThreadModel.offersSessionReply(asked), "its reply takes Reply… like any other")
+        asked.request?.outcome = "Answered elsewhere"
+        XCTAssertTrue(ChatThreadModel.keepsWords(asked))
+        var menu = ask(2, kind: "question", options: ["Red", "Blue"], typed: true)
+        menu.request?.outcome = "You chose Red"
+        XCTAssertFalse(ChatThreadModel.keepsWords(menu))
+        XCTAssertFalse(ChatThreadModel.offersSessionReply(menu))
+        var permission = ask(3, kind: "permission")
+        permission.request?.outcome = "You allowed it"
+        XCTAssertFalse(ChatThreadModel.keepsWords(permission))
+        var notice = ask(5, kind: "question", token: "")
+        notice.request?.outcome = "Answered elsewhere"
+        XCTAssertFalse(ChatThreadModel.keepsWords(notice), "a dialog it showed, not its turn: the outcome line")
+        let decoded = try? JSONDecoder().decode(ChatRequest.self, from: Data(#"{"item":1,"kind":"question","turn":true}"#.utf8))
+        XCTAssertEqual(decoded?.turn, true)
+        var job = ask(4, kind: "question", token: "")
+        job.who = ChatWho(kind: "coordinator")
+        job.request?.job = "job_000000000001"
+        job.request?.turn = true
+        job.request?.outcome = "You answered: blue"
+        XCTAssertFalse(ChatThreadModel.keepsWords(job), "the coordinator's question on a job keeps its outcome line")
+    }
+
     func testItOpensAtTheOldestOfTheUnreadTheLoadCounted() async {
         // Like a seeded thread: older entries never marked read, the core counting the last two.
         let client = FakeChatClient((1...8).map { entry($0) })
