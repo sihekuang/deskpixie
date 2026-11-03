@@ -211,6 +211,9 @@ func TestParseSessionTools(t *testing.T) {
 		{"flush_session", map[string]any{"name": "focus-claude"}, agent.McpCall{Kind: agent.CallFlushSession, Name: "focus-claude"}},
 		{"stop_and_send_session", map[string]any{"name": "focus-claude"}, agent.McpCall{Kind: agent.CallStopAndSendSession, Name: "focus-claude"}},
 		{"message_session", map[string]any{"name": "focus-claude", "text": "hi", "force": true}, agent.McpCall{Kind: agent.CallMessageSession, Name: "focus-claude", Text: "hi", Force: true}},
+		// #428: the names the coordinator reaches for first take the message as well.
+		{"message_session", map[string]any{"session": "focus-claude", "message": "hi"}, agent.McpCall{Kind: agent.CallMessageSession, Name: "focus-claude", Text: "hi"}},
+		{"message_session", map[string]any{"name": "focus-claude", "message": "hi"}, agent.McpCall{Kind: agent.CallMessageSession, Name: "focus-claude", Text: "hi"}},
 	}
 	for _, c := range cases {
 		got, err := agent.ParseToolCall(agent.RoleCoordinator, c.name, c.args)
