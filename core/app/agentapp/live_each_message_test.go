@@ -3,7 +3,8 @@
 package agentapp_test
 
 // Opt-in live check of #428: two messages typed to your session in the chat window, the same
-// words one right after the other, both go in: the coordinator never folds them into one.
+// words one right after the other, both reach it: the coordinator never folds them into one
+// (pix takes each, sent or waiting).
 //
 //	go test -tags live -run LiveEachMessage -v -timeout 15m ./app/agentapp/
 //
@@ -116,9 +117,17 @@ func TestLiveEachMessageToASessionGoesIn(t *testing.T) {
 		t.Fatal(err)
 	}
 	tty.Close()
+	// prompts: the messages pix took for the session (sent, or waiting to go in); a refused one
+	// logs "command prompt: <why>".
 	prompts := func() int {
 		b, _ := os.ReadFile(filepath.Join(pixData, "logs", "pix.log"))
-		return strings.Count(string(b), "command prompt")
+		n := 0
+		for _, l := range strings.Split(string(b), "\n") {
+			if strings.HasSuffix(l, " command prompt") {
+				n++
+			}
+		}
+		return n
 	}
 	t.Cleanup(func() {
 		pix.Process.Signal(syscall.SIGKILL)
@@ -144,12 +153,12 @@ func TestLiveEachMessageToASessionGoesIn(t *testing.T) {
 	}
 	for deadline := time.Now().Add(5 * time.Minute); prompts() < 2; time.Sleep(time.Second) {
 		if time.Now().After(deadline) {
-			t.Fatalf("the session got %d of the 2 messages", prompts())
+			t.Fatalf("pix took %d of the 2 messages", prompts())
 		}
 	}
 	time.Sleep(20 * time.Second) // nothing more goes in
 	if n := prompts(); n != 2 {
-		t.Fatalf("the session got %d messages, want 2", n)
+		t.Fatalf("pix took %d messages, want 2", n)
 	}
-	t.Log("ok   both messages went in")
+	t.Log("ok   pix took both messages")
 }

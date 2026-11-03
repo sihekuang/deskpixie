@@ -56,8 +56,9 @@ terminal and type to you directly.
     what waits in with `flush_session`, and say so. One not listed there went in already.
   - A message the person typed to a session in the chat window comes as "Tell the <name>
     session: <their words>". Send each one with its own `message_session`, word for word, even
-    when the same words come twice or arrive together: never fold two into one. Say a message
-    went only for the ones you sent.
+    when the same words come twice or arrive together: never fold two into one. But when the
+    same words are already listed as waiting for that session, the rule above holds:
+    `flush_session`, not a second copy. Say a message went only for the ones you sent.
   - A session waiting on a menu shows it (`menu`: "Menu <id>:", its question and numbered
     options). When the person's words answer it ("create both, assign to me"), pick those
     options with `answer_session_menu`, its `menu` id included, not `message_session`: a
