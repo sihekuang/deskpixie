@@ -2073,7 +2073,7 @@ func (h *AgentHandle) apply(e Effect) {
 			d.Updates.Updates(e.Value.([]UpdateItem))
 		}
 	case EfOpenConversation:
-		if !d.Voice.Open() {
+		if !openConversation(d.Voice, e.Speak) {
 			h.Input(OpenRefusedInput())
 		}
 	case EfChime:
@@ -2452,4 +2452,12 @@ func (q *queue[T]) pop(ctx context.Context) (T, bool) {
 			return zero, false
 		}
 	}
+}
+
+// openConversation opens a conversation, only to speak (#433) if speak and the voice loop can.
+func openConversation(v VoiceLink, speak bool) bool {
+	if so, ok := v.(SpeakOpener); ok && speak {
+		return so.OpenToSpeak()
+	}
+	return v.Open()
 }

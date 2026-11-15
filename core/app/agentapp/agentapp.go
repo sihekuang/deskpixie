@@ -406,6 +406,7 @@ func Build(c Config) *Agent {
 			SessionTurns:        c.Notifications.SessionTurns,
 			SessionTurnsMinMs:   agent.Millis(c.Notifications.SessionTurnsMinSeconds) * 1000,
 			OpenConversation:    s.OpenConversationForUpdates,
+			SpeakUpdatesOnly:    s.SpeakUpdatesOnly,
 			AlwaysForceSend:     s.AlwaysForceSend,
 			MarkForcedSends:     s.MarkForcedSends,
 			CoordinatorKind:     kind,

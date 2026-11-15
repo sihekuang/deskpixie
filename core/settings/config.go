@@ -174,6 +174,9 @@ type AgentSettings struct {
 	// worker report that comes while no conversation is open makes Pixie open one and say it
 	// (on by default, #366).
 	OpenConversationForUpdates bool `json:"openConversationForUpdates"`
+	// SpeakUpdatesOnly: the conversation OpenConversationForUpdates opens only says the update,
+	// with no mic, unless it asks you something (off by default, #433).
+	SpeakUpdatesOnly bool `json:"speakUpdatesOnly"`
 	// AlwaysForceSend (#205): every message Pixie passes to a session you started with pix
 	// goes in at once, as message_session's force would send it (off by default).
 	AlwaysForceSend bool `json:"alwaysForceSend"`

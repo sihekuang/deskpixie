@@ -90,6 +90,9 @@ type Settings struct {
 	// or failed line, an agent question or a spoken worker report that comes while no
 	// conversation is open makes Pixie open one and say it (opener.go).
 	OpenConversation bool
+	// SpeakUpdatesOnly (`agent.speakUpdatesOnly`, off by default, #433): a conversation
+	// OpenConversation opens only says the updates, with no mic, unless one asks you something.
+	SpeakUpdatesOnly bool
 	// AlwaysForceSend (`agent.alwaysForceSend`, off by default, #205): every message to a
 	// session you started with pix is sent as message_session's force sends it.
 	AlwaysForceSend bool
@@ -413,7 +416,7 @@ const (
 	EfReadWorker       // Name: read the worker's screen (answered with InWorkerScreen)
 	EfForgetWorker     // Name: the worker is gone: revoke its token and delete its launch files
 	EfLabel            // Tab: relabel the coordinator's tab (its current request, or idle)
-	EfOpenConversation // start a conversation if the voice loop is at rest (else answered with InOpenRefused)
+	EfOpenConversation // start a conversation if the voice loop is at rest (else answered with InOpenRefused); Speak: only to say the updates (#433)
 	EfUpdates          // Value: []UpdateItem: the updates bubble's list (sent when it changes)
 	EfManual           // Agent, Manual: a Claude agent is (or no longer is) in Manual mode
 	EfShowPane         // Job, Name: bring up this agent's pane (Name "": the coordinator) — it waits at a prompt in its terminal (#110)
@@ -449,6 +452,8 @@ type Effect struct {
 	Tab      TabLabel
 	Agent    string
 	Manual   bool
+	// Speak (EfOpenConversation): open it only to say the updates, with no mic (#433).
+	Speak bool
 	// Answer (EfAnswerSession): "yes", "no", a menu option's number, or (a menu that takes
 	// them, #268) "text:" and the typed answer, or "chat", or "picks:" and the options' numbers
 	// (#364).

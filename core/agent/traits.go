@@ -130,6 +130,12 @@ type VoiceLink interface {
 	Open() bool
 }
 
+// SpeakOpener is a VoiceLink that can open a conversation only to say what's waiting, with no
+// mic (agent.speakUpdatesOnly, #433); like Open, false if it did nothing.
+type SpeakOpener interface {
+	OpenToSpeak() bool
+}
+
 // HeldWithdrawer is a VoiceLink that can drop a notice it hasn't said yet that says a
 // session's message still waits, once the session has its messages up to upTo (0: all, #339).
 type HeldWithdrawer interface {

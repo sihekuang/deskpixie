@@ -78,6 +78,7 @@ const (
 	InOpen                   // start a conversation if none is under way (unlike InHotkey, never ends one)
 	InHandOffDone            // the hand-off's delegate call finished; Notice (Text "" = nothing to say)
 	InWithdrawHeld           // Held, HeldUpTo: that session has its messages up to that number now; their queued "still waits" notices go (#339)
+	InOpenToSpeak            // like InOpen, but only to say what's waiting: no mic, and it ends once said (#433)
 )
 
 // Input is one stimulus for Conversation.Step. Build it with the *Input constructors.
@@ -112,6 +113,11 @@ func InjectInput(n Notice) Input        { return Input{Kind: InInject, Notice: n
 func HoldOpenInput(on bool) Input       { return Input{Kind: InHoldOpen, Hold: on} }
 func MicLiveInput() Input               { return Input{Kind: InMicLive} }
 func OpenInput() Input                  { return Input{Kind: InOpen} }
+
+// OpenToSpeakInput: open a conversation only to say what's waiting (agent.speakUpdatesOnly,
+// #433). The mic stays off and it ends once Pixie has said its notices, unless one asks you
+// something or you press the hotkey: then the mic comes on and it goes on as usual.
+func OpenToSpeakInput() Input { return Input{Kind: InOpenToSpeak} }
 
 // WithdrawHeldInput: session has its messages numbered up to upTo (0: all of them, a pix too
 // old to number them) that queued notices say still wait (#339); not said yet, they would tell
@@ -274,7 +280,17 @@ type Conversation struct {
 	questionAsked, answerTurn bool
 	// endNotBefore: an ending conversation waits until then for GPT-Live's hand-off line.
 	endNotBefore time.Time
+
+	// speakOnly: opened only to say what's waiting (InOpenToSpeak, #433): no mic, and it ends
+	// once nothing is left to say. spokeAt: when it was ready; said: a notice was given to Pixie.
+	speakOnly bool
+	spokeAt   time.Time
+	said      bool
 }
+
+// SpeakOnlyWait: a conversation opened to speak that has been given nothing to say by then
+// (the app's notices come a moment after it opens) ends.
+const SpeakOnlyWait = 5 * time.Second
 
 // NewConversation starts in PhaseIdle.
 func NewConversation(cfg ConversationConfig) *Conversation {
@@ -367,12 +383,31 @@ func elapsed(since, now time.Time, d time.Duration) bool {
 
 // Step applies one input at time now and returns the effects to carry out, in order.
 func (c *Conversation) Step(in Input, now time.Time) []Effect {
+	fx := c.step(in, now)
+	if c.speakOnly {
+		// With no mic on, Pixie doesn't look like it is listening (#433).
+		for i, e := range fx {
+			if e.Kind == EfPixie && e.State == StateListening {
+				fx[i].State = StateIdle
+			}
+		}
+	}
+	return fx
+}
+
+func (c *Conversation) step(in Input, now time.Time) []Effect {
 	var fx []Effect
 	switch in.Kind {
 	case InHotkey:
+		if c.speakOnly && c.IsActive() {
+			// You want a word in: the conversation opened to speak goes on as usual.
+			fx = c.startListening(now, fx)
+			break
+		}
 		switch c.phase {
 		case PhaseIdle, PhaseCooldown:
 			c.resetTurn()
+			c.speakOnly = false
 			c.phase = PhaseConnecting
 			fx = append(fx, Effect{Kind: EfConnect}, pixieFx(StateThinking))
 		case PhaseConnecting:
@@ -382,10 +417,11 @@ func (c *Conversation) Step(in Input, now time.Time) []Effect {
 		default:
 			fx = c.end(fx, true, "hotkey")
 		}
-	case InOpen:
+	case InOpen, InOpenToSpeak:
 		// Only from rest: a conversation starting, open, closing or showing an error is left alone.
 		if c.phase == PhaseIdle {
 			c.resetTurn()
+			c.speakOnly, c.said = in.Kind == InOpenToSpeak, false
 			c.phase = PhaseConnecting
 			fx = append(fx, Effect{Kind: EfConnect}, pixieFx(StateThinking))
 		}
@@ -441,6 +477,8 @@ func (c *Conversation) Step(in Input, now time.Time) []Effect {
 		case c.phase == PhaseCooldown && !now.Before(c.cooldownUntil):
 			c.phase = PhaseIdle
 			fx = append(fx, pixieFx(c.restState()))
+		case c.spokenAll(now):
+			fx = c.end(fx, false, "said its updates")
 		case c.listeningArmed() && c.micLive && c.pendingTools == 0 && elapsed(c.silenceSince, now, c.timeout()):
 			fx = c.end(fx, false, "silence timeout")
 		case c.phase == PhaseThinking && c.openResponses == 0 && c.pendingTools == 0 &&
@@ -539,7 +577,15 @@ func (c *Conversation) Step(in Input, now time.Time) []Effect {
 func (c *Conversation) onModel(ev Event, now time.Time, fx []Effect) []Effect {
 	switch ev.Kind {
 	case EvReady:
-		if c.phase == PhaseConnecting {
+		if c.phase == PhaseConnecting && c.speakOnly {
+			// No mic and no start chime: Pixie only says what it's given (#433).
+			c.listen(now)
+			c.micLive, c.spokeAt = true, now
+			fx = append(fx,
+				Effect{Kind: EfStatus},
+				pixieFx(StateIdle),
+				Effect{Kind: EfSignal, Signal: VoiceSignal{Kind: SigOpened}})
+		} else if c.phase == PhaseConnecting {
 			c.listen(now)
 			c.micAskedAt = now
 			fx = append(fx,
@@ -743,7 +789,37 @@ func (c *Conversation) tryInject(now time.Time, fx []Effect) []Effect {
 	c.phase = PhaseThinking
 	c.thinkingSince = now
 	c.turnReplySeen = false
-	return append(fx, Effect{Kind: EfInject, Text: n.Text, Sessions: n.Sessions}, pixieFx(StateThinking))
+	c.said = true
+	fx = append(fx, Effect{Kind: EfInject, Text: n.Text, Sessions: n.Sessions}, pixieFx(StateThinking))
+	if c.speakOnly && c.asked {
+		// It asks you something: listen for the answer (#433).
+		fx = c.startListening(now, fx)
+	}
+	return fx
+}
+
+// startListening turns a conversation opened only to speak into a usual one: the mic comes on
+// (with the start chime), and Pixie listens once it has finished what it is saying (#433).
+func (c *Conversation) startListening(now time.Time, fx []Effect) []Effect {
+	c.speakOnly = false
+	if c.phase == PhaseConnecting {
+		return fx // ready opens the mic as usual
+	}
+	c.micLive, c.micAskedAt = false, now
+	fx = append(fx, Effect{Kind: EfPlayChime, Chime: ChimeStart}, Effect{Kind: EfStartMic})
+	if c.listeningArmed() {
+		c.silenceSince = now
+		fx = append(fx, pixieFx(StateListening))
+	}
+	return fx
+}
+
+// spokenAll: a conversation opened only to speak has nothing left to say: quiet, nothing
+// waiting, and either a notice was said or none came within SpeakOnlyWait.
+func (c *Conversation) spokenAll(now time.Time) bool {
+	return c.speakOnly && c.listeningArmed() && c.playbackIdle && c.openResponses == 0 &&
+		c.pendingTools == 0 && len(c.injects) == 0 && c.endAfterNotice == "" &&
+		(c.said || elapsed(c.spokeAt, now, SpeakOnlyWait))
 }
 
 // closedSignal drains the queued notices into a SigClosed signal.
@@ -772,12 +848,12 @@ func (c *Conversation) end(fx []Effect, flush bool, reason string) []Effect {
 	if flush {
 		fx = append(fx, Effect{Kind: EfFlushPlayback})
 	}
-	fx = append(fx,
-		Effect{Kind: EfStopMic},
-		Effect{Kind: EfClose},
-		Effect{Kind: EfPlayChime, Chime: ChimeEnd},
-		pixieFx(c.restState()),
-		c.closedSignal())
+	fx = append(fx, Effect{Kind: EfStopMic}, Effect{Kind: EfClose})
+	if !c.speakOnly {
+		fx = append(fx, Effect{Kind: EfPlayChime, Chime: ChimeEnd}) // no mic was on to close
+	}
+	fx = append(fx, pixieFx(c.restState()), c.closedSignal())
+	c.speakOnly = false
 	c.phase = PhaseIdle
 	c.silenceSince = time.Time{}
 	c.resetTurn()
@@ -798,6 +874,7 @@ func (c *Conversation) fail(f Failure, now time.Time, fx []Effect) []Effect {
 		Effect{Kind: EfStatus, Status: f.Status()},
 		c.closedSignal())
 	c.phase = PhaseCooldown
+	c.speakOnly = false
 	c.silenceSince = time.Time{}
 	c.cooldownUntil = now.Add(ErrorCooldown)
 	c.resetTurn()
