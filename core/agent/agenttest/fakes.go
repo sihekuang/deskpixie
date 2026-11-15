@@ -535,6 +535,7 @@ const (
 	CallHoldOpen
 	CallOpen
 	CallWithdrawHeld
+	CallOpenToSpeak
 )
 
 // VoiceCall is one recorded VoiceLink call: Inject(Text), HoldOpen(On), Open or
@@ -549,6 +550,7 @@ type VoiceCall struct {
 func InjectCall(text string) VoiceCall { return VoiceCall{Kind: CallInject, Text: text} }
 func HoldOpenCall(on bool) VoiceCall   { return VoiceCall{Kind: CallHoldOpen, On: on} }
 func OpenCall() VoiceCall              { return VoiceCall{Kind: CallOpen} }
+func OpenToSpeakCall() VoiceCall       { return VoiceCall{Kind: CallOpenToSpeak} }
 func WithdrawHeldCall(session string, upTo uint64) VoiceCall {
 	return VoiceCall{Kind: CallWithdrawHeld, Text: session, Seq: upTo}
 }
@@ -574,6 +576,14 @@ func (v *RecordingVoiceLink) Open() bool {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.calls = append(v.calls, OpenCall())
+	return !v.busy && !v.open
+}
+
+// OpenToSpeak records the call; it answers like Open (#433).
+func (v *RecordingVoiceLink) OpenToSpeak() bool {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.calls = append(v.calls, OpenToSpeakCall())
 	return !v.busy && !v.open
 }
 

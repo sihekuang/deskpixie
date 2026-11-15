@@ -309,3 +309,59 @@ func TestARefusedOpenWaitsOutTheClosingConversation(t *testing.T) {
 		t.Fatal("the refused open must be retried once Pixie is at rest")
 	}
 }
+
+// #433: with agent.speakUpdatesOnly the open is only to say the update.
+func TestSpeakUpdatesOnlyOpensOnlyToSpeak(t *testing.T) {
+	for _, speak := range []bool{false, true} {
+		c := ctlWith(func(s *Settings) { s.OpenConversation, s.SpeakUpdatesOnly = true, speak })
+		delegate(c, 1, "summarise the issues")
+		c.Step(CoordinatorUpInput(PaneIdle), T0)
+		var open []Effect
+		for _, e := range stop(c, doneStop, T0) {
+			if e.Kind == EfOpenConversation {
+				open = append(open, e)
+			}
+		}
+		if len(open) != 1 || open[0].Speak != speak {
+			t.Fatalf("speak %v: %+v", speak, open)
+		}
+		// Opened to speak, it replays the outbox as any open does.
+		fx := visible(c.Step(voiceOpened(), T0+800))
+		wantEffects(t, fx, eInject("Coordinator replies while you were away:\n- Coordinator reply: There are 12 open issues."))
+	}
+}
+
+// openConversation opens only to speak when asked and the voice loop can; a loop that can't
+// gets a usual open (#433).
+func TestOpenConversationOpensToSpeakWhenItCan(t *testing.T) {
+	v := &speakOpener{}
+	if !openConversation(v, true) || !openConversation(v, false) || v.toSpeak != 1 || v.opens != 1 {
+		t.Fatalf("to speak %d, usual %d", v.toSpeak, v.opens)
+	}
+	plain := &plainOpener{}
+	if !openConversation(plain, true) || plain.opens != 1 {
+		t.Fatal("a voice loop that can't open to speak isn't opened as usual")
+	}
+	v.busy = true
+	if openConversation(v, true) {
+		t.Fatal("a busy voice loop opened to speak")
+	}
+}
+
+// plainOpener is a VoiceLink with no OpenToSpeak; speakOpener has one. busy: both refuse.
+type plainOpener struct {
+	opens int
+	busy  bool
+}
+
+func (*plainOpener) IsOpen() bool  { return false }
+func (*plainOpener) Inject(Notice) {}
+func (*plainOpener) HoldOpen(bool) {}
+func (p *plainOpener) Open() bool  { p.opens++; return !p.busy }
+
+type speakOpener struct {
+	plainOpener
+	toSpeak int
+}
+
+func (p *speakOpener) OpenToSpeak() bool { p.toSpeak++; return !p.busy }

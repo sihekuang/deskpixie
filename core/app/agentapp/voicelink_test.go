@@ -11,6 +11,9 @@ import (
 // The real voice loop can drop a held notice (#339).
 var _ agent.HeldWithdrawer = (*voice.Runtime)(nil)
 
+// The real voice loop can open a conversation only to speak (#433).
+var _ agent.SpeakOpener = (*voice.Runtime)(nil)
+
 // plainVoice is a voice loop that can't withdraw; withdrawingVoice can.
 type plainVoice struct{}
 
@@ -42,4 +45,30 @@ func TestVoiceLinkPassesAWithdrawalOn(t *testing.T) {
 	var other VoiceLink
 	other.attach(plainVoice{})
 	other.WithdrawHeld("repo-claude", 3)
+}
+
+type speakingVoice struct {
+	plainVoice
+	toSpeak int
+}
+
+func (v *speakingVoice) OpenToSpeak() bool { v.toSpeak++; return true }
+
+// #433: the link opens a voice loop to speak when it can, opens one that can't as usual, and
+// with none attached does nothing.
+func TestVoiceLinkOpensToSpeak(t *testing.T) {
+	var l VoiceLink
+	if l.OpenToSpeak() {
+		t.Fatal("opened with nothing attached")
+	}
+	v := &speakingVoice{}
+	l.attach(v)
+	if !l.OpenToSpeak() || v.toSpeak != 1 {
+		t.Fatal("not opened to speak")
+	}
+	var other VoiceLink
+	other.attach(plainVoice{}) // its Open answers false
+	if other.OpenToSpeak() {
+		t.Fatal("a plain voice loop's answer wasn't passed on")
+	}
 }

@@ -130,6 +130,7 @@ const (
 	ctlMouthLevels
 	ctlOpen
 	ctlWithdrawHeld
+	ctlOpenToSpeak
 )
 
 type control struct {
@@ -344,6 +345,23 @@ func (r *Runtime) Open() bool {
 		return false
 	}
 	r.control(control{kind: ctlOpen})
+	return true
+}
+
+// OpenToSpeak starts a conversation only to say what's waiting (agent.speakUpdatesOnly, #433),
+// with no mic. Like Open it refuses when the mic is unusable: a question it says, or the hotkey,
+// turns the mic on, and a question said into a mic that fails would be lost (the update stays
+// in the bubble instead). False while Pixie is not at rest or after Close.
+func (r *Runtime) OpenToSpeak() bool {
+	select {
+	case <-r.done:
+		return false
+	default:
+	}
+	if !r.resting.Load() || r.micUnavailable.Load() != nil {
+		return false
+	}
+	r.control(control{kind: ctlOpenToSpeak})
 	return true
 }
 
@@ -636,6 +654,8 @@ func (r *Runtime) onControl(c control) {
 		r.meter = NewMouthMeter(c.levels)
 	case ctlOpen:
 		r.input(OpenInput())
+	case ctlOpenToSpeak:
+		r.input(OpenToSpeakInput())
 	case ctlWithdrawHeld:
 		r.input(WithdrawHeldInput(c.held, c.upTo))
 	}

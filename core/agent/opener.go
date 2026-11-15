@@ -9,7 +9,8 @@ import "github.com/sihekuang/deskpixie/core/voice"
 // progress reply (status working) opens none, so it gets no chime or notification either (#113):
 // it waits in the outbox and the next conversation says it. An opened conversation replays
 // the outbox (each line once, marked delivered), so Pixie says the update and then listens;
-// it ends on the usual silence timeout.
+// it ends on the usual silence timeout. With agent.speakUpdatesOnly (#433) it is opened only to
+// speak: no mic, and it ends once said, unless an update asks you something.
 //
 // Worker reports are debounced first (debounce.go): held per job until quiet, deduped and
 // coalesced, so a burst of reports is one line and that one line is what opens a
@@ -89,7 +90,7 @@ func (c *AgentController) tryOpen(now Millis, fx *[]Effect) {
 	o.opened = append(o.opened, now)
 	o.waiting = someMs(now)
 	o.retry = false
-	*fx = append(*fx, Effect{Kind: EfOpenConversation})
+	*fx = append(*fx, Effect{Kind: EfOpenConversation, Speak: c.settings.SpeakUpdatesOnly})
 }
 
 // setAway (InPresence): while you're away Pixie doesn't open a conversation or chime (the

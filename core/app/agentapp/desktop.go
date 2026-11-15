@@ -295,6 +295,17 @@ func (l *VoiceLink) Open() bool {
 	return false
 }
 
+// OpenToSpeak opens a conversation only to say what's waiting (#433), if the voice loop can.
+func (l *VoiceLink) OpenToSpeak() bool {
+	if v := l.voice.Load(); v != nil {
+		if so, ok := (*v).(agent.SpeakOpener); ok {
+			return so.OpenToSpeak()
+		}
+		return (*v).Open()
+	}
+	return false
+}
+
 func (l *VoiceLink) HoldOpen(on bool) {
 	if v := l.voice.Load(); v != nil {
 		(*v).HoldOpen(on)

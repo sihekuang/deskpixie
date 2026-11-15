@@ -115,6 +115,7 @@ type liveSpy struct {
 	heard     []string // user transcripts
 	tools     []string
 	cancels   []int64 // HeardMs of each CmdCancelResponse
+	audioSent int     // CmdAudio frames sent (mic audio)
 	errs      []string
 	firstAuth time.Time // first audio delta
 }
@@ -191,6 +192,11 @@ type liveSpySession struct {
 func (s liveSpySession) Events() <-chan voice.Event { return s.events }
 
 func (s liveSpySession) Send(c voice.Command) error {
+	if c.Kind == voice.CmdAudio {
+		s.liveSpy.mu.Lock()
+		s.liveSpy.audioSent++
+		s.liveSpy.mu.Unlock()
+	}
 	if c.Kind == voice.CmdCancelResponse {
 		s.liveSpy.mu.Lock()
 		s.liveSpy.cancels = append(s.liveSpy.cancels, c.HeardMs)
