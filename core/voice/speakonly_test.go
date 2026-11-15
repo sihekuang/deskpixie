@@ -112,8 +112,8 @@ func TestSpeakOnlyHotkeyTurnsTheMicOn(t *testing.T) {
 	c.Step(InjectInput(notice("Coordinator reply: done.")), ms(t0(), 30))
 	model(c, evResponseCreated, ms(t0(), 40))
 	model(c, evAudio(frame()), ms(t0(), 50))
-	// Mid-sentence: the mic comes on and Pixie keeps talking.
-	eq(t, c.Step(HotkeyInput(), ms(t0(), 60)), chime(ChimeStart), ef(EfStartMic))
+	// Mid-sentence: the mic comes on and Pixie keeps talking, with no chime cutting it in two.
+	eq(t, c.Step(HotkeyInput(), ms(t0(), 60)), ef(EfStartMic))
 	phase(t, c, PhaseSpeaking)
 	model(c, evResponseDone, ms(t0(), 70))
 	if fx := tick(c, true, ms(t0(), 80)); !contains(fx, pixie(StateListening)) || hasKind(fx, EfClose) {
@@ -147,8 +147,8 @@ func TestSpeakOnlyFailureEndsLikeAnyOther(t *testing.T) {
 	c := openedToSpeak(t)
 	fx := c.Step(FailedInput(Failure{Kind: FailConnectionLost}), ms(t0(), 30))
 	phase(t, c, PhaseCooldown)
-	if !hasKind(fx, EfClose) {
-		t.Fatalf("failure: %+v", fx)
+	if !hasKind(fx, EfClose) || contains(fx, chime(ChimeEnd)) {
+		t.Fatalf("failure (no end chime with no start chime): %+v", fx)
 	}
 	// The next conversation is a usual one.
 	tick(c, true, ms(t0(), 30+int64(ErrorCooldown/time.Millisecond)))
@@ -170,8 +170,6 @@ func TestOpenAfterSpeakOnlyIsAUsualConversation(t *testing.T) {
 
 func TestRuntimeOpenToSpeakStartsNoMic(t *testing.T) {
 	r, m, ui := newTestRuntime(t, "sk-test")
-	r.MicFailed("Microphone access denied") // no mic needed to speak
-	eventually(t, "mic failure recorded", func() bool { return r.micUnavailable.Load() != nil })
 	if !r.OpenToSpeak() {
 		t.Fatal("refused at rest")
 	}
@@ -192,5 +190,49 @@ func TestRuntimeOpenToSpeakAfterCloseIsRefused(t *testing.T) {
 	r.Close()
 	if r.OpenToSpeak() {
 		t.Fatal("accepted after Close")
+	}
+}
+
+// A question it says turns the mic on: with the mic unusable it would be lost, so it doesn't
+// open (the update stays in the bubble, as with Open).
+func TestRuntimeOpenToSpeakRefusesWhileTheMicIsUnusable(t *testing.T) {
+	r, m, _ := newTestRuntime(t, "sk-test")
+	r.MicFailed("Microphone access denied")
+	eventually(t, "mic failure recorded", func() bool { return r.micUnavailable.Load() != nil })
+	if r.OpenToSpeak() {
+		t.Fatal("accepted with the mic unusable")
+	}
+	time.Sleep(20 * time.Millisecond)
+	if len(m.connects()) != 0 {
+		t.Fatalf("connected %d times", len(m.connects()))
+	}
+}
+
+// While a job holds the conversation open, Pixie rests delegating, not idle, and it still ends
+// once said.
+func TestSpeakOnlyWhileHeldRestsDelegatingAndEnds(t *testing.T) {
+	c := newConv()
+	c.Step(HoldOpenInput(true), t0())
+	c.Step(OpenToSpeakInput(), ms(t0(), 1))
+	eq(t, model(c, evReady, ms(t0(), 20)),
+		ef(EfStatus), pixie(StateDelegating), signalFx(VoiceSignal{Kind: SigOpened}))
+	c.Step(InjectInput(notice("Coordinator reply: done.")), ms(t0(), 30))
+	if fx := sayIt(t, c, ms(t0(), 40)); contains(fx, pixie(StateIdle)) || contains(fx, pixie(StateListening)) {
+		t.Fatalf("after its reply: %+v", fx)
+	}
+	if fx := tick(c, true, ms(t0(), 100)); !hasKind(fx, EfClose) || !contains(fx, pixie(StateDelegating)) {
+		t.Fatalf("held, it didn't end once said: %+v", fx)
+	}
+}
+
+// A silence timeout shorter than SpeakOnlyWait doesn't end it before its notices come.
+func TestSpeakOnlyIgnoresAShortSilenceTimeout(t *testing.T) {
+	cfg := DefaultConversationConfig()
+	cfg.IdleTimeout = time.Second
+	c := NewConversation(cfg)
+	c.Step(OpenToSpeakInput(), t0())
+	model(c, evReady, ms(t0(), 20))
+	if fx := tick(c, true, ms(t0(), 3000)); hasKind(fx, EfClose) {
+		t.Fatalf("ended on silence before its notices came: %+v", fx)
 	}
 }

@@ -385,10 +385,10 @@ func elapsed(since, now time.Time, d time.Duration) bool {
 func (c *Conversation) Step(in Input, now time.Time) []Effect {
 	fx := c.step(in, now)
 	if c.speakOnly {
-		// With no mic on, Pixie doesn't look like it is listening (#433).
+		// With no mic on, Pixie doesn't look like it is listening: it rests as it would (#433).
 		for i, e := range fx {
 			if e.Kind == EfPixie && e.State == StateListening {
-				fx[i].State = StateIdle
+				fx[i].State = c.restState()
 			}
 		}
 	}
@@ -479,7 +479,7 @@ func (c *Conversation) step(in Input, now time.Time) []Effect {
 			fx = append(fx, pixieFx(c.restState()))
 		case c.spokenAll(now):
 			fx = c.end(fx, false, "said its updates")
-		case c.listeningArmed() && c.micLive && c.pendingTools == 0 && elapsed(c.silenceSince, now, c.timeout()):
+		case !c.speakOnly && c.listeningArmed() && c.micLive && c.pendingTools == 0 && elapsed(c.silenceSince, now, c.timeout()):
 			fx = c.end(fx, false, "silence timeout")
 		case c.phase == PhaseThinking && c.openResponses == 0 && c.pendingTools == 0 &&
 			elapsed(c.thinkingSince, now, ReplyWatchdog):
@@ -583,7 +583,7 @@ func (c *Conversation) onModel(ev Event, now time.Time, fx []Effect) []Effect {
 			c.micLive, c.spokeAt = true, now
 			fx = append(fx,
 				Effect{Kind: EfStatus},
-				pixieFx(StateIdle),
+				pixieFx(c.restState()),
 				Effect{Kind: EfSignal, Signal: VoiceSignal{Kind: SigOpened}})
 		} else if c.phase == PhaseConnecting {
 			c.listen(now)
@@ -806,7 +806,11 @@ func (c *Conversation) startListening(now time.Time, fx []Effect) []Effect {
 		return fx // ready opens the mic as usual
 	}
 	c.micLive, c.micAskedAt = false, now
-	fx = append(fx, Effect{Kind: EfPlayChime, Chime: ChimeStart}, Effect{Kind: EfStartMic})
+	if c.phase != PhaseSpeaking {
+		// Mid-sentence the chime would play after what is already queued, cutting it in two.
+		fx = append(fx, Effect{Kind: EfPlayChime, Chime: ChimeStart})
+	}
+	fx = append(fx, Effect{Kind: EfStartMic})
 	if c.listeningArmed() {
 		c.silenceSince = now
 		fx = append(fx, pixieFx(StateListening))
@@ -869,8 +873,11 @@ func (c *Conversation) fail(f Failure, now time.Time, fx []Effect) []Effect {
 		Effect{Kind: EfFlushPlayback},
 		Effect{Kind: EfStopMic},
 		Effect{Kind: EfClose},
-		pixieFx(StateError),
-		Effect{Kind: EfPlayChime, Chime: ChimeEnd},
+		pixieFx(StateError))
+	if !c.speakOnly {
+		fx = append(fx, Effect{Kind: EfPlayChime, Chime: ChimeEnd}) // no start chime to answer
+	}
+	fx = append(fx,
 		Effect{Kind: EfStatus, Status: f.Status()},
 		c.closedSignal())
 	c.phase = PhaseCooldown
