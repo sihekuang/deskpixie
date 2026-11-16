@@ -349,9 +349,9 @@ func (r *Runtime) Open() bool {
 }
 
 // OpenToSpeak starts a conversation only to say what's waiting (agent.speakUpdatesOnly, #433),
-// with no mic. Like Open it refuses when the mic is unusable: a question it says, or the hotkey,
-// turns the mic on, and a question said into a mic that fails would be lost (the update stays
-// in the bubble instead). False while Pixie is not at rest or after Close.
+// with no mic. Like Open it refuses when the mic is unusable: the hotkey turns the mic on, and
+// an answer said into a mic that fails would be lost (the update stays in the bubble
+// instead). False while Pixie is not at rest or after Close.
 func (r *Runtime) OpenToSpeak() bool {
 	select {
 	case <-r.done:

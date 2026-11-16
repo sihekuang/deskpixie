@@ -12,6 +12,9 @@ type reask struct {
 	// said: it reached a conversation (injected, not bounced back unsaid); heard: you said
 	// something after it there; due: that conversation closed first; again: said again once.
 	said, heard, due, again bool
+	// mute: the conversation open now was opened only to speak (agent.speakUpdatesOnly), so you
+	// can't answer there: saying it again there doesn't use up the once (#443).
+	mute bool
 }
 
 func (r reask) in(lines []Line) bool {
@@ -56,7 +59,7 @@ func (c *AgentController) reaskOpened(fx *[]Effect) {
 	if !c.reaskWaiting() {
 		return
 	}
-	c.reask.again = true
+	c.reask.again = !c.reask.mute
 	l := c.reask.line
 	n := c.remember(Notice{Text: "Coordinator replies while you were away:\n- " + l.Kind.Prefix() + l.Text}, nil)
 	n.Sessions = sessionsOf([]Line{l})
