@@ -115,8 +115,8 @@ func MicLiveInput() Input               { return Input{Kind: InMicLive} }
 func OpenInput() Input                  { return Input{Kind: InOpen} }
 
 // OpenToSpeakInput: open a conversation only to say what's waiting (agent.speakUpdatesOnly,
-// #433). The mic stays off and it ends once Pixie has said its notices, unless one asks you
-// something or you press the hotkey: then the mic comes on and it goes on as usual.
+// #433). The mic stays off and it ends once Pixie has said its notices, a question too (#443),
+// unless you press the hotkey: then the mic comes on and it goes on as usual.
 func OpenToSpeakInput() Input { return Input{Kind: InOpenToSpeak} }
 
 // WithdrawHeldInput: session has its messages numbered up to upTo (0: all of them, a pix too
@@ -295,6 +295,10 @@ const SpeakOnlyWait = 5 * time.Second
 // speakOnlyNote follows a notice Pixie says with the mic off, so it doesn't ask a follow-up
 // nobody can answer ("Anything else?") (#436).
 const speakOnlyNote = "\n(The user can't answer right now: say this update, then stop. Don't add a question of your own or offer more help.)"
+
+// speakOnlyQuestionNote follows a question Pixie says with the mic off (#443): it says what is
+// asked so you can answer later (the hotkey, the chat window), and adds nothing of its own.
+const speakOnlyQuestionNote = "\n(The user can't answer right now: say this, including what it asks, so they can answer later, then stop. Don't add a question of your own or offer more help.)"
 
 // NewConversation starts in PhaseIdle.
 func NewConversation(cfg ConversationConfig) *Conversation {
@@ -772,11 +776,12 @@ func (c *Conversation) tryInject(now time.Time, fx []Effect) []Effect {
 	}
 	n := c.injects[0]
 	c.injects = c.injects[1:]
+	asks := sayConfirm.MatchString(n.Text) || asksQuestion(n.Text)
 	if asksQuestion(n.Text) {
 		c.questionAsked = true
 	}
 	// Once said, not when queued: the user's words before it don't answer it.
-	c.asked = c.asked || sayConfirm.MatchString(n.Text) || asksQuestion(n.Text)
+	c.asked = c.asked || asks
 	if c.endAfterNotice != "" {
 		c.ending, c.endWhy = true, c.endAfterNotice // once Pixie has said it
 		c.endAfterNotice = ""
@@ -795,20 +800,21 @@ func (c *Conversation) tryInject(now time.Time, fx []Effect) []Effect {
 	c.turnReplySeen = false
 	c.said = true
 	text := n.Text
-	if c.speakOnly && !c.asked {
+	switch {
+	case c.speakOnly && asks: // this notice's own, not one said before it
+		// The mic stays off even for a question: Pixie says it, and you answer later (#443).
+		text += speakOnlyQuestionNote
+	case c.speakOnly:
 		// Nobody can answer: Pixie says the update and nothing more (#436).
 		text += speakOnlyNote
 	}
 	fx = append(fx, Effect{Kind: EfInject, Text: text, Sessions: n.Sessions}, pixieFx(StateThinking))
-	if c.speakOnly && c.asked {
-		// It asks you something: listen for the answer (#433).
-		fx = c.startListening(now, fx)
-	}
 	return fx
 }
 
-// startListening turns a conversation opened only to speak into a usual one: the mic comes on
-// (with the start chime), and Pixie listens once it has finished what it is saying (#433).
+// startListening turns a conversation opened only to speak into a usual one when you press the
+// hotkey: the mic comes on (with the start chime), and Pixie listens once it has finished what
+// it is saying (#433).
 func (c *Conversation) startListening(now time.Time, fx []Effect) []Effect {
 	c.speakOnly = false
 	if c.phase == PhaseConnecting {

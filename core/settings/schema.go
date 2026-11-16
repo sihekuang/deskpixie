@@ -485,7 +485,7 @@ var Fields = concat(
 	group(SectionCoordinator, "Updates",
 		enabledWhen(spec("agent.narration", "Say what the coordinator is doing", "Pixie tells you what the coordinator is up to while it works.", boolKind, ApplyRestart), on("agent.enabled")),
 		enabledWhen(spec("agent.openConversationForUpdates", "Start a conversation for updates", "When a job finishes or fails, or the coordinator asks you something, while you're not talking to Pixie, Pixie starts a conversation to tell you and then listens for your answer.", boolKind, ApplyRestart), on("agent.enabled")),
-		enabledWhen(spec("agent.speakUpdatesOnly", "Announce updates only", "Pixie says the update and doesn't listen for an answer. It still listens after a question, and you can press the hotkey while it talks to answer.", boolKind, ApplyRestart), on("agent.enabled"), on("agent.openConversationForUpdates")),
+		enabledWhen(spec("agent.speakUpdatesOnly", "Announce updates only", "Pixie says the update and doesn't listen for an answer, even to a question. To answer, press the hotkey while it talks, or reply in the chat window.", boolKind, ApplyRestart), on("agent.enabled"), on("agent.openConversationForUpdates")),
 	),
 	group(SectionCoordinator, "Canvas",
 		spec("canvas.autoOpen", "Open new pages", "Show new and changed canvas pages automatically.", boolKind, ApplyLive),

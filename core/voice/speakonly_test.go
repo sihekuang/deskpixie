@@ -83,27 +83,46 @@ func TestSpeakOnlyWaitsForItsNoticesAWhile(t *testing.T) {
 		ef(EfStopMic), ef(EfClose), pixie(StateIdle), closed())
 }
 
-func TestSpeakOnlyListensAfterAQuestion(t *testing.T) {
+// #443: a question is said with the mic off too, and the conversation ends once it is said.
+func TestSpeakOnlyKeepsTheMicOffForAQuestion(t *testing.T) {
 	c := openedToSpeak(t)
 	q := "Coordinator question: deploy now or wait?"
-	fx := c.Step(InjectInput(notice(q)), ms(t0(), 30))
-	eq(t, fx, injectFx(q), pixie(StateThinking), chime(ChimeStart), ef(EfStartMic))
-	sayIt(t, c, ms(t0(), 40))
-	c.Step(MicLiveInput(), ms(t0(), 80))
-	// A usual conversation now: it waits for the answer, then ends on silence with the chime.
-	if fx := tick(c, true, ms(t0(), 1000)); hasKind(fx, EfClose) {
-		t.Fatalf("ended without waiting for the answer: %+v", fx)
+	eq(t, c.Step(InjectInput(notice(q)), ms(t0(), 30)), injectFx(q+speakOnlyQuestionNote), pixie(StateThinking))
+	if fx := sayIt(t, c, ms(t0(), 40)); hasKind(fx, EfStartMic) || contains(fx, pixie(StateListening)) {
+		t.Fatalf("listened after a question: %+v", fx)
 	}
-	if fx := tick(c, true, ms(t0(), 80+int64(QuestionListenMin/time.Millisecond))); !contains(fx, chime(ChimeEnd)) {
-		t.Fatalf("silence end: %+v", fx)
+	eq(t, tick(c, true, ms(t0(), 100)),
+		ef(EfStopMic), ef(EfClose), pixie(StateIdle), closed()) // no end chime
+	if c.EndReason() != "said its updates" {
+		t.Fatalf("end reason %q", c.EndReason())
 	}
 }
 
-func TestSpeakOnlyListensAfterAConfirmWord(t *testing.T) {
+func TestSpeakOnlyKeepsTheMicOffForAConfirmWord(t *testing.T) {
 	c := openedToSpeak(t)
-	fx := c.Step(InjectInput(notice("Coordinator wants to run rm -rf build. Say confirm hawk.")), ms(t0(), 30))
-	if !hasKind(fx, EfStartMic) {
-		t.Fatalf("mic not started for a confirm word: %+v", fx)
+	n := "Coordinator wants to run rm -rf build. Say confirm hawk."
+	eq(t, c.Step(InjectInput(notice(n)), ms(t0(), 30)), injectFx(n+speakOnlyQuestionNote), pixie(StateThinking))
+	sayIt(t, c, ms(t0(), 40))
+	if fx := tick(c, true, ms(t0(), 100)); !hasKind(fx, EfClose) || hasKind(fx, EfStartMic) {
+		t.Fatalf("after a confirm word: %+v", fx)
+	}
+}
+
+// A question said, the hotkey still turns the mic on to answer it, and it waits for the answer.
+func TestSpeakOnlyHotkeyAfterAQuestionListensForTheAnswer(t *testing.T) {
+	c := openedToSpeak(t)
+	c.Step(InjectInput(notice("Coordinator question: deploy now or wait?")), ms(t0(), 30))
+	model(c, evResponseCreated, ms(t0(), 40))
+	model(c, evAudio(frame()), ms(t0(), 50))
+	eq(t, c.Step(HotkeyInput(), ms(t0(), 60)), ef(EfStartMic))
+	model(c, evResponseDone, ms(t0(), 70))
+	tick(c, true, ms(t0(), 80))
+	c.Step(MicLiveInput(), ms(t0(), 90))
+	if fx := tick(c, true, ms(t0(), 1000)); hasKind(fx, EfClose) {
+		t.Fatalf("ended without waiting for the answer: %+v", fx)
+	}
+	if fx := tick(c, true, ms(t0(), 90+int64(QuestionListenMin/time.Millisecond))); !contains(fx, chime(ChimeEnd)) {
+		t.Fatalf("silence end: %+v", fx)
 	}
 }
 
@@ -193,8 +212,8 @@ func TestRuntimeOpenToSpeakAfterCloseIsRefused(t *testing.T) {
 	}
 }
 
-// A question it says turns the mic on: with the mic unusable it would be lost, so it doesn't
-// open (the update stays in the bubble, as with Open).
+// The hotkey turns the mic on to answer: with the mic unusable the answer would be lost, so it
+// doesn't open (the update stays in the bubble, as with Open).
 func TestRuntimeOpenToSpeakRefusesWhileTheMicIsUnusable(t *testing.T) {
 	r, m, _ := newTestRuntime(t, "sk-test")
 	r.MicFailed("Microphone access denied")
@@ -237,8 +256,8 @@ func TestSpeakOnlyIgnoresAShortSilenceTimeout(t *testing.T) {
 	}
 }
 
-// #436: nobody can answer, so Pixie is told to say the update and nothing more; a question it
-// listens after, and a usual conversation, are given the notice as it is.
+// #436: nobody can answer, so Pixie is told to say the update and nothing more; a question is
+// told to be said in full for later (#443); a usual conversation is given the notice as it is.
 func TestSpeakOnlyTellsPixieToSayOnlyTheUpdate(t *testing.T) {
 	c := openedToSpeak(t)
 	fx := c.Step(InjectInput(notice("Session update: orchard finished its turn.")), ms(t0(), 30))
@@ -247,7 +266,7 @@ func TestSpeakOnlyTellsPixieToSayOnlyTheUpdate(t *testing.T) {
 	}
 
 	q := "Coordinator question: deploy now or wait?"
-	if fx := openedToSpeak(t).Step(InjectInput(notice(q)), ms(t0(), 30)); !contains(fx, injectFx(q)) {
+	if fx := openedToSpeak(t).Step(InjectInput(notice(q)), ms(t0(), 30)); !contains(fx, injectFx(q+speakOnlyQuestionNote)) {
 		t.Fatalf("a question: %+v", fx)
 	}
 
@@ -256,5 +275,15 @@ func TestSpeakOnlyTellsPixieToSayOnlyTheUpdate(t *testing.T) {
 	c.Step(HotkeyInput(), ms(t0(), 30))
 	if fx := c.Step(InjectInput(notice("Coordinator reply: done.")), ms(t0(), 40)); !contains(fx, injectFx("Coordinator reply: done.")) {
 		t.Fatalf("after the hotkey: %+v", fx)
+	}
+}
+
+// Each notice gets its own note: a plain update said after a question is told it's an update.
+func TestSpeakOnlyAnUpdateAfterAQuestionGetsTheUpdateNote(t *testing.T) {
+	c := openedToSpeak(t)
+	c.Step(InjectInput(notice("Coordinator question: deploy now or wait?")), ms(t0(), 30))
+	c.Step(InjectInput(notice("Session update: orchard finished its turn.")), ms(t0(), 35))
+	if fx := sayIt(t, c, ms(t0(), 40)); !contains(fx, injectFx("Session update: orchard finished its turn."+speakOnlyNote)) {
+		t.Fatalf("the update after a question: %+v", fx)
 	}
 }

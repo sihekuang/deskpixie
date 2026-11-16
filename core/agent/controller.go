@@ -91,7 +91,7 @@ type Settings struct {
 	// conversation is open makes Pixie open one and say it (opener.go).
 	OpenConversation bool
 	// SpeakUpdatesOnly (`agent.speakUpdatesOnly`, off by default, #433): a conversation
-	// OpenConversation opens only says the updates, with no mic, unless one asks you something.
+	// OpenConversation opens only says the updates, with no mic, a question too (#443).
 	SpeakUpdatesOnly bool
 	// AlwaysForceSend (`agent.alwaysForceSend`, off by default, #205): every message to a
 	// session you started with pix is sent as message_session's force sends it.

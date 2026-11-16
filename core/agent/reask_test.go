@@ -153,3 +153,52 @@ func TestAQuestionThatBouncedIsSaidOnceInTheNext(t *testing.T) {
 		t.Fatalf("said %d times", n)
 	}
 }
+
+// #443: with agent.speakUpdatesOnly the mic stays off for a question, so a conversation opened
+// only to speak says it again without using up the once: the next one you can answer in still
+// says it, and your answer goes to it.
+func TestAQuestionSaidWithTheMicOffIsStillSaidAgainOnceYouCanAnswer(t *testing.T) {
+	c := ctlWith(func(s *Settings) { s.OpenConversation, s.SpeakUpdatesOnly = true, true })
+	c.Step(CoordinatorUpInput(PaneIdle), T0)
+	if fx := askSession(c, storiesAsk, T0+1); opens(fx) != 1 {
+		t.Fatalf("the question opened no conversation: %+v", fx)
+	}
+	if fx := c.Step(voiceOpened(), T0+800); !asksAgain(fx) {
+		t.Fatalf("not said: %q", injectsOf(fx))
+	}
+	c.Step(voiceClosed(), T0+5_000) // said with the mic off: nobody could answer
+
+	// A job's done line opens another conversation only to speak: the question goes with it.
+	delegate(c, 1, "summarise the issues")
+	if fx := stop(c, doneStop, T0+70_000); opens(fx) != 1 {
+		t.Fatalf("the done line opened no conversation: %+v", fx)
+	}
+	if fx := c.Step(voiceOpened(), T0+70_800); !asksAgain(fx) {
+		t.Fatalf("not said with the update: %q", injectsOf(fx))
+	}
+	c.Step(voiceClosed(), T0+75_000)
+
+	// You press the hotkey: this one you can answer in, and it still says the question.
+	if fx := c.Step(voiceOpened(), T0+90_000); !asksAgain(fx) {
+		t.Fatalf("not said where you can answer: %q", injectsOf(fx))
+	}
+	if a := answers(c.Step(AnswerInput("", "create both, assign to me"), T0+91_000)); len(a) != 1 || a[0].Answer != "2" {
+		t.Fatalf("%+v", a)
+	}
+}
+
+// Once said where you could answer, it is said no more, as without the setting.
+func TestAQuestionSaidAgainWithTheMicOnIsSaidOnlyOnce(t *testing.T) {
+	c := ctlWith(func(s *Settings) { s.OpenConversation, s.SpeakUpdatesOnly = true, true })
+	c.Step(CoordinatorUpInput(PaneIdle), T0)
+	askSession(c, storiesAsk, T0+1)
+	c.Step(voiceOpened(), T0+800)
+	c.Step(voiceClosed(), T0+5_000)
+	if fx := c.Step(voiceOpened(), T0+20_000); !asksAgain(fx) { // the hotkey
+		t.Fatalf("not said again: %q", injectsOf(fx))
+	}
+	c.Step(voiceClosed(), T0+30_000)
+	if fx := c.Step(voiceOpened(), T0+60_000); asksAgain(fx) {
+		t.Fatalf("said a third time: %q", injectsOf(fx))
+	}
+}
