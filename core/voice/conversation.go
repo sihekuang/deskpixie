@@ -292,6 +292,10 @@ type Conversation struct {
 // (the app's notices come a moment after it opens) ends.
 const SpeakOnlyWait = 5 * time.Second
 
+// speakOnlyNote follows a notice Pixie says with the mic off, so it doesn't ask a follow-up
+// nobody can answer ("Anything else?") (#436).
+const speakOnlyNote = "\n(The user can't answer right now: say this update, then stop. Don't add a question of your own or offer more help.)"
+
 // NewConversation starts in PhaseIdle.
 func NewConversation(cfg ConversationConfig) *Conversation {
 	hold := cfg.HoldTimeout
@@ -790,7 +794,12 @@ func (c *Conversation) tryInject(now time.Time, fx []Effect) []Effect {
 	c.thinkingSince = now
 	c.turnReplySeen = false
 	c.said = true
-	fx = append(fx, Effect{Kind: EfInject, Text: n.Text, Sessions: n.Sessions}, pixieFx(StateThinking))
+	text := n.Text
+	if c.speakOnly && !c.asked {
+		// Nobody can answer: Pixie says the update and nothing more (#436).
+		text += speakOnlyNote
+	}
+	fx = append(fx, Effect{Kind: EfInject, Text: text, Sessions: n.Sessions}, pixieFx(StateThinking))
 	if c.speakOnly && c.asked {
 		// It asks you something: listen for the answer (#433).
 		fx = c.startListening(now, fx)

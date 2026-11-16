@@ -3,6 +3,7 @@
 package voice_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -10,7 +11,8 @@ import (
 )
 
 // #433: a conversation opened only to speak says the notice it is given, sends no mic audio,
-// and ends on its own. Run with: go test -tags live -run LiveSpeakOnly/gemini -v ./voice/
+// and ends on its own. #436: it says only the update, with no follow-up nobody can answer.
+// Run with: go test -tags live -run LiveSpeakOnly/gemini -v ./voice/
 func TestLiveSpeakOnly(t *testing.T) {
 	secrets := liveSecrets(t)
 	for _, p := range liveProviders() {
@@ -20,7 +22,8 @@ func TestLiveSpeakOnly(t *testing.T) {
 				t.Skipf("no %s found in the environment or the app's .env files", v)
 			}
 			cfg := p.cfg
-			cfg.Instructions = liveInstructions + " When told about an update, say it to the user in one short sentence."
+			cfg.Instructions = liveInstructions + " When told about an update, say it to the user in one short sentence." +
+				` End with "Anything else?" only if the user probably wants more: the update offers a choice or a next step.`
 			r := newLiveRig(t, p.model(&liveWireLog{}, t), cfg, secrets)
 			if !r.rt.OpenToSpeak() {
 				t.Fatal("refused at rest")
@@ -29,7 +32,7 @@ func TestLiveSpeakOnly(t *testing.T) {
 				return
 			}
 			r.waitFor("open", 2*time.Second, r.rt.IsOpen)
-			r.rt.Inject(voice.Notice{Text: "Coordinator replies while you were away:\n- Coordinator reply: The build passed and all 212 tests are green."})
+			r.rt.Inject(voice.Notice{Text: "Coordinator replies while you were away:\n- Coordinator reply: The build passed and all 212 tests are green. It can deploy to staging next if you want."})
 			r.waitFor("the notice said", 20*time.Second, func() bool { return r.playedMs() > 500 && r.liveSpy.assistant() != "" })
 			r.waitFor("it ends on its own", 20*time.Second, func() bool { return !r.rt.IsOpen() })
 			r.liveSpy.mu.Lock()
@@ -37,6 +40,9 @@ func TestLiveSpeakOnly(t *testing.T) {
 			r.liveSpy.mu.Unlock()
 			if sent != 0 {
 				t.Errorf("sent %d mic frames", sent)
+			}
+			if said := r.liveSpy.assistant(); strings.HasSuffix(strings.TrimSpace(said), "?") {
+				t.Errorf("asked a follow-up nobody can answer: %q", said)
 			}
 			t.Logf("%s played=%d ms", r.liveSpy.summary(), r.playedMs())
 		})

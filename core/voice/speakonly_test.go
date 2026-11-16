@@ -39,7 +39,7 @@ func TestSpeakOnlyOpensWithNoMicAndNoChime(t *testing.T) {
 func TestSpeakOnlySaysItsNoticesThenEnds(t *testing.T) {
 	c := openedToSpeak(t)
 	fx := c.Step(InjectInput(notice("Coordinator reply: the build passed.")), ms(t0(), 30))
-	eq(t, fx, injectFx("Coordinator reply: the build passed."), pixie(StateThinking))
+	eq(t, fx, injectFx("Coordinator reply: the build passed."+speakOnlyNote), pixie(StateThinking))
 	sayIt(t, c, ms(t0(), 40))
 	eq(t, tick(c, true, ms(t0(), 100)),
 		ef(EfStopMic), ef(EfClose), pixie(StateIdle), closed()) // no end chime
@@ -65,7 +65,7 @@ func TestSpeakOnlySaysEveryNoticeBeforeEnding(t *testing.T) {
 	c.Step(InjectInput(notice("Coordinator reply: one.")), ms(t0(), 30))
 	c.Step(InjectInput(notice("Coordinator progress: editing two.go")), ms(t0(), 35))
 	fx := sayIt(t, c, ms(t0(), 40))
-	if !contains(fx, injectFx("Coordinator progress: editing two.go")) || hasKind(fx, EfClose) {
+	if !contains(fx, injectFx("Coordinator progress: editing two.go"+speakOnlyNote)) || hasKind(fx, EfClose) {
 		t.Fatalf("second notice: %+v", fx)
 	}
 	sayIt(t, c, ms(t0(), 110))
@@ -234,5 +234,27 @@ func TestSpeakOnlyIgnoresAShortSilenceTimeout(t *testing.T) {
 	model(c, evReady, ms(t0(), 20))
 	if fx := tick(c, true, ms(t0(), 3000)); hasKind(fx, EfClose) {
 		t.Fatalf("ended on silence before its notices came: %+v", fx)
+	}
+}
+
+// #436: nobody can answer, so Pixie is told to say the update and nothing more; a question it
+// listens after, and a usual conversation, are given the notice as it is.
+func TestSpeakOnlyTellsPixieToSayOnlyTheUpdate(t *testing.T) {
+	c := openedToSpeak(t)
+	fx := c.Step(InjectInput(notice("Session update: orchard finished its turn.")), ms(t0(), 30))
+	if !contains(fx, injectFx("Session update: orchard finished its turn."+speakOnlyNote)) {
+		t.Fatalf("speak-only notice: %+v", fx)
+	}
+
+	q := "Coordinator question: deploy now or wait?"
+	if fx := openedToSpeak(t).Step(InjectInput(notice(q)), ms(t0(), 30)); !contains(fx, injectFx(q)) {
+		t.Fatalf("a question: %+v", fx)
+	}
+
+	// After the hotkey the mic is on: the next notice is a usual one.
+	c = openedToSpeak(t)
+	c.Step(HotkeyInput(), ms(t0(), 30))
+	if fx := c.Step(InjectInput(notice("Coordinator reply: done.")), ms(t0(), 40)); !contains(fx, injectFx("Coordinator reply: done.")) {
+		t.Fatalf("after the hotkey: %+v", fx)
 	}
 }
