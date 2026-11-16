@@ -12,8 +12,9 @@ type reask struct {
 	// said: it reached a conversation (injected, not bounced back unsaid); heard: you said
 	// something after it there; due: that conversation closed first; again: said again once.
 	said, heard, due, again bool
-	// mute: the conversation open now was opened only to speak (agent.speakUpdatesOnly), so you
-	// can't answer there: saying it again there doesn't use up the once (#443).
+	// mute: the conversation open now was opened only to speak, with the mic off even for a
+	// question (agent.listenAfterUpdates "never"), so you can't answer there: saying it again
+	// there doesn't use up the once (#443).
 	mute bool
 }
 

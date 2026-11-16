@@ -114,9 +114,10 @@ func HoldOpenInput(on bool) Input       { return Input{Kind: InHoldOpen, Hold: o
 func MicLiveInput() Input               { return Input{Kind: InMicLive} }
 func OpenInput() Input                  { return Input{Kind: InOpen} }
 
-// OpenToSpeakInput: open a conversation only to say what's waiting (agent.speakUpdatesOnly,
-// #433). The mic stays off and it ends once Pixie has said its notices, a question too (#443),
-// unless you press the hotkey: then the mic comes on and it goes on as usual.
+// OpenToSpeakInput: open a conversation only to say what's waiting (agent.listenAfterUpdates,
+// #433). The mic stays off and it ends once Pixie has said its notices, unless you press the
+// hotkey, or one asks you something and SpeakListens is on: then the mic comes on and it goes
+// on as usual. With SpeakListens off a question is said with the mic off too (#443).
 func OpenToSpeakInput() Input { return Input{Kind: InOpenToSpeak} }
 
 // WithdrawHeldInput: session has its messages numbered up to upTo (0: all of them, a pix too
@@ -202,6 +203,9 @@ type ConversationConfig struct {
 	// ClientDelegation: the provider hands turns to the app without a task (SessionConfig.
 	// ClientDelegation; #70). Its ClientDelegationTool calls get the task from the transcript.
 	ClientDelegation bool
+	// SpeakListens: a conversation opened only to speak turns the mic on after a question it
+	// says, to listen for the answer (agent.listenAfterUpdates "questions", #445); false keeps it off (#443).
+	SpeakListens bool
 }
 
 // DefaultConversationConfig: 7 s idle, 180 s hold-open.
@@ -284,8 +288,10 @@ type Conversation struct {
 	// speakOnly: opened only to say what's waiting (InOpenToSpeak, #433): no mic, and it ends
 	// once nothing is left to say. spokeAt: when it was ready; said: a notice was given to Pixie.
 	speakOnly bool
-	spokeAt   time.Time
-	said      bool
+	// speakListens: ConversationConfig.SpeakListens.
+	speakListens bool
+	spokeAt      time.Time
+	said         bool
 }
 
 // SpeakOnlyWait: a conversation opened to speak that has been given nothing to say by then
@@ -314,6 +320,7 @@ func NewConversation(cfg ConversationConfig) *Conversation {
 		handOff:       cfg.HandOff,
 		checkClaims:   cfg.CheckClaims,
 		claimTools:    cfg.ClaimTools,
+		speakListens:  cfg.SpeakListens,
 
 		clientDelegation: cfg.ClientDelegation,
 		playbackIdle:     true,
@@ -800,21 +807,28 @@ func (c *Conversation) tryInject(now time.Time, fx []Effect) []Effect {
 	c.turnReplySeen = false
 	c.said = true
 	text := n.Text
+	listen := c.speakOnly && asks && c.speakListens
 	switch {
+	case listen:
 	case c.speakOnly && asks: // this notice's own, not one said before it
-		// The mic stays off even for a question: Pixie says it, and you answer later (#443).
+		// With SpeakListens off the mic stays off for a question too: Pixie says it, and you
+		// answer later (#443).
 		text += speakOnlyQuestionNote
 	case c.speakOnly:
 		// Nobody can answer: Pixie says the update and nothing more (#436).
 		text += speakOnlyNote
 	}
 	fx = append(fx, Effect{Kind: EfInject, Text: text, Sessions: n.Sessions}, pixieFx(StateThinking))
+	if listen {
+		// It asks you something: listen for the answer (#433, #445).
+		fx = c.startListening(now, fx)
+	}
 	return fx
 }
 
-// startListening turns a conversation opened only to speak into a usual one when you press the
-// hotkey: the mic comes on (with the start chime), and Pixie listens once it has finished what
-// it is saying (#433).
+// startListening turns a conversation opened only to speak into a usual one, when you press the
+// hotkey or it asks you something (SpeakListens): the mic comes on (with the start chime), and
+// Pixie listens once it has finished what it is saying (#433).
 func (c *Conversation) startListening(now time.Time, fx []Effect) []Effect {
 	c.speakOnly = false
 	if c.phase == PhaseConnecting {

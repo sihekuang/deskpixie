@@ -12,7 +12,8 @@ import (
 
 // #433: a conversation opened only to speak says the notice it is given, sends no mic audio,
 // and ends on its own. #436: it says only the update, with no follow-up nobody can answer.
-// #443: a question too is said with no mic, and it still ends on its own.
+// #443: with agent.listenAfterUpdates "never" (SpeakListens false), a question too is said with
+// no mic, and it still ends on its own.
 // Run with: go test -tags live -run LiveSpeakOnly/gemini -v ./voice/
 func TestLiveSpeakOnly(t *testing.T) {
 	cases := []struct {

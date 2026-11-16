@@ -269,6 +269,20 @@ const (
 	LiveDelegationAgent   = "agent"
 )
 
+// agent.listenAfterUpdates's values (#445).
+const (
+	ListenAlways    = "always"
+	ListenQuestions = "questions"
+	ListenNever     = "never"
+)
+
+// ListenAfterUpdatesChoices are agent.listenAfterUpdates's choices.
+var ListenAfterUpdatesChoices = []Opt{
+	{ListenAlways, "Always", AllPlatforms},
+	{ListenQuestions, "Only after a question", AllPlatforms},
+	{ListenNever, "Never", AllPlatforms},
+}
+
 // LiveDelegations are voice.liveDelegation's choices.
 var LiveDelegations = []Opt{
 	{LiveDelegationBackend, "OpenAI backend model", AllPlatforms},
@@ -484,8 +498,8 @@ var Fields = concat(
 	),
 	group(SectionCoordinator, "Updates",
 		enabledWhen(spec("agent.narration", "Say what the coordinator is doing", "Pixie tells you what the coordinator is up to while it works.", boolKind, ApplyRestart), on("agent.enabled")),
-		enabledWhen(spec("agent.openConversationForUpdates", "Start a conversation for updates", "When a job finishes or fails, or the coordinator asks you something, while you're not talking to Pixie, Pixie starts a conversation to tell you and then listens for your answer.", boolKind, ApplyRestart), on("agent.enabled")),
-		enabledWhen(spec("agent.speakUpdatesOnly", "Announce updates only", "Pixie says the update and doesn't listen for an answer, even to a question. To answer, press the hotkey while it talks, or reply in the chat window.", boolKind, ApplyRestart), on("agent.enabled"), on("agent.openConversationForUpdates")),
+		enabledWhen(spec("agent.openConversationForUpdates", "Start a conversation for updates", "When a job finishes or fails, or the coordinator asks you something, while you're not talking to Pixie, Pixie starts a conversation to tell you.", boolKind, ApplyRestart), on("agent.enabled")),
+		enabledWhen(spec("agent.listenAfterUpdates", "Listen after an update", "Whether Pixie listens for an answer after it says an update: always, only when the update asks you something, or never. Press the hotkey while it talks to answer anyway.", staticChoice(ListenAfterUpdatesChoices), ApplyRestart), on("agent.enabled"), on("agent.openConversationForUpdates")),
 	),
 	group(SectionCoordinator, "Canvas",
 		spec("canvas.autoOpen", "Open new pages", "Show new and changed canvas pages automatically.", boolKind, ApplyLive),
