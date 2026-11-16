@@ -51,6 +51,8 @@ struct SettingsControlView: View {
                         .disabled(!item.enabled)
                     }
                 }
+                // One element carries the field's label, so each checkbox keeps its own name (#435).
+                .accessibilityElement(children: .contain)
             case .text:
                 CommitTextField(model: model, spec: spec, width: 260)
             case .path(let path, let dir, _):
