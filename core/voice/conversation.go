@@ -114,7 +114,7 @@ func HoldOpenInput(on bool) Input       { return Input{Kind: InHoldOpen, Hold: o
 func MicLiveInput() Input               { return Input{Kind: InMicLive} }
 func OpenInput() Input                  { return Input{Kind: InOpen} }
 
-// OpenToSpeakInput: open a conversation only to say what's waiting (agent.speakUpdatesOnly,
+// OpenToSpeakInput: open a conversation only to say what's waiting (agent.listenAfterUpdates,
 // #433). The mic stays off and it ends once Pixie has said its notices, unless you press the
 // hotkey, or one asks you something and SpeakListens is on: then the mic comes on and it goes
 // on as usual. With SpeakListens off a question is said with the mic off too (#443).
@@ -204,7 +204,7 @@ type ConversationConfig struct {
 	// ClientDelegation; #70). Its ClientDelegationTool calls get the task from the transcript.
 	ClientDelegation bool
 	// SpeakListens: a conversation opened only to speak turns the mic on after a question it
-	// says, to listen for the answer (agent.listenAfterQuestion, #445); false keeps it off (#443).
+	// says, to listen for the answer (agent.listenAfterUpdates "questions", #445); false keeps it off (#443).
 	SpeakListens bool
 }
 

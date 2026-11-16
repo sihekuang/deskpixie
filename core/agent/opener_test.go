@@ -310,7 +310,7 @@ func TestARefusedOpenWaitsOutTheClosingConversation(t *testing.T) {
 	}
 }
 
-// #433: with agent.speakUpdatesOnly the open is only to say the update.
+// #433: with agent.listenAfterUpdates the open is only to say the update.
 func TestSpeakUpdatesOnlyOpensOnlyToSpeak(t *testing.T) {
 	for _, speak := range []bool{false, true} {
 		c := ctlWith(func(s *Settings) { s.OpenConversation, s.SpeakUpdatesOnly = true, speak })

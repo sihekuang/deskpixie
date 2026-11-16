@@ -137,28 +137,44 @@ func TestOpenConversationForUpdatesIsOnByDefault(t *testing.T) {
 	}
 }
 
-// #433: Pixie listens after an update by default; a settings.json that turned "just say
-// updates" on keeps it on.
-func TestSpeakUpdatesOnlyIsOffByDefault(t *testing.T) {
-	if Default().Agent.SpeakUpdatesOnly {
-		t.Fatal("speakUpdatesOnly is on by default")
+// #445: Pixie listens after an update by default; a settings.json from before
+// agent.listenAfterUpdates keeps what agent.speakUpdatesOnly (#433) and a test build's
+// agent.listenAfterQuestion said, and a saved agent.listenAfterUpdates wins over both.
+func TestListenAfterUpdates(t *testing.T) {
+	if Default().Agent.ListenAfterUpdates != ListenAlways {
+		t.Fatalf("default %q", Default().Agent.ListenAfterUpdates)
 	}
-	if !parseConfig(t, `{"agent":{"speakUpdatesOnly":true}}`).Agent.SpeakUpdatesOnly {
-		t.Fatal("a saved true was lost")
+	for _, tc := range []struct{ json, want string }{
+		{`{}`, ListenAlways},
+		{`{"agent":{"speakUpdatesOnly":false}}`, ListenAlways},
+		{`{"agent":{"speakUpdatesOnly":true}}`, ListenQuestions},
+		{`{"agent":{"speakUpdatesOnly":true,"listenAfterQuestion":true}}`, ListenQuestions},
+		{`{"agent":{"speakUpdatesOnly":true,"listenAfterQuestion":false}}`, ListenNever},
+		{`{"agent":{"speakUpdatesOnly":false,"listenAfterQuestion":false}}`, ListenAlways},
+		{`{"agent":{"speakUpdatesOnly":true,"listenAfterUpdates":"always"}}`, ListenAlways},
+		{`{"agent":{"listenAfterUpdates":"never"}}`, ListenNever},
+	} {
+		if got := parseConfig(t, tc.json).Agent.ListenAfterUpdates; got != tc.want {
+			t.Errorf("%s: %q, want %q", tc.json, got, tc.want)
+		}
 	}
 }
 
-// #445: Pixie listens after a question by default, a settings.json from before the setting
-// included; a saved false is kept.
-func TestListenAfterQuestionIsOnByDefault(t *testing.T) {
-	if !Default().Agent.ListenAfterQuestion {
-		t.Fatal("listenAfterQuestion is off by default")
-	}
-	if !parseConfig(t, `{"agent":{"speakUpdatesOnly":true}}`).Agent.ListenAfterQuestion {
-		t.Fatal("a settings.json without it doesn't listen after a question")
-	}
-	if parseConfig(t, `{"agent":{"listenAfterQuestion":false}}`).Agent.ListenAfterQuestion {
-		t.Fatal("a saved false was lost")
+// What the agent and the voice loop are told for each choice.
+func TestListenAfterUpdatesFlags(t *testing.T) {
+	for _, tc := range []struct {
+		v                 string
+		speakOnly, listen bool
+	}{
+		{ListenAlways, false, true},
+		{ListenQuestions, true, true},
+		{ListenNever, true, false},
+		{"bogus", false, true}, // as always
+	} {
+		a := AgentSettings{ListenAfterUpdates: tc.v}
+		if a.SpeakUpdatesOnly() != tc.speakOnly || a.ListenAfterQuestion() != tc.listen {
+			t.Errorf("%q: speak only %v, listen after a question %v", tc.v, a.SpeakUpdatesOnly(), a.ListenAfterQuestion())
+		}
 	}
 }
 
@@ -282,10 +298,9 @@ func TestAgentDefaultsMatchTheSpec(t *testing.T) {
 		"enabled": true, "sessionHost": "herdr", "session": "deskpixie", "terminal": "warp",
 		"herdrPath": nil, "tmuxPath": nil, "coordinatorKind": "claude", "coordinatorEffort": "low", "model": nil, "codexModel": nil, "warm": false, "port": float64(48217), "keepPanesOnQuit": true,
 		"holdOpenSecs": float64(180), "permissionTimeoutSecs": float64(120), "notifyPerMinute": float64(4), "narration": true, "openConversationForUpdates": true, "alwaysForceSend": false,
-		"markForcedSends":     true,  // #340
-		"speakUpdatesOnly":    false, // #433
-		"listenAfterQuestion": true,  // #445
-		"editor":              "auto", "projectsRoot": "~/Documents/deskpixie",
+		"markForcedSends":    true,     // #340
+		"listenAfterUpdates": "always", // #445
+		"editor":             "auto", "projectsRoot": "~/Documents/deskpixie",
 		"workers": map[string]any{"enabled": false, "max": float64(4), "kinds": []any{"claude", "codex"}, "speakResults": false},
 	}
 	if !reflect.DeepEqual(j["agent"], want) {

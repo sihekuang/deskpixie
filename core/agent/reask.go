@@ -13,7 +13,7 @@ type reask struct {
 	// something after it there; due: that conversation closed first; again: said again once.
 	said, heard, due, again bool
 	// mute: the conversation open now was opened only to speak, with the mic off even for a
-	// question (agent.listenAfterQuestion off), so you can't answer there: saying it again
+	// question (agent.listenAfterUpdates "never"), so you can't answer there: saying it again
 	// there doesn't use up the once (#443).
 	mute bool
 }

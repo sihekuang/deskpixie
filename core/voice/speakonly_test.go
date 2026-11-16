@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// #433: a conversation opened only to speak (agent.speakUpdatesOnly).
+// #433: a conversation opened only to speak (agent.listenAfterUpdates).
 
 // openedToSpeak is a speak-only conversation, ready at t0+20ms.
 func openedToSpeak(t *testing.T) *Conversation {
@@ -288,7 +288,7 @@ func TestSpeakOnlyAnUpdateAfterAQuestionGetsTheUpdateNote(t *testing.T) {
 	}
 }
 
-// #445: with SpeakListens (agent.listenAfterQuestion, on by default) a question it says turns
+// #445: with SpeakListens (agent.listenAfterUpdates "questions") a question it says turns
 // the mic on to listen for the answer, as before #443.
 
 // openedToSpeakListening is a speak-only conversation that listens after a question.

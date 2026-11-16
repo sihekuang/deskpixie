@@ -348,7 +348,7 @@ func (r *Runtime) Open() bool {
 	return true
 }
 
-// OpenToSpeak starts a conversation only to say what's waiting (agent.speakUpdatesOnly, #433),
+// OpenToSpeak starts a conversation only to say what's waiting (agent.listenAfterUpdates, #433),
 // with no mic. Like Open it refuses when the mic is unusable: the hotkey, or a question it says
 // (SpeakListens), turns the mic on, and an answer said into a mic that fails would be lost (the
 // update stays in the bubble instead). False while Pixie is not at rest or after Close.

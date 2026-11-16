@@ -174,13 +174,11 @@ type AgentSettings struct {
 	// worker report that comes while no conversation is open makes Pixie open one and say it
 	// (on by default, #366).
 	OpenConversationForUpdates bool `json:"openConversationForUpdates"`
-	// SpeakUpdatesOnly: the conversation OpenConversationForUpdates opens only says the update,
-	// with no mic, unless it asks you something and ListenAfterQuestion is on (off by default,
-	// #433).
-	SpeakUpdatesOnly bool `json:"speakUpdatesOnly"`
-	// ListenAfterQuestion: with SpeakUpdatesOnly, an update that asks you something turns the
-	// mic on to listen for your answer; off, the mic stays off for it too (on by default, #445).
-	ListenAfterQuestion bool `json:"listenAfterQuestion"`
+	// ListenAfterUpdates: whether the conversation OpenConversationForUpdates opens listens
+	// after Pixie says the update: ListenAlways (the default), ListenQuestions (#433: the mic
+	// stays off unless the update asks you something) or ListenNever (#443) (#445). It replaces
+	// speakUpdatesOnly, which ParseConfig reads from an older settings.json.
+	ListenAfterUpdates string `json:"listenAfterUpdates"`
 	// AlwaysForceSend (#205): every message Pixie passes to a session you started with pix
 	// goes in at once, as message_session's force would send it (off by default).
 	AlwaysForceSend bool `json:"alwaysForceSend"`
@@ -231,7 +229,7 @@ func Default() Config {
 			Port: 48217, HoldOpenSecs: 180, PermissionTimeoutSecs: 120, NotifyPerMinute: 4, Editor: richtext.EditorAuto,
 			Narration: true, ProjectsRoot: "~/Documents/deskpixie", MarkForcedSends: true,
 			OpenConversationForUpdates: true,
-			ListenAfterQuestion:        true,
+			ListenAfterUpdates:         ListenAlways,
 			// Handed-off work keeps running when the app quits; the next start adopts it.
 			KeepPanesOnQuit: true,
 			Workers:         WorkerSettings{Max: 4, Kinds: []string{"claude", "codex"}},
@@ -384,7 +382,37 @@ func ParseConfig(b []byte) (Config, error) {
 	if err := json.Unmarshal(b, &c); err != nil {
 		return Default(), withLine(b, err)
 	}
+	migrateListenAfterUpdates(b, &c)
 	return c, nil
+}
+
+// SpeakUpdatesOnly: the conversation an update opens only says it, with no mic, unless the
+// update asks you something and ListenAfterQuestion (#433).
+func (a AgentSettings) SpeakUpdatesOnly() bool {
+	return a.ListenAfterUpdates == ListenQuestions || a.ListenAfterUpdates == ListenNever
+}
+
+// ListenAfterQuestion: with SpeakUpdatesOnly, an update that asks you something turns the mic
+// on to listen for your answer; false keeps it off for that too (#443).
+func (a AgentSettings) ListenAfterQuestion() bool { return a.ListenAfterUpdates != ListenNever }
+
+// migrateListenAfterUpdates: a settings.json from before agent.listenAfterUpdates (#445) keeps
+// what its agent.speakUpdatesOnly (#433) and agent.listenAfterQuestion (a test build's) said.
+func migrateListenAfterUpdates(b []byte, c *Config) {
+	var old struct {
+		Agent struct {
+			ListenAfterUpdates  *string `json:"listenAfterUpdates"`
+			SpeakUpdatesOnly    bool    `json:"speakUpdatesOnly"`
+			ListenAfterQuestion *bool   `json:"listenAfterQuestion"`
+		} `json:"agent"`
+	}
+	if json.Unmarshal(b, &old) != nil || old.Agent.ListenAfterUpdates != nil || !old.Agent.SpeakUpdatesOnly {
+		return
+	}
+	c.Agent.ListenAfterUpdates = ListenQuestions
+	if q := old.Agent.ListenAfterQuestion; q != nil && !*q {
+		c.Agent.ListenAfterUpdates = ListenNever
+	}
 }
 
 // withLine adds "at line L column C" to a syntax error, as serde_json's messages have.

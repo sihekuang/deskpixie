@@ -99,13 +99,9 @@ func TestEnabledWhenNamesASwitchOnTheSamePage(t *testing.T) {
 		t.Fatal("no field depends on a switch")
 	}
 	// Under a switch that's off: the workers' settings, the coordinator's.
-	// #433: "just say updates" only means something while updates start a conversation.
-	if !slices.ContainsFunc(FieldByPath("agent.speakUpdatesOnly").EnabledWhen, func(c Condition) bool { return c.Key == "agent.openConversationForUpdates" }) {
-		t.Fatal("agent.speakUpdatesOnly isn't under agent.openConversationForUpdates")
-	}
-	// #445: "listen after a question" only means something while updates are only announced.
-	if !slices.ContainsFunc(FieldByPath("agent.listenAfterQuestion").EnabledWhen, func(c Condition) bool { return c.Key == "agent.speakUpdatesOnly" }) {
-		t.Fatal("agent.listenAfterQuestion isn't under agent.speakUpdatesOnly")
+	// #445: listening after an update only means something while updates start a conversation.
+	if !slices.ContainsFunc(FieldByPath("agent.listenAfterUpdates").EnabledWhen, func(c Condition) bool { return c.Key == "agent.openConversationForUpdates" }) {
+		t.Fatal("agent.listenAfterUpdates isn't under agent.openConversationForUpdates")
 	}
 	for _, p := range []string{"agent.workers.max", "agent.projectsRoot", "agent.coordinatorKind", "notifications.bubble.popSecs", "voice.noiseModel"} {
 		if len(FieldByPath(p).EnabledWhen) == 0 {

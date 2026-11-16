@@ -154,7 +154,7 @@ func TestAQuestionThatBouncedIsSaidOnceInTheNext(t *testing.T) {
 	}
 }
 
-// #443: with agent.speakUpdatesOnly the mic stays off for a question, so a conversation opened
+// #443: with agent.listenAfterUpdates the mic stays off for a question, so a conversation opened
 // only to speak says it again without using up the once: the next one you can answer in still
 // says it, and your answer goes to it.
 func TestAQuestionSaidWithTheMicOffIsStillSaidAgainOnceYouCanAnswer(t *testing.T) {
@@ -203,7 +203,7 @@ func TestAQuestionSaidAgainWithTheMicOnIsSaidOnlyOnce(t *testing.T) {
 	}
 }
 
-// #445: with agent.listenAfterQuestion on, a question said where Pixie opened only to speak
+// #445: with agent.listenAfterUpdates "questions", a question said where Pixie opened only to speak
 // turned the mic on, so you could answer there: it is said again once, as without the setting.
 func TestAQuestionSaidWhereYouCouldAnswerIsSaidAgainOnlyOnce(t *testing.T) {
 	c := ctlWith(func(s *Settings) { s.OpenConversation, s.SpeakUpdatesOnly, s.ListenAfterQuestion = true, true, true })

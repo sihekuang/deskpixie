@@ -9,9 +9,9 @@ import "github.com/sihekuang/deskpixie/core/voice"
 // progress reply (status working) opens none, so it gets no chime or notification either (#113):
 // it waits in the outbox and the next conversation says it. An opened conversation replays
 // the outbox (each line once, marked delivered), so Pixie says the update and then listens;
-// it ends on the usual silence timeout. With agent.speakUpdatesOnly (#433) it is opened only to
-// speak: no mic, and it ends once said, unless an update asks you something and
-// agent.listenAfterQuestion is on (#445).
+// it ends on the usual silence timeout. With agent.listenAfterUpdates "questions" or "never"
+// (#433, #445) it is opened only to speak: no mic, and it ends once said, unless an update
+// asks you something and it is "questions".
 //
 // Worker reports are debounced first (debounce.go): held per job until quiet, deduped and
 // coalesced, so a burst of reports is one line and that one line is what opens a
@@ -36,7 +36,7 @@ type opener struct {
 	waiting optMs
 	// retry: an update is waiting in the outbox for an open that was refused or capped.
 	retry bool
-	// speak: the open waiting was asked for only to speak (agent.speakUpdatesOnly, #433).
+	// speak: the open waiting was asked for only to speak (agent.listenAfterUpdates, #433).
 	speak bool
 }
 

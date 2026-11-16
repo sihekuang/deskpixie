@@ -131,7 +131,7 @@ type VoiceLink interface {
 }
 
 // SpeakOpener is a VoiceLink that can open a conversation only to say what's waiting, with no
-// mic (agent.speakUpdatesOnly, #433); like Open, false if it did nothing.
+// mic (agent.listenAfterUpdates, #433); like Open, false if it did nothing.
 type SpeakOpener interface {
 	OpenToSpeak() bool
 }
