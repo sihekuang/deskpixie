@@ -268,7 +268,8 @@ private final class WindowObservers {
 }
 
 /// One tab, as a grouped form: the file-error banner, a section of name / note / control rows
-/// per group (the extra rows among them), the warning (or notice) line and the Restart bar.
+/// per group (the extra rows among them) and the warning (or notice) line, under the Restart bar
+/// pinned at the top.
 struct SettingsTabView: View {
     let model: SettingsModel
     /// The pix command row (#89); the login shell's PATH is read once, when Settings opens.
@@ -317,14 +318,18 @@ struct SettingsTabView: View {
                         .accessibilityAddTraits(.isStaticText)
                 }
             }
-            if let restart = model.restartText {
-                Section {
-                    SettingsStrip(symbol: nil, text: restart, buttonTitle: "Restart",
-                                  buttonHelp: "Restarts DeskPixie to apply the changes.") { model.restart() }
-                }
-            }
         }
         .formStyle(.grouped)
+        // Pinned above the page, out of the scrolling list, so a change that waits for a restart
+        // isn't missed (#440).
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if let changed = model.restartText {
+                RestartBar(changed: changed) { model.restart() }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 8)
+                    .padding(.bottom, 4)
+            }
+        }
         .alert(CoordinatorRestart.title, isPresented: $confirmRestart) {
             Button(CoordinatorRestart.confirm, role: .destructive) { model.restartCoordinator() }
             Button("Cancel", role: .cancel) {}
@@ -347,6 +352,9 @@ struct SettingsTabView: View {
                 }
             }
             .disabled(!canChange)
+            // A switch that's on keeps its accent color when disabled; grey it so it reads as off
+            // limits (#440).
+            .tint(canChange ? nil : .gray)
         } note: {
             VStack(alignment: .leading, spacing: 2) {
                 if let off = model.disabledNote(field) {
@@ -354,8 +362,9 @@ struct SettingsTabView: View {
                 }
                 NoteText(text: spec.note.text, isError: spec.note.isError)
             }
-            .opacity(canChange ? 1 : 0.6)
         }
+        // The whole row fades while its switch is off: name, note and control (#440).
+        .opacity(canChange ? 1 : 0.4)
         if field.path == SettingsModel.projectsRootPath, canChange, let folder = model.projectsFolder {
             projectsFolderRow(folder)
         }

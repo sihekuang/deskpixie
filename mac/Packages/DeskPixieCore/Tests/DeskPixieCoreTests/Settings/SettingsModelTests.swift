@@ -326,7 +326,7 @@ final class SettingsModelTests: XCTestCase {
         XCTAssertFalse(model.enabled, "a broken file disables the controls")
         XCTAssertEqual(model.bannerText, "settings.json has a syntax error; fix it or reset it (line 3)")
         XCTAssertEqual(model.noticeText, "Size couldn't be applied now (x); it applies after a restart.")
-        XCTAssertEqual(model.restartText, "Restart to apply: Voice service, Model")
+        XCTAssertEqual(model.restartText, "Changed: Voice service, Model")
         XCTAssertEqual(model.secretText(.openAI), "Found")
         XCTAssertEqual(model.secretText(.gemini), "Missing")
     }

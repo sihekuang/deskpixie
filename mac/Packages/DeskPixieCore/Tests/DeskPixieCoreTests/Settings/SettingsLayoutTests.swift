@@ -281,7 +281,7 @@ final class SettingsLayoutTests: XCTestCase {
         let fields = SettingsFixture.fields
         XCTAssertNil(L.restartText([], fields: fields))
         XCTAssertEqual(L.restartText(["voice.provider", "voice.model"], fields: fields),
-                       "Restart to apply: Voice service, Model")
+                       "Changed: Voice service, Model")
         XCTAssertEqual(L.saveNotice("disk full"), "Couldn't save settings: disk full")
     }
 
