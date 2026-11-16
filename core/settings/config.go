@@ -175,8 +175,12 @@ type AgentSettings struct {
 	// (on by default, #366).
 	OpenConversationForUpdates bool `json:"openConversationForUpdates"`
 	// SpeakUpdatesOnly: the conversation OpenConversationForUpdates opens only says the update,
-	// with no mic, even when it asks you something (off by default, #433, #443).
+	// with no mic, unless it asks you something and ListenAfterQuestion is on (off by default,
+	// #433).
 	SpeakUpdatesOnly bool `json:"speakUpdatesOnly"`
+	// ListenAfterQuestion: with SpeakUpdatesOnly, an update that asks you something turns the
+	// mic on to listen for your answer; off, the mic stays off for it too (on by default, #445).
+	ListenAfterQuestion bool `json:"listenAfterQuestion"`
 	// AlwaysForceSend (#205): every message Pixie passes to a session you started with pix
 	// goes in at once, as message_session's force would send it (off by default).
 	AlwaysForceSend bool `json:"alwaysForceSend"`
@@ -227,6 +231,7 @@ func Default() Config {
 			Port: 48217, HoldOpenSecs: 180, PermissionTimeoutSecs: 120, NotifyPerMinute: 4, Editor: richtext.EditorAuto,
 			Narration: true, ProjectsRoot: "~/Documents/deskpixie", MarkForcedSends: true,
 			OpenConversationForUpdates: true,
+			ListenAfterQuestion:        true,
 			// Handed-off work keeps running when the app quits; the next start adopts it.
 			KeepPanesOnQuit: true,
 			Workers:         WorkerSettings{Max: 4, Kinds: []string{"claude", "codex"}},

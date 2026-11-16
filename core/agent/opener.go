@@ -10,7 +10,8 @@ import "github.com/sihekuang/deskpixie/core/voice"
 // it waits in the outbox and the next conversation says it. An opened conversation replays
 // the outbox (each line once, marked delivered), so Pixie says the update and then listens;
 // it ends on the usual silence timeout. With agent.speakUpdatesOnly (#433) it is opened only to
-// speak: no mic, and it ends once said, even when an update asks you something (#443).
+// speak: no mic, and it ends once said, unless an update asks you something and
+// agent.listenAfterQuestion is on (#445).
 //
 // Worker reports are debounced first (debounce.go): held per job until quiet, deduped and
 // coalesced, so a burst of reports is one line and that one line is what opens a
@@ -129,8 +130,9 @@ func (c *AgentController) openerSaw(kind voice.SignalKind, now Millis, fx *[]Eff
 	switch {
 	case kind == voice.SigOpened:
 		o.retry = false
-		// The open asked for only to speak: you can't answer a question said there (#443).
-		c.reask.mute = o.waiting.set && o.speak
+		// The open asked for only to speak, with the mic off for a question too: you can't
+		// answer a question said there (#443).
+		c.reask.mute = o.waiting.set && o.speak && !c.settings.ListenAfterQuestion
 		c.dropHeldCards()
 	case o.waiting.set:
 		o.retry = false

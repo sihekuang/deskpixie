@@ -103,6 +103,10 @@ func TestEnabledWhenNamesASwitchOnTheSamePage(t *testing.T) {
 	if !slices.ContainsFunc(FieldByPath("agent.speakUpdatesOnly").EnabledWhen, func(c Condition) bool { return c.Key == "agent.openConversationForUpdates" }) {
 		t.Fatal("agent.speakUpdatesOnly isn't under agent.openConversationForUpdates")
 	}
+	// #445: "listen after a question" only means something while updates are only announced.
+	if !slices.ContainsFunc(FieldByPath("agent.listenAfterQuestion").EnabledWhen, func(c Condition) bool { return c.Key == "agent.speakUpdatesOnly" }) {
+		t.Fatal("agent.listenAfterQuestion isn't under agent.speakUpdatesOnly")
+	}
 	for _, p := range []string{"agent.workers.max", "agent.projectsRoot", "agent.coordinatorKind", "notifications.bubble.popSecs", "voice.noiseModel"} {
 		if len(FieldByPath(p).EnabledWhen) == 0 {
 			t.Fatal(p)

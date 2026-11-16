@@ -148,6 +148,20 @@ func TestSpeakUpdatesOnlyIsOffByDefault(t *testing.T) {
 	}
 }
 
+// #445: Pixie listens after a question by default, a settings.json from before the setting
+// included; a saved false is kept.
+func TestListenAfterQuestionIsOnByDefault(t *testing.T) {
+	if !Default().Agent.ListenAfterQuestion {
+		t.Fatal("listenAfterQuestion is off by default")
+	}
+	if !parseConfig(t, `{"agent":{"speakUpdatesOnly":true}}`).Agent.ListenAfterQuestion {
+		t.Fatal("a settings.json without it doesn't listen after a question")
+	}
+	if parseConfig(t, `{"agent":{"listenAfterQuestion":false}}`).Agent.ListenAfterQuestion {
+		t.Fatal("a saved false was lost")
+	}
+}
+
 func TestMissingFileGivesDefaultsAndCreatesIt(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "sub", "settings.json")
 	if !Load(p).Equal(Default()) {
@@ -268,9 +282,10 @@ func TestAgentDefaultsMatchTheSpec(t *testing.T) {
 		"enabled": true, "sessionHost": "herdr", "session": "deskpixie", "terminal": "warp",
 		"herdrPath": nil, "tmuxPath": nil, "coordinatorKind": "claude", "coordinatorEffort": "low", "model": nil, "codexModel": nil, "warm": false, "port": float64(48217), "keepPanesOnQuit": true,
 		"holdOpenSecs": float64(180), "permissionTimeoutSecs": float64(120), "notifyPerMinute": float64(4), "narration": true, "openConversationForUpdates": true, "alwaysForceSend": false,
-		"markForcedSends":  true,  // #340
-		"speakUpdatesOnly": false, // #433
-		"editor":           "auto", "projectsRoot": "~/Documents/deskpixie",
+		"markForcedSends":     true,  // #340
+		"speakUpdatesOnly":    false, // #433
+		"listenAfterQuestion": true,  // #445
+		"editor":              "auto", "projectsRoot": "~/Documents/deskpixie",
 		"workers": map[string]any{"enabled": false, "max": float64(4), "kinds": []any{"claude", "codex"}, "speakResults": false},
 	}
 	if !reflect.DeepEqual(j["agent"], want) {

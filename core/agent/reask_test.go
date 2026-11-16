@@ -202,3 +202,22 @@ func TestAQuestionSaidAgainWithTheMicOnIsSaidOnlyOnce(t *testing.T) {
 		t.Fatalf("said a third time: %q", injectsOf(fx))
 	}
 }
+
+// #445: with agent.listenAfterQuestion on, a question said where Pixie opened only to speak
+// turned the mic on, so you could answer there: it is said again once, as without the setting.
+func TestAQuestionSaidWhereYouCouldAnswerIsSaidAgainOnlyOnce(t *testing.T) {
+	c := ctlWith(func(s *Settings) { s.OpenConversation, s.SpeakUpdatesOnly, s.ListenAfterQuestion = true, true, true })
+	c.Step(CoordinatorUpInput(PaneIdle), T0)
+	askSession(c, storiesAsk, T0+1)
+	c.Step(voiceOpened(), T0+800)
+	c.Step(voiceClosed(), T0+5_000) // you didn't answer
+	delegate(c, 1, "summarise the issues")
+	stop(c, doneStop, T0+70_000)
+	if fx := c.Step(voiceOpened(), T0+70_800); !asksAgain(fx) { // opened to speak; it listens after it
+		t.Fatalf("not said again: %q", injectsOf(fx))
+	}
+	c.Step(voiceClosed(), T0+75_000)
+	if fx := c.Step(voiceOpened(), T0+90_000); asksAgain(fx) {
+		t.Fatalf("said a third time: %q", injectsOf(fx))
+	}
+}

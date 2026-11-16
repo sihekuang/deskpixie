@@ -287,3 +287,50 @@ func TestSpeakOnlyAnUpdateAfterAQuestionGetsTheUpdateNote(t *testing.T) {
 		t.Fatalf("the update after a question: %+v", fx)
 	}
 }
+
+// #445: with SpeakListens (agent.listenAfterQuestion, on by default) a question it says turns
+// the mic on to listen for the answer, as before #443.
+
+// openedToSpeakListening is a speak-only conversation that listens after a question.
+func openedToSpeakListening(t *testing.T) *Conversation {
+	t.Helper()
+	c := NewConversation(ConversationConfig{IdleTimeout: testTimeout, SpeakListens: true})
+	c.Step(OpenToSpeakInput(), t0())
+	eq(t, model(c, evReady, ms(t0(), 20)),
+		ef(EfStatus), pixie(StateIdle), signalFx(VoiceSignal{Kind: SigOpened}))
+	return c
+}
+
+func TestSpeakListensAfterAQuestion(t *testing.T) {
+	c := openedToSpeakListening(t)
+	q := "Coordinator question: deploy now or wait?"
+	eq(t, c.Step(InjectInput(notice(q)), ms(t0(), 30)), injectFx(q), pixie(StateThinking), chime(ChimeStart), ef(EfStartMic))
+	sayIt(t, c, ms(t0(), 40))
+	c.Step(MicLiveInput(), ms(t0(), 80))
+	// A usual conversation now: it waits for the answer, then ends on silence with the chime.
+	if fx := tick(c, true, ms(t0(), 1000)); hasKind(fx, EfClose) {
+		t.Fatalf("ended without waiting for the answer: %+v", fx)
+	}
+	if fx := tick(c, true, ms(t0(), 80+int64(QuestionListenMin/time.Millisecond))); !contains(fx, chime(ChimeEnd)) {
+		t.Fatalf("silence end: %+v", fx)
+	}
+}
+
+func TestSpeakListensAfterAConfirmWord(t *testing.T) {
+	c := openedToSpeakListening(t)
+	n := "Coordinator wants to run rm -rf build. Say confirm hawk."
+	if fx := c.Step(InjectInput(notice(n)), ms(t0(), 30)); !hasKind(fx, EfStartMic) || !contains(fx, injectFx(n)) {
+		t.Fatalf("mic not started for a confirm word: %+v", fx)
+	}
+}
+
+// A plain update is still only said, with the update note, and it ends once said.
+func TestSpeakListensSaysAPlainUpdateOnly(t *testing.T) {
+	c := openedToSpeakListening(t)
+	fx := c.Step(InjectInput(notice("Coordinator reply: the build passed.")), ms(t0(), 30))
+	eq(t, fx, injectFx("Coordinator reply: the build passed."+speakOnlyNote), pixie(StateThinking))
+	sayIt(t, c, ms(t0(), 40))
+	if fx := tick(c, true, ms(t0(), 100)); !hasKind(fx, EfClose) || contains(fx, chime(ChimeEnd)) {
+		t.Fatalf("didn't end once said: %+v", fx)
+	}
+}

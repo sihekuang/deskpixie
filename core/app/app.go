@@ -328,7 +328,7 @@ func (a *App) buildVoice(cfg settings.Config) {
 		Chimes:       cfg.Voice.Chimes,
 		RecordDir:    a.recordDir,
 		MouthLevels:  MouthLevels(levels, ok),
-		Conversation: voice.ConversationConfig{IdleTimeout: idle, HoldTimeout: hold, HandOff: cfg.Voice.HandOffWhenUnsure, CheckClaims: cfg.Voice.CheckClaims},
+		Conversation: voice.ConversationConfig{IdleTimeout: idle, HoldTimeout: hold, HandOff: cfg.Voice.HandOffWhenUnsure, CheckClaims: cfg.Voice.CheckClaims, SpeakListens: cfg.Agent.ListenAfterQuestion},
 		OnMicSent:    a.deps.OnMicSent,
 		Log:          voice.NewVoiceLog(voice.VoiceLogPath(a.paths.AppSupport), a.LogMaxBytes),
 	}, a.onVoiceEvent)
