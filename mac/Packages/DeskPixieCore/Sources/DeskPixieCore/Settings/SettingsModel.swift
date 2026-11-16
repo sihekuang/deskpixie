@@ -23,7 +23,7 @@ public final class SettingsModel {
     public private(set) var drafts: [String: String] = [:]
     /// path → text typed but not yet committed (text and number fields).
     public private(set) var editing: [String: String] = [:]
-    /// A failed save or action; shown above the Restart bar, ahead of the snapshot's warning.
+    /// A failed save or action; shown at the end of the page, ahead of the snapshot's warning.
     public private(set) var notice: String?
     /// The hotkey field being recorded, if any.
     public var recordingPath: String?

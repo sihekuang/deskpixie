@@ -268,7 +268,8 @@ private final class WindowObservers {
 }
 
 /// One tab, as a grouped form: the file-error banner, a section of name / note / control rows
-/// per group (the extra rows among them), the warning (or notice) line and the Restart bar.
+/// per group (the extra rows among them) and the warning (or notice) line, under the Restart bar
+/// pinned at the top.
 struct SettingsTabView: View {
     let model: SettingsModel
     /// The pix command row (#89); the login shell's PATH is read once, when Settings opens.
@@ -278,8 +279,33 @@ struct SettingsTabView: View {
     let section: SettingsSection
     /// The row a search or Pixie pointed out (a field path or an extra's `path`).
     var highlighted: String? = nil
+    /// The Restart bar's height as laid out, kept clear at the top of the list.
+    @State private var restartBarHeight: CGFloat = 0
 
     var body: some View {
+        // The Restart bar floats over the top of the page, out of the scrolling list, so a change
+        // that waits for a restart isn't missed (#440). An overlay, so it never resizes the page
+        // (in a stack, or as a safe-area inset, the form grew past the window); the list leaves
+        // room for it at the top, as tall as the bar is.
+        form
+            .contentMargins(.top, model.restartText == nil ? 0 : restartBarHeight, for: .scrollContent)
+            .overlay(alignment: .top) {
+                if let changed = model.restartText {
+                    RestartBar(changed: changed) { model.restart() }
+                        .padding(.horizontal, 20)
+                        .padding(.top, 8)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { restartBarHeight = $0 }
+                }
+            }
+        .alert(CoordinatorRestart.title, isPresented: $confirmRestart) {
+            Button(CoordinatorRestart.confirm, role: .destructive) { model.restartCoordinator() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(CoordinatorRestart.message)
+        }
+    }
+
+    private var form: some View {
         // Grouped rounded sections, as in System Settings (#393).
         Form {
             if let banner = model.bannerText {
@@ -317,20 +343,8 @@ struct SettingsTabView: View {
                         .accessibilityAddTraits(.isStaticText)
                 }
             }
-            if let restart = model.restartText {
-                Section {
-                    SettingsStrip(symbol: nil, text: restart, buttonTitle: "Restart",
-                                  buttonHelp: "Restarts DeskPixie to apply the changes.") { model.restart() }
-                }
-            }
         }
         .formStyle(.grouped)
-        .alert(CoordinatorRestart.title, isPresented: $confirmRestart) {
-            Button(CoordinatorRestart.confirm, role: .destructive) { model.restartCoordinator() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text(CoordinatorRestart.message)
-        }
     }
 
     /// A setting: its label, its control (and unit), and its note; greyed out while the switch
@@ -339,7 +353,9 @@ struct SettingsTabView: View {
     private func fieldRow(_ field: SettingsField) -> some View {
         let spec = model.spec(field)
         let canChange = model.canChange(field)
-        row(label: spec.label, id: field.path) {
+        // While its switch is off the row fades (#440): its name, control and note, but not the
+        // line saying which switch to turn on, nor a search's highlight.
+        row(label: spec.label, id: field.path, faded: !canChange) {
             HStack(spacing: 6) {
                 SettingsControlView(model: model, spec: spec)
                 if let unit = field.unit {
@@ -347,14 +363,18 @@ struct SettingsTabView: View {
                 }
             }
             .disabled(!canChange)
+            // A switch that's on keeps its accent color when disabled; grey it so it reads as off
+            // limits (#440).
+            .tint(canChange ? nil : .gray)
+            .opacity(canChange ? 1 : 0.4)
         } note: {
             VStack(alignment: .leading, spacing: 2) {
                 if let off = model.disabledNote(field) {
                     NoteText(text: off, isError: false)
                 }
                 NoteText(text: spec.note.text, isError: spec.note.isError)
+                    .opacity(canChange ? 1 : 0.5)
             }
-            .opacity(canChange ? 1 : 0.6)
         }
         if field.path == SettingsModel.projectsRootPath, canChange, let folder = model.projectsFolder {
             projectsFolderRow(folder)
@@ -493,13 +513,16 @@ struct SettingsTabView: View {
     }
 
     /// One setting's row: its name with the note under it, and its control on the right.
-    private func row<Control: View, Note: View>(label: String, id: String, @ViewBuilder control: () -> Control,
+    /// faded: its switch is off, so the name is dimmed (the highlight around it isn't).
+    private func row<Control: View, Note: View>(label: String, id: String, faded: Bool = false,
+                                                @ViewBuilder control: () -> Control,
                                                 @ViewBuilder note: () -> Note) -> some View {
         LabeledContent {
             control()
         } label: {
             VStack(alignment: .leading, spacing: 2) {
                 Text(label)
+                    .foregroundStyle(faded ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.primary))
                     // Pointed out by a search or Pixie: a tint just around the name.
                     .background(
                         RoundedRectangle(cornerRadius: 4, style: .continuous)

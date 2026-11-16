@@ -426,14 +426,18 @@ public enum SettingsLayout {
         "\(fileBroken) (\(fileError))"
     }
 
-    /// "Restart to apply: Voice service, Model", or nil when nothing waits for a restart.
+    /// The Restart bar's headline, pinned above the page while a change waits for a restart (#440).
+    public static let restartTitle = "Restart DeskPixie to apply your changes."
+
+    /// The Restart bar's second line, "Changed: Voice service, Model", or nil when nothing waits
+    /// for a restart.
     public static func restartText(_ pending: [String], fields: [SettingsField]) -> String? {
         guard !pending.isEmpty else { return nil }
         let labels = pending.map { p in fields.first { $0.path == p }?.label ?? p }
-        return "Restart to apply: " + labels.joined(separator: ", ")
+        return "Changed: " + labels.joined(separator: ", ")
     }
 
-    /// A failed save or action, shown above the Restart bar.
+    /// A failed save or action, shown at the end of the page.
     public static func saveNotice(_ message: String) -> String {
         "Couldn't save settings: \(message)"
     }
