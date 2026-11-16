@@ -281,6 +281,28 @@ struct SettingsTabView: View {
     var highlighted: String? = nil
 
     var body: some View {
+        // The Restart bar floats over the top of the page, out of the scrolling list, so a change
+        // that waits for a restart isn't missed (#440). An overlay, so it never resizes the page
+        // (in a stack, or as a safe-area inset, the form grew past the window); the list leaves
+        // room for it at the top.
+        form
+            .contentMargins(.top, model.restartText == nil ? 0 : RestartBar.reservedHeight, for: .scrollContent)
+            .overlay(alignment: .top) {
+                if let changed = model.restartText {
+                    RestartBar(changed: changed) { model.restart() }
+                        .padding(.horizontal, 20)
+                        .padding(.top, 8)
+                }
+            }
+        .alert(CoordinatorRestart.title, isPresented: $confirmRestart) {
+            Button(CoordinatorRestart.confirm, role: .destructive) { model.restartCoordinator() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(CoordinatorRestart.message)
+        }
+    }
+
+    private var form: some View {
         // Grouped rounded sections, as in System Settings (#393).
         Form {
             if let banner = model.bannerText {
@@ -320,22 +342,6 @@ struct SettingsTabView: View {
             }
         }
         .formStyle(.grouped)
-        // Pinned above the page, out of the scrolling list, so a change that waits for a restart
-        // isn't missed (#440).
-        .safeAreaInset(edge: .top, spacing: 0) {
-            if let changed = model.restartText {
-                RestartBar(changed: changed) { model.restart() }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 8)
-                    .padding(.bottom, 4)
-            }
-        }
-        .alert(CoordinatorRestart.title, isPresented: $confirmRestart) {
-            Button(CoordinatorRestart.confirm, role: .destructive) { model.restartCoordinator() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text(CoordinatorRestart.message)
-        }
     }
 
     /// A setting: its label, its control (and unit), and its note; greyed out while the switch

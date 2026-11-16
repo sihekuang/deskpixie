@@ -49,6 +49,9 @@ struct NoteText: View {
 /// The bar pinned above a Settings page while a change waits for a restart (#440): what to do,
 /// what changed, and a prominent Restart Now.
 struct RestartBar: View {
+    /// Room the page leaves at its top for the bar floating over it.
+    static let reservedHeight: CGFloat = 64
+
     let changed: String
     let restart: () -> Void
 
