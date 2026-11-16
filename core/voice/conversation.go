@@ -811,7 +811,8 @@ func (c *Conversation) tryInject(now time.Time, fx []Effect) []Effect {
 	switch {
 	case listen:
 	case c.speakOnly && asks: // this notice's own, not one said before it
-		// The mic stays off even for a question: Pixie says it, and you answer later (#443).
+		// With SpeakListens off the mic stays off for a question too: Pixie says it, and you
+		// answer later (#443).
 		text += speakOnlyQuestionNote
 	case c.speakOnly:
 		// Nobody can answer: Pixie says the update and nothing more (#436).

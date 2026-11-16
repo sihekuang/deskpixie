@@ -334,3 +334,19 @@ func TestSpeakListensSaysAPlainUpdateOnly(t *testing.T) {
 		t.Fatalf("didn't end once said: %+v", fx)
 	}
 }
+
+// A plain update first, then a question: the update gets its note, the question turns the mic
+// on, and an update after that is a usual one, with no note.
+func TestSpeakListensAnUpdateThenAQuestionThenAnUpdate(t *testing.T) {
+	c := openedToSpeakListening(t)
+	c.Step(InjectInput(notice("Coordinator reply: one.")), ms(t0(), 30))
+	c.Step(InjectInput(notice("Coordinator question: deploy now or wait?")), ms(t0(), 35))
+	c.Step(InjectInput(notice("Coordinator reply: two.")), ms(t0(), 36))
+	fx := sayIt(t, c, ms(t0(), 40))
+	if !contains(fx, injectFx("Coordinator question: deploy now or wait?")) || !hasKind(fx, EfStartMic) {
+		t.Fatalf("the question: %+v", fx)
+	}
+	if fx := sayIt(t, c, ms(t0(), 110)); !contains(fx, injectFx("Coordinator reply: two.")) || hasKind(fx, EfClose) {
+		t.Fatalf("the update after it: %+v", fx)
+	}
+}
