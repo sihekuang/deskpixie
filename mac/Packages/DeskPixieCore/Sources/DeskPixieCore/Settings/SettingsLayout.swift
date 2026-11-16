@@ -437,7 +437,7 @@ public enum SettingsLayout {
         return "Changed: " + labels.joined(separator: ", ")
     }
 
-    /// A failed save or action, shown above the Restart bar.
+    /// A failed save or action, shown at the end of the page.
     public static func saveNotice(_ message: String) -> String {
         "Couldn't save settings: \(message)"
     }

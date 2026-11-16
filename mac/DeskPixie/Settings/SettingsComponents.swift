@@ -44,14 +44,9 @@ struct NoteText: View {
     }
 }
 
-/// A full-width strip with an optional symbol, wrapping text and a trailing button: the
-/// file-error banner and the Restart bar.
 /// The bar pinned above a Settings page while a change waits for a restart (#440): what to do,
-/// what changed, and a prominent Restart Now.
+/// what changed (two lines at most), and a prominent Restart Now.
 struct RestartBar: View {
-    /// Room the page leaves at its top for the bar floating over it.
-    static let reservedHeight: CGFloat = 64
-
     let changed: String
     let restart: () -> Void
 
@@ -66,6 +61,8 @@ struct RestartBar: View {
                     .fontWeight(.semibold)
                 Text(changed)
                     .font(.subheadline)
+                    .lineLimit(2)
+                    .truncationMode(.tail)
                     .foregroundStyle(.secondary)
             }
             .fixedSize(horizontal: false, vertical: true)
@@ -84,6 +81,8 @@ struct RestartBar: View {
     }
 }
 
+/// A full-width strip with an optional symbol, wrapping text and a trailing button: the
+/// file-error banner.
 struct SettingsStrip: View {
     let symbol: String?
     let text: String
