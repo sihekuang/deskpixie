@@ -51,6 +51,8 @@ struct SettingsControlView: View {
                         .disabled(!item.enabled)
                     }
                 }
+                // One element carries the field's label, so each checkbox keeps its own name (#435).
+                .accessibilityElement(children: .contain)
             case .text:
                 CommitTextField(model: model, spec: spec, width: 260)
             case .path(let path, let dir, _):
@@ -106,6 +108,11 @@ private struct PathControl: View {
             Button("Choose…", action: choose)
             Button("Clear") { model.commit(spec.path, .path(nil)) }
         }
+        // One element carries the field's label (SettingsControlView), not each part. Passed
+        // down, it landed on the path's tooltip wrapper too, and on macOS 27.2 an outside
+        // accessibility client reading that wrapper's description sent SwiftUI into endless
+        // recursion, crashing the app (#435). The buttons keep their own names this way.
+        .accessibilityElement(children: .contain)
     }
 
     private func choose() {
