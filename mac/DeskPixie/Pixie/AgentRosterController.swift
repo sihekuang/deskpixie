@@ -37,7 +37,7 @@ final class AgentRosterController {
     /// last drawn.
     private var alwaysCaption = false
     /// captionDismissSecs: the words are put away this long after they were said (0 keeps them).
-    private var dismissSecs = 120
+    private var dismissSecs = 20
     private var hovering = false
     /// Keeps the card up while the pointer is around Pixie and its cards, or a swipe runs (#286).
     private var keeper = HoverKeeper()

@@ -349,6 +349,9 @@ func TestNotificationRanges(t *testing.T) {
 		{"debounce 0", func(c *Config, n uint64) { c.Notifications.DebounceSecs = n }, 0, true},
 		{"debounce 301", func(c *Config, n uint64) { c.Notifications.DebounceSecs = n }, 301, false},
 		{"pop 0", func(c *Config, n uint64) { c.Notifications.Bubble.PopSecs = n }, 0, false},
+		{"clear 0 keeps the badge", func(c *Config, n uint64) { c.Notifications.Bubble.ClearSecs = n }, 0, true},
+		{"clear 3600", func(c *Config, n uint64) { c.Notifications.Bubble.ClearSecs = n }, 3600, true},
+		{"clear 3601", func(c *Config, n uint64) { c.Notifications.Bubble.ClearSecs = n }, 3601, false},
 		{"away 61", func(c *Config, n uint64) { c.Notifications.AwayAfterMins = n }, 61, false},
 	} {
 		c := Default()
