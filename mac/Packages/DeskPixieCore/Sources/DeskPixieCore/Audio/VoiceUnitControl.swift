@@ -10,6 +10,9 @@ protocol VoiceUnitHandle: AnyObject {
 /// `crates/audio-macos/src/engine.rs` `control_loop` (its mic pumping lives in `AudioPump`):
 ///
 /// - the unit is built on demand: when there is audio to play, or the mic was switched on;
+/// - with the mic off it is built without one (speaker only), so playing a spoken update
+///   doesn't turn the Mac's mic on (#451); the mic switching on swaps it for one with the mic,
+///   keeping the queued audio, and a speaker-only unit ignores the mic's device;
 /// - it is built on the saved devices (`pick`), retrying on the defaults (`buildWithFallback`);
 /// - a failed build discards the queued audio, is reported, and is not retried for
 ///   `buildBackoff` (1 s); a mic start during the back-off hears that failure at once;
@@ -27,7 +30,8 @@ final class VoiceUnitControl {
     /// After a failed unit build, don't retry (or re-report) for this long.
     static let buildBackoff: TimeInterval = 1
 
-    typealias Build = (DevicePair) throws -> (unit: VoiceUnitHandle, used: DevicePair)
+    /// Builds a unit on the devices; `withMic` false builds it speaker only (no input).
+    typealias Build = (_ chosen: DevicePair, _ withMic: Bool) throws -> (unit: VoiceUnitHandle, used: DevicePair)
 
     struct Hooks {
         /// The saved UIDs (Settings ▸ Voice ▸ Microphone / Speaker); nil or "" = System Default.
@@ -46,8 +50,12 @@ final class VoiceUnitControl {
 
     private struct Running {
         let unit: VoiceUnitHandle
+        /// Built with the mic (else speaker only).
+        let withMic: Bool
         /// The mic and speaker this unit uses, as built, and whether they changed since.
         var watch: UnitWatch
+        /// The mic's device as first watched: a speaker-only unit keeps reading this.
+        let inputAtBuild: WatchedDevice
         var idleSince: TimeInterval?
         var lastPoll: TimeInterval
     }
@@ -97,10 +105,20 @@ final class VoiceUnitControl {
         }
 
         guard var r = running else { return }
+        // The mic came on while a speaker-only unit plays: swap it for one with the mic. The
+        // queued audio stays in the ring for the new unit; reported as a stop and a start so the
+        // pump doesn't take the gap while the new unit builds for a stall and flush it.
+        if hooks.micOn() && !r.withMic {
+            hooks.log("mic on: rebuilding the voice unit with the mic")
+            stopUnit(r.unit)
+            start(now: now)
+            return
+        }
         // Device changes: drop the unit and tell the conversation.
         if now - r.lastPoll >= Self.devicePoll {
             r.lastPoll = now
-            let current = AudioDevices.watched(source(), r.watch.used)
+            var current = AudioDevices.watched(source(), r.watch.used)
+            if !r.withMic { current.input = r.inputAtBuild }  // a speaker-only unit has no mic
             if r.watch.changed(current, now: now, log: hooks.log) {
                 stopUnit(r.unit)
                 hooks.discardSpeaker()  // queued for the old device; the unit that would play it is gone
@@ -141,12 +159,14 @@ final class VoiceUnitControl {
                 hooks.log("audio device \(uid) (\(dir.rawValue)) isn't connected; using the default")
             }
         }
+        let withMic = hooks.micOn()
         do {
             // A pinned device the unit can't start on: retry on the defaults.
-            let (unit, used) = try AudioDevices.buildWithFallback(chosen, log: hooks.log, build)
+            let (unit, used) = try AudioDevices.buildWithFallback(chosen, log: hooks.log) { try build($0, withMic) }
             lastBuildFailure = nil
-            running = Running(unit: unit, watch: UnitWatch(used: used, current: AudioDevices.watched(src, used), now: now),
-                              idleSince: nil, lastPoll: now)
+            let current = AudioDevices.watched(src, used)
+            running = Running(unit: unit, withMic: withMic, watch: UnitWatch(used: used, current: current, now: now),
+                              inputAtBuild: current.input, idleSince: nil, lastPoll: now)
             hooks.runningChanged(true)
         } catch {
             hooks.discardSpeaker()  // no unit will play it
