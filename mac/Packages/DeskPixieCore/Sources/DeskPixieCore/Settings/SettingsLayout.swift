@@ -204,13 +204,7 @@ public enum SettingsLayout {
 
     /// The size menu's names for the tray's sizes.
     private static func sizeName(_ n: Int64) -> String? {
-        switch n {
-        case 4: return "Small"
-        case 6: return "Medium"
-        case 8: return "Large"
-        case 12: return "Huge"
-        default: return nil
-        }
+        TrayMenu.sizes.first { Int64($0.scale) == n }?.label
     }
 
     /// Every whole number from `min` to `max`. The size field reads "Large (×8)" or "×5".

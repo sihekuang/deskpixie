@@ -37,7 +37,7 @@ final class TrayLabelsAndRoutingTests: XCTestCase {
             "Hotkey unavailable: ⌃⌥Space (off)", "---",
             "Coordinator: ready (off)", "---",
             "> Size",
-            "  [ ] Small (×4)", "  [ ] Medium (×6)", "  [x] Large (×8)", "  [ ] Huge (×12)",
+            "  [ ] Tiny (×2)", "  [ ] Extra Small (×3)", "  [ ] Small (×4)", "  [ ] Medium (×6)", "  [x] Large (×8)", "  [ ] Huge (×12)",
             "Reset position",
             "> Pixie",
             "  [x] Bit",

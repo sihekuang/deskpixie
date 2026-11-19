@@ -30,7 +30,7 @@ type SizePreset struct {
 }
 
 // SizePresets are the tray's sizes (Rust tray::SIZES); a custom scale shows as "Custom (×N)".
-var SizePresets = []SizePreset{{"Small", 4}, {"Medium", 6}, {"Large", 8}, {"Huge", 12}}
+var SizePresets = []SizePreset{{"Tiny", 2}, {"Extra Small", 3}, {"Small", 4}, {"Medium", 6}, {"Large", 8}, {"Huge", 12}}
 
 // Config is settings.json. Optional values are pointers (nil = null).
 type Config struct {

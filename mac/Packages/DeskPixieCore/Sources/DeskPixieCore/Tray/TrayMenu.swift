@@ -112,7 +112,7 @@ public enum TrayMenu {
     }
 
     /// Size presets: label, integer scale.
-    public static let sizes: [(label: String, scale: Int)] = [("Small", 4), ("Medium", 6), ("Large", 8), ("Huge", 12)]
+    public static let sizes: [(label: String, scale: Int)] = [("Tiny", 2), ("Extra Small", 3), ("Small", 4), ("Medium", 6), ("Large", 8), ("Huge", 12)]
     /// Scale assumed when app.state has none (Rust default).
     public static let defaultScale = 8
 

@@ -63,7 +63,7 @@ Read the Rust source with `git -C ~/Documents/Projects/ai-moscot show origin/mai
 - Scale change keeps feet (bottom-centre). Pack select saves `pack`; Reload never saves.
 - One-shots: happy/error return to idle after (frames+1)×frame time; `celebrate` only from idle; `flash_error` only from idle/delegating, returns to previous state; looping variant holds 2 s.
 - Simulate talking: 33 ms fake mouth envelope, silent while a conversation is open.
-- Tray (rebuilt after every change), size presets Small ×4/Medium ×6/Large ×8/Huge ×12/Custom (×N); recent titles ≤60 chars; job rows ≤40 chars "<task> — <status>, <age>". Tooltip, left-click opens menu.
+- Tray (rebuilt after every change), size presets Tiny ×2/Extra Small ×3/Small ×4/Medium ×6/Large ×8/Huge ×12/Custom (×N); recent titles ≤60 chars; job rows ≤40 chars "<task> — <status>, <age>". Tooltip, left-click opens menu.
 - TimerAlarm: during a conversation inject; else (or undelivered) Glass.aiff + macOS notification "Timer done" / "<label> (<length>)".
 - Settings: schema FIELDS (Bool, Int{min,max,menu}, Choice, MultiChoice, Text{optional}, Path{dir,optional}, Hotkey, Managed), platforms, Apply Live/Restart. Live: hotkey, pack, scale, proximityFade.enabled, proximityFade.radius, voice.noiseFilter, voice.inputDevice, voice.outputDevice, canvas.autoOpen. Service set_field: merge hand edits → parse → validate (existing problems don't block) → hotkey applied before save ("That shortcut is in use") → atomic save → live apply (warning "<Label> couldn't be applied now (…); it applies after a restart."). reload on focus; broken file banner "settings.json has a syntax error; fix it or reset it" blocks saves. Snapshot {platform, values, fields, restartPending, fileError, warning, seq}. Validation messages: "Use a whole number from N to M", "Not one of the choices", "Not available on this platform", "Not a key combination (e.g. ctrl+alt+Space)", "Choose an existing folder inside your home folder", session `[a-z0-9][a-z0-9-]{0,47}` not "default", "No file at that path", workers need ≥1 kind; device UIDs never rejected. ops: restart, open file (`open -R`), secrets Found/Missing.
 - Native settings window: tabs Mascot (face.smiling), Voice (waveform), Agent (sparkles), Workers (person.2), Canvas (rectangle.on.rectangle), Advanced (gearshape.2); remembers frame + last tab; control per kind (switch, popup, field+stepper, checkboxes, text, path control with Choose…/Clear, hotkey recorder: needs ⌃/⌥/⌘ unless F1–F20, Esc cancels, shown with Mac symbols, "Type shortcut…"); "(not available on this platform)", "(not found)"; extra rows Reset Position, OpenAI/Gemini key Found/Missing/Unknown with help "Set OPENAI_API_KEY in your environment or a .env file. Keys are never shown here.", Open Settings File; file-error banner, warning line, Restart bar "Restart to apply: <labels>"; refused input stays with error under it; stale snapshots ignored by seq.
@@ -90,7 +90,7 @@ Read the Rust source with `git -C ~/Documents/Projects/ai-moscot show origin/mai
 [Hotkey unavailable: <combo>] / [Voice: <status>] / [Agent: <status or hint>]   (disabled, conditional)
 State ▸ idle listening thinking delegating happy error
 Simulate talking
-Size ▸ Small (×4) Medium (×6) Large (×8) Huge (×12) [Custom (×N)]
+Size ▸ Tiny (×2) Extra Small (×3) Small (×4) Medium (×6) Large (×8) Huge (×12) [Custom (×N)]
 Reset position
 Proximity fade
 Mascot ▸ <packs>

@@ -37,7 +37,7 @@ final class TrayMenuTests: XCTestCase {
 
     func test_preset_labels() {
         XCTAssertEqual(TrayMenu.sizeItems(scale: 8).map(\.title),
-                       ["Small (×4)", "Medium (×6)", "Large (×8)", "Huge (×12)"])
+                       ["Tiny (×2)", "Extra Small (×3)", "Small (×4)", "Medium (×6)", "Large (×8)", "Huge (×12)"])
     }
 
     // MARK: Tree
