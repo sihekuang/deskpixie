@@ -276,7 +276,7 @@ final class VoiceUnitControlTests: XCTestCase {
         XCTAssertEqual(r.handles[0].stopped, 1)
         XCTAssertEqual(r.handles[1].stopped, 0)
         XCTAssertTrue(r.control.isRunning)
-        XCTAssertEqual(r.running, [true], "a swap isn't a stop and a start")
+        XCTAssertEqual(r.running, [true, false, true], "the pump pauses its stall clock while the new unit builds")
         XCTAssertEqual(r.discards, 0, "the queued audio plays on the new unit")
         r.control.tick(now: t0 + 0.2)
         XCTAssertEqual(r.builds.count, 2, "swapped once")

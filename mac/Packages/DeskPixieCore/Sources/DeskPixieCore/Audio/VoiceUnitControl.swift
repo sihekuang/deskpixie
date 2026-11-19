@@ -106,12 +106,12 @@ final class VoiceUnitControl {
 
         guard var r = running else { return }
         // The mic came on while a speaker-only unit plays: swap it for one with the mic. The
-        // queued audio stays in the ring for the new unit.
+        // queued audio stays in the ring for the new unit; reported as a stop and a start so the
+        // pump doesn't take the gap while the new unit builds for a stall and flush it.
         if hooks.micOn() && !r.withMic {
             hooks.log("mic on: rebuilding the voice unit with the mic")
-            r.unit.stop()
-            running = nil
-            start(now: now, swapping: true)
+            stopUnit(r.unit)
+            start(now: now)
             return
         }
         // Device changes: drop the unit and tell the conversation.
@@ -149,8 +149,7 @@ final class VoiceUnitControl {
         pendingEnsure = false
     }
 
-    /// `swapping`: replacing a running unit, so the app isn't told it stopped and started.
-    private func start(now: TimeInterval, swapping: Bool = false) {
+    private func start(now: TimeInterval) {
         let src = source()
         let saved = hooks.saved()
         var chosen = DevicePair.systemDefaults
@@ -168,9 +167,8 @@ final class VoiceUnitControl {
             let current = AudioDevices.watched(src, used)
             running = Running(unit: unit, withMic: withMic, watch: UnitWatch(used: used, current: current, now: now),
                               inputAtBuild: current.input, idleSince: nil, lastPoll: now)
-            if !swapping { hooks.runningChanged(true) }
+            hooks.runningChanged(true)
         } catch {
-            if swapping { hooks.runningChanged(false) }
             hooks.discardSpeaker()  // no unit will play it
             let message = "cannot start audio: \(error)"
             lastBuildFailure = (now, message)
