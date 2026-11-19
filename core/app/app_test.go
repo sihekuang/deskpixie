@@ -9,6 +9,7 @@ package app
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -523,6 +524,20 @@ func TestSizeActionSavesAndResendsThePack(t *testing.T) {
 	h.action("size:12")
 	if len(h.kinds(h.take(), "pack")) != 0 {
 		t.Error("the same size again resends")
+	}
+}
+
+func TestTheSmallestTraySizesApply(t *testing.T) {
+	h := newHarness(t)
+	for _, n := range []uint32{2, 3} {
+		h.take()
+		h.action(fmt.Sprintf("size:%d", n))
+		if h.saved().Scale != n || h.state().Scale != int(n) {
+			t.Fatalf("size %d not saved", n)
+		}
+		if p := h.kinds(h.take(), "pack"); len(p) != 1 || p[0]["scale"] != float64(n) {
+			t.Fatalf("size %d pack events %v", n, p)
+		}
 	}
 }
 

@@ -257,6 +257,18 @@ func TestEveryTraySizeIsWithinTheCap(t *testing.T) {
 	}
 }
 
+func TestTheTrayOffersSizesForSmallScreens(t *testing.T) {
+	want := []uint32{2, 3, 4, 6, 8, 12}
+	if len(SizePresets) != len(want) {
+		t.Fatalf("%+v", SizePresets)
+	}
+	for i, s := range SizePresets {
+		if s.Scale != want[i] {
+			t.Fatalf("%+v", SizePresets)
+		}
+	}
+}
+
 func TestCanvasDefaultsMatchTheSpec(t *testing.T) {
 	c := Default().Canvas
 	if !c.AutoOpen || c.Keep != 50 || c.Window != nil {

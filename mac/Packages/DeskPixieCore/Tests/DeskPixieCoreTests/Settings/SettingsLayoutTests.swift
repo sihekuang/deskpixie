@@ -78,6 +78,8 @@ final class SettingsLayoutTests: XCTestCase {
         let items = L.intItems(path: "scale", min: 1, max: 16)
         XCTAssertEqual(items.count, 16)
         XCTAssertEqual(items[0].label, "×1")
+        XCTAssertEqual(items[1].label, "Tiny (×2)")
+        XCTAssertEqual(items[2].label, "Extra Small (×3)")
         XCTAssertEqual(items[3].label, "Small (×4)")
         XCTAssertEqual(items[4].label, "×5")
         XCTAssertEqual(items[5].label, "Medium (×6)")

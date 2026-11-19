@@ -60,6 +60,8 @@ final class PixiePlacementTests: XCTestCase {
         let pack = try XCTUnwrap(PackPayload.decode(Data(contentsOf: XCTUnwrap(
             Bundle.module.url(forResource: "bit-pack", withExtension: "json", subdirectory: "Fixtures"))))).pack
         XCTAssertEqual(Layout.windowSize(pack: pack, scale: 8), CGSize(width: 256, height: 256))
+        XCTAssertEqual(Layout.windowSize(pack: pack, scale: 3), CGSize(width: 96, height: 96), "Extra Small")
+        XCTAssertEqual(Layout.windowSize(pack: pack, scale: 2), CGSize(width: 64, height: 64), "Tiny")
         XCTAssertEqual(Layout.windowSize(pack: pack, scale: 0), CGSize(width: 256, height: 256), "0 = default ×8")
     }
 }
