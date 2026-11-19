@@ -11,6 +11,8 @@ import os
 ///
 /// - `start` only arms it: the unit is built on demand (audio queued in the playback ring,
 ///   or the mic switched on) and stopped after 300 ms with the mic off and the speaker idle;
+///   with the mic off it is a plain speaker-only output unit instead, so Pixie speaking an
+///   update doesn't turn the Mac's mic on (#451);
 ///   a failed build backs off 1 s (`VoiceUnitControl`, polled every 20 ms on a private queue).
 /// - Devices: the UIDs from `setPinned` are used when connected, else the Mac's default
 ///   (`AudioDevices.pick`); a unit that can't start on them is retried on the defaults.
@@ -126,7 +128,9 @@ public final class VPIOVoiceIO: VoiceIO, @unchecked Sendable {
         let gate = gate, micState = micState, devices = devices
         control = VoiceUnitControl(
             source: { devices },
-            build: { chosen in try VPIOUnit.build(chosen, playback: playback, gate: gate, onMic: onMicSamples) },
+            build: { chosen, withMic in
+                try VPIOUnit.build(chosen, withMic: withMic, playback: playback, gate: gate, onMic: onMicSamples)
+            },
             hooks: VoiceUnitControl.Hooks(
                 saved: { [weak self] in self?.lock.withLock { self?.pinned } ?? (nil, nil) },
                 micOn: { gate.micOn },
@@ -152,7 +156,8 @@ private final class WeakBox<T: AnyObject>: @unchecked Sendable {
     weak var value: T?
 }
 
-/// One built and started VoiceProcessingIO unit.
+/// One built and started VoiceProcessingIO unit, or, built without the mic, a speaker-only
+/// HAL output unit (no input, no echo cancellation: nothing to cancel).
 final class VPIOUnit: VoiceUnitHandle, AudioDeviceTarget {
     private static let log = Logger(subsystem: "com.sihekuang.deskpixie", category: "audio")
 
@@ -164,17 +169,18 @@ final class VPIOUnit: VoiceUnitHandle, AudioDeviceTarget {
     }
 
     /// Builds and starts a unit on `chosen`; returns it and the devices it really uses (a
-    /// pinned device it can't be pointed at falls back to the default).
-    static func build(_ chosen: DevicePair, playback: PlaybackRing, gate: AudioGate,
+    /// pinned device it can't be pointed at falls back to the default). `withMic` false builds
+    /// the speaker-only unit, which never opens the input device.
+    static func build(_ chosen: DevicePair, withMic: Bool, playback: PlaybackRing, gate: AudioGate,
                       onMic: @escaping @Sendable (UnsafeBufferPointer<Int16>, UInt64) -> Void) throws
         -> (unit: VoiceUnitHandle, used: DevicePair) {
         var desc = AudioComponentDescription(
             componentType: kAudioUnitType_Output,
-            componentSubType: kAudioUnitSubType_VoiceProcessingIO,
+            componentSubType: withMic ? kAudioUnitSubType_VoiceProcessingIO : kAudioUnitSubType_HALOutput,
             componentManufacturer: kAudioUnitManufacturer_Apple,
             componentFlags: 0, componentFlagsMask: 0)
         guard let comp = AudioComponentFindNext(nil, &desc) else {
-            throw VoiceIOError.audioUnit(step: "find VoiceProcessingIO", status: -1)
+            throw VoiceIOError.audioUnit(step: withMic ? "find VoiceProcessingIO" : "find HALOutput", status: -1)
         }
         var maybeUnit: AudioUnit?
         try check("instantiate", AudioComponentInstanceNew(comp, &maybeUnit))
@@ -182,11 +188,13 @@ final class VPIOUnit: VoiceUnitHandle, AudioDeviceTarget {
         let vpio = VPIOUnit(unit: u)
         let ctx = VPIOContext(unit: u, playback: playback, gate: gate, onMic: onMic)
         do {
-            var one: UInt32 = 1
-            try setProp(u, kAudioOutputUnitProperty_EnableIO, kAudioUnitScope_Input, 1, &one)
+            var one: UInt32 = 1, micIO: UInt32 = withMic ? 1 : 0
+            try setProp(u, kAudioOutputUnitProperty_EnableIO, kAudioUnitScope_Input, 1, &micIO)
             try setProp(u, kAudioOutputUnitProperty_EnableIO, kAudioUnitScope_Output, 0, &one)
-            // Settings ▸ Voice ▸ Microphone / Speaker: before the formats and initialize.
-            let used = AudioDevices.apply(vpio, chosen) { log.notice("\($0, privacy: .public)") }
+            // Settings ▸ Voice ▸ Microphone / Speaker: before the formats and initialize. A
+            // speaker-only unit is only pointed at the speaker (a HAL unit has one device).
+            let devices = withMic ? chosen : DevicePair(input: .systemDefault, output: chosen.output)
+            let used = AudioDevices.apply(vpio, devices) { log.notice("\($0, privacy: .public)") }
 
             var fmt = AudioStreamBasicDescription(
                 mSampleRate: 24_000,
@@ -195,19 +203,20 @@ final class VPIOUnit: VoiceUnitHandle, AudioDeviceTarget {
                 mBytesPerPacket: 2, mFramesPerPacket: 1, mBytesPerFrame: 2,
                 mChannelsPerFrame: 1, mBitsPerChannel: 16, mReserved: 0)
             // Mic data leaves input element 1 on its output scope; speaker data enters element 0.
-            try setProp(u, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 1, &fmt)
+            if withMic { try setProp(u, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 1, &fmt) }
             try setProp(u, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0, &fmt)
-
-            // Keep other apps' audio as loud as possible while Pixie listens. Best effort.
-            var duck = VPIOVoiceIO.otherAudioDucking
-            _ = AudioUnitSetProperty(u, kAUVoiceIOProperty_OtherAudioDuckingConfiguration,
-                                     kAudioUnitScope_Global, 0, &duck,
-                                     UInt32(MemoryLayout<AUVoiceIOOtherAudioDuckingConfiguration>.size))
 
             let ref = Unmanaged.passRetained(ctx).toOpaque()
             ctx.retainedRef = ref
-            var input = AURenderCallbackStruct(inputProc: vpioInputCallback, inputProcRefCon: ref)
-            try setProp(u, kAudioOutputUnitProperty_SetInputCallback, kAudioUnitScope_Global, 1, &input)
+            if withMic {
+                // Keep other apps' audio as loud as possible while Pixie listens. Best effort.
+                var duck = VPIOVoiceIO.otherAudioDucking
+                _ = AudioUnitSetProperty(u, kAUVoiceIOProperty_OtherAudioDuckingConfiguration,
+                                         kAudioUnitScope_Global, 0, &duck,
+                                         UInt32(MemoryLayout<AUVoiceIOOtherAudioDuckingConfiguration>.size))
+                var input = AURenderCallbackStruct(inputProc: vpioInputCallback, inputProcRefCon: ref)
+                try setProp(u, kAudioOutputUnitProperty_SetInputCallback, kAudioUnitScope_Global, 1, &input)
+            }
             var render = AURenderCallbackStruct(inputProc: vpioRenderCallback, inputProcRefCon: ref)
             try setProp(u, kAudioUnitProperty_SetRenderCallback, kAudioUnitScope_Input, 0, &render)
 

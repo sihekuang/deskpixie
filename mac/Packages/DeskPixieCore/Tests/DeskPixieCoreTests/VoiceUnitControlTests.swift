@@ -18,6 +18,8 @@ final class VoiceUnitControlTests: XCTestCase {
         var speakerIdle = true
         var failBuild: ((DevicePair) -> Bool) = { _ in false }
         var builds: [DevicePair] = []
+        /// Each build's `withMic`.
+        var withMic: [Bool] = []
         var handles: [FakeHandle] = []
         var discards = 0
         var mutes = 0
@@ -31,8 +33,9 @@ final class VoiceUnitControlTests: XCTestCase {
         init() {
             control = VoiceUnitControl(
                 source: { [unowned self] in self.src },
-                build: { [unowned self] chosen in
+                build: { [unowned self] chosen, withMic in
                     self.builds.append(chosen)
+                    self.withMic.append(withMic)
                     if self.failBuild(chosen) { throw BuildFailed() }
                     let h = FakeHandle()
                     self.handles.append(h)
@@ -243,6 +246,91 @@ final class VoiceUnitControlTests: XCTestCase {
         }
         XCTAssertEqual(r.reports, [.deviceChanged])
         XCTAssertTrue(r.logs.contains("pinned Input device USB-1: id 30 → gone"), "\(r.logs)")
+    }
+
+    // MARK: Speaker only (#451)
+
+    func testPlaybackWithTheMicOffBuildsASpeakerOnlyUnit() {
+        let r = Rig()
+        r.speakerIdle = false
+        r.control.tick(now: t0)
+        XCTAssertEqual(r.withMic, [false], "a spoken update must not turn the Mac's mic on")
+    }
+
+    func testTheMicOnBuildsAUnitWithTheMic() {
+        let r = Rig()
+        r.micOn = true
+        r.control.micStarted(now: t0)
+        r.control.tick(now: t0)
+        XCTAssertEqual(r.withMic, [true])
+    }
+
+    func testTheMicComingOnDuringPlaybackSwapsInAUnitWithTheMic() {
+        let r = Rig()
+        r.speakerIdle = false
+        r.control.tick(now: t0)
+        r.micOn = true
+        r.control.micStarted(now: t0 + 0.1)
+        r.control.tick(now: t0 + 0.1)
+        XCTAssertEqual(r.withMic, [false, true])
+        XCTAssertEqual(r.handles[0].stopped, 1)
+        XCTAssertEqual(r.handles[1].stopped, 0)
+        XCTAssertTrue(r.control.isRunning)
+        XCTAssertEqual(r.running, [true], "a swap isn't a stop and a start")
+        XCTAssertEqual(r.discards, 0, "the queued audio plays on the new unit")
+        r.control.tick(now: t0 + 0.2)
+        XCTAssertEqual(r.builds.count, 2, "swapped once")
+    }
+
+    func testTheMicGoingOffKeepsTheUnitUntilIdle() {
+        let r = Rig()
+        r.micOn = true
+        r.control.micStarted(now: t0)
+        r.control.tick(now: t0)
+        r.micOn = false
+        r.speakerIdle = false  // Pixie's reply still playing
+        r.control.tick(now: t0 + 0.1)
+        XCTAssertEqual(r.builds.count, 1, "no rebuild mid-reply")
+        r.speakerIdle = true
+        r.control.tick(now: t0 + 0.2)
+        r.control.tick(now: t0 + 0.6)
+        XCTAssertFalse(r.control.isRunning)
+    }
+
+    func testAFailedSwapIsReportedAndTheUnitIsGone() {
+        let r = Rig()
+        r.speakerIdle = false
+        r.control.tick(now: t0)
+        r.failBuild = { _ in true }
+        r.micOn = true
+        r.control.micStarted(now: t0 + 0.1)
+        r.control.tick(now: t0 + 0.1)
+        XCTAssertFalse(r.control.isRunning)
+        XCTAssertEqual(r.handles[0].stopped, 1)
+        XCTAssertEqual(r.running, [true, false])
+        XCTAssertEqual(r.discards, 1, "no unit will play the queued audio")
+        guard case .other(let msg)? = r.reports.first else { return XCTFail("\(r.reports)") }
+        XCTAssertTrue(msg.hasPrefix("cannot start audio: "), msg)
+    }
+
+    func testASpeakerOnlyUnitIgnoresTheMicsDevice() {
+        let r = Rig()
+        r.speakerIdle = false
+        r.control.tick(now: t0)
+        r.src.defaultIn = 20  // a new default mic: nothing this unit uses
+        var t = t0
+        while t < t0 + 6 {
+            t += 0.02
+            r.control.tick(now: t)
+        }
+        XCTAssertTrue(r.control.isRunning)
+        XCTAssertTrue(r.reports.isEmpty)
+        r.src.defaultOut = 20  // the speaker does matter
+        while t < t0 + 12, r.control.isRunning {
+            t += 0.02
+            r.control.tick(now: t)
+        }
+        XCTAssertEqual(r.reports, [.deviceChanged])
     }
 
     func testShutdownStopsTheUnit() {
