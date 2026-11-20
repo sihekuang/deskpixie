@@ -480,6 +480,31 @@ func (h *Host) ClearHistory() {
 	}
 }
 
+// HerdrPaneOf is the pane of the Herdr tab the session with pid runs in, when DeskPixie resumed
+// it there (#461: its Where is Herdr and History has its pane); false for any other.
+func (h *Host) HerdrPaneOf(pid int) (string, bool) {
+	h.mu.Lock()
+	store := h.history
+	var ids []string
+	for _, s := range h.sessions {
+		if s.hello.Pid == pid && s.hello.Where == "Herdr" {
+			ids = append(ids, s.sessionID, s.resumes)
+		}
+	}
+	h.mu.Unlock()
+	if store == nil {
+		return "", false
+	}
+	list := store.List()
+	for _, id := range ids {
+		i := slices.IndexFunc(list, func(e HistoryEntry) bool { return id != "" && e.SessionID == id })
+		if i >= 0 && list[i].HerdrPane != "" {
+			return list[i].HerdrPane, true
+		}
+	}
+	return "", false
+}
+
 func (h *Host) historyStore() HistoryStore {
 	h.mu.Lock()
 	defer h.mu.Unlock()

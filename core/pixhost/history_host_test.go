@@ -305,3 +305,51 @@ func TestHistoryNilStoreIsSafe(t *testing.T) {
 		t.Fatalf("%+v", got)
 	}
 }
+
+// #461: a session resumed in Herdr is found by its pid: its tab's pane, from History.
+func TestHerdrPaneOfAResumedSession(t *testing.T) {
+	h, sock, store, _ := newHistoryHost(t)
+	store.Record(HistoryEntry{SessionID: "old", Tool: "claude", HerdrPane: "w1:p7", LastActive: at(0)})
+	p, _ := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api", Where: "Herdr", Pid: 42, Resumes: "old"})
+	// While resuming (not reported yet) and once Claude reports it.
+	if pane, ok := h.HerdrPaneOf(42); !ok || pane != "w1:p7" {
+		t.Fatal(pane, ok)
+	}
+	sendEvent(p, wire.Msg{Event: "session", SessionID: "old"})
+	eventually(t, "not reported", func() bool { e, _ := store.entry("old"); return !e.Ended && e.GitRoot == "/x/api" })
+	if pane, ok := h.HerdrPaneOf(42); !ok || pane != "w1:p7" {
+		t.Fatal(pane, ok)
+	}
+}
+
+// A resume Claude forked under a new id keeps the old one's pane.
+func TestHerdrPaneOfAForkedResume(t *testing.T) {
+	h, sock, store, _ := newHistoryHost(t)
+	store.Record(HistoryEntry{SessionID: "old", Tool: "claude", HerdrPane: "w1:p7", LastActive: at(0)})
+	p, _ := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api", Where: "Herdr", Pid: 42, Resumes: "old"})
+	sendEvent(p, wire.Msg{Event: "session", SessionID: "new"})
+	eventually(t, "not forked", func() bool { _, ok := store.entry("new"); return ok })
+	if pane, ok := h.HerdrPaneOf(42); !ok || pane != "w1:p7" {
+		t.Fatal(pane, ok)
+	}
+}
+
+// Anything else is shown the usual way: another pid, a session not in Herdr, one with no pane
+// in History, or no History at all.
+func TestHerdrPaneOfOtherSessions(t *testing.T) {
+	h, sock, store, _ := newHistoryHost(t)
+	store.Record(HistoryEntry{SessionID: "a", Tool: "claude", HerdrPane: "w1:p7", LastActive: at(0)})
+	store.Record(HistoryEntry{SessionID: "b", Tool: "claude", LastActive: at(0)})
+	dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api", Where: "iTerm", Pid: 42, Resumes: "a"})
+	dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/web", Where: "Herdr", Pid: 43, Resumes: "b"})
+	for _, pid := range []int{42, 43, 44} {
+		if pane, ok := h.HerdrPaneOf(pid); ok {
+			t.Fatal(pid, pane)
+		}
+	}
+	bare, bareSock := newHost(t)
+	dialPix(t, bareSock, wire.Msg{Tool: "claude", GitRoot: "/x/api", Where: "Herdr", Pid: 42, Resumes: "a"})
+	if pane, ok := bare.HerdrPaneOf(42); ok {
+		t.Fatal(pane)
+	}
+}
