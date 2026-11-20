@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -22,14 +23,16 @@ type resumer interface {
 	Resume(ctx context.Context, id string) (agent.FocusPlan, error)
 }
 
-// pastSessions is History as the Resumer sees it: only sessions not running now, so a click on
-// a stale row can't start a second pix on a live conversation.
+// pastSessions is History as the Resumer sees it: only sessions not running now, so it never
+// starts a second pix on a live conversation.
 type pastSessions struct {
 	host  *pixhost.Host
 	store pixhost.HistoryStore
 }
 
-func (p pastSessions) List() []pixhost.HistoryEntry { return p.host.History() }
+func (p pastSessions) List() []pixhost.HistoryEntry {
+	return slices.DeleteFunc(p.host.History(), func(e pixhost.HistoryEntry) bool { return e.RunningAs != "" })
+}
 
 // Update writes the raw store, deliberately unsignalled: it only sets HerdrPane, which no row shows.
 func (p pastSessions) Update(id string, f func(*pixhost.HistoryEntry)) {
@@ -67,7 +70,7 @@ func (a *Agent) historyRows() []app.HistoryRow {
 			folder = filepath.Base(folder)
 		}
 		rows = append(rows, app.HistoryRow{ID: e.SessionID, Description: e.Description, Folder: folder,
-			LastActive: e.LastActive, Unresumable: e.Unresumable})
+			LastActive: e.LastActive, Unresumable: e.Unresumable, Running: e.RunningAs != ""})
 	}
 	return rows
 }
@@ -82,7 +85,9 @@ func (a *Agent) historyMenu(what string) bool {
 		return true
 	}
 	if id, ok := strings.CutPrefix(what, "remove:"); ok && id != "" {
-		if a.pix != nil {
+		if a.runningAs(id) != "" {
+			log.Print("agent: history: a running session stays in History")
+		} else if a.pix != nil {
 			a.pix.RemoveHistory(id)
 		}
 		return true
@@ -94,9 +99,27 @@ func (a *Agent) historyMenu(what string) bool {
 	return false
 }
 
-// resume opens a past session in its Herdr tab and shows it (async). A click on one being
-// resumed, or just resumed, is ignored; a failure is a notification saying why.
+// runningAs is the address of the session running id now; "" for none.
+func (a *Agent) runningAs(id string) string {
+	if a.pix == nil {
+		return ""
+	}
+	for _, e := range a.pix.History() {
+		if e.SessionID == id {
+			return e.RunningAs
+		}
+	}
+	return ""
+}
+
+// resume opens a past session in its Herdr tab and shows it (async); one running now is shown
+// as a click on its roster row shows it. A click on one being resumed, or just resumed, is
+// ignored; a failure is a notification saying why.
 func (a *Agent) resume(id string) {
+	if addr := a.runningAs(id); addr != "" {
+		a.FocusSession(addr)
+		return
+	}
 	if a.resumer == nil {
 		log.Print("agent: resume: sessions you start with pix are unavailable")
 		return
@@ -113,6 +136,11 @@ func (a *Agent) resume(id string) {
 	a.resuming[id] = true
 	a.wg.Go(func() {
 		plan, err := a.resumer.Resume(a.ctx, id)
+		if addr := a.runningAs(id); errors.Is(err, pixhost.ErrNotInHistory) && addr != "" {
+			a.resumed(id)
+			a.FocusSession(addr) // it started running since the menu was drawn
+			return
+		}
 		if err != nil {
 			a.resumed(id)
 			log.Printf("agent: resume: %v", err)

@@ -3,6 +3,8 @@ package agentapp
 import (
 	"context"
 	"errors"
+	"net"
+	"os"
 	"slices"
 	"sync"
 	"testing"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/sihekuang/deskpixie/core/agent"
 	"github.com/sihekuang/deskpixie/core/app"
+	"github.com/sihekuang/deskpixie/core/pix/wire"
 	"github.com/sihekuang/deskpixie/core/pixhost"
 )
 
@@ -221,5 +224,87 @@ func TestHistoryResumeAfterQuittingShowsNothing(t *testing.T) {
 	f.agent.Menu("agent:history:resume:s2")
 	if n := len(f.rec.focusedPlans()); n != 0 || r.count() != 1 {
 		t.Fatal(n, r.count())
+	}
+}
+
+// runHerdrPix registers a pix session in Herdr running (resuming) id, and returns its address.
+// With no herdr in the fixture, showing it ends in the Resumer's ErrNoHerdr on the status line:
+// proof it went the way a click on its roster row goes.
+func runHerdrPix(t *testing.T, f *fixture, id string) string {
+	t.Helper()
+	c, err := net.Dial("unix", f.agent.pixSock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.Close() })
+	wire.Encode(c, wire.Msg{Kind: wire.KindRegister, Tool: "claude", GitRoot: "/x/api", Where: "Herdr", Pid: os.Getpid(), Resumes: id})
+	r, _ := wire.NewDecoder(c).Next()
+	if r.Kind != wire.KindRegistered {
+		t.Fatalf("%+v", r)
+	}
+	return r.Address
+}
+
+var shownThroughTheRoster = "Coordinator: " + string(pixhost.ErrNoHerdr)
+
+func historyFixture(t *testing.T) *fixture {
+	return newFixture(t, func(c *Config) {
+		writeHistory(t, c.AppSupport, pixhost.HistoryEntry{SessionID: "s1", Tool: "claude", Description: "login bug",
+			Cwd: "/x/api", GitRoot: "/x/api", HerdrPane: "w1:p2", LastActive: time.Now(), Unresumable: true})
+	})
+}
+
+// #461: a running session is listed with a ●, and a click brings it forward as a click on its
+// roster row does, never starting a second pix.
+func TestHistoryARunningSessionIsShownNotResumed(t *testing.T) {
+	f := historyFixture(t)
+	r := &fakeResumer{}
+	f.withResumer(r)
+	runHerdrPix(t, f, "s1")
+	if got := f.agent.Tray().History; len(got) != 1 || !got[0].Running {
+		t.Fatalf("%+v", got)
+	}
+	f.agent.Menu("agent:history:resume:s1")
+	waitFor(t, "shown", func() bool { return f.agent.Tray().Status == shownThroughTheRoster })
+	f.agent.Menu("agent:history:resume:s1") // focusing has no double-click guard
+	if r.count() != 0 || len(f.rec.notifications()) != 0 {
+		t.Fatal(r.count(), f.rec.notifications())
+	}
+}
+
+// A click drawn while it was past that lands once it runs (the Resumer no longer finds it
+// among the past ones) shows it too.
+func TestHistoryAResumeThatStartedRunningMeanwhileShowsIt(t *testing.T) {
+	f := historyFixture(t)
+	r := &fakeResumer{err: pixhost.ErrNotInHistory, gate: make(chan struct{})}
+	f.withResumer(r)
+	f.agent.Menu("agent:history:resume:s1")
+	waitFor(t, "the resume", func() bool { return r.count() == 1 })
+	runHerdrPix(t, f, "s1")
+	close(r.gate)
+	waitFor(t, "shown", func() bool { return f.agent.Tray().Status == shownThroughTheRoster })
+	if n := f.rec.notifications(); len(n) != 0 {
+		t.Fatal(n)
+	}
+}
+
+// The Resumer sees only past sessions: a running one is not in its History.
+func TestTheResumerNeverStartsARunningOne(t *testing.T) {
+	f := historyFixture(t)
+	runHerdrPix(t, f, "s1")
+	if _, err := realResumer(t, f.agent).Resume(context.Background(), "s1"); !errors.Is(err, pixhost.ErrNotInHistory) {
+		t.Fatal(err)
+	}
+}
+
+func TestHistoryRemoveLeavesARunningOne(t *testing.T) {
+	f := historyFixture(t)
+	runHerdrPix(t, f, "s1")
+	if !f.agent.Menu("agent:history:remove:s1") {
+		t.Fatal("not the agent's")
+	}
+	f.agent.Menu("agent:history:clear")
+	if got := f.agent.Tray().History; len(got) != 1 || got[0].ID != "s1" {
+		t.Fatalf("%+v", got)
 	}
 }
