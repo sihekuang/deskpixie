@@ -452,7 +452,7 @@ func TestStartupPrunesOldPages(t *testing.T) {
 func TestAppStateHasEveryListAndTheSettingsValues(t *testing.T) {
 	h := newHarness(t, withSettings(func(c *settings.Config) { c.Scale = 6; c.ProximityFade.Enabled = false }))
 	raw := string(h.call("app.state", nil))
-	for _, k := range []string{`"packs":[`, `"canvasRecent":[`, `"jobs":[`, `"statusLines":[`} {
+	for _, k := range []string{`"packs":[`, `"canvasRecent":[`, `"jobs":[`, `"history":[`, `"statusLines":[`} {
 		if !strings.Contains(raw, k) {
 			t.Errorf("%s missing in %s", k, raw)
 		}

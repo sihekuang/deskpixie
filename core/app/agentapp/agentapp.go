@@ -138,6 +138,8 @@ type Agent struct {
 	pix     *pixhost.Host
 	resumer resumer
 	yours   *herdr.Host
+	// resumeGrace: how long after a resume a click on it is still ignored (ResumeGrace).
+	resumeGrace time.Duration
 
 	// toAgent receives the voice signals the echo gate admits (handle.Voice; tests replace it).
 	toAgent func(voice.VoiceSignal)
@@ -147,6 +149,8 @@ type Agent struct {
 
 	mu           sync.Mutex
 	status, hint string
+	// resuming: the past sessions being resumed now, or just resumed (#461).
+	resuming map[string]bool
 	// Manual mode (#97): which agents are flagged, and why (set once per change, off the
 	// controller's goroutine, since the probes run a program).
 	manual map[string]bool
@@ -218,7 +222,7 @@ func Build(c Config) *Agent {
 	}
 	a := &Agent{paths: NewPaths(c.AppSupport), hooks: c.Hooks, manual: map[string]bool{}, causes: map[string]agent.ManualCause{},
 		gens: map[string]int{}, workerModel: map[string]string{},
-		managedOff: managedOff}
+		managedOff: managedOff, resuming: map[string]bool{}, resumeGrace: ResumeGrace}
 	home, environ := c.Home, c.Environ
 	if environ == nil {
 		environ = os.Environ()
@@ -481,13 +485,14 @@ func (a *Agent) Facts() string { return a.handle.Facts() }
 
 // Tray is Tray ▸ Coordinator: the open jobs, the runtime's status line and the standing hint.
 func (a *Agent) Tray() app.AgentTray {
+	history := a.historyRows()
 	var rows []app.JobRow
 	for _, j := range a.handle.OpenJobs() {
 		rows = append(rows, app.JobRow{ID: j.JobID, Status: j.Status.String(), Task: j.Task, AgeSecs: j.AgeSecs})
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	t := app.AgentTray{Enabled: true, Jobs: rows, Status: a.status, Hint: a.hint}
+	t := app.AgentTray{Enabled: true, Jobs: rows, Status: a.status, Hint: a.hint, History: history}
 	subject, name := "A worker", ""
 	if a.manual[agent.Coordinator] {
 		subject, name = "Coordinator", agent.Coordinator
@@ -643,6 +648,9 @@ func (a *Agent) Menu(id string) bool {
 		}
 		call(a.hooks.RefreshTray)
 	default:
+		if what, ok := strings.CutPrefix(id, "agent:history:"); ok {
+			return a.historyMenu(what)
+		}
 		job, ok := strings.CutPrefix(id, "agent:cancel:")
 		if !ok {
 			return false

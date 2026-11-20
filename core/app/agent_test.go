@@ -219,6 +219,24 @@ func TestTheAgentGetsTheVoiceLoopAndAddsItsToolsAndPersona(t *testing.T) {
 	}
 }
 
+// #461: History rows reach app.state; with the agent off there are none.
+func TestTheAgentHistoryReachesAppState(t *testing.T) {
+	f := &fakeAgent{tray: AgentTray{Enabled: true,
+		History: []HistoryRow{{ID: "s1", Description: "login bug", Folder: "api", LastActive: time.Now()}}}}
+	h := newHarness(t, withAgent(f))
+	if got := h.state().Agent.History; len(got) != 1 || got[0] != (HistoryRef{ID: "s1", Label: "login bug · api · just now", Enabled: true}) {
+		t.Fatalf("%+v", got)
+	}
+	if err := h.app.Action("agent:history:resume:s1"); err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !slices.Contains(f.menu, "agent:history:resume:s1") {
+		t.Fatal(f.menu)
+	}
+}
+
 func TestTheAgentTrayRowsAndStatusLineReachAppState(t *testing.T) {
 	f := &fakeAgent{tray: AgentTray{Enabled: true, Status: "", Hint: IntegrationHint,
 		Jobs: []JobRow{{ID: "job_000000000001", Status: "working", Task: strings.Repeat("x", 50), AgeSecs: 125}}}}

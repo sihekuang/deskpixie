@@ -68,6 +68,8 @@ type AgentTray struct {
 	// Claude agent is in Manual mode (#97); ModeFix its one-click fix, or nil.
 	Mode    string
 	ModeFix *TrayFix
+	// History is your past pix sessions, the most recently active first (#461).
+	History []HistoryRow
 }
 
 // Deps are the app's collaborators; zero values pick the real ones.
@@ -858,7 +860,7 @@ func (a *App) State() AppState {
 		Fade:         cfg.ProximityFade.Enabled,
 		Talking:      a.pixie.Talking,
 		CanvasRecent: append([]CanvasPage{}, a.canvasRecent...),
-		Agent:        AgentState{Enabled: agent.Enabled, Jobs: JobItems(agent.Jobs)},
+		Agent:        AgentState{Enabled: agent.Enabled, Jobs: JobItems(agent.Jobs), History: HistoryItems(agent.History, time.Now())},
 		StatusLines:  []string{},
 		PackProblems: append([]string{}, a.packProblems...),
 		Hotkey:       cfg.Hotkey,

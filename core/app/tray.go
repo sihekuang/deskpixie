@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -49,6 +50,25 @@ type CanvasPage struct {
 type AgentState struct {
 	Enabled bool     `json:"enabled"`
 	Jobs    []JobRef `json:"jobs"`
+	// History is Tray ▸ History (#461): a click resumes with `agent:history:resume:<id>`.
+	History []HistoryRef `json:"history"`
+}
+
+// HistoryRow is one past pix session for Tray ▸ History (#461). agentapp maps
+// pixhost.HistoryEntry to it.
+type HistoryRow struct {
+	ID, Description string
+	Folder          string // the git root's or cwd's base name
+	LastActive      time.Time
+	Unresumable     bool
+}
+
+// HistoryRef is one Tray ▸ History row: "login bug · deskpixie · 2h ago"; not Enabled when it
+// can't be resumed.
+type HistoryRef struct {
+	ID      string `json:"id"`
+	Label   string `json:"label"`
+	Enabled bool   `json:"enabled"`
 }
 
 // JobRef is one agent job row; Label is preformatted by JobItems.
@@ -85,6 +105,42 @@ func JobItems(jobs []JobRow) []JobRef {
 		out = append(out, JobRef{ID: j.ID, Label: fmt.Sprintf("%s — %s, %s", task, j.Status, age)})
 	}
 	return out
+}
+
+// HistoryItems are the Tray ▸ History rows: the description (≤ 40 chars, cut with "…"), the
+// folder and how long ago it was active, each left out when empty ([] for none, never nil).
+func HistoryItems(rows []HistoryRow, now time.Time) []HistoryRef {
+	const maxDesc = 40
+	out := make([]HistoryRef, 0, len(rows))
+	for _, r := range rows {
+		desc := r.Description
+		if utf8.RuneCountInString(desc) > maxDesc {
+			desc = string([]rune(desc)[:maxDesc-1]) + "…"
+		}
+		var parts []string
+		for _, p := range []string{desc, r.Folder, ago(now.Sub(r.LastActive))} {
+			if p != "" {
+				parts = append(parts, p)
+			}
+		}
+		out = append(out, HistoryRef{ID: r.ID, Label: strings.Join(parts, " · "), Enabled: !r.Unresumable})
+	}
+	return out
+}
+
+// ago says how long ago d was: "just now", "5 min ago", "2h ago", "yesterday", "3 days ago".
+func ago(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%d min ago", int(d/time.Minute))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d/time.Hour))
+	case d < 48*time.Hour:
+		return "yesterday"
+	}
+	return fmt.Sprintf("%d days ago", int(d/(24*time.Hour)))
 }
 
 // AgentStatusLine is the tray's agent line: the runtime's status if it has one, else the
