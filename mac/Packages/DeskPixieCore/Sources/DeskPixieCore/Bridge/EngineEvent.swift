@@ -81,6 +81,9 @@ public enum EngineEvent: Sendable, Equatable {
     case about([String])
     case error(String)
     case mic(start: Bool)
+    /// A voice conversation opened or closed (#460); unlike the mic, also one that only says
+    /// updates.
+    case conversation(open: Bool)
     case metrics(String)
     /// Re-read `app.state` and rebuild the tray menu.
     case tray
@@ -171,7 +174,7 @@ public enum EngineEvent: Sendable, Equatable {
         guard let k = try? dec.decode(Kind.self, from: json) else { return nil }
         func get<T: Decodable>(_: T.Type) -> T? { try? dec.decode(T.self, from: json) }
         switch k.kind {
-        case "state", "mouth", "status", "transcript", "heard", "saying", "about", "error", "mic", "metrics":
+        case "state", "mouth", "status", "transcript", "heard", "saying", "about", "error", "mic", "conversation", "metrics":
             guard let w = get(Voice.self) else { return nil }
             switch k.kind {
             case "state": return .state(w.state ?? "")
@@ -183,6 +186,7 @@ public enum EngineEvent: Sendable, Equatable {
             case "about": return .about(w.sessions ?? [])
             case "error": return .error(w.text ?? "")
             case "mic": return .mic(start: w.text == "start")
+            case "conversation": return .conversation(open: w.text == "open")
             default: return .metrics(w.text ?? "")
             }
         case "tray": return .tray

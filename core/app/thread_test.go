@@ -806,11 +806,13 @@ func TestLiveLinesComeAndGo(t *testing.T) {
 	h.app.onVoiceEvent(voice.UIEvent{Kind: "transcript", Role: "assistant", Text: " "})
 	expect("Pixie's", "live pixie//Ten", "live pixie//", "entry Ten past three.", "live pixie//And", "live pixie//")
 
-	// The mic going off clears what was cut off.
+	// The conversation ending clears what was cut off; the mic alone doesn't (one that only
+	// says updates never turns it on, #460).
 	h.app.onVoiceEvent(voice.UIEvent{Kind: "heard", Text: "never mind"})
 	h.app.onVoiceEvent(voice.UIEvent{Kind: "saying", Text: "Sure"})
 	h.app.onVoiceEvent(voice.UIEvent{Kind: "mic", Text: "stop"})
-	expect("mic off", "live you//never mind", "live pixie//Sure", "live you//", "live pixie//")
+	h.app.onVoiceEvent(voice.UIEvent{Kind: "conversation", Text: "closed"})
+	expect("conversation closed", "live you//never mind", "live pixie//Sure", "live you//", "live pixie//")
 
 	// The coordinator's step, by job, cleared by the job's answer (the feed clears first).
 	f.hooks.ThreadLive("j1", "Reading the logs.")

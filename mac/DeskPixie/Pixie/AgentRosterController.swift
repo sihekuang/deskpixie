@@ -286,7 +286,8 @@ final class AgentRosterController {
         render()
     }
 
-    /// The voice conversation opened or ended (the mic): an ended one's caption goes a moment later.
+    /// The voice conversation opened or ended (its own event, not the mic's: one that only says
+    /// updates never turns the mic on, #460): an ended one's caption goes a moment later.
     func conversation(open: Bool) {
         conversationOpen = open
         captionHide?.invalidate()
