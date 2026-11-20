@@ -111,6 +111,38 @@ func TestTabRenameCloseAndMetadata(t *testing.T) {
 	assertJSON(t, tr.sentFor("pane.report_metadata")[1], `{"pane_id":"w1:p2","source":"deskpixie","clear_title":true}`)
 }
 
+// #461: a resumed session's command line is typed into its tab, and its pane brought forward.
+func TestSendInputAndFocusPane(t *testing.T) {
+	tr := newScriptedTransport()
+	ok := `{"id":"p1","result":{"type":"ok"}}`
+	tr.answer("pane.send_input", ok)
+	tr.answer("pane.send_input", ok)
+	tr.answer("pane.focus", ok)
+	c := NewClient(tr)
+	if err := c.SendInput(bg, "w1:p2", "pix claude", []string{"Enter"}); err != nil {
+		t.Fatal(err)
+	}
+	assertJSON(t, tr.sentFor("pane.send_input")[0], `{"pane_id":"w1:p2","text":"pix claude","keys":["Enter"]}`)
+	// No keys is an empty list, never null.
+	if err := c.SendInput(bg, "w1:p2", "x", nil); err != nil {
+		t.Fatal(err)
+	}
+	assertJSON(t, tr.sentFor("pane.send_input")[1], `{"pane_id":"w1:p2","text":"x","keys":[]}`)
+	if err := c.FocusPane(bg, "w1:p2"); err != nil {
+		t.Fatal(err)
+	}
+	assertJSON(t, tr.sentFor("pane.focus")[0], `{"pane_id":"w1:p2"}`)
+}
+
+// A pane that is gone is NoAgent, like an agent that is gone.
+func TestFocusPaneOnAGonePaneIsNoAgent(t *testing.T) {
+	tr := newScriptedTransport()
+	tr.answer("pane.focus", `{"id":"p1","error":{"code":"pane_not_found","message":"w1:p9"}}`)
+	if err := NewClient(tr).FocusPane(bg, "w1:p9"); !agent.IsHostError(err, agent.HostNoAgent) {
+		t.Fatalf("%#v", err)
+	}
+}
+
 func TestReadKeepsTheLastLines(t *testing.T) {
 	tr := newScriptedTransport()
 	tr.answer("agent.read", fixture(t, "pane_read.json"))

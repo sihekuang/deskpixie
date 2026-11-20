@@ -353,6 +353,19 @@ func (c *Client) Read(ctx context.Context, target string, lines uint16) (string,
 	return strings.Join(all[from:], "\n"), nil
 }
 
+// SendInput types text into a pane's terminal, then presses keys (#461: a command line, then
+// Enter).
+func (c *Client) SendInput(ctx context.Context, paneID, text string, keys []string) error {
+	_, err := c.call(ctx, "pane.send_input", paneID, map[string]any{"pane_id": paneID, "text": text, "keys": nonNil(keys)})
+	return err
+}
+
+// FocusPane brings a pane (and its tab) to the front of its session.
+func (c *Client) FocusPane(ctx context.Context, paneID string) error {
+	_, err := c.call(ctx, "pane.focus", paneID, map[string]any{"pane_id": paneID})
+	return err
+}
+
 func (c *Client) ClosePane(ctx context.Context, paneID string) error {
 	_, err := c.call(ctx, "pane.close", paneID, map[string]any{"pane_id": paneID})
 	return err
