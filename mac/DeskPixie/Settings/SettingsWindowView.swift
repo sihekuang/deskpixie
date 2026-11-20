@@ -477,6 +477,44 @@ struct SettingsTabView: View {
                         .font(.subheadline)
                 }
             }
+        case .pixHistory(let help):
+            // #461: read from the tray state, so the list redraws whenever the tray is read again.
+            let sessions = model.historyRows
+            row(label: extra.label, id: extra.path) {
+                EmptyView()
+            } note: {
+                VStack(alignment: .leading, spacing: 2) {
+                    NoteText(text: help, isError: false)
+                    if sessions.isEmpty {
+                        NoteText(text: HistoryActions.emptyText, isError: false)
+                    }
+                }
+            }
+            ForEach(sessions) { session in
+                LabeledContent {
+                    HStack(spacing: 6) {
+                        Button(session.buttonTitle) { model.historyAction(session.buttonID) }
+                            .disabled(!session.buttonEnabled)
+                        if let remove = session.removeID {
+                            Button { model.historyAction(remove) } label: { Image(systemName: "trash") }
+                                .buttonStyle(.borderless)
+                                .help(HistoryActions.removeHelp)
+                                .accessibilityLabel("\(HistoryActions.removeHelp): \(session.label)")
+                        }
+                    }
+                } label: {
+                    Text(session.label)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .help(session.label)
+                }
+            }
+            if model.offersClearHistory {
+                HStack {
+                    Spacer()
+                    Button("Clear History") { model.historyAction(HistoryActions.clearID) }
+                }
+            }
         case .secret(let id, let label, let help):
             row(label: label, id: extra.path) {
                 HStack(spacing: 6) {

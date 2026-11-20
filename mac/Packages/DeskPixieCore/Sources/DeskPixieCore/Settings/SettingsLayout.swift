@@ -475,6 +475,9 @@ public enum SettingsLayout {
         case secret(id: SettingsSecretID, label: String, help: String)
         /// The pix command row (#89): install state, Install / Uninstall, the PATH line, Copy Aliases.
         case pix(help: String)
+        /// Settings ▸ Sessions ▸ History (#461): pix sessions to resume, show or remove; a list,
+        /// not a setting.
+        case pixHistory(help: String)
 
         /// The row's id, as the core's search names it (Go `settings.Extras`, path `extra:<id>`).
         public var id: String {
@@ -482,6 +485,7 @@ public enum SettingsLayout {
             case .button(_, _, _, let action): return action.rawValue
             case .secret(let id, _, _): return "key.\(id.rawValue)"
             case .pix: return "pix"
+            case .pixHistory: return "pixHistory"
             }
         }
 
@@ -493,13 +497,14 @@ public enum SettingsLayout {
             switch self {
             case .button(let label, _, _, _), .secret(_, let label, _): return label
             case .pix: return "pix command"
+            case .pixHistory: return "History"
             }
         }
 
         /// The row's help, as the core's search has it.
         public var help: String {
             switch self {
-            case .button(_, let help, _, _), .secret(_, _, let help), .pix(let help): return help
+            case .button(_, let help, _, _), .secret(_, _, let help), .pix(let help), .pixHistory(let help): return help
             }
         }
     }
@@ -516,6 +521,9 @@ public enum SettingsLayout {
     /// The pix row's help.
     public static let pixHelp = "Start Claude Code or Codex with `pix claude` or `pix codex` in any terminal (WebStorm, iTerm, …) and Pixie can see, message and interrupt that session. Quitting DeskPixie never ends it."
 
+    /// The History row's help (#461).
+    public static let pixHistoryHelp = "Past Claude Code sessions you ran with pix. Resume one to open it in Herdr, in its project folder."
+
     /// Every extra row's look; the core places them (`SettingsSnapshot.extras`).
     public static let allExtras: [Extra] = [
         .button(label: "Reset position", help: "Move Pixie back to the bottom-right corner of the main screen.",
@@ -525,6 +533,7 @@ public enum SettingsLayout {
                 help: "Stops the coordinator and starts it again on your next request, with its conversation. Asks first.",
                 title: "Restart Coordinator…", action: .restartCoordinator),
         .pix(help: pixHelp),
+        .pixHistory(help: pixHistoryHelp),
         .button(label: "Settings file", help: "settings.json holds every setting.",
                 title: "Open Settings File", action: .openFile),
         .button(label: "Logs",

@@ -19,6 +19,10 @@ enum SettingsHub {
             guard let composition else { return false }
             return bind(combo, previous: previous, composition: composition)
         }
+        // History (#461) lists the tray's sessions and its buttons act like the tray's rows; the
+        // tray state is observed, so an open window redraws whenever the tray is read again.
+        model.historySource = { [weak composition] in composition?.appState.core?.agent?.history ?? [] }
+        model.performAction = { [weak composition] id in composition?.coordinator.perform(id) }
         shared = model
         return model
     }
