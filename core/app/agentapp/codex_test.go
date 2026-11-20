@@ -195,3 +195,10 @@ func TestBundledPixIsBesideTheApp(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func TestOnlyAClaudeCoordinatorIsKnownToReportItsPrompts(t *testing.T) {
+	// #456: its first prompt's landing is checked; a Codex one's is learned, as before.
+	if !CoordinatorReportsSubmits(agent.Claude) || CoordinatorReportsSubmits(agent.Codex) {
+		t.Fatal(CoordinatorReportsSubmits(agent.Claude), CoordinatorReportsSubmits(agent.Codex))
+	}
+}

@@ -154,3 +154,27 @@ func TestARetryIsNotTypedIntoAPromptInTheTerminal(t *testing.T) {
 	wantPrompts(t, tick(c, T1+PromptLandMs+10*PromptRetryMs))
 	wantPrompts(t, c.Step(coordStatus(PaneIdle), T1+PromptLandMs+10*PromptRetryMs+1), firstPrompt)
 }
+
+func reportingCtl() *AgentController {
+	return ctlWith(func(s *Settings) { s.ReportsSubmits = true })
+}
+
+func TestAKeptCoordinatorAdoptedMidTurnCountsAsWorking(t *testing.T) {
+	// Its turn's submit came in the last run: its Working is believed, so a stop reaches it.
+	c := reportingCtl()
+	c.Step(CoordinatorUpInput(PaneWorking), T0)
+	fx := c.Step(InterruptTurnInput(), T0+100)
+	wantContains(t, fx, Effect{Kind: EfToolResult, Value: true})
+}
+
+func TestAWorkingCoordinatorThatNeverReportsAPromptIsNotSentItTwice(t *testing.T) {
+	// Its hooks are off (the user's settings): the prompt it is plainly working on counts as
+	// taken, not typed again.
+	c := reportingCtl()
+	c.Step(CoordinatorUpInput(PaneIdle), T0)
+	wantPrompts(t, c.Step(DelegateInput(job(1), "summarise the issues", ""), T0), firstPrompt)
+	c.Step(coordStatus(PaneWorking), T0+500)
+	wantContains(t, tick(c, T0+PromptLandMs), eLog("prompt taken by a working coordinator that reports no prompts"))
+	wantPrompts(t, tick(c, T0+PromptLandMs+10*PromptRetryMs))
+	wantJobStatus(t, c, 1, JobWorking)
+}

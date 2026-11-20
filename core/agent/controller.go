@@ -555,8 +555,13 @@ type AgentController struct {
 	// idleWaitAt: an Idle/Done came while awaiting the Stop: if the Stop is lost, ready at this time.
 	idleWaitAt optMs
 	// submits: the coordinator reports each prompt it takes. Only then is a prompt's landing
-	// checked, and a Working with no submitted turn behind it told apart (#127, #128).
+	// checked (#128): known from the start for one this app runs (Settings.ReportsSubmits,
+	// #456), else learned from its first submit.
 	submits bool
+	// submitSeen: it has reported one. Only then is a Working with no submitted turn behind it
+	// a spinner (#127): one adopted mid-turn, or whose hooks the user's settings turn off, is
+	// believed.
+	submitSeen bool
 	// turnOpen: a turn the coordinator took is running (its submit seen, its Stop not yet).
 	turnOpen bool
 	// landing: the prompt in flight (landingRefs, landingText) is not yet seen taken; landBy is
@@ -1349,7 +1354,7 @@ func (c *AgentController) flush(now Millis, fx *[]Effect) {
 }
 
 func (c *AgentController) onCoordinatorStatus(status PaneStatus, now Millis, fx *[]Effect) {
-	if c.submits && status == PaneWorking && !c.turnOpen {
+	if c.submitSeen && status == PaneWorking && !c.turnOpen {
 		// No turn is running: Herdr reads a spinner the TUI keeps while a background agent
 		// runs, at an idle prompt. It neither holds the inbox nor counts as busy (#127).
 		return
@@ -1446,10 +1451,10 @@ func (c *AgentController) ensureCoordinator(fx *[]Effect) {
 // carries its refs (or, with none, its text), else another (the user's, or a background agent's
 // notification). Either way it is busy until that turn's Stop.
 func (c *AgentController) onSubmit(prompt string, now Millis, fx *[]Effect) {
-	if !c.submits {
+	if !c.submitSeen {
 		*fx = append(*fx, logEffect("the coordinator reports the prompts it takes: checking that each one lands"))
 	}
-	c.submits = true
+	c.submits, c.submitSeen = true, true
 	c.turnOpen = true
 	c.coordStatus = PaneWorking
 	c.inbox.OnStatus(PaneWorking)
@@ -1545,9 +1550,16 @@ func (c *AgentController) tickInbox(now Millis, fx *[]Effect) {
 		c.watchdogFired(w.jobs, now, fx)
 	}
 	if c.landBy.due(now) {
-		*fx = append(*fx, logEffect("prompt not taken by the coordinator: sending it again"))
-		c.watchdog = nil
-		c.promptFailed(now, fx)
+		if !c.submitSeen && c.coordStatus == PaneWorking {
+			// Working on it, yet no submit ever came: its hooks may be off. Typed again it
+			// would run twice: it counts as taken (#456).
+			*fx = append(*fx, logEffect("prompt taken by a working coordinator that reports no prompts"))
+			c.stopLanding()
+		} else {
+			*fx = append(*fx, logEffect("prompt not taken by the coordinator: sending it again"))
+			c.watchdog = nil
+			c.promptFailed(now, fx)
+		}
 	}
 	settled := c.settleAt.due(now)
 	retry := c.retryAt.due(now)

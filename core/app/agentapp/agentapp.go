@@ -416,7 +416,7 @@ func Build(c Config) *Agent {
 			AlwaysForceSend:     s.AlwaysForceSend,
 			MarkForcedSends:     s.MarkForcedSends,
 			CoordinatorKind:     kind,
-			ReportsSubmits:      kind == agent.Claude,
+			ReportsSubmits:      CoordinatorReportsSubmits(kind),
 			SpokenPaths:         spoken,
 		},
 		Warm: s.Warm,
