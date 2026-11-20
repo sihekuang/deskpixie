@@ -800,6 +800,53 @@ final class UpdatesBubbleModelTests: XCTestCase {
         XCTAssertEqual(m.phase, .hidden, "and it runs out the same way")
     }
 
+    func testWhatCameWhileAwayPopsWhenYouAreBackAndItsBadgeOpens() {
+        // Review of #455: the held pop came back over a cleared badge, which then ignored hover.
+        var m = clearing()
+        m.apply([line(1)], now: 1, pop: .hold)
+        m.tick(now: 2); m.tick(now: 22)
+        XCTAssertEqual(m.phase, .hidden)
+        m.back(now: 30, pop: .allowed)
+        XCTAssertEqual(m.phase, .popped(until: 36))
+        XCTAssertFalse(m.cleared)
+        m.tick(now: 36)
+        XCTAssertEqual(m.phase, .badge)
+        m.pointerEntered(now: 37)
+        XCTAssertNotEqual(m.phase, .badge, "hover opens it")
+    }
+
+    func testWhatCameWhileAwayHidesAgainAFullTimeAfterItsPop() {
+        var m = clearing()
+        m.apply([line(1)], now: 1, pop: .hold)
+        m.tick(now: 2); m.tick(now: 22)
+        m.back(now: 30, pop: .allowed)
+        m.tick(now: 36); m.tick(now: 55)
+        XCTAssertEqual(m.phase, .badge, "a fresh 20 s")
+        m.tick(now: 56)
+        XCTAssertEqual(m.phase, .hidden)
+    }
+
+    func testSettingZeroBringsAHiddenBadgeBack() {
+        var m = clearing()
+        m.apply([line(1)], now: 1, pop: .allowed)
+        m.tick(now: 7); m.tick(now: 27)
+        XCTAssertEqual(m.phase, .hidden)
+        m.clearSecs = 0
+        m.tick(now: 28)
+        XCTAssertEqual(m.phase, .badge)
+        XCTAssertFalse(m.cleared)
+    }
+
+    func testSettingZeroWithNothingListedShowsNothing() {
+        var m = clearing()
+        m.apply([line(1)], now: 1, pop: .allowed)
+        m.tick(now: 7); m.tick(now: 27)
+        m.apply([], now: 28, pop: .allowed)
+        m.clearSecs = 0
+        m.tick(now: 29)
+        XCTAssertEqual(m.phase, .hidden)
+    }
+
     func testAHiddenBadgeDoesNotOpenUnderThePointer() {
         var m = clearing()
         m.apply([line(1)], now: 1, pop: .allowed)

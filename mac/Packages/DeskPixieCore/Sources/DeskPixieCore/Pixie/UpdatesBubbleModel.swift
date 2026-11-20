@@ -395,6 +395,11 @@ public struct UpdatesBubbleModel: Sendable {
         if case .popped(let until) = phase, now >= until, !waitsOnYou, !holding {
             phase = .badge
         }
+        if clearSecs <= 0, cleared {
+            // Set to keep the badge: a hidden one comes back.
+            cleared = false
+            if phase == .hidden, !lines.isEmpty { phase = .badge }
+        }
         guard phase == .badge, clearSecs > 0 else {
             badgeSince = nil
             return
@@ -459,6 +464,9 @@ public struct UpdatesBubbleModel: Sendable {
     public mutating func back(now: TimeInterval, pop: PopPermission) {
         if heldPop, !lines.isEmpty, pop == .allowed, !isExpanded {
             phase = .popped(until: now + popSecs)
+            // What came while you were away is shown again, its badge with a fresh time (#455).
+            cleared = false
+            badgeSince = nil
         }
         heldPop = false
         noteDecisions(now)
