@@ -149,6 +149,7 @@ final class UpdatesBubbleController {
     func apply(settings s: BubbleSettingsValues) {
         settings = s
         model.popSecs = TimeInterval(s.popSecs)
+        model.clearSecs = TimeInterval(s.clearSecs)
         model.maxLines = s.lines
         render()
     }

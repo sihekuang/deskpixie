@@ -37,7 +37,7 @@ final class AgentRosterController {
     /// last drawn.
     private var alwaysCaption = false
     /// captionDismissSecs: the words are put away this long after they were said (0 keeps them).
-    private var dismissSecs = 120
+    private var dismissSecs = 20
     private var hovering = false
     /// Keeps the card up while the pointer is around Pixie and its cards, or a swipe runs (#286).
     private var keeper = HoverKeeper()
@@ -315,7 +315,7 @@ final class AgentRosterController {
             let reply: ModeReply?? = await worker.run { try? engine.call("chat.mode", as: ModeReply.self) }
             guard let self, let reply = reply ?? nil else { return }
             self.alwaysCaption = reply.alwaysShowCaption ?? false
-            self.dismissSecs = reply.captionDismissSecs ?? 120
+            self.dismissSecs = reply.captionDismissSecs ?? 20
             self.chat.fadeSecs = reply.captionFadeSecs ?? 4
             self.chat.historySecs = (reply.replyHistoryMins ?? 5) * 60
             self.apply(mode: reply.mode)

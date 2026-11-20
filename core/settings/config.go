@@ -127,6 +127,9 @@ type BubbleSettings struct {
 	Enabled bool   `json:"enabled"`
 	PopSecs uint64 `json:"popSecs"`
 	Lines   uint64 `json:"lines"`
+	// ClearSecs: the badge hides this long after it shows (#455); 0 keeps it. Only hides it:
+	// nothing is answered or heard, and a new update shows it again.
+	ClearSecs uint64 `json:"clearSecs"`
 }
 
 // CanvasSettings is the canvas block.
@@ -209,7 +212,7 @@ func Default() Config {
 		Pack:               "bit",
 		Scale:              8,
 		ReplyMode:          ReplyVoice,
-		CaptionDismissSecs: 120,
+		CaptionDismissSecs: 20,
 		CaptionFadeSecs:    4,
 		ReplyHistoryMins:   5,
 		ChatKeepDays:       7,
@@ -222,7 +225,7 @@ func Default() Config {
 			HandOffWhenUnsure: true, CheckClaims: true,
 		},
 		Canvas:        CanvasSettings{AutoOpen: true, Keep: 50},
-		Notifications: NotificationSettings{DebounceSecs: 20, Bubble: BubbleSettings{Enabled: true, PopSecs: 6, Lines: 5}, AwayAfterMins: 5, SessionTurns: true, SessionTurnsMinSeconds: 30},
+		Notifications: NotificationSettings{DebounceSecs: 20, Bubble: BubbleSettings{Enabled: true, PopSecs: 6, Lines: 5, ClearSecs: 20}, AwayAfterMins: 5, SessionTurns: true, SessionTurnsMinSeconds: 30},
 		Agent: AgentSettings{
 			Enabled: true, SessionHost: "herdr", Session: "deskpixie", Terminal: "warp",
 			CoordinatorKind: CoordinatorClaude, CoordinatorEffort: "low",

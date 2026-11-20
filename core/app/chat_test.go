@@ -151,7 +151,7 @@ func TestChatStopCallsTheAgent(t *testing.T) {
 func TestChatModeReportsTheSettingAndTheAgentStartsInIt(t *testing.T) {
 	f := &fakeAgent{tray: AgentTray{Enabled: true}}
 	h := newHarness(t, withAgent(f), withSettings(func(c *settings.Config) { c.ReplyMode = settings.ReplyText }))
-	if out := h.call("chat.mode", nil); string(out) != `{"alwaysShowCaption":false,"captionDismissSecs":120,"captionFadeSecs":4,"mode":"text","replyHistoryMins":5}` {
+	if out := h.call("chat.mode", nil); string(out) != `{"alwaysShowCaption":false,"captionDismissSecs":20,"captionFadeSecs":4,"mode":"text","replyHistoryMins":5}` {
 		t.Fatal(string(out))
 	}
 	if !slices.Equal(f.textModes, []bool{true}) {
@@ -193,7 +193,7 @@ func TestSwitchingReplyModeTellsTheAgentAndTheShell(t *testing.T) {
 	if !slices.Equal(f.textModes, []bool{false, true}) {
 		t.Fatal(f.textModes)
 	}
-	if out := h.call("chat.mode", nil); string(out) != `{"alwaysShowCaption":false,"captionDismissSecs":120,"captionFadeSecs":4,"mode":"text","replyHistoryMins":5}` {
+	if out := h.call("chat.mode", nil); string(out) != `{"alwaysShowCaption":false,"captionDismissSecs":20,"captionFadeSecs":4,"mode":"text","replyHistoryMins":5}` {
 		t.Fatal(string(out))
 	}
 }
@@ -215,12 +215,12 @@ func TestAlwaysShowCaptionTellsTheShell(t *testing.T) {
 		t.Fatal(string(s.SetError))
 	}
 	h.waitFor("captions", func(e event) bool {
-		return e["always"] == true && e["dismissSecs"] == float64(120) && e["fadeSecs"] == float64(4) && e["historyMins"] == float64(5)
+		return e["always"] == true && e["dismissSecs"] == float64(20) && e["fadeSecs"] == float64(4) && e["historyMins"] == float64(5)
 	}, time.Second)
 	if len(f.textModes) != 1 {
 		t.Fatal("the agent was told again:", f.textModes)
 	}
-	if out := h.call("chat.mode", nil); string(out) != `{"alwaysShowCaption":true,"captionDismissSecs":120,"captionFadeSecs":4,"mode":"voice","replyHistoryMins":5}` {
+	if out := h.call("chat.mode", nil); string(out) != `{"alwaysShowCaption":true,"captionDismissSecs":20,"captionFadeSecs":4,"mode":"voice","replyHistoryMins":5}` {
 		t.Fatal(string(out))
 	}
 }

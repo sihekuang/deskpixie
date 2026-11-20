@@ -64,13 +64,13 @@ func TestAlwaysShowCaptionIsALivePixieSwitchOffByDefault(t *testing.T) {
 	}
 }
 
-// #224: what Pixie said is dismissed after a while, 2 minutes by default (0 keeps it).
+// #224: what Pixie said is dismissed after a while, 20 s by default (#455; 0 keeps it).
 func TestCaptionDismissSecsIsALivePixieNumber(t *testing.T) {
-	if got := Default().CaptionDismissSecs; got != 120 {
+	if got := Default().CaptionDismissSecs; got != 20 {
 		t.Fatal(got)
 	}
 	c, err := ParseConfig([]byte(`{"hotkey":"ctrl+alt+Space"}`))
-	if err != nil || c.CaptionDismissSecs != 120 {
+	if err != nil || c.CaptionDismissSecs != 20 {
 		t.Fatal("an old settings.json gets the default:", c.CaptionDismissSecs, err)
 	}
 	f := FieldByPath("captionDismissSecs")
@@ -175,5 +175,24 @@ func TestChatKeepDaysDefaultsToSevenAndIsLive(t *testing.T) {
 		if ok && len(got) != 0 || !ok && !bad {
 			t.Errorf("%d: %v", days, got)
 		}
+	}
+}
+
+// #455: the badge hides 20 s after it shows by default (0 keeps it); an old settings.json
+// without the field gets the default, and it applies live with the rest of the bubble.
+func TestBubbleClearSecsIsALiveNotificationNumber(t *testing.T) {
+	if got := Default().Notifications.Bubble.ClearSecs; got != 20 {
+		t.Fatal(got)
+	}
+	c, err := ParseConfig([]byte(`{"notifications":{"bubble":{"enabled":true,"popSecs":6,"lines":5}}}`))
+	if err != nil || c.Notifications.Bubble.ClearSecs != 20 {
+		t.Fatal("an old settings.json gets the default:", c.Notifications.Bubble.ClearSecs, err)
+	}
+	f := FieldByPath("notifications.bubble.clearSecs")
+	if f == nil || f.Apply != ApplyLive || f.Kind.Type != KindInt {
+		t.Fatalf("%+v", f)
+	}
+	if r, ok := RouteFor("notifications.bubble.clearSecs"); !ok || r != RouteNotifications {
+		t.Fatal(r, ok)
 	}
 }

@@ -726,4 +726,164 @@ final class UpdatesBubbleModelTests: XCTestCase {
         m.apply([other], now: 12, pop: .allowed)
         XCTAssertEqual(m.phase, .expanded(since: 11))
     }
+
+    // MARK: Hiding the badge (#455)
+
+    /// A model past launch (the first list is the restored one) that hides the badge after 20 s.
+    private func clearing() -> UpdatesBubbleModel {
+        var m = UpdatesBubbleModel(popSecs: 6)
+        m.clearSecs = 20
+        m.apply([], now: 0, pop: .allowed)
+        return m
+    }
+
+    /// A session asking with no buttons: it reaches the badge, and the badge timer treats it like
+    /// any other line (it never looks at whether a question is waiting).
+    private func asking(_ id: UInt64) -> UpdateLine {
+        UpdateLine(id: id, text: "Resize the VM?", kind: "session", at: Int64(id), job: nil, worker: nil,
+                   session: "trader", title: "trader", asking: true)
+    }
+
+    func testTheBadgeHidesClearSecsAfterItShows() {
+        var m = clearing()
+        m.apply([line(1)], now: 1, pop: .allowed)
+        m.tick(now: 7)                       // the pop runs out: the badge, its clock starts
+        XCTAssertEqual(m.phase, .badge)
+        m.tick(now: 26.9)
+        XCTAssertEqual(m.phase, .badge, "19.9 s")
+        m.tick(now: 27)
+        XCTAssertEqual(m.phase, .hidden)
+        XCTAssertTrue(m.cleared)
+        XCTAssertEqual(m.count, 1, "only hidden: the line is still listed")
+    }
+
+    func testAQuestionWithoutButtonsIsHiddenLikeAnyLine() {
+        var m = clearing()
+        m.apply([asking(1)], now: 1, pop: .allowed)
+        m.tick(now: 7)
+        m.tick(now: 27)
+        XCTAssertEqual(m.phase, .hidden)
+    }
+
+    func testTheSameListAgainDoesNotBringItBack() {
+        var m = clearing()
+        m.apply([line(1), line(2)], now: 1, pop: .allowed)
+        m.tick(now: 7); m.tick(now: 27)
+        m.apply([line(1), line(2)], now: 28, pop: .allowed)  // re-sent unchanged
+        m.apply([line(2)], now: 29, pop: .allowed)           // one answered elsewhere
+        XCTAssertEqual(m.phase, .hidden)
+        m.tick(now: 60)
+        XCTAssertEqual(m.phase, .hidden)
+    }
+
+    func testANewLineShowsItAgainWithItsTimeStartingOver() {
+        var m = clearing()
+        m.apply([line(1)], now: 1, pop: .allowed)
+        m.tick(now: 7); m.tick(now: 27)
+        m.apply([line(1), line(2)], now: 30, pop: .allowed)
+        XCTAssertEqual(m.phase, .popped(until: 36))
+        XCTAssertFalse(m.cleared)
+        m.tick(now: 36)
+        m.tick(now: 55)
+        XCTAssertEqual(m.phase, .badge, "a fresh 20 s")
+        m.tick(now: 56)
+        XCTAssertEqual(m.phase, .hidden)
+    }
+
+    func testANewLineWhileAwayShowsTheBadgeAgain() {
+        var m = clearing()
+        m.apply([line(1)], now: 1, pop: .allowed)
+        m.tick(now: 7); m.tick(now: 27)
+        m.apply([line(1), line(2)], now: 30, pop: .hold)
+        XCTAssertEqual(m.phase, .badge)
+        m.tick(now: 31); m.tick(now: 51)
+        XCTAssertEqual(m.phase, .hidden, "and it runs out the same way")
+    }
+
+    func testWhatCameWhileAwayPopsWhenYouAreBackAndItsBadgeOpens() {
+        // Review of #455: the held pop came back over a cleared badge, which then ignored hover.
+        var m = clearing()
+        m.apply([line(1)], now: 1, pop: .hold)
+        m.tick(now: 2); m.tick(now: 22)
+        XCTAssertEqual(m.phase, .hidden)
+        m.back(now: 30, pop: .allowed)
+        XCTAssertEqual(m.phase, .popped(until: 36))
+        XCTAssertFalse(m.cleared)
+        m.tick(now: 36)
+        XCTAssertEqual(m.phase, .badge)
+        m.pointerEntered(now: 37)
+        XCTAssertNotEqual(m.phase, .badge, "hover opens it")
+    }
+
+    func testWhatCameWhileAwayHidesAgainAFullTimeAfterItsPop() {
+        var m = clearing()
+        m.apply([line(1)], now: 1, pop: .hold)
+        m.tick(now: 2); m.tick(now: 22)
+        m.back(now: 30, pop: .allowed)
+        m.tick(now: 36); m.tick(now: 55)
+        XCTAssertEqual(m.phase, .badge, "a fresh 20 s")
+        m.tick(now: 56)
+        XCTAssertEqual(m.phase, .hidden)
+    }
+
+    func testSettingZeroBringsAHiddenBadgeBack() {
+        var m = clearing()
+        m.apply([line(1)], now: 1, pop: .allowed)
+        m.tick(now: 7); m.tick(now: 27)
+        XCTAssertEqual(m.phase, .hidden)
+        m.clearSecs = 0
+        m.tick(now: 28)
+        XCTAssertEqual(m.phase, .badge)
+        XCTAssertFalse(m.cleared)
+    }
+
+    func testSettingZeroWithNothingListedShowsNothing() {
+        var m = clearing()
+        m.apply([line(1)], now: 1, pop: .allowed)
+        m.tick(now: 7); m.tick(now: 27)
+        m.apply([], now: 28, pop: .allowed)
+        m.clearSecs = 0
+        m.tick(now: 29)
+        XCTAssertEqual(m.phase, .hidden)
+    }
+
+    func testAHiddenBadgeDoesNotOpenUnderThePointer() {
+        var m = clearing()
+        m.apply([line(1)], now: 1, pop: .allowed)
+        m.tick(now: 7); m.tick(now: 27)
+        m.pointerEntered(now: 28)
+        XCTAssertEqual(m.phase, .hidden)
+    }
+
+    func testZeroKeepsTheBadge() {
+        var m = clearing()
+        m.clearSecs = 0
+        m.apply([line(1)], now: 1, pop: .allowed)
+        m.tick(now: 7); m.tick(now: 5000)
+        XCTAssertEqual(m.phase, .badge)
+    }
+
+    func testTheRestoredListAtLaunchHidesToo() {
+        var m = UpdatesBubbleModel()
+        m.clearSecs = 20
+        m.apply([asking(1)], now: 0, pop: .allowed)
+        XCTAssertEqual(m.phase, .badge)
+        m.tick(now: 1); m.tick(now: 21)
+        XCTAssertEqual(m.phase, .hidden)
+    }
+
+    func testOpeningTheBadgeStopsItsClock() {
+        var m = clearing()
+        m.apply([line(1)], now: 1, pop: .allowed)
+        m.tick(now: 7)
+        m.pointerEntered(now: 20)
+        m.tick(now: 40)
+        XCTAssertEqual(m.phase, .expanded(since: 20), "never hidden from under the pointer")
+        m.pointerLeft()
+        m.tick(now: 41)
+        m.tick(now: 60.9)
+        XCTAssertEqual(m.phase, .badge, "back to the badge: a fresh 20 s")
+        m.tick(now: 61)
+        XCTAssertEqual(m.phase, .hidden)
+    }
 }

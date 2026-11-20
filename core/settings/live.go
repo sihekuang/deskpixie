@@ -57,7 +57,7 @@ func RouteFor(path string) (Route, bool) {
 		return RouteNoiseFilter, true
 	case "voice.inputDevice", "voice.outputDevice":
 		return RouteAudioDevices, true
-	case "notifications.bubble.enabled", "notifications.bubble.popSecs", "notifications.bubble.lines",
+	case "notifications.bubble.enabled", "notifications.bubble.popSecs", "notifications.bubble.clearSecs", "notifications.bubble.lines",
 		"notifications.awayAfterMins":
 		return RouteNotifications, true
 	case "replyMode":
