@@ -107,18 +107,23 @@ func JobItems(jobs []JobRow) []JobRef {
 	return out
 }
 
-// HistoryItems are the Tray ▸ History rows: the description (≤ 40 chars, cut with "…"), the
-// folder and how long ago it was active, each left out when empty ([] for none, never nil).
+// HistoryItems are the Tray ▸ History rows: the description (on one line, ≤ 40 chars, cut with
+// "…"), the folder and how long ago it was active, each left out when unknown ([] for none,
+// never nil).
 func HistoryItems(rows []HistoryRow, now time.Time) []HistoryRef {
 	const maxDesc = 40
 	out := make([]HistoryRef, 0, len(rows))
 	for _, r := range rows {
-		desc := r.Description
+		desc := strings.Join(strings.Fields(r.Description), " ")
 		if utf8.RuneCountInString(desc) > maxDesc {
 			desc = string([]rune(desc)[:maxDesc-1]) + "…"
 		}
 		var parts []string
-		for _, p := range []string{desc, r.Folder, ago(now.Sub(r.LastActive))} {
+		age := ""
+		if !r.LastActive.IsZero() {
+			age = ago(now.Sub(r.LastActive))
+		}
+		for _, p := range []string{desc, r.Folder, age} {
 			if p != "" {
 				parts = append(parts, p)
 			}

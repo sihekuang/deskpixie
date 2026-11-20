@@ -54,6 +54,7 @@ func TestHistoryRowsShowDescriptionFolderAndAge(t *testing.T) {
 		{ID: "f", Folder: "api", LastActive: ago(time.Minute)},
 		{ID: "g", Description: strings.Repeat("y", 50), Folder: "api", LastActive: ago(time.Minute), Unresumable: true},
 		{ID: "h", Description: "clock skew", LastActive: now.Add(time.Minute)},
+		{ID: "i", Description: "two\n  lines\t here", Folder: "api"},
 	}, now)
 	want := []HistoryRef{
 		{ID: "a", Label: "login bug · deskpixie · just now", Enabled: true},
@@ -64,6 +65,7 @@ func TestHistoryRowsShowDescriptionFolderAndAge(t *testing.T) {
 		{ID: "f", Label: "api · 1 min ago", Enabled: true},
 		{ID: "g", Label: strings.Repeat("y", 39) + "… · api · 1 min ago", Enabled: false},
 		{ID: "h", Label: "clock skew · just now", Enabled: true},
+		{ID: "i", Label: "two lines here · api", Enabled: true}, // no time: no age
 	}
 	if !slices.Equal(rows, want) {
 		t.Fatalf("%+v", rows)
