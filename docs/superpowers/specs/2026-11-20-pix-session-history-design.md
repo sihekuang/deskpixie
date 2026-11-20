@@ -64,7 +64,7 @@ The store is its own type behind a small interface (`HistoryStore`: `Record`, `L
 | Case | Says |
 |---|---|
 | The folder is gone | "That project folder is gone." |
-| Herdr isn't available | "Resuming needs Herdr. Set it up in Settings ▸ Agents." |
+| Herdr isn't available | "Resuming needs Herdr. Install it, or set its path in Settings ▸ Advanced." |
 | Claude no longer has the conversation | Claude's own error shows in the tab; the pix exits at once, so the entry is marked unresumable and the next try says "This conversation can't be resumed." |
 | Already running elsewhere | Not listed; if it races, pix's existing duplicate refusal names it in the tab title. |
 

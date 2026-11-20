@@ -78,7 +78,7 @@ func TestHistoryResumeFailureSaysWhy(t *testing.T) {
 		want string
 	}{
 		{pixhost.ErrFolderGone, "That project folder is gone."},
-		{pixhost.ErrNoHerdr, "Resuming needs Herdr. Set it up in Settings ▸ Agents."},
+		{pixhost.ErrNoHerdr, "Resuming needs Herdr. Install it, or set its path in Settings ▸ Advanced."},
 		{errors.New("herdr: socket: connection refused"), ResumeFailed},
 	} {
 		f := newFixture(t, nil)

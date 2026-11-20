@@ -228,3 +228,10 @@ func TestResumeChecksTheRealFolder(t *testing.T) {
 		}
 	}
 }
+
+// The text names where agent.herdrPath is set: Settings ▸ Advanced ("Herdr program").
+func TestNoHerdrSaysWhereToSetIt(t *testing.T) {
+	if ErrNoHerdr != "Resuming needs Herdr. Install it, or set its path in Settings ▸ Advanced." {
+		t.Fatal(ErrNoHerdr)
+	}
+}

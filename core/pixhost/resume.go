@@ -34,7 +34,7 @@ type Resumer struct {
 
 var (
 	ErrFolderGone   = agent.LaunchError("That project folder is gone.")
-	ErrNoHerdr      = agent.LaunchError("Resuming needs Herdr. Set it up in Settings ▸ Agents.")
+	ErrNoHerdr      = agent.LaunchError("Resuming needs Herdr. Install it, or set its path in Settings ▸ Advanced.")
 	ErrUnresumable  = agent.LaunchError("This conversation can't be resumed.")
 	ErrNotInHistory = agent.LaunchError("That session is no longer in History.")
 )
