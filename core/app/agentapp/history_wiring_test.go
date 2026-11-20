@@ -168,3 +168,11 @@ func TestHistoryChangesRefreshTheTray(t *testing.T) {
 	f.agent.pix.ClearHistory()
 	waitFor(t, "a tray refresh", func() bool { return f.rec.refreshes() > before })
 }
+
+// The fixture never finds a herdr installed on the machine running the tests.
+func TestFixturesNeverFindTheRealHerdr(t *testing.T) {
+	f := newFixture(t, nil)
+	if f.agent.yours != nil || realResumer(t, f.agent).Tabs != nil {
+		t.Fatal("the fixture found a herdr")
+	}
+}

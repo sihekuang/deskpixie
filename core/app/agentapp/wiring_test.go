@@ -164,6 +164,8 @@ func newFixture(t *testing.T, change func(*Config)) *fixture {
 		Listen:    func(uint16) (net.Listener, error) { return net.Listen("tcp", "127.0.0.1:0") },
 		PixSocket: shortSocket(t),
 	}
+	// Never the real herdr (in /opt/homebrew/bin, say): tests that need one set a fake.
+	herdrAt(&cfg, "/definitely/not/herdr")
 	if change != nil {
 		change(&cfg)
 	}
