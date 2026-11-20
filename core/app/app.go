@@ -504,9 +504,10 @@ func (a *App) onVoiceEvent(ev voice.UIEvent) {
 		a.threadLive("you", "", ev.Text)
 	case "saying":
 		a.threadLive("pixie", "", ev.Text)
-	case "mic":
-		if ev.Text == "stop" {
-			// The conversation ended: words cut off with no transcript don't stay live.
+	case "conversation":
+		if ev.Text == "closed" {
+			// The conversation ended: words cut off with no transcript don't stay live. Not the
+			// mic's stop: one that only says updates never turns it on (#460).
 			a.threadLive("you", "", "")
 			a.threadLive("pixie", "", "")
 		}

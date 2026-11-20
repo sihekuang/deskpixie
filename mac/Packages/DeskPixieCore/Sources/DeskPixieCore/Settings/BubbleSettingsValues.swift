@@ -1,20 +1,23 @@
 import Foundation
 
 /// The settings the updates bubble and presence follow, read from `settings.snapshot` `values`
-/// (settings.json `notifications.{bubble.{enabled,popSecs,lines},awayAfterMins}`; all live).
+/// (settings.json `notifications.{bubble.{enabled,popSecs,clearSecs,lines},awayAfterMins}`; all live).
 /// `notifications.debounceSecs` is the core's (restart) and not read here.
 public struct BubbleSettingsValues: Equatable, Sendable {
     public var enabled: Bool
     /// Seconds a new update pops before shrinking to the badge (1–60).
     public var popSecs: Int
+    /// Seconds the badge stays before it hides (#455; 0–3600, 0 keeps it).
+    public var clearSecs: Int
     /// The most lines the bubble lists (1–10).
     public var lines: Int
     /// Minutes without input before the user counts as away (1–60).
     public var awayAfterMins: Int
 
-    public init(enabled: Bool, popSecs: Int, lines: Int, awayAfterMins: Int) {
+    public init(enabled: Bool, popSecs: Int, clearSecs: Int = 20, lines: Int, awayAfterMins: Int) {
         self.enabled = enabled
         self.popSecs = popSecs
+        self.clearSecs = clearSecs
         self.lines = lines
         self.awayAfterMins = awayAfterMins
     }
@@ -26,14 +29,16 @@ public struct BubbleSettingsValues: Equatable, Sendable {
         struct Bubble: Decodable {
             var enabled: Bool?
             var popSecs: Int?
+            var clearSecs: Int?
             var lines: Int?
 
-            private enum CodingKeys: String, CodingKey { case enabled, popSecs, lines }
+            private enum CodingKeys: String, CodingKey { case enabled, popSecs, clearSecs, lines }
 
             init(from decoder: Decoder) throws {
                 let c = try decoder.container(keyedBy: CodingKeys.self)
                 enabled = try? c.decodeIfPresent(Bool.self, forKey: .enabled)
                 popSecs = try? c.decodeIfPresent(Int.self, forKey: .popSecs)
+                clearSecs = try? c.decodeIfPresent(Int.self, forKey: .clearSecs)
                 lines = try? c.decodeIfPresent(Int.self, forKey: .lines)
             }
         }
@@ -74,6 +79,7 @@ public struct BubbleSettingsValues: Equatable, Sendable {
         let n = v.notifications
         if let e = n?.bubble?.enabled { s.enabled = e }
         if let p = n?.bubble?.popSecs, (1...60).contains(p) { s.popSecs = p }
+        if let c = n?.bubble?.clearSecs, (0...3600).contains(c) { s.clearSecs = c }
         if let l = n?.bubble?.lines, (1...10).contains(l) { s.lines = l }
         if let a = n?.awayAfterMins, (1...60).contains(a) { s.awayAfterMins = a }
         return s

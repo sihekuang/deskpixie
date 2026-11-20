@@ -396,6 +396,11 @@ func KeptFor(kept agent.KeptAgents, kind agent.AgentKind, stamp string) agent.Ke
 	return kept
 }
 
+// CoordinatorReportsSubmits: a coordinator of kind this app runs reports each prompt it takes
+// to the hook port. Claude Code's settings carry its UserPromptSubmit hook (a kept one started
+// with others is replaced, KeptFor); Codex's reach it only on tmux (#456).
+func CoordinatorReportsSubmits(kind agent.AgentKind) bool { return kind == agent.Claude }
+
 // BundledPix is the pix shipped in the app whose executable is exe
 // (DeskPixie.app/Contents/MacOS/DeskPixie → DeskPixie.app/Contents/Helpers/pix).
 func BundledPix(exe string) string {

@@ -526,6 +526,7 @@ var Fields = concat(
 	group(SectionNotifications, "Updates bubble",
 		spec("notifications.bubble.enabled", "Updates bubble", "Shows what happened since you last talked to Pixie in a bubble beside it.", boolKind, ApplyLive),
 		enabledWhen(unit(spec("notifications.bubble.popSecs", "Show new updates for", "How long the bubble shows a new update before it shrinks to a badge.", intKind(1, 60, false), ApplyLive), "seconds"), on("notifications.bubble.enabled")),
+		enabledWhen(unit(spec("notifications.bubble.clearSecs", "Hide the badge after", "How long the badge stays once updates shrink to it. It only hides: nothing is answered, and a new update shows it again. 0 keeps it.", intKind(0, 3600, false), ApplyLive), "seconds"), on("notifications.bubble.enabled")),
 		enabledWhen(spec("notifications.bubble.lines", "Most updates shown", "The most updates the bubble lists.", intKind(1, 10, false), ApplyLive), on("notifications.bubble.enabled")),
 	),
 	group(SectionNotifications, "When you're away",

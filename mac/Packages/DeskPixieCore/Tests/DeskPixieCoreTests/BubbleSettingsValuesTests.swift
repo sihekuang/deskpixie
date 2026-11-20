@@ -22,6 +22,16 @@ final class BubbleSettingsValuesTests: XCTestCase {
         XCTAssertNil(BubbleSettingsValues.fromSnapshot(Data("nope".utf8)))
     }
 
+    /// #455: the badge's clear time, 20 s by default, 0 keeps it, past an hour falls back.
+    func testReadsClearSecs() throws {
+        XCTAssertEqual(BubbleSettingsValues.defaults.clearSecs, 20)
+        for (json, want) in [(#"{"clearSecs":45}"#, 45), (#"{"clearSecs":0}"#, 0),
+                             (#"{"clearSecs":3601}"#, 20), (#"{"clearSecs":"soon"}"#, 20), ("{}", 20)] {
+            let s = try XCTUnwrap(BubbleSettingsValues.fromSnapshot(snapshot(#"{"notifications":{"bubble":"# + json + "}}")))
+            XCTAssertEqual(s.clearSecs, want, json)
+        }
+    }
+
     func testMalformedOrOutOfRangeValuesFallBack() throws {
         let s = try XCTUnwrap(BubbleSettingsValues.fromSnapshot(snapshot(
             #"{"notifications":{"bubble":{"enabled":"yes","popSecs":0,"lines":99},"awayAfterMins":null}}"#)))
