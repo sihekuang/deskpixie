@@ -1474,11 +1474,12 @@ func TestRunInTabTypesTheCommandLineInANewTab(t *testing.T) {
 	}
 }
 
-// A new tab's shell not at its prompt yet: the command line is typed again until it takes.
+// A new tab's terminal not taking the line yet (Herdr 0.9.5 refuses a line over 1024 bytes
+// before the shell's prompt): it is typed again until it takes.
 func TestRunInTabRetriesWhileTheShellIsNotReady(t *testing.T) {
 	t.Parallel()
 	server := herdrtest.Start(t)
-	server.BusyInputs(2)
+	server.CanonicalInputs(2)
 	h := newTestHost(t, server)
 	if _, err := h.RunInTab(bg, "t", "/data/ws", nil, "pix claude"); err != nil {
 		t.Fatal(err)
@@ -1486,8 +1487,8 @@ func TestRunInTabRetriesWhileTheShellIsNotReady(t *testing.T) {
 	if n := len(server.Requests("pane.send_input")); n != 3 {
 		t.Fatal(n)
 	}
-	if server.PaneCount() != 1 {
-		t.Fatal(server.PaneCount())
+	if server.PaneCount() != 1 || len(server.Typed()) != 1 {
+		t.Fatal(server.PaneCount(), server.Typed())
 	}
 }
 
@@ -1505,14 +1506,14 @@ func TestRunInTabThatCannotTypeClosesItsTab(t *testing.T) {
 	}
 }
 
-// A shell still busy past the limit: the busy error, and no tab left.
-func TestRunInTabBusyPastTheLimitClosesItsTab(t *testing.T) {
+// A terminal still not taking the line past the limit: that error, and no tab left.
+func TestRunInTabNotReadyPastTheLimitClosesItsTab(t *testing.T) {
 	t.Parallel()
 	server := herdrtest.Start(t)
-	server.BusyInputs(1 << 30)
+	server.CanonicalInputs(1 << 30)
 	h := newTestHost(t, server)
 	h.paneBusyLimit = 300 * time.Millisecond
-	if _, err := h.RunInTab(bg, "t", "/data/ws", nil, "pix claude"); !IsPaneBusy(err) {
+	if _, err := h.RunInTab(bg, "t", "/data/ws", nil, "pix claude"); !IsInputNotReady(err) {
 		t.Fatalf("%#v", err)
 	}
 	if server.PaneCount() != 0 {

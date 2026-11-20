@@ -134,6 +134,21 @@ func TestSendInputAndFocusPane(t *testing.T) {
 	assertJSON(t, tr.sentFor("pane.focus")[0], `{"pane_id":"w1:p2"}`)
 }
 
+// Herdr 0.9.5's pane.send_input refusal of a long line before the shell's prompt (seen live,
+// #461) is the same not-ready as agent.start's.
+func TestPaneSendFailedInCanonicalModeIsInputNotReady(t *testing.T) {
+	tr := newScriptedTransport()
+	tr.answer("pane.send_input", `{"id":"p1","error":{"code":"pane_send_failed","message":"input contains a 1511-byte line but the terminal is in canonical mode with a 1024-byte limit; wait for the shell prompt and retry"}}`)
+	tr.answer("pane.send_input", `{"id":"p1","error":{"code":"pane_send_failed","message":"something else"}}`)
+	c := NewClient(tr)
+	if err := c.SendInput(bg, "w1:p2", "x", nil); !IsInputNotReady(err) {
+		t.Fatalf("%#v", err)
+	}
+	if err := c.SendInput(bg, "w1:p2", "x", nil); IsInputNotReady(err) {
+		t.Fatalf("%#v", err)
+	}
+}
+
 // A pane that is gone is NoAgent, like an agent that is gone.
 func TestFocusPaneOnAGonePaneIsNoAgent(t *testing.T) {
 	tr := newScriptedTransport()

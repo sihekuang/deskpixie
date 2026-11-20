@@ -465,8 +465,9 @@ func (h *Host) start(ctx context.Context, spec agent.AgentSpec, replaceLive bool
 
 // RunInTab opens a tab labeled label in cwd with env and types line into its shell (#461: a
 // session you resume, which DeskPixie doesn't run as an agent, so agent.start can't start
-// it). It waits out a shell that isn't at its prompt yet, like start, and closes the tab if
-// the line never goes in. Returns the tab's pane.
+// it). A line typed before the shell's prompt waits in the terminal and runs (Behavior); one
+// too long for that is retried until the prompt, like start's. The tab is closed if the line
+// never goes in. Returns the tab's pane.
 func (h *Host) RunInTab(ctx context.Context, label, cwd string, env []agent.EnvVar, line string) (string, error) {
 	client, workspace, err := h.client(ctx)
 	if err != nil {
@@ -490,7 +491,7 @@ func (h *Host) RunInTab(ctx context.Context, label, cwd string, env []agent.EnvV
 		if err == nil {
 			break
 		}
-		if (IsPaneBusy(err) || IsInputNotReady(err)) && time.Now().Before(busyUntil) {
+		if IsInputNotReady(err) && time.Now().Before(busyUntil) {
 			if sleepCtx(ctx, StartPoll) {
 				continue
 			}
