@@ -50,8 +50,18 @@ func TestResumeID(t *testing.T) {
 		{"claude", []string{"--resume="}, ""},
 		{"claude", []string{"--continue"}, ""},
 		{"claude", nil, ""},
-		{"codex", []string{"resume", "abc"}, ""}, // Codex isn't recorded yet (#461)
+		{"codex", []string{"resume", "abc"}, "abc"}, // #468
+		{"codex", []string{"-m", "o3", "resume", "abc", "fix it"}, "abc"},
+		{"codex", []string{"resume", "-c", "model=\"o3\"", "abc"}, "abc"},
+		{"codex", []string{"resume", "--all", "abc"}, "abc"},
+		{"codex", []string{"resume", "--last"}, ""}, // no id: the most recent
+		{"codex", []string{"resume", "--last", "fix it"}, ""},
+		{"codex", []string{"resume"}, ""}, // the picker
+		{"codex", []string{"fork", "abc"}, ""},
+		{"codex", []string{"fix the resume bug"}, ""}, // a prompt
 		{"codex", []string{"--resume", "abc"}, ""},
+		// A valueless flag pix doesn't know takes the id as its value: no id, which is harmless.
+		{"codex", []string{"resume", "--some-new-switch", "abc"}, ""},
 	}
 	for _, c := range cases {
 		if got := ResumeID(c.tool, c.args); got != c.want {

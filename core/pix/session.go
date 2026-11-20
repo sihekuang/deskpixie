@@ -63,6 +63,42 @@ func (w *screenWatch) saw(chunk, marker string) bool {
 	return false
 }
 
+// codexExitLine is what Codex prints as it exits, naming the conversation to resume by its
+// UUID (#468); spaces are gone, as in screenWatch. A UUID's fixed length means output cut
+// short doesn't match.
+var codexExitLine = regexp.MustCompile(`Tocontinuethissession,run:codexresume([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})`)
+
+// codexExitTail: how much of Codex's last output is kept to find its exit line in.
+const codexExitTail = 4096
+
+// codexExitWatch keeps the end of Codex's output, to read its exit line once it has exited: a
+// session that ran no turn has no notify to carry its id (a resume you closed at once). Only
+// the very end counts, since the same words anywhere on screen before (a reply quoting them,
+// a log) name no conversation.
+type codexExitWatch struct{ raw string }
+
+// add keeps chunk, as it came: escapes are taken out of the whole tail, so one split across
+// reads still goes.
+func (w *codexExitWatch) add(chunk string) {
+	w.raw += chunk
+	if len(w.raw) > codexExitTail {
+		w.raw = w.raw[len(w.raw)-codexExitTail:]
+	}
+}
+
+// id is the conversation the last exit line in the tail names; "" for none.
+func (w *codexExitWatch) id() string {
+	tail := noSpace(ansi.ReplaceAllString(w.raw, ""))
+	if !strings.Contains(tail, "codexresume") {
+		return ""
+	}
+	all := codexExitLine.FindAllStringSubmatch(tail, -1)
+	if len(all) == 0 {
+		return ""
+	}
+	return all[len(all)-1][1]
+}
+
 // interruptOnScreen finds Claude's interrupt line on screen (at: its last row, -1 for none;
 // a narrow pane wraps it over a few) and what follows it (#322): latest, the input box with
 // no prompt of yours (❯) or reply (⏺) before it; stale, a turn since (a redraw brought back
@@ -115,6 +151,8 @@ type Session struct {
 	client *Client
 	queue  Queue
 	gate   Gate
+	// codexExit: written by the PTY reader only, read by finish once the agent's output ended.
+	codexExit codexExitWatch
 
 	mu          sync.Mutex
 	status      string // idle | working | blocked
@@ -381,6 +419,9 @@ func newSession(o sessionOpts) *Session {
 	case "codex":
 		s.runner.OnOutput = func(b []byte) {
 			out := string(b)
+			if s.currentSessionID() == "" { // a notify has said already: nothing to read off the screen
+				s.codexExit.add(out)
+			}
 			stoppedNow := stopped.saw(out, codexInterrupted) && s.currentStatus() != "idle"
 			if stoppedNow {
 				s.clearQuestion("interrupted")
@@ -449,6 +490,9 @@ func newSession(o sessionOpts) *Session {
 // Hook handles the agent's hooks (LocalHandler).
 func (s *Session) Hook(event string, p map[string]any) string {
 	if id, _ := p["session_id"].(string); id != "" {
+		s.setSessionID(id)
+	}
+	if id, _ := p["thread-id"].(string); id != "" { // Codex's notify: the id `codex resume` takes (#468)
 		s.setSessionID(id)
 	}
 	switch event {
@@ -1163,6 +1207,12 @@ func (s *Session) currentTurnPrompt() string {
 	return s.turnPrompt
 }
 
+func (s *Session) currentSessionID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sessionID
+}
+
 func (s *Session) setSessionID(id string) {
 	s.mu.Lock()
 	changed := s.sessionID != id
@@ -1291,6 +1341,12 @@ func (s *Session) start(ctx context.Context) error {
 func (s *Session) finish() int {
 	code := s.runner.Wait()
 	s.o.log.Printf("the agent exited (%d)", code)
+	// Its output is read to the end before Wait returns: Codex's exit line, if any, is in.
+	if s.o.tool == "codex" && s.currentSessionID() == "" {
+		if id := s.codexExit.id(); id != "" {
+			s.setSessionID(id)
+		}
+	}
 	s.client.Send(wire.Msg{Kind: wire.KindEvent, Event: "exited", ExitCode: code})
 	s.client.Send(wire.Msg{Kind: wire.KindBye})
 	return code

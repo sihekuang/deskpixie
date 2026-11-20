@@ -703,6 +703,71 @@ func TestCodexDescriptionFromItsTurn(t *testing.T) {
 	h.s.finish()
 }
 
+// Codex's turn-end notify carries its thread id, the conversation `codex resume` takes (#468).
+func TestCodexNotifySetsSessionIDOnce(t *testing.T) {
+	h := newHarness(t, "codex", Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}})
+	const id = "019a5c1e-7f3b-7d20-9c4e-2b8f1a6d3e90"
+	turn := map[string]any{"type": "agent-turn-complete", "thread-id": id, "turn-id": "t1", "input-messages": []any{"hi"}}
+	h.s.Hook("Stop", turn)
+	waitEvent(t, h.d.events, "codex session id", func(m wire.Msg) bool { return m.Event == "session" && m.SessionID == id })
+	h.s.Hook("Stop", turn)
+	h.s.setStatus("working") // a marker: no second session event comes before it
+	waitEvent(t, h.d.events, "working", func(m wire.Msg) bool {
+		if m.Event == "session" {
+			t.Fatalf("session id sent again: %+v", m)
+		}
+		return m.Event == "status" && m.Status == "working"
+	})
+	h.s.runner.Hangup()
+	h.s.finish()
+}
+
+// On exit Codex prints the line that resumes it: a session that ran no turn (a resume you
+// closed at once) still reports its conversation, before pix says it exited (#468).
+func TestCodexExitLineSetsSessionID(t *testing.T) {
+	const id = "019a5c1e-7f3b-7d20-9c4e-2b8f1a6d3e90"
+	h := newHarness(t, "codex", Launch{Path: "/bin/sh", Args: []string{"-c",
+		`read x; printf 'Token usage: total=0\r\nTo continue this session, run: \033[36mcodex resume ` + id + `\033[39m\r\n'`}})
+	exitAfterAPrompt(t, h)
+	m := waitEvent(t, h.d.events, "session or exit", func(m wire.Msg) bool { return m.Event == "session" || m.Event == "exited" })
+	if m.Event != "session" || m.SessionID != id {
+		t.Fatalf("want the session id before the exit, got %+v", m)
+	}
+}
+
+// The exit line on screen mid-session (a reply quoting it, a log) names no conversation: only
+// what Codex prints as it exits counts, and a notify's id wins (#468).
+func TestCodexExitLineMidSessionIsNotActedOn(t *testing.T) {
+	const quoted, real = "11111111-2222-3333-4444-555555555555", "019a5c1e-7f3b-7d20-9c4e-2b8f1a6d3e90"
+	h := newHarness(t, "codex", Launch{Path: "/bin/sh", Args: []string{"-c",
+		`printf 'To continue this session, run: codex resume ` + quoted + `\r\nmore output\r\n'; read x; printf 'bye\r\n'`}})
+	h.s.Hook("Stop", map[string]any{"type": "agent-turn-complete", "thread-id": real})
+	waitEvent(t, h.d.events, "the notify's id", func(m wire.Msg) bool {
+		if m.Event == "session" && m.SessionID != real {
+			t.Fatalf("an id from the screen: %+v", m)
+		}
+		return m.Event == "session"
+	})
+	exitAfterAPrompt(t, h)
+	waitEvent(t, h.d.events, "exited", func(m wire.Msg) bool {
+		if m.Event == "session" {
+			t.Fatalf("another session event: %+v", m)
+		}
+		return m.Event == "exited"
+	})
+}
+
+// A quoted exit line long scrolled away before the exit names nothing either.
+func TestCodexExitLineMustBeAtTheEnd(t *testing.T) {
+	h := newHarness(t, "codex", Launch{Path: "/bin/sh", Args: []string{"-c",
+		`printf 'To continue this session, run: codex resume 11111111-2222-3333-4444-555555555555\r\n'; read x; i=0; while [ $i -lt 200 ]; do printf 'line %d of the reply\r\n' $i; i=$((i+1)); done`}})
+	exitAfterAPrompt(t, h)
+	m := waitEvent(t, h.d.events, "session or exit", func(m wire.Msg) bool { return m.Event == "session" || m.Event == "exited" })
+	if m.Event != "exited" {
+		t.Fatalf("%+v", m)
+	}
+}
+
 // #105: prompts a session waits on, answered from Pixie.
 
 // keyHarness runs an agent that prints, in hex, the first byte typed into it on a cleared
@@ -2513,4 +2578,30 @@ func TestHelloSaysWhichConversationItResumes(t *testing.T) {
 	waitEvent(t, h.d.events, "hello", func(m wire.Msg) bool { return m.Kind == wire.KindRegister && m.Resumes == "abc" })
 	h.s.runner.Hangup()
 	h.s.finish()
+}
+
+// exitAfterAPrompt types a line into an agent that exits on it, and waits for the exit. The
+// prompt's result comes back over the connection, so pix is registered before the agent ends.
+func exitAfterAPrompt(t *testing.T, h *harness) {
+	t.Helper()
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "bye"})
+	waitEvent(t, h.d.events, "prompt result", func(m wire.Msg) bool { return m.Kind == wire.KindResult && m.ID == "1" })
+	h.s.finish()
+}
+
+// A read can cut the exit line anywhere, inside an escape sequence too (#468).
+func TestCodexExitWatchAcrossReads(t *testing.T) {
+	const id = "019a5c1e-7f3b-7d20-9c4e-2b8f1a6d3e90"
+	var w codexExitWatch
+	for _, chunk := range []string{"Token usage: total=3\r\nTo continue this session, run: \x1b[3", "6mcodex res", "ume 019a5c1e-7f3b-7d20", "-9c4e-2b8f1a6d3e9"} {
+		w.add(chunk)
+		if got := w.id(); got != "" {
+			t.Fatalf("an id before it is whole: %q", got)
+		}
+	}
+	w.add("0\x1b[3")
+	w.add("9m\r\n")
+	if got := w.id(); got != id {
+		t.Fatalf("%q", got)
+	}
 }

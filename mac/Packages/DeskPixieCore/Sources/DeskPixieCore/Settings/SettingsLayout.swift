@@ -522,7 +522,7 @@ public enum SettingsLayout {
     public static let pixHelp = "Start Claude Code or Codex with `pix claude` or `pix codex` in any terminal (WebStorm, iTerm, …) and Pixie can see, message and interrupt that session. Quitting DeskPixie never ends it."
 
     /// The History row's help (#461).
-    public static let pixHistoryHelp = "Past Claude Code sessions you ran with pix. Resume one to open it in Herdr, in its project folder."
+    public static let pixHistoryHelp = "Past Claude Code and Codex sessions you ran with pix. Resume one to open it in Herdr, in its project folder."
 
     /// Every extra row's look; the core places them (`SettingsSnapshot.extras`).
     public static let allExtras: [Extra] = [

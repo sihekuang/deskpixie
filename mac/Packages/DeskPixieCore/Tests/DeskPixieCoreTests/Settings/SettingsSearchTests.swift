@@ -101,7 +101,7 @@ final class SettingsSearchTests: XCTestCase {
             "key.openai": ["OpenAI key", "Type the key here to keep it in the Keychain (used first), or set OPENAI_API_KEY in your environment or a .env file. Keys are never shown here."],
             "key.gemini": ["Gemini key", "Type the key here to keep it in the Keychain (used first), or set GEMINI_API_KEY in your environment or a .env file. Keys are never shown here."],
             "pix": ["pix command", "Start Claude Code or Codex with `pix claude` or `pix codex` in any terminal (WebStorm, iTerm, …) and Pixie can see, message and interrupt that session. Quitting DeskPixie never ends it."],
-            "pixHistory": ["History", "Past Claude Code sessions you ran with pix. Resume one to open it in Herdr, in its project folder."],
+            "pixHistory": ["History", "Past Claude Code and Codex sessions you ran with pix. Resume one to open it in Herdr, in its project folder."],
             "restartCoordinator": ["Restart coordinator", "Stops the coordinator and starts it again on your next request, with its conversation. Asks first."],
             "openFile": ["Settings file", "settings.json holds every setting."],
             "exportLogs": ["Logs", "Saves the app's log, pix's log, the voice log and metrics in one zip to share. It can include what you said to Pixie."],

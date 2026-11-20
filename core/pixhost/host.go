@@ -28,7 +28,7 @@ const UnreachableFor = 10 * time.Second
 // CommandLimit bounds one command's round trip to a pix.
 const CommandLimit = 10 * time.Second
 
-// ResumeFailWithin: a resume whose pix exits this soon without Claude reporting the
+// ResumeFailWithin: a resume whose pix exits this soon without the agent reporting the
 // conversation failed, and the conversation is marked unresumable (#461).
 const ResumeFailWithin = 30 * time.Second
 
@@ -86,7 +86,7 @@ func New(sock string, taken func() []string) *Host {
 		historyChanges: make(chan struct{}, 1), now: time.Now}
 }
 
-// SetHistory keeps your Claude sessions in store, timed by now (#461). Without it (nil, the
+// SetHistory keeps your Claude and Codex sessions in store, timed by now (#461). Without it (nil, the
 // default) none are kept.
 func (h *Host) SetHistory(store HistoryStore, now func() time.Time) {
 	h.mu.Lock()
@@ -442,7 +442,7 @@ func (h *Host) remove(s *session) {
 	h.broadcast(agent.PaneEvent{Kind: agent.PaneEventExited, Agent: s.addr})
 }
 
-// recordReported records e, the session Claude just reported, as running. forkOf: the
+// recordReported records e, the session the agent just reported, as running. forkOf: the
 // conversation it resumed under another id; the new entry carries it on in its place.
 func (h *Host) recordReported(store HistoryStore, e HistoryEntry, forkOf string) {
 	if forkOf != "" {
@@ -461,7 +461,7 @@ func (h *Host) recordReported(store HistoryStore, e HistoryEntry, forkOf string)
 	h.changed()
 }
 
-// exited: s's agent exited. A resume that ends this soon without Claude reporting the
+// exited: s's agent exited. A resume that ends this soon without the agent reporting the
 // conversation failed: History marks it unresumable (#461).
 func (h *Host) exited(s *session) {
 	h.mu.Lock()
@@ -474,16 +474,17 @@ func (h *Host) exited(s *session) {
 }
 
 // historyOf is the store and s's entry as it stands (h.mu held); a nil store when none is kept
-// or s is not a Claude session. The entry's SessionID is "" until Claude reports it.
+// or s is not a Claude or Codex session (#468). The entry's SessionID is "" until the agent
+// reports it.
 func (h *Host) historyOf(s *session) (HistoryStore, HistoryEntry) {
-	if h.history == nil || s.hello.Tool != "claude" {
+	if h.history == nil || resumeArgs[s.hello.Tool] == nil { // only what History can resume
 		return nil, HistoryEntry{}
 	}
 	return h.history, HistoryEntry{SessionID: s.sessionID, Tool: s.hello.Tool, Description: s.desc.Current(),
 		Cwd: s.hello.Cwd, GitRoot: s.hello.GitRoot, Where: s.hello.Where, Started: s.started, LastActive: h.now()}
 }
 
-// History is your Claude sessions, the most recently active first; one running now
+// History is your Claude and Codex sessions, the most recently active first; one running now
 // (connected, reconnecting, or a resume of it) has RunningAs set. Nil when none are kept (#461).
 func (h *Host) History() []HistoryEntry {
 	store, running := h.historyRunning()

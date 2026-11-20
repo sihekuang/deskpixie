@@ -8,8 +8,13 @@ on the same history.
 
 ## Scope
 
-- Claude Code only. pix learns Claude's conversation id from its SessionStart hook
-  (`core/pix/session.go`); it learns none from Codex yet, so Codex sessions are not recorded.
+- Claude Code and Codex (#468). pix learns Claude's conversation id from its hooks
+  (`session_id`, first at SessionStart; `core/pix/session.go`). Codex's is its thread id:
+  the `thread-id` of the notify it runs at each turn's end. A session with no notify yet (a
+  resume closed before any turn) takes it from the
+  `To continue this session, run: codex resume <id>` line Codex prints as it exits: read off
+  the end of its output once it has exited, never mid-session, where the same words may be
+  quoted. Codex keeps the id when resumed; Claude may fork it under a new one.
 - Not under the session chip: History lives in the menu bar, Pixie's right-click menu and
   Settings.
 
@@ -17,12 +22,12 @@ on the same history.
 
 ### What's kept (Go, `core/pixhost`)
 
-One entry per Claude conversation with a session id:
+One entry per Claude or Codex conversation with a session id:
 
 | Field | From |
 |---|---|
 | `sessionId` | the `session` event |
-| `tool` | register (`claude`) |
+| `tool` | register (`claude` or `codex`) |
 | `description` | the latest description |
 | `cwd`, `gitRoot` | register |
 | `where` | register (WebStorm, iTerm, Herdr…) |
@@ -100,8 +105,9 @@ reconciles, replaces or stops it, so:
 ### Resume (Go decides, Swift does)
 
 1. Go ensures `deskpixie-yours` and opens a tab named after the description, in the entry's
-   `cwd`, running `<DeskPixie.app>/…/pix claude --resume <sessionId>`. The app's own pix is
-   used, so resuming works without installing the `pix` command.
+   `cwd`, running `<DeskPixie.app>/…/pix claude --resume <sessionId>` (Codex:
+   `pix codex resume <sessionId>`; any other tool is refused as unresumable). The app's own
+   pix is used, so resuming works without installing the `pix` command.
 2. The tab's environment has no `PIXIE_AGENT_TOKEN` (so `pix.Nested` is false and pix wraps
    Claude as usual) and has `PIX_WHERE=Herdr`; `pix.Where` reads it first.
 3. pix registers with the host as any session you started: listed under ⌨, Pixie can message

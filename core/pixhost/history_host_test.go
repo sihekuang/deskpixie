@@ -311,10 +311,36 @@ func TestHistoryRemoveAndClearPassThrough(t *testing.T) {
 	}
 }
 
-func TestHistoryLeavesCodexOut(t *testing.T) {
-	h, sock, store, _ := newHistoryHost(t)
-	p, _ := dialPix(t, sock, wire.Msg{Tool: "codex", GitRoot: "/x/api"})
+// Codex sessions are recorded like Claude's, under their thread id (#468).
+func TestHistoryRecordsCodex(t *testing.T) {
+	_, sock, store, _ := newHistoryHost(t)
+	p, _ := dialPix(t, sock, wire.Msg{Tool: "codex", Cwd: "/x/api", GitRoot: "/x/api", Where: "iTerm", Description: "retries"})
 	sendEvent(p, wire.Msg{Event: "session", SessionID: "c1"})
+	eventually(t, "not recorded", func() bool { _, ok := store.entry("c1"); return ok })
+	if e, _ := store.entry("c1"); e.Tool != "codex" || e.Cwd != "/x/api" || e.Where != "iTerm" || e.Description != "retries" {
+		t.Fatalf("%+v", e)
+	}
+}
+
+// A Codex resume keeps its thread id: the entry carries on, not marked unresumable (#468).
+func TestHistoryCodexResumeKeepsItsEntry(t *testing.T) {
+	h, sock, store, _ := newHistoryHost(t)
+	store.Record(HistoryEntry{SessionID: "c1", Tool: "codex", Description: "retries", HerdrPane: "w1:p3", LastActive: at(0), Ended: true})
+	p, _ := dialPix(t, sock, wire.Msg{Tool: "codex", GitRoot: "/x/api", Resumes: "c1"})
+	sendEvent(p, wire.Msg{Event: "session", SessionID: "c1"})
+	eventually(t, "not running again", func() bool { e, _ := store.entry("c1"); return !e.Ended })
+	sendEvent(p, wire.Msg{Event: "exited"})
+	eventually(t, "not removed", func() bool { return len(listed(t, h)) == 0 })
+	if e, _ := store.entry("c1"); e.Unresumable || e.Description != "retries" || e.HerdrPane != "w1:p3" || len(store.List()) != 1 {
+		t.Fatalf("%+v", store.List())
+	}
+}
+
+// Only the tools History can resume are recorded.
+func TestHistoryLeavesOtherToolsOut(t *testing.T) {
+	h, sock, store, _ := newHistoryHost(t)
+	p, _ := dialPix(t, sock, wire.Msg{Tool: "aider", GitRoot: "/x/api"})
+	sendEvent(p, wire.Msg{Event: "session", SessionID: "a1"})
 	sendEvent(p, wire.Msg{Event: "exited"})
 	eventually(t, "not removed", func() bool { return len(listed(t, h)) == 0 })
 	if got := store.List(); len(got) != 0 {

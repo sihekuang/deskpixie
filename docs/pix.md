@@ -99,17 +99,21 @@ counted until it reconnects.
 
 ## Picking up a past session
 
-DeskPixie remembers your last 20 Claude Code sessions that ran through pix. Find them under
-**History** in the menu bar, in Pixie's right-click menu, or in Settings ▸ Sessions. History
-needs the coordinator to be on. Codex sessions aren't listed yet.
+DeskPixie remembers your last 20 Claude Code and Codex sessions that ran through pix. Find them
+under **History** in the menu bar, in Pixie's right-click menu, or in Settings ▸ Sessions.
+History needs the coordinator to be on. A Codex session is listed once it has finished a turn
+(or once you quit it).
 
 - **A past session:** click it (or **Resume** in Settings). It opens in a new tab of a Herdr
   session of its own, named after yours with `-yours` added (`deskpixie-yours`), in the
-  project folder it ran in, as `pix claude --resume …`. Your terminal opens attached to it.
-  It is still your session: Pixie can message it, asks before closing it, and quitting
-  DeskPixie never ends it. Clicking its row under Pixie later brings that Herdr tab back.
+  project folder it ran in, as `pix claude --resume …` or `pix codex resume …`. Your
+  terminal opens attached to it. It is still your session: Pixie can message it, asks before
+  closing it, and quitting DeskPixie never ends it. Clicking its row under Pixie later brings
+  that Herdr tab back.
 - **A running session** is marked ●. Clicking it brings it forward, the same as clicking its
-  row under Pixie. Nothing new is started.
+  row under Pixie. Nothing new is started. A Codex conversation you resume a second time
+  yourself (`codex resume` in another terminal) keeps its id, so that second one runs without
+  Pixie; Claude gives a second resume an id of its own.
 - **Remove** (in Settings) and **Clear History** forget past sessions only; running ones stay.
 
 Resuming needs Herdr installed, even when the coordinator runs in tmux.
