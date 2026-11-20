@@ -31,7 +31,7 @@ const (
 	KindBye        Kind = "bye"
 )
 
-// Msg is one message. Only the fields of its Kind are set: register → Tool…Description;
+// Msg is one message. Only the fields of its Kind are set: register → Tool…Description, Resumes;
 // registered → Address, Outdated; refused → Reason; event → Event (status, description, session,
 // exited, hook, turn, question, question-gone) and its fields; command → Command, Text, Keys;
 // result → Text, Err.
@@ -48,6 +48,7 @@ type Msg struct {
 	App         string `json:"app,omitempty"`
 	SessionID   string `json:"sessionId,omitempty"`
 	Description string `json:"description,omitempty"`
+	Resumes     string `json:"resumes,omitempty"` // the conversation a run resumes (claude --resume <id>, #461)
 	Address     string `json:"address,omitempty"`
 	Reason      string `json:"reason,omitempty"`
 	Event       string `json:"event,omitempty"`

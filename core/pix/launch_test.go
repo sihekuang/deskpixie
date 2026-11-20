@@ -29,6 +29,37 @@ func TestWhere(t *testing.T) {
 	}
 }
 
+func TestWherePixWhereWins(t *testing.T) {
+	env := map[string]string{"PIX_WHERE": "Herdr", "TERM_PROGRAM": "iTerm.app"}
+	if got := Where(envOf(env)); got != "Herdr" {
+		t.Fatal(got)
+	}
+}
+
+func TestResumeID(t *testing.T) {
+	cases := []struct {
+		tool string
+		args []string
+		want string
+	}{
+		{"claude", []string{"--resume", "abc"}, "abc"},
+		{"claude", []string{"-r", "abc", "--model", "x"}, "abc"},
+		{"claude", []string{"--model", "x", "--resume=abc"}, "abc"},
+		{"claude", []string{"--resume"}, ""},            // the picker: no id yet
+		{"claude", []string{"--resume", "--model"}, ""}, // a flag, not an id
+		{"claude", []string{"--resume="}, ""},
+		{"claude", []string{"--continue"}, ""},
+		{"claude", nil, ""},
+		{"codex", []string{"resume", "abc"}, ""}, // Codex isn't recorded yet (#461)
+		{"codex", []string{"--resume", "abc"}, ""},
+	}
+	for _, c := range cases {
+		if got := ResumeID(c.tool, c.args); got != c.want {
+			t.Errorf("%s %v: got %q want %q", c.tool, c.args, got, c.want)
+		}
+	}
+}
+
 func TestNested(t *testing.T) {
 	if !Nested(envOf(map[string]string{"PIX_SESSION": "1"})) || !Nested(envOf(map[string]string{"PIXIE_AGENT_TOKEN": "t"})) {
 		t.Fatal("nested not detected")

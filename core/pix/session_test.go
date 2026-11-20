@@ -151,9 +151,16 @@ func newHarness(t *testing.T, tool string, agent Launch) *harness {
 
 func newLoggedHarness(t *testing.T, tool string, agent Launch, log *Log) *harness {
 	t.Helper()
+	return newHarnessWith(t, sessionOpts{tool: tool, agent: agent, where: "terminal", log: log})
+}
+
+// newHarnessWith is a harness for a session with o, connected to a fake daemon.
+func newHarnessWith(t *testing.T, o sessionOpts) *harness {
+	t.Helper()
 	d, sock := newFakeDaemon(t, "")
 	inR, inW, outR, outW := pipes(t)
-	s := newSession(sessionOpts{tool: tool, daemonSock: sock, home: t.TempDir(), stdin: inR, stdout: outW, agent: agent, where: "terminal", log: log})
+	o.daemonSock, o.home, o.stdin, o.stdout = sock, t.TempDir(), inR, outW
+	s := newSession(o)
 	s.runner.Tap = func(b []byte) {
 		tapMu.Lock()
 		tapped[s] = append(tapped[s], b...)
@@ -2497,4 +2504,13 @@ func TestForcedMessagesAMenuKeptGoPastYourTyping(t *testing.T) {
 	if got := h.s.typedForTest(); !sent || !strings.Contains(got, "\x1b[200~kept\x1b[201~") {
 		t.Fatalf("sent %v, typed %q", sent, got)
 	}
+}
+
+// #461: a run resuming a conversation says which in its hello, so DeskPixie can tell a resume
+// that fails at once.
+func TestHelloSaysWhichConversationItResumes(t *testing.T) {
+	h := newHarnessWith(t, sessionOpts{tool: "claude", resumes: "abc", agent: Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}}})
+	waitEvent(t, h.d.events, "hello", func(m wire.Msg) bool { return m.Kind == wire.KindRegister && m.Resumes == "abc" })
+	h.s.runner.Hangup()
+	h.s.finish()
 }
