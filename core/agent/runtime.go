@@ -144,6 +144,7 @@ const (
 	opInterrupt
 	opStop    // Escape, then close the pane
 	opRelabel // tab: the coordinator's tab label
+	opRead    // its screen, for the prompt it waits at (#459)
 )
 
 type hostOp struct {
@@ -1184,6 +1185,10 @@ func (h *AgentHandle) runOp(op hostOp) {
 		// of life and fails its jobs if none comes.
 		h.Input(PromptTimedOutInput())
 	}
+	if op.kind == opRead && !h.quitting() {
+		// Unread: the generic hint (a late read is ignored once it's said).
+		h.Input(CoordinatorScreenInput(""))
+	}
 	if op.kind == opStart && !h.quitting() {
 		// The controller must leave Starting: its waiting jobs fail under the usual rules.
 		h.Input(CoordinatorFailedInput(HostError{Kind: HostTimeout, Detail: "the coordinator did not start in time"}))
@@ -1244,6 +1249,15 @@ func (h *AgentHandle) runOpInner(ctx context.Context, op hostOp) {
 		}
 	case opRelabel:
 		relabelQuietly(ctx, host.Session(), Coordinator, op.tab)
+	case opRead:
+		text, err := host.Session().Read(ctx, Coordinator, 40)
+		if ctx.Err() != nil {
+			return // runOp gave up on it and said so
+		}
+		if err != nil {
+			text = "" // unread: the generic hint, then
+		}
+		h.Input(CoordinatorScreenInput(text))
 	}
 }
 
@@ -2110,6 +2124,8 @@ func (h *AgentHandle) apply(e Effect) {
 		}
 	case EfStopCoordinator:
 		h.queueOp(hostOp{kind: opStop})
+	case EfReadCoordinator:
+		h.queueOp(hostOp{kind: opRead})
 	case EfLabel:
 		h.queueOp(hostOp{kind: opRelabel, tab: e.Tab})
 	case EfResetHost:
