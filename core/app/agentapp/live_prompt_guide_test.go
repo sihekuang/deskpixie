@@ -27,6 +27,8 @@ import (
 )
 
 // extraDirHost starts the coordinator with one more --add-dir: a folder Claude Code asks about.
+// Without --continue: this fresh workspace has no conversation, and Claude Code would exit
+// once the prompt is answered (a real coordinator has one).
 type extraDirHost struct {
 	agent.SessionHost
 	dir string
@@ -34,7 +36,13 @@ type extraDirHost struct {
 
 func (h extraDirHost) withDir(spec agent.AgentSpec) agent.AgentSpec {
 	if spec.Name == agent.Coordinator {
-		spec.Args = append(append([]string{}, spec.Args...), "--add-dir", h.dir)
+		var args []string
+		for _, a := range spec.Args {
+			if a != "--continue" {
+				args = append(args, a)
+			}
+		}
+		spec.Args = append(args, "--add-dir", h.dir)
 	}
 	return spec
 }
@@ -101,13 +109,24 @@ func TestLivePromptGuideClaude(t *testing.T) {
 	t.Logf("     after the second request: %q", v.all()[mark:])
 
 	t.Log("step 3: answer the prompt as the user would: Yes, add it")
+	screen := func(when string) string {
+		text, _ := host.Read(context.Background(), agent.Coordinator, 40)
+		t.Logf("     screen %s:\n%s", when, agent.ScreenBottom(text, 12))
+		return text
+	}
+	screen("before")
 	if err := host.SendKeys(context.Background(), agent.Coordinator, []string{"Down"}); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(time.Second)
+	if !strings.Contains(screen("after Down"), "❯ Yes, add it") {
+		t.Fatal("Down didn't move to \"Yes, add it\"")
+	}
 	if err := host.SendKeys(context.Background(), agent.Coordinator, []string{"Enter"}); err != nil {
 		t.Fatal(err)
 	}
+	time.Sleep(2 * time.Second)
+	screen("after Enter")
 
 	t.Log("step 4: the requests go through, the user hears so, and the coordinator answers")
 	v.waitFor(t, "went through", 2*time.Minute, func() bool { return hasEvent(v.all()[mark:], "your request went through") })
