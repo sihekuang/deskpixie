@@ -361,8 +361,14 @@ func TestRuntimeConversationEventsComeWithoutTheMic(t *testing.T) {
 	eventually(t, "connect", func() bool { return len(m.connects()) == 1 })
 	m.sess.events <- Event{Kind: EvReady}
 	eventually(t, "conversation open", func() bool { return ui.has(UIEvent{Kind: "conversation", Text: "open"}) })
-	m.sess.events <- Event{Kind: EvError, Fatal: true, Message: "connection lost"} // ended
-	eventually(t, "conversation closed", func() bool { return ui.has(UIEvent{Kind: "conversation", Text: "closed"}) })
+	// It ends on its own, as one that said its updates does: nothing more came to say.
+	deadline := time.Now().Add(SpeakOnlyWait + 3*time.Second)
+	for !ui.has(UIEvent{Kind: "conversation", Text: "closed"}) {
+		if time.Now().After(deadline) {
+			t.Fatal("no conversation closed once it had nothing more to say")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 	if ui.has(UIEvent{Kind: "mic", Text: "start"}) || ui.has(UIEvent{Kind: "mic", Text: "stop"}) {
 		t.Fatal("the mic was used")
 	}
