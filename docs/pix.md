@@ -106,11 +106,14 @@ History needs the coordinator to be on. A Codex session is listed once it has fi
 
 - **A past session:** click it (or **Resume** in Settings). It opens in a new tab of a Herdr
   session of its own, named after yours with `-yours` added (`deskpixie-yours`), in the
-  project folder it ran in, as `pix claude --resume …` or `pix codex resume …`. Your terminal opens attached to it.
-  It is still your session: Pixie can message it, asks before closing it, and quitting
-  DeskPixie never ends it. Clicking its row under Pixie later brings that Herdr tab back.
+  project folder it ran in, as `pix claude --resume …` or `pix codex resume …`. Your
+  terminal opens attached to it. It is still your session: Pixie can message it, asks before
+  closing it, and quitting DeskPixie never ends it. Clicking its row under Pixie later brings
+  that Herdr tab back.
 - **A running session** is marked ●. Clicking it brings it forward, the same as clicking its
-  row under Pixie. Nothing new is started.
+  row under Pixie. Nothing new is started. A Codex conversation you resume a second time
+  yourself (`codex resume` in another terminal) keeps its id, so that second one runs without
+  Pixie; Claude gives a second resume an id of its own.
 - **Remove** (in Settings) and **Clear History** forget past sessions only; running ones stay.
 
 Resuming needs Herdr installed, even when the coordinator runs in tmux.
