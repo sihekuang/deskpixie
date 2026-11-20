@@ -54,7 +54,9 @@ var codexNoValue = set("--all", "--include-non-interactive", "--oss", "--search"
 	"--dangerously-bypass-approvals-and-sandbox", "--yolo", "--no-alt-screen")
 
 // codexResumeID is the id in `codex [flags] resume [flags] <id> [prompt]`; "" for the picker or
-// --last (the most recent, whichever that is).
+// --last (the most recent, whichever that is). A miss is harmless: after a valueless flag not
+// in codexNoValue the id reads as its value (no id), and a thread name passes as an id that no
+// entry has; either way only a failed resume goes unmarked.
 func codexResumeID(args []string) string {
 	var words []string // the arguments that are neither a flag nor a flag's value
 	for i, a := range args {

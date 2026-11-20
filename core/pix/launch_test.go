@@ -60,6 +60,8 @@ func TestResumeID(t *testing.T) {
 		{"codex", []string{"fork", "abc"}, ""},
 		{"codex", []string{"fix the resume bug"}, ""}, // a prompt
 		{"codex", []string{"--resume", "abc"}, ""},
+		// A valueless flag pix doesn't know takes the id as its value: no id, which is harmless.
+		{"codex", []string{"resume", "--some-new-switch", "abc"}, ""},
 	}
 	for _, c := range cases {
 		if got := ResumeID(c.tool, c.args); got != c.want {

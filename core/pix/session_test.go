@@ -735,10 +735,32 @@ func TestCodexExitLineSetsSessionID(t *testing.T) {
 	}
 }
 
-// Only Codex's own exit line counts: the same words in a reply mid-session name no conversation.
-func TestCodexResumeTextIsNotAnExitLine(t *testing.T) {
+// The exit line on screen mid-session (a reply quoting it, a log) names no conversation: only
+// what Codex prints as it exits counts, and a notify's id wins (#468).
+func TestCodexExitLineMidSessionIsNotActedOn(t *testing.T) {
+	const quoted, real = "11111111-2222-3333-4444-555555555555", "019a5c1e-7f3b-7d20-9c4e-2b8f1a6d3e90"
 	h := newHarness(t, "codex", Launch{Path: "/bin/sh", Args: []string{"-c",
-		`read x; printf 'try codex resume 019a5c1e-7f3b-7d20-9c4e-2b8f1a6d3e90\r\n'`}})
+		`printf 'To continue this session, run: codex resume ` + quoted + `\r\nmore output\r\n'; read x; printf 'bye\r\n'`}})
+	h.s.Hook("Stop", map[string]any{"type": "agent-turn-complete", "thread-id": real})
+	waitEvent(t, h.d.events, "the notify's id", func(m wire.Msg) bool {
+		if m.Event == "session" && m.SessionID != real {
+			t.Fatalf("an id from the screen: %+v", m)
+		}
+		return m.Event == "session"
+	})
+	exitAfterAPrompt(t, h)
+	waitEvent(t, h.d.events, "exited", func(m wire.Msg) bool {
+		if m.Event == "session" {
+			t.Fatalf("another session event: %+v", m)
+		}
+		return m.Event == "exited"
+	})
+}
+
+// A quoted exit line long scrolled away before the exit names nothing either.
+func TestCodexExitLineMustBeAtTheEnd(t *testing.T) {
+	h := newHarness(t, "codex", Launch{Path: "/bin/sh", Args: []string{"-c",
+		`printf 'To continue this session, run: codex resume 11111111-2222-3333-4444-555555555555\r\n'; read x; i=0; while [ $i -lt 200 ]; do printf 'line %d of the reply\r\n' $i; i=$((i+1)); done`}})
 	exitAfterAPrompt(t, h)
 	m := waitEvent(t, h.d.events, "session or exit", func(m wire.Msg) bool { return m.Event == "session" || m.Event == "exited" })
 	if m.Event != "exited" {
@@ -2567,18 +2589,19 @@ func exitAfterAPrompt(t *testing.T, h *harness) {
 	h.s.finish()
 }
 
-// A read can cut the exit line anywhere; the id counts only once it is whole (#468).
+// A read can cut the exit line anywhere, inside an escape sequence too (#468).
 func TestCodexExitWatchAcrossReads(t *testing.T) {
+	const id = "019a5c1e-7f3b-7d20-9c4e-2b8f1a6d3e90"
 	var w codexExitWatch
-	for _, chunk := range []string{"To continue this session, run: \x1b[36mcodex res", "ume 019a5c1e-7f3b-7d20", "-9c4e-2b8f1a6d3e9"} {
-		if id := w.saw(chunk); id != "" {
-			t.Fatalf("an id before it is whole: %q", id)
+	for _, chunk := range []string{"Token usage: total=3\r\nTo continue this session, run: \x1b[3", "6mcodex res", "ume 019a5c1e-7f3b-7d20", "-9c4e-2b8f1a6d3e9"} {
+		w.add(chunk)
+		if got := w.id(); got != "" {
+			t.Fatalf("an id before it is whole: %q", got)
 		}
 	}
-	if id := w.saw("0\x1b[39m\r\n"); id != "019a5c1e-7f3b-7d20-9c4e-2b8f1a6d3e90" {
-		t.Fatalf("%q", id)
-	}
-	if id := w.saw("\r\n"); id != "" {
-		t.Fatalf("again: %q", id)
+	w.add("0\x1b[3")
+	w.add("9m\r\n")
+	if got := w.id(); got != id {
+		t.Fatalf("%q", got)
 	}
 }

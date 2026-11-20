@@ -64,27 +64,39 @@ func (w *screenWatch) saw(chunk, marker string) bool {
 }
 
 // codexExitLine is what Codex prints as it exits, naming the conversation to resume by its
-// UUID (#468); spaces are gone, as in screenWatch. A UUID's fixed length means a read that cuts
-// it short doesn't match yet.
+// UUID (#468); spaces are gone, as in screenWatch. A UUID's fixed length means output cut
+// short doesn't match.
 var codexExitLine = regexp.MustCompile(`Tocontinuethissession,run:codexresume([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})`)
 
-// codexExitWatch finds Codex's exit line in its output, a session that ran no turn included
-// (its notify, which carries the id too, comes only at a turn's end).
-type codexExitWatch struct{ tail string }
+// codexExitTail: how much of Codex's last output is kept to find its exit line in.
+const codexExitTail = 4096
 
-// saw adds chunk and returns the id the exit line names, once; "" until then.
-func (w *codexExitWatch) saw(chunk string) string {
-	w.tail += noSpace(ansi.ReplaceAllString(chunk, ""))
-	if len(w.tail) > 1024 {
-		w.tail = w.tail[len(w.tail)-1024:]
+// codexExitWatch keeps the end of Codex's output, to read its exit line once it has exited: a
+// session that ran no turn has no notify to carry its id (a resume you closed at once). Only
+// the very end counts, since the same words anywhere on screen before (a reply quoting them,
+// a log) name no conversation.
+type codexExitWatch struct{ raw string }
+
+// add keeps chunk, as it came: escapes are taken out of the whole tail, so one split across
+// reads still goes.
+func (w *codexExitWatch) add(chunk string) {
+	w.raw += chunk
+	if len(w.raw) > codexExitTail {
+		w.raw = w.raw[len(w.raw)-codexExitTail:]
 	}
-	m := codexExitLine.FindStringSubmatchIndex(w.tail)
-	if m == nil {
+}
+
+// id is the conversation the last exit line in the tail names; "" for none.
+func (w *codexExitWatch) id() string {
+	tail := noSpace(ansi.ReplaceAllString(w.raw, ""))
+	if !strings.Contains(tail, "codexresume") {
 		return ""
 	}
-	id := w.tail[m[2]:m[3]]
-	w.tail = ""
-	return id
+	all := codexExitLine.FindAllStringSubmatch(tail, -1)
+	if len(all) == 0 {
+		return ""
+	}
+	return all[len(all)-1][1]
 }
 
 // interruptOnScreen finds Claude's interrupt line on screen (at: its last row, -1 for none;
@@ -139,6 +151,8 @@ type Session struct {
 	client *Client
 	queue  Queue
 	gate   Gate
+	// codexExit: written by the PTY reader only, read by finish once the agent's output ended.
+	codexExit codexExitWatch
 
 	mu          sync.Mutex
 	status      string // idle | working | blocked
@@ -401,13 +415,12 @@ func newSession(o sessionOpts) *Session {
 	var shown questionWatch
 	var vt *screen
 	var notes osc9Watch
-	var exitLine codexExitWatch
 	switch o.tool {
 	case "codex":
 		s.runner.OnOutput = func(b []byte) {
 			out := string(b)
-			if id := exitLine.saw(out); id != "" {
-				s.setSessionID(id) // before pix says it exited: its output is read to the end first
+			if s.currentSessionID() == "" { // a notify has said already: nothing to read off the screen
+				s.codexExit.add(out)
 			}
 			stoppedNow := stopped.saw(out, codexInterrupted) && s.currentStatus() != "idle"
 			if stoppedNow {
@@ -1194,6 +1207,12 @@ func (s *Session) currentTurnPrompt() string {
 	return s.turnPrompt
 }
 
+func (s *Session) currentSessionID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sessionID
+}
+
 func (s *Session) setSessionID(id string) {
 	s.mu.Lock()
 	changed := s.sessionID != id
@@ -1322,6 +1341,12 @@ func (s *Session) start(ctx context.Context) error {
 func (s *Session) finish() int {
 	code := s.runner.Wait()
 	s.o.log.Printf("the agent exited (%d)", code)
+	// Its output is read to the end before Wait returns: Codex's exit line, if any, is in.
+	if s.o.tool == "codex" && s.currentSessionID() == "" {
+		if id := s.codexExit.id(); id != "" {
+			s.setSessionID(id)
+		}
+	}
 	s.client.Send(wire.Msg{Kind: wire.KindEvent, Event: "exited", ExitCode: code})
 	s.client.Send(wire.Msg{Kind: wire.KindBye})
 	return code
