@@ -25,7 +25,8 @@ extension HistoryActions {
         public var removeID: String?
     }
 
-    public static let emptyText = "No past sessions yet."
+    /// Said for an empty History, in the tray and in Settings.
+    public static let emptyText = "No past sessions"
     public static let removeHelp = "Remove from History"
 
     public static func settingsRows(_ refs: [TrayAppState.HistoryRef]) -> [SettingsRow] {

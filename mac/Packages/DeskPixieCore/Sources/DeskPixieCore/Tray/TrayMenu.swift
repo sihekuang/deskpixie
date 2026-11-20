@@ -218,11 +218,15 @@ public enum TrayMenu {
     }
 
     /// Tray ▸ History (#461): pix sessions, newest first; a click resumes a past one in Herdr or
-    /// shows a running one (the core decides which). An unresumable one is greyed.
+    /// shows a running one (the core decides which). An unresumable one is greyed. Clear History
+    /// only when there is something it would clear.
     public static func historyItems(_ rows: [TrayAppState.HistoryRef]) -> [TrayItem] {
-        guard !rows.isEmpty else { return [.action(Row(id: "agent:history:none", title: "No past sessions", enabled: false))] }
-        return rows.map { .action(Row(id: HistoryActions.resumeID($0.id), title: $0.label, enabled: $0.enabled)) }
-            + [.separator, .action(Row(id: HistoryActions.clearID, title: "Clear History"))]
+        guard !rows.isEmpty else { return [.action(Row(id: "agent:history:none", title: HistoryActions.emptyText, enabled: false))] }
+        var items: [TrayItem] = rows.map { .action(Row(id: HistoryActions.resumeID($0.id), title: $0.label, enabled: $0.enabled)) }
+        if HistoryActions.offersClear(rows) {
+            items += [.separator, .action(Row(id: HistoryActions.clearID, title: "Clear History"))]
+        }
+        return items
     }
 
     /// Tray ▸ Pixie: the pixies, the ones that didn't load and why, then your pixies folder

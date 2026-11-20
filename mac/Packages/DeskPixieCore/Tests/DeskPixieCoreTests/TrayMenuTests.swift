@@ -168,6 +168,13 @@ final class TrayMenuTests: XCTestCase {
         ])
     }
 
+    func test_only_running_sessions_offer_no_clear() {
+        // Clear keeps running sessions, so with only those listed there is nothing to clear.
+        let running = TrayAppState.HistoryRef(id: "s-run", label: "● login bug · deskpixie · running", running: true)
+        XCTAssertEqual(TrayMenu.historyItems([running]),
+                       [.action(.init(id: "agent:history:resume:s-run", title: "● login bug · deskpixie · running"))])
+    }
+
     func test_history_rows_go_to_the_core() {
         for id in ["agent:history:resume:s-old", "agent:history:remove:s-old", "agent:history:clear"] {
             XCTAssertEqual(TrayMenu.route(id), .core(id, focusCanvas: false))
