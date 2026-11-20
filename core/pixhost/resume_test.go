@@ -3,9 +3,11 @@ package pixhost
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 
@@ -121,23 +123,38 @@ func TestResumeRefuses(t *testing.T) {
 	unresumable.Unresumable = true
 	gone := loginBug
 	gone.Cwd = "/x/gone"
-	for _, c := range []struct {
+	// The id is typed into a terminal: control characters would act before the shell's quoting.
+	withID := func(id string) HistoryEntry { e := loginBug; e.SessionID = id; return e }
+	cases := []struct {
 		name   string
 		entry  HistoryEntry
 		noTabs bool
 		want   error
 	}{
-		{"not in history", HistoryEntry{SessionID: "other", Tool: "claude", Cwd: "/x/api"}, false, ErrNotInHistory},
+		{"not in history", withID("other"), false, ErrNotInHistory},
 		{"unresumable", unresumable, false, ErrUnresumable},
 		{"no herdr", loginBug, true, ErrNoHerdr},
 		{"folder gone", gone, false, ErrFolderGone},
-	} {
+	}
+	for _, id := range []string{"s1'; rm -rf ~", "s1\x03", "s1\nrm x", "s1\r", "s1\x1b[A", "s1\x15", "", strings.Repeat("a", 129)} {
+		cases = append(cases, struct {
+			name   string
+			entry  HistoryEntry
+			noTabs bool
+			want   error
+		}{fmt.Sprintf("id %q", id), withID(id), false, ErrUnresumable})
+	}
+	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			f := newResumer(t, c.entry)
 			if c.noTabs {
 				f.r.Tabs = nil
 			}
-			if _, err := f.r.Resume(bg, "s1"); !errors.Is(err, c.want) {
+			id := c.entry.SessionID
+			if c.want == ErrNotInHistory {
+				id = "s1"
+			}
+			if _, err := f.r.Resume(bg, id); !errors.Is(err, c.want) {
 				t.Fatalf("%v, want %v", err, c.want)
 			}
 			if len(f.tabs.runs) != 0 || len(f.planner.Opened()) != 0 {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 
 	"github.com/sihekuang/deskpixie/core/agent"
@@ -38,12 +39,18 @@ var (
 	ErrNotInHistory = agent.LaunchError("That session is no longer in History.")
 )
 
+// resumableID is what a conversation id may be: it is typed into a terminal, where a control
+// character (Ctrl-C, Enter, Escape) would act before the shell's quoting does.
+var resumableID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+
 // Resume opens id's conversation in a new tab of the yours session, in its folder, and returns
 // the plan that shows that tab.
 func (r *Resumer) Resume(ctx context.Context, id string) (agent.FocusPlan, error) {
 	list := r.History.List()
 	i := slices.IndexFunc(list, func(e HistoryEntry) bool { return e.SessionID == id })
 	switch {
+	case !resumableID.MatchString(id):
+		return agent.FocusPlan{}, ErrUnresumable
 	case i < 0:
 		return agent.FocusPlan{}, ErrNotInHistory
 	case list[i].Unresumable:
