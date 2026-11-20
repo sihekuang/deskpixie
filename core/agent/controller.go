@@ -21,6 +21,11 @@ import (
 // terminal hint.
 const BlockedGraceMs Millis = 3_000
 
+// PermissionGuideWaitMs: a permission prompt on the coordinator's screen waits this long for its
+// hook's own request before the user hears about it from the screen (#459: Claude Code's came
+// about 5 s after the prompt showed).
+const PermissionGuideWaitMs Millis = 15_000
+
 const BlockedHint = "The coordinator is waiting at a prompt in its terminal; I'm bringing it up for you."
 
 // unreadableDenial is what the agent is told when a request cannot be read aloud plainly
@@ -541,6 +546,9 @@ type AgentController struct {
 	hinted      bool
 	// guided: the user was told which prompt the blocked coordinator waits at (#459).
 	guided bool
+	// permGuideAt: the screen shows a permission prompt; unless the coordinator's hook asks
+	// by then, the user hears about it at this time (#459).
+	permGuideAt optMs
 	// heldAtPrompt: the requests that waited while it was at that prompt: once one goes
 	// through, the user hears so (#459).
 	heldAtPrompt map[JobID]bool
@@ -881,7 +889,7 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 			c.clearTimers()
 			c.promptFailures = 0
 			c.blocked = optMs{}
-			c.hinted, c.guided = false, false
+			c.hinted, c.guided, c.permGuideAt = false, false, optMs{}
 			clear(c.heldAtPrompt)
 			c.flush(now, &fx)
 			// #118: kept running while the app is (flush already restarted it if work was queued).
@@ -1013,7 +1021,7 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 		c.coordinator = coordAbsent
 		c.clearMode(Coordinator, &fx)
 		c.blocked = optMs{}
-		c.hinted, c.guided = false, false
+		c.hinted, c.guided, c.permGuideAt = false, false, optMs{}
 		clear(c.heldAtPrompt)
 		c.promptFailures = 0
 		c.clearTimers()
@@ -1410,7 +1418,7 @@ func (c *AgentController) onCoordinatorStatus(status PaneStatus, now Millis, fx 
 		}
 	} else {
 		c.blocked = optMs{}
-		c.hinted, c.guided = false, false
+		c.hinted, c.guided, c.permGuideAt = false, false, optMs{}
 		if c.status == "Coordinator: waiting in terminal" {
 			c.setStatus(c.notice, fx)
 		}
@@ -2410,6 +2418,7 @@ func (c *AgentController) tick(now Millis, fx *[]Effect) {
 		c.applyDelivery(d, now, fx)
 	}
 	c.tryOpen(now, fx)
+	c.tickPermissionGuide(now, fx)
 	blockedLong := c.blocked.set && satSub(now, c.blocked.v) >= BlockedGraceMs
 	if blockedLong && !c.hinted && !c.confirms.HasPendingFor(Coordinator) {
 		c.hinted = true
@@ -2433,13 +2442,37 @@ const pastPromptText = "The coordinator is past its prompt; your request went th
 // and that the requests waiting on it go through once it's answered. Gone by now, or explained
 // by a permission request of its own: nothing to say.
 func (c *AgentController) guidePrompt(screen string, now Millis, fx *[]Effect) {
+	if !c.blocked.set || !c.hinted || c.guided || c.permGuideAt.set || c.confirms.HasPendingFor(Coordinator) {
+		return
+	}
+	prompt := ClassifyCoordinatorPrompt(c.settings.CoordinatorKind, screen)
+	*fx = append(*fx, logEffect(fmt.Sprintf("the coordinator waits at a prompt: %q", string(prompt))))
+	if prompt == PromptPermission {
+		// Its hook's own request usually follows a few seconds after the prompt shows, and asks
+		// it properly (Allow, or a confirm word): wait for it, and speak only if none comes.
+		c.permGuideAt = someMs(now + PermissionGuideWaitMs)
+		return
+	}
+	c.sayPromptGuide(prompt, now, fx)
+}
+
+// tickPermissionGuide: the permission prompt's wait is over; no request of its own came, and
+// it still waits: say what it is.
+func (c *AgentController) tickPermissionGuide(now Millis, fx *[]Effect) {
+	if !c.permGuideAt.due(now) {
+		return
+	}
+	c.permGuideAt = optMs{}
 	if !c.blocked.set || !c.hinted || c.guided || c.confirms.HasPendingFor(Coordinator) {
 		return
 	}
+	c.sayPromptGuide(PromptPermission, now, fx)
+}
+
+// sayPromptGuide tells the user which prompt the coordinator waits at and what to do there.
+func (c *AgentController) sayPromptGuide(prompt CoordinatorPrompt, now Millis, fx *[]Effect) {
 	c.guided = true
 	kind := c.settings.CoordinatorKind
-	prompt := ClassifyCoordinatorPrompt(kind, screen)
-	*fx = append(*fx, logEffect(fmt.Sprintf("the coordinator waits at a prompt: %q", string(prompt))))
 	text := BlockedHint
 	if prompt != PromptUnknown {
 		text = CoordinatorPromptGuide(kind, prompt) + " I'm bringing it up for you."

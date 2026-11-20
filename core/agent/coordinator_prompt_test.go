@@ -323,3 +323,32 @@ func wantChatSays(t *testing.T, fx []Effect, want string) {
 	}
 	t.Fatalf("no chat line with %q in %v", want, fx)
 }
+
+// permissionGuide is the screen guidance's line for a permission prompt.
+var permissionGuide = CoordinatorPromptGuide(Claude, PromptPermission) + " I'm bringing it up for you."
+
+func TestAPermissionRequestComingJustAfterTheScreenReadLeavesNoGuidance(t *testing.T) {
+	// Seen live: Claude Code's hook request came ~5 s after its permission prompt showed, after
+	// the read; the guidance then waited behind the question and was heard once it was denied.
+	c := blockedAtPrompt(t, Claude)
+	wantNone(t, visible(c.Step(CoordinatorScreenInput(claudePermissionScreen), T0+3_100)))
+	askPush(c, 7, T0+8_000)
+	for at := T0 + 9_000; at <= T0+3_100+PermissionGuideWaitMs+5_000; at += 1_000 {
+		wantNotContains(t, visible(c.Step(TickInput(), at)), eNotify(permissionGuide))
+	}
+}
+
+func TestAPermissionPromptWithNoRequestOfItsOwnIsToldAfterAWait(t *testing.T) {
+	c := blockedAtPrompt(t, Claude)
+	wantNone(t, visible(c.Step(CoordinatorScreenInput(claudePermissionScreen), T0+3_100)))
+	wantNotContains(t, visible(c.Step(TickInput(), T0+3_100+PermissionGuideWaitMs-1)), eNotify(permissionGuide))
+	wantContains(t, visible(c.Step(TickInput(), T0+3_100+PermissionGuideWaitMs)), eNotify(permissionGuide))
+	wantNotContains(t, visible(c.Step(TickInput(), T0+3_100+PermissionGuideWaitMs+1_000)), eNotify(permissionGuide))
+}
+
+func TestAPermissionPromptAnsweredDuringTheWaitIsNotTold(t *testing.T) {
+	c := blockedAtPrompt(t, Claude)
+	c.Step(CoordinatorScreenInput(claudePermissionScreen), T0+3_100)
+	c.Step(coordStatus(PaneWorking), T0+6_000)
+	wantNotContains(t, visible(c.Step(TickInput(), T0+3_100+PermissionGuideWaitMs)), eNotify(permissionGuide))
+}
