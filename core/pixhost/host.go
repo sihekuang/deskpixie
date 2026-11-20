@@ -27,12 +27,18 @@ const UnreachableFor = 10 * time.Second
 // CommandLimit bounds one command's round trip to a pix.
 const CommandLimit = 10 * time.Second
 
+// ResumeFailWithin: a resume whose pix exits this soon without Claude reporting the
+// conversation failed, and the conversation is marked unresumable (#461).
+const ResumeFailWithin = 30 * time.Second
+
 var errUnsupported = agent.HostError{Kind: agent.HostOther, Detail: "not supported for sessions you started"}
 
 type session struct {
 	addr      string
 	hello     wire.Msg
 	sessionID string
+	resumes   string // the conversation its pix resumes (#461)
+	reported  bool   // a session event arrived
 	status    agent.PaneStatus
 	desc      Descriptions
 	labeled   bool // verbatim turned off: messages are prefixed (#143)
@@ -66,12 +72,23 @@ type Host struct {
 	subs     []chan agent.PaneEvent
 	changes  chan struct{}
 	seq      atomic.Uint64
+	history  HistoryStore     // nil: none kept (SetHistory)
+	now      func() time.Time // History's clock, and when sessions started
 }
 
 // New is a host listening on sock once Listen is called; taken lists the names already in
 // use elsewhere (Pixie's workers), so addresses never collide with them.
 func New(sock string, taken func() []string) *Host {
-	return &Host{sock: sock, taken: taken, unreachableFor: UnreachableFor, sessions: map[string]*session{}, changes: make(chan struct{}, 1)}
+	return &Host{sock: sock, taken: taken, unreachableFor: UnreachableFor, sessions: map[string]*session{}, changes: make(chan struct{}, 1),
+		now: time.Now}
+}
+
+// SetHistory keeps your Claude sessions in store, timed by now (#461). Without it (nil, the
+// default) none are kept.
+func (h *Host) SetHistory(store HistoryStore, now func() time.Time) {
+	h.mu.Lock()
+	h.history, h.now = store, now
+	h.mu.Unlock()
 }
 
 // Changes signals that List may have changed (coalesced: one pending signal at most).
@@ -226,9 +243,9 @@ func (h *Host) register(hello wire.Msg, c net.Conn) (*session, string) {
 	if !ok {
 		return nil, "no free name for this session"
 	}
-	now := time.Now()
-	s := &session{addr: addr, hello: hello, sessionID: hello.SessionID, conn: c, pending: map[string]chan wire.Msg{},
-		started: now, active: now}
+	now := h.now()
+	s := &session{addr: addr, hello: hello, sessionID: hello.SessionID, resumes: hello.Resumes, conn: c,
+		pending: map[string]chan wire.Msg{}, started: now, active: now}
 	if hello.Description != "" {
 		s.desc.Set(SourceUser, hello.Description, time.Now())
 	}
@@ -269,21 +286,36 @@ func (h *Host) onMsg(s *session, m wire.Msg) bool {
 			case "agent":
 				s.desc.Set(SourceAgent, m.Description, time.Now())
 			}
+			store, e := h.historyOf(s)
 			h.mu.Unlock()
+			if store != nil && e.SessionID != "" {
+				store.Record(HistoryEntry{SessionID: e.SessionID, Description: e.Description, LastActive: e.LastActive})
+			}
 			h.changed()
 		case "session":
 			// The id usually arrives after registering (at the first hook), so the duplicate
 			// check runs here too: the later pix is refused and runs on without Pixie.
 			h.mu.Lock()
-			dup := false
+			dup, oldRuns := false, false
 			for _, o := range h.sessions {
 				dup = dup || (o != s && m.SessionID != "" && o.sessionID == m.SessionID)
+				oldRuns = oldRuns || (o != s && s.resumes != "" && o.sessionID == s.resumes)
 			}
+			s.reported = true
 			if !dup {
 				s.sessionID = m.SessionID
 			}
 			conn := s.conn
+			store, e := h.historyOf(s)
+			forked := s.resumes != "" && s.sessionID != s.resumes && !oldRuns
 			h.mu.Unlock()
+			if !dup && store != nil && e.SessionID != "" {
+				store.Record(e)
+				if forked { // Claude resumed it under a new id: the new entry carries it on
+					store.Remove(s.resumes)
+				}
+				h.changed()
+			}
 			if dup {
 				if conn != nil {
 					s.wmu.Lock()
@@ -316,6 +348,7 @@ func (h *Host) onMsg(s *session, m wire.Msg) bool {
 			h.mu.Unlock()
 			h.broadcast(agent.PaneEvent{Kind: agent.PaneEventDelivered, Agent: s.addr, Seq: m.Seq, Run: run}) // a notice saying it waits goes (#339)
 		case "exited":
+			h.exited(s)
 			h.remove(s)
 			return true
 		}
@@ -353,7 +386,7 @@ func (h *Host) lost(s *session, c net.Conn) {
 	})
 }
 
-// remove drops s and reports it Exited.
+// remove drops s and reports it Exited; History marks its conversation ended.
 func (h *Host) remove(s *session) {
 	h.mu.Lock()
 	if h.sessions[s.addr] != s {
@@ -361,8 +394,76 @@ func (h *Host) remove(s *session) {
 		return
 	}
 	delete(h.sessions, s.addr)
+	store, e := h.historyOf(s)
 	h.mu.Unlock()
+	if store != nil && e.SessionID != "" {
+		store.Update(e.SessionID, func(x *HistoryEntry) { x.Ended, x.LastActive = true, e.LastActive })
+	}
 	h.broadcast(agent.PaneEvent{Kind: agent.PaneEventExited, Agent: s.addr})
+}
+
+// exited: s's agent exited. A resume that ends this soon without Claude reporting the
+// conversation failed: History marks it unresumable (#461).
+func (h *Host) exited(s *session) {
+	h.mu.Lock()
+	store, failed := h.history, s.resumes != "" && !s.reported && h.now().Sub(s.started) < ResumeFailWithin
+	h.mu.Unlock()
+	if store != nil && failed {
+		store.Update(s.resumes, func(x *HistoryEntry) { x.Unresumable = true })
+		h.changed()
+	}
+}
+
+// historyOf is the store and s's entry as it stands (h.mu held); a nil store when none is kept
+// or s is not a Claude session. The entry's SessionID is "" until Claude reports it.
+func (h *Host) historyOf(s *session) (HistoryStore, HistoryEntry) {
+	if h.history == nil || s.hello.Tool != "claude" {
+		return nil, HistoryEntry{}
+	}
+	return h.history, HistoryEntry{SessionID: s.sessionID, Tool: s.hello.Tool, Description: s.desc.Current(),
+		Cwd: s.hello.Cwd, GitRoot: s.hello.GitRoot, Where: s.hello.Where, Started: s.started, LastActive: h.now()}
+}
+
+// History is your past Claude sessions, the most recently active first, without the ones
+// running now (connected, reconnecting, or a resume of one); nil when none are kept (#461).
+func (h *Host) History() []HistoryEntry {
+	h.mu.Lock()
+	store := h.history
+	running := map[string]bool{}
+	for _, s := range h.sessions {
+		for _, id := range []string{s.sessionID, s.resumes} {
+			if id != "" {
+				running[id] = true
+			}
+		}
+	}
+	h.mu.Unlock()
+	if store == nil {
+		return nil
+	}
+	return slices.DeleteFunc(store.List(), func(e HistoryEntry) bool { return running[e.SessionID] })
+}
+
+// RemoveHistory forgets one past session.
+func (h *Host) RemoveHistory(id string) {
+	if store := h.historyStore(); store != nil {
+		store.Remove(id)
+		h.changed()
+	}
+}
+
+// ClearHistory forgets every past session.
+func (h *Host) ClearHistory() {
+	if store := h.historyStore(); store != nil {
+		store.Clear()
+		h.changed()
+	}
+}
+
+func (h *Host) historyStore() HistoryStore {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.history
 }
 
 func (h *Host) broadcast(ev agent.PaneEvent) {
@@ -443,7 +544,11 @@ func (h *Host) SetDescription(name, text string) error {
 	} else {
 		s.desc.Set(SourceUser, text, time.Now())
 	}
+	store, e := h.historyOf(s)
 	h.mu.Unlock()
+	if store != nil && e.SessionID != "" {
+		store.Record(HistoryEntry{SessionID: e.SessionID, Description: e.Description, LastActive: e.LastActive})
+	}
 	h.changed()
 	return nil
 }
