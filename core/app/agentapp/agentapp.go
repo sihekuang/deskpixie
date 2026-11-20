@@ -27,6 +27,7 @@ import (
 	"github.com/sihekuang/deskpixie/core/agent/terminal"
 	"github.com/sihekuang/deskpixie/core/app"
 	"github.com/sihekuang/deskpixie/core/attach"
+	"github.com/sihekuang/deskpixie/core/herdr"
 	"github.com/sihekuang/deskpixie/core/pix/wire"
 	"github.com/sihekuang/deskpixie/core/pixhost"
 	"github.com/sihekuang/deskpixie/core/settings"
@@ -130,6 +131,13 @@ type Agent struct {
 	addr    string
 	attach  *attach.Store
 	feed    *threadFeed // the chat thread's feed (#302); nil until built
+
+	// History (#461): pix is the pix host while it listens (nil otherwise); resumer resumes a
+	// past session (nil without the pix host); yours is the Herdr host resumed sessions run
+	// in (nil without Herdr).
+	pix     *pixhost.Host
+	resumer resumer
+	yours   *herdr.Host
 
 	// toAgent receives the voice signals the echo gate admits (handle.Voice; tests replace it).
 	toAgent func(voice.VoiceSignal)
@@ -291,18 +299,31 @@ func Build(c Config) *Agent {
 		return names
 	})
 	ph.SetBuild(wire.BuildOf(c.Pix))
-	if err := ph.Listen(); err != nil {
-		log.Printf("agent: pix: %v", err) // delegation still works without it
-	} else {
-		session = agent.NewCompositeHost(primary, ph)
-		a.pixSock = c.PixSocket
-	}
-	a.session = session
+	history := pixhost.NewHistoryFile(paths.PixHistory())
+	ph.SetHistory(history, time.Now)
 	termFactory, ok := c.Terminals[s.Terminal]
 	if !ok {
 		log.Printf("agent: unknown terminal %q; using warp", s.Terminal)
 		termFactory = c.Terminals["warp"]
 	}
+	planner := termFactory(c.Runner, c.Home)
+	var res *pixhost.Resumer
+	if err := ph.Listen(); err != nil {
+		log.Printf("agent: pix: %v", err) // delegation still works without it
+	} else {
+		session = agent.NewCompositeHost(primary, ph)
+		a.pixSock = c.PixSocket
+		a.pix = ph
+		res = &pixhost.Resumer{History: pastSessions{ph, history}, Planner: planner, Pix: c.Pix}
+		// Resumed sessions need only Herdr, whichever host runs the coordinator (#461).
+		if yours, err := newYoursHerdr(hd); err != nil {
+			log.Printf("agent: resuming sessions needs herdr: %v", err)
+		} else {
+			res.Tabs, a.yours = yours, yours // never a nil *herdr.Host in the interface
+		}
+		a.resumer = res
+	}
+	a.session = session
 
 	// What the last quit left running (keepPanesOnQuit): read once, whatever the setting is now.
 	kept := LoadKept(paths.Kept())
@@ -359,8 +380,8 @@ func Build(c Config) *Agent {
 		Notifier:    NewNotifier(c.Runner, c.Hooks.Notify).WithUpdates(c.Hooks.NotifyUpdate),
 		Pixie:       pixieCue{c.Hooks},
 		Status:      statusSink{a},
-		Planner:     termFactory(c.Runner, c.Home),
-		Sessions:    terminal.NewSessionPlanner(c.Runner),
+		Planner:     planner,
+		Sessions:    herdrAwareSessions{inner: terminal.NewSessionPlanner(c.Runner), paneOf: ph.HerdrPaneOf, resumer: res},
 		Focus:       focusSink{c.Hooks},
 		TerminalDir: TerminalDir(folder, c.Home),
 		Store:       NewJsonlStore(paths.Root),
@@ -434,6 +455,9 @@ func Build(c Config) *Agent {
 	a.toAgent = a.handle.Voice
 	a.ctx, a.cancel = context.WithCancel(context.Background())
 	a.wg.Go(func() { a.handle.Run(a.ctx) })
+	if a.pix != nil {
+		a.wg.Go(func() { a.followHistory(a.pix.HistoryChanges()) })
+	}
 	if ln != nil {
 		a.addr = ln.Addr().String()
 		a.wg.Go(func() {
@@ -868,6 +892,9 @@ func (a *Agent) Shutdown() {
 		a.cancel()
 		agentfs.ClearMcpDir(a.paths.McpDir)
 		shutdownHost(a.session)
+		if a.yours != nil {
+			a.yours.Shutdown() // its event pump only: your sessions there keep running
+		}
 		done := make(chan struct{})
 		go func() {
 			a.wg.Wait()

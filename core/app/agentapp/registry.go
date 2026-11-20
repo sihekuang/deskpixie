@@ -59,6 +59,25 @@ func parentEnv(d HostDeps) ([]agent.EnvVar, string) {
 }
 
 func newHerdrHost(d HostDeps) (agent.SessionHost, error) {
+	host, err := herdrHost(d, d.Settings.Session)
+	if err != nil {
+		return nil, err
+	}
+	return NewIntegrationCheck(host, host.IntegrationMissing, d.Hint), nil
+}
+
+// YoursSession is the Herdr session your resumed sessions run in (#461): never the
+// coordinator's, so DeskPixie never reconciles, replaces or stops them.
+func YoursSession(session string) string { return session + "-yours" }
+
+// newYoursHerdr is the Herdr host of YoursSession, whatever agent.sessionHost is: resuming
+// needs only Herdr installed. No integration check: nothing there is Pixie's agent.
+func newYoursHerdr(d HostDeps) (*herdr.Host, error) {
+	return herdrHost(d, YoursSession(d.Settings.Session))
+}
+
+// herdrHost is the Herdr host of session, with the herdr agent.herdrPath or the PATH names.
+func herdrHost(d HostDeps, session string) (*herdr.Host, error) {
 	parent, pathVar := parentEnv(d)
 	configured := ""
 	if d.Settings.HerdrPath != nil {
@@ -68,7 +87,7 @@ func newHerdrHost(d HostDeps) (agent.SessionHost, error) {
 	if !ok {
 		return nil, agent.HostError{Kind: agent.HostNotFound}
 	}
-	env, err := herdr.ServerEnv(parent, d.Settings.Session, d.Home)
+	env, err := herdr.ServerEnv(parent, session, d.Home)
 	if err != nil {
 		return nil, err
 	}
@@ -76,8 +95,7 @@ func newHerdrHost(d HostDeps) (agent.SessionHost, error) {
 	if err != nil {
 		return nil, err
 	}
-	host := herdr.NewHost(d.Settings.Session, d.Home, sup)
-	return NewIntegrationCheck(host, host.IntegrationMissing, d.Hint), nil
+	return herdr.NewHost(session, d.Home, sup), nil
 }
 
 // newTmuxHost is the tmux session host (no integration hint: the agents' status hooks are

@@ -64,6 +64,12 @@ func (r *recorder) hooks() app.AgentHooks {
 	}
 }
 
+func (r *recorder) refreshes() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.refreshed
+}
+
 func (r *recorder) chatLines() []any {
 	r.mu.Lock()
 	defer r.mu.Unlock()
