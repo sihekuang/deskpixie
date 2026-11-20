@@ -286,7 +286,8 @@ final class AgentRosterController {
         render()
     }
 
-    /// The voice conversation opened or ended (the mic): an ended one's caption goes a moment later.
+    /// The voice conversation opened or ended (its own event, not the mic's: one that only says
+    /// updates never turns the mic on, #460): an ended one's caption goes a moment later.
     func conversation(open: Bool) {
         conversationOpen = open
         captionHide?.invalidate()
@@ -583,7 +584,7 @@ final class AgentRosterController {
     private func setRoot() {
         agoShown = cardUp ? chat.ago(now: Date()) : nil
         hosting.rootView = AnyView(AgentRosterView(
-            model: model, below: below, maxChipWidth: max(40, pixie.panel.frame.width),
+            model: model, below: below, maxChipWidth: ChipPlacement.maxChipWidth(pixieWidth: pixie.panel.frame.width),
             onChip: { [weak self] in
                 // Hover already opens the list; a click only opens it (never closes, so click and
                 // hover poll can't fight). Leaving the panel closes it.
