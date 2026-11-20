@@ -131,3 +131,26 @@ func TestALostStopOfAnotherTurnStillLeavesThePromptToLand(t *testing.T) {
 	tick(c, at+PromptLandMs)
 	wantPrompts(t, tick(c, at+PromptLandMs+PromptRetryMs), firstPrompt+"\n\n"+secondPrompt)
 }
+
+func TestAFreshCoordinatorsFirstPromptIsCheckedWhenItsHookIsKnown(t *testing.T) {
+	// #456: a coordinator DeskPixie started has the UserPromptSubmit hook: its first prompt,
+	// typed before it ever reported one (just past a folder-trust prompt), is checked too.
+	c := ctlWith(func(s *Settings) { s.ReportsSubmits = true })
+	c.Step(CoordinatorUpInput(PaneIdle), T0)
+	wantPrompts(t, c.Step(DelegateInput(job(1), "summarise the issues", ""), T0), firstPrompt)
+	wantPrompts(t, tick(c, T0+PromptLandMs-1))
+	wantContains(t, tick(c, T0+PromptLandMs), eLog("prompt not taken by the coordinator: sending it again"))
+	wantPrompts(t, tick(c, T0+PromptLandMs+PromptRetryMs), firstPrompt)
+	wantJobStatus(t, c, 1, JobWorking)
+}
+
+func TestARetryIsNotTypedIntoAPromptInTheTerminal(t *testing.T) {
+	// #456: the coordinator is at a prompt of its own (a folder to trust) when the retry
+	// falls due: typed now, it would be lost again. Its next Idle sends it.
+	c := sentJob1(t)
+	tick(c, T1+PromptLandMs)
+	c.Step(coordStatus(PaneBlocked), T1+PromptLandMs+100)
+	wantPrompts(t, tick(c, T1+PromptLandMs+PromptRetryMs))
+	wantPrompts(t, tick(c, T1+PromptLandMs+10*PromptRetryMs))
+	wantPrompts(t, c.Step(coordStatus(PaneIdle), T1+PromptLandMs+10*PromptRetryMs+1), firstPrompt)
+}

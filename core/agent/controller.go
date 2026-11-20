@@ -106,6 +106,10 @@ type Settings struct {
 	// CoordinatorKind (`agent.coordinatorKind`, #87): the coordinator's agent, named in the
 	// tray when it can't start.
 	CoordinatorKind AgentKind
+	// ReportsSubmits: the coordinator this app runs has the UserPromptSubmit hook (a Claude
+	// Code one; a kept one started otherwise is replaced), so even its first prompt's landing
+	// is checked (#456). Off, that is learned from its first submit.
+	ReportsSubmits bool
 	// SpokenPaths: folders a spoken approval names short (#97).
 	SpokenPaths SpokenPaths
 }
@@ -651,6 +655,7 @@ func NewAgentController(settings Settings) *AgentController {
 		narrator:       NewNarrator(NarrateIntervalMs),
 		updates:        NewUpdatesWith(settings.UpdateQuietMs),
 		settings:       settings,
+		submits:        settings.ReportsSubmits,
 		jobs:           NewJobTable(),
 		inbox:          NewInbox(),
 		outbox:         NewOutbox(),
