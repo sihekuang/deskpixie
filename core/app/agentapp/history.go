@@ -30,6 +30,8 @@ type pastSessions struct {
 }
 
 func (p pastSessions) List() []pixhost.HistoryEntry { return p.host.History() }
+
+// Update writes the raw store, deliberately unsignalled: it only sets HerdrPane, which no row shows.
 func (p pastSessions) Update(id string, f func(*pixhost.HistoryEntry)) {
 	p.store.Update(id, f)
 }
@@ -95,18 +97,20 @@ func (a *Agent) historyMenu(what string) bool {
 // resume opens a past session in its Herdr tab and shows it (async). A click on one being
 // resumed, or just resumed, is ignored; a failure is a notification saying why.
 func (a *Agent) resume(id string) {
-	if a.resumer == nil || a.ctx.Err() != nil {
+	if a.resumer == nil {
 		log.Print("agent: resume: sessions you start with pix are unavailable")
 		return
 	}
 	a.mu.Lock()
-	busy := a.resuming[id]
-	a.resuming[id] = true
-	a.mu.Unlock()
-	if busy {
+	defer a.mu.Unlock()
+	if a.closed {
+		return // quitting: nothing new beside Shutdown's wait
+	}
+	if a.resuming[id] {
 		log.Print("agent: resume: that session is already being resumed")
 		return
 	}
+	a.resuming[id] = true
 	a.wg.Go(func() {
 		plan, err := a.resumer.Resume(a.ctx, id)
 		if err != nil {
@@ -123,7 +127,9 @@ func (a *Agent) resume(id string) {
 			return
 		}
 		time.AfterFunc(a.resumeGrace, func() { a.resumed(id) })
-		focusSink{a.hooks}.Focus(plan)
+		if a.ctx.Err() == nil {
+			focusSink{a.hooks}.Focus(plan)
+		}
 	})
 }
 

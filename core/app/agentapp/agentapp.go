@@ -151,6 +151,8 @@ type Agent struct {
 	status, hint string
 	// resuming: the past sessions being resumed now, or just resumed (#461).
 	resuming map[string]bool
+	// closed: Shutdown began, so no new work joins wg (it may already be waiting on it).
+	closed bool
 	// Manual mode (#97): which agents are flagged, and why (set once per change, off the
 	// controller's goroutine, since the probes run a program).
 	manual map[string]bool
@@ -896,6 +898,9 @@ func (a *Agent) OnMouth(level int) {
 // host (herdr's event pump). Idempotent.
 func (a *Agent) Shutdown() {
 	a.shutOnce.Do(func() {
+		a.mu.Lock()
+		a.closed = true
+		a.mu.Unlock()
 		a.handle.Shutdown()
 		a.cancel()
 		agentfs.ClearMcpDir(a.paths.McpDir)

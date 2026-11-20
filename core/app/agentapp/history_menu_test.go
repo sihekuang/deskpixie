@@ -62,8 +62,11 @@ func TestHistoryResumeShowsTheTab(t *testing.T) {
 		t.Fatal("not the agent's")
 	}
 	waitFor(t, "the plan", func() bool { return len(f.rec.focusedPlans()) == 1 })
-	if got := f.rec.focusedPlans()[0]; !equalPlans(got, plan) || r.calls[0] != "s1" {
-		t.Fatalf("%+v %v", got, r.calls)
+	r.mu.Lock()
+	calls := slices.Clone(r.calls)
+	r.mu.Unlock()
+	if got := f.rec.focusedPlans()[0]; !equalPlans(got, plan) || !slices.Equal(calls, []string{"s1"}) {
+		t.Fatalf("%+v %v", got, calls)
 	}
 }
 
@@ -81,16 +84,18 @@ func TestHistoryResumeFailureSaysWhy(t *testing.T) {
 		{pixhost.ErrNoHerdr, "Resuming needs Herdr. Install it, or set its path in Settings ▸ Advanced."},
 		{errors.New("herdr: socket: connection refused"), ResumeFailed},
 	} {
-		f := newFixture(t, nil)
-		f.withResumer(&fakeResumer{err: c.err})
-		f.agent.Menu("agent:history:resume:s1")
-		waitFor(t, "a notification", func() bool { return len(f.rec.notifications()) == 1 })
-		if got := f.rec.notifications()[0]; got != [2]string{"Couldn't resume", c.want} {
-			t.Fatalf("%q", got)
-		}
-		if len(f.rec.focusedPlans()) != 0 {
-			t.Fatal("focused after a failure")
-		}
+		t.Run(c.want, func(t *testing.T) {
+			f := newFixture(t, nil)
+			f.withResumer(&fakeResumer{err: c.err})
+			f.agent.Menu("agent:history:resume:s1")
+			waitFor(t, "a notification", func() bool { return len(f.rec.notifications()) == 1 })
+			if got := f.rec.notifications()[0]; got != [2]string{"Couldn't resume", c.want} {
+				t.Fatalf("%q", got)
+			}
+			if len(f.rec.focusedPlans()) != 0 {
+				t.Fatal("focused after a failure")
+			}
+		})
 	}
 }
 
@@ -107,8 +112,11 @@ func TestHistoryResumeIgnoresASecondClickWhileResuming(t *testing.T) {
 	waitFor(t, "the other session", func() bool { return r.count() == 2 })
 	close(r.gate)
 	waitFor(t, "both answered", func() bool { return len(f.rec.notifications()) == 2 })
-	if r.calls[0] != "s1" || r.calls[1] != "s2" {
-		t.Fatal(r.calls)
+	r.mu.Lock()
+	calls := slices.Clone(r.calls)
+	r.mu.Unlock()
+	if !slices.Equal(calls, []string{"s1", "s2"}) {
+		t.Fatal(calls)
 	}
 	f.agent.Menu("agent:history:resume:s1")
 	waitFor(t, "a retry after the failure", func() bool { return r.count() == 3 })
@@ -125,8 +133,8 @@ func TestHistoryResumeIgnoresAClickJustAfterItOpened(t *testing.T) {
 	waitFor(t, "the plan", func() bool { return len(f.rec.focusedPlans()) == 1 })
 	f.agent.Menu("agent:history:resume:s1")
 	time.Sleep(20 * time.Millisecond)
-	if r.count() != 1 {
-		t.Fatal(r.calls)
+	if n := r.count(); n != 1 {
+		t.Fatal(n)
 	}
 	waitFor(t, "a click after the grace", func() bool {
 		f.agent.Menu("agent:history:resume:s1")
@@ -195,4 +203,23 @@ func equalRows(a, b []app.HistoryRow) bool {
 		return x.ID == y.ID && x.Description == y.Description && x.Folder == y.Folder &&
 			x.LastActive.Equal(y.LastActive) && x.Unresumable == y.Unresumable
 	})
+}
+
+// Quitting while a resume runs: nothing is shown afterwards, and a click after quitting starts
+// nothing.
+func TestHistoryResumeAfterQuittingShowsNothing(t *testing.T) {
+	f := newFixture(t, nil)
+	r := &fakeResumer{gate: make(chan struct{})}
+	f.withResumer(r)
+	f.agent.Menu("agent:history:resume:s1")
+	waitFor(t, "the resume", func() bool { return r.count() == 1 })
+	done := make(chan struct{})
+	go func() { f.agent.Shutdown(); close(done) }()
+	waitFor(t, "quitting", func() bool { return f.agent.ctx.Err() != nil })
+	close(r.gate)
+	<-done
+	f.agent.Menu("agent:history:resume:s2")
+	if n := len(f.rec.focusedPlans()); n != 0 || r.count() != 1 {
+		t.Fatal(n, r.count())
+	}
 }
