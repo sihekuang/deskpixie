@@ -117,14 +117,19 @@ func TestHistoryUnreadableFileIsSetAside(t *testing.T) {
 	}
 }
 
-func TestHistoryUnreadableFileStartsEmpty(t *testing.T) {
+// A folder where the file should be is set aside like a damaged file, and History is written
+// in its place.
+func TestHistoryAFolderInTheWayIsSetAside(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "pix-history.json")
-	if err := os.Mkdir(p, 0o700); err != nil { // a folder where the file should be
+	if err := os.Mkdir(p, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	h := NewHistoryFile(p)
+	if fi, err := os.Stat(p + ".bad"); err != nil || !fi.IsDir() {
+		t.Fatalf("the folder was not set aside: %v", err)
+	}
 	h.Record(HistoryEntry{SessionID: "a", LastActive: at(1)})
-	if got := h.List(); len(got) != 1 {
+	if got := NewHistoryFile(p).List(); len(got) != 1 || got[0].SessionID != "a" {
 		t.Fatalf("got %+v", got)
 	}
 }
