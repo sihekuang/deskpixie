@@ -7,6 +7,11 @@ public enum ChipPlacement {
     /// five typed lines. Placed for this, it never runs off the screen as it grows.
     public static let textBoxHeight: CGFloat = 340
 
+    /// The widest the session chip may be: Pixie's width, so it doesn't reach the updates bubble
+    /// at Pixie's side, but never under Small's 128 pt. At Tiny and Extra Small Pixie is narrower
+    /// than the busy dot and both counts, and the counts were squeezed out (#465).
+    public static func maxChipWidth(pixieWidth: CGFloat) -> CGFloat { max(128, pixieWidth) }
+
     /// `panel` is the chip, or the chip with the open list. `openHeight` (the open panel's height)
     /// picks below/above in every phase, so the chip doesn't jump when the list opens. Above
     /// Pixie when the open panel wouldn't fit below. `keeping` (the side while the list is open)
