@@ -55,8 +55,9 @@ No calls of its own: History rides on the tray model and its actions.
   exactly as a click on its row by the session chip does), `agent:history:remove:<sessionId>`
   (ignored for a running one), `agent:history:clear`.
 - When History changes (an entry written, a session started or ended), the core refreshes the
-  tray, which pushes `app.state` again; `app.action` also sends `settings.changed`, so an open
-  Settings window refreshes.
+  tray, which pushes `app.state` again. An open Settings window redraws from those tray-state
+  updates (it reads History from the tray state), not from `settings.changed`, which only
+  follows an `app.action`.
 
 ### Where you click it (Swift)
 
@@ -64,11 +65,16 @@ No calls of its own: History rides on the tray model and its actions.
   (`TrayContextMenu`), so one **History ▸** submenu shows in both. Rows: "login bug ·
   deskpixie · 2h ago" (description, project folder name, relative time), or "● login bug ·
   deskpixie · running" for one running now, which a click brings forward; then a separator and
-  **Clear History**. Empty: a greyed "No past sessions". An unresumable entry is shown greyed.
+  **Clear History**, only when a row that isn't running is listed (Clear keeps running ones).
+  Empty: a greyed "No past sessions". An unresumable entry is shown greyed. While the
+  coordinator is off, History isn't in the menu.
   The tree is built in `DeskPixieCore` (`TrayMenu`) and tested in `TrayMenuTests`.
 - **Settings ▸ Sessions:** a "History" section, hand-drawn in Swift (it is a list, not a
-  setting): each row with **Resume** and a remove button, and **Clear History**. A running row
-  has **Show** instead of **Resume**, and no remove button.
+  setting): each row with **Resume** and a remove button, and **Clear History** while a row
+  that isn't running is listed. A running row has **Show** instead of **Resume**, and no
+  remove button. Empty: "No past sessions". While the coordinator is off (the core sends no
+  sessions then) the rows are hidden and it says "History needs the coordinator. Turn on Hand
+  work to the coordinator under Coordinator."
 
 ### Errors (short, plain)
 
