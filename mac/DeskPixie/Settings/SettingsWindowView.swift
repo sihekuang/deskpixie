@@ -478,23 +478,31 @@ struct SettingsTabView: View {
                 }
             }
         case .pixHistory(let help):
-            // #461: read from the tray state, so the list redraws whenever the tray is read again.
-            let sessions = model.historyRows
+            // #461: read from the tray state, once per draw, so the list redraws whenever the
+            // tray is read again.
+            let history = model.history
             row(label: extra.label, id: extra.path) {
                 EmptyView()
             } note: {
                 VStack(alignment: .leading, spacing: 2) {
                     NoteText(text: help, isError: false)
-                    if sessions.isEmpty {
-                        NoteText(text: HistoryActions.emptyText, isError: false)
+                    if let note = history.note {
+                        NoteText(text: note, isError: false)
                     }
                 }
             }
-            ForEach(sessions) { session in
+            // The name is hidden in `row`; with no control to carry it, the row is the heading.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(extra.label)
+            .accessibilityValue(history.note ?? "")
+            .accessibilityHint(help)
+            .accessibilityAddTraits(.isHeader)
+            ForEach(history.rows) { session in
                 LabeledContent {
                     HStack(spacing: 6) {
                         Button(session.buttonTitle) { model.historyAction(session.buttonID) }
                             .disabled(!session.buttonEnabled)
+                            .accessibilityLabel("\(session.buttonTitle): \(session.label)")
                         if let remove = session.removeID {
                             Button { model.historyAction(remove) } label: { Image(systemName: "trash") }
                                 .buttonStyle(.borderless)
@@ -509,7 +517,7 @@ struct SettingsTabView: View {
                         .help(session.label)
                 }
             }
-            if model.offersClearHistory {
+            if history.offersClear {
                 HStack {
                     Spacer()
                     Button("Clear History") { model.historyAction(HistoryActions.clearID) }

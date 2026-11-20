@@ -37,6 +37,30 @@ extension HistoryActions {
         }
     }
 
+    /// Settings ▸ Sessions ▸ History, worked out once per draw.
+    public struct SettingsList: Equatable, Sendable {
+        public var rows: [SettingsRow]
+        public var offersClear: Bool
+        /// Shown instead of rows: History is unavailable, or empty.
+        public var note: String?
+
+        public init(rows: [SettingsRow], offersClear: Bool, note: String?) {
+            self.rows = rows
+            self.offersClear = offersClear
+            self.note = note
+        }
+    }
+
+    /// Said in Settings while History can't be had: the coordinator is off (or the core hasn't
+    /// answered yet), and the core sends no sessions then.
+    public static let unavailableText = "History needs the coordinator. Turn on Hand work to the coordinator under Coordinator."
+
+    /// `available`: the coordinator is on. Off, no rows: the core's empty list means nothing then.
+    public static func settingsList(available: Bool, _ refs: [TrayAppState.HistoryRef]) -> SettingsList {
+        guard available else { return SettingsList(rows: [], offersClear: false, note: unavailableText) }
+        return SettingsList(rows: settingsRows(refs), offersClear: offersClear(refs), note: refs.isEmpty ? emptyText : nil)
+    }
+
     /// Clear History is offered while anything but running sessions is listed: a running one
     /// stays.
     public static func offersClear(_ refs: [TrayAppState.HistoryRef]) -> Bool {

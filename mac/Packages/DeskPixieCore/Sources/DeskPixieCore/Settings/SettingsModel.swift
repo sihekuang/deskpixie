@@ -60,6 +60,8 @@ public final class SettingsModel {
     /// History's sessions (#461), as the tray last read them. The app reads its tray state here,
     /// so a view that lists them redraws whenever the tray is read again.
     @ObservationIgnored public var historySource: @MainActor () -> [TrayAppState.HistoryRef] = { [] }
+    /// Whether History can be had: the coordinator is on (in the tray state the app reads).
+    @ObservationIgnored public var historyAvailable: @MainActor () -> Bool = { false }
     /// Runs an `app.action` id the way a tray click does (the app sets it); nil = History's
     /// buttons do nothing.
     @ObservationIgnored public var performAction: (@MainActor (String) -> Void)?
@@ -73,8 +75,10 @@ public final class SettingsModel {
 
     // MARK: History (#461)
 
-    public var historyRows: [HistoryActions.SettingsRow] { HistoryActions.settingsRows(historySource()) }
-    public var offersClearHistory: Bool { HistoryActions.offersClear(historySource()) }
+    /// What Settings ▸ Sessions ▸ History shows; read once per draw.
+    public var history: HistoryActions.SettingsList {
+        HistoryActions.settingsList(available: historyAvailable(), historyAvailable() ? historySource() : [])
+    }
 
     /// A History button: resume or show, remove, or Clear History.
     public func historyAction(_ id: String) { performAction?(id) }
