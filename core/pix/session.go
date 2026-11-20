@@ -63,6 +63,30 @@ func (w *screenWatch) saw(chunk, marker string) bool {
 	return false
 }
 
+// codexExitLine is what Codex prints as it exits, naming the conversation to resume by its
+// UUID (#468); spaces are gone, as in screenWatch. A UUID's fixed length means a read that cuts
+// it short doesn't match yet.
+var codexExitLine = regexp.MustCompile(`Tocontinuethissession,run:codexresume([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})`)
+
+// codexExitWatch finds Codex's exit line in its output, a session that ran no turn included
+// (its notify, which carries the id too, comes only at a turn's end).
+type codexExitWatch struct{ tail string }
+
+// saw adds chunk and returns the id the exit line names, once; "" until then.
+func (w *codexExitWatch) saw(chunk string) string {
+	w.tail += noSpace(ansi.ReplaceAllString(chunk, ""))
+	if len(w.tail) > 1024 {
+		w.tail = w.tail[len(w.tail)-1024:]
+	}
+	m := codexExitLine.FindStringSubmatchIndex(w.tail)
+	if m == nil {
+		return ""
+	}
+	id := w.tail[m[2]:m[3]]
+	w.tail = ""
+	return id
+}
+
 // interruptOnScreen finds Claude's interrupt line on screen (at: its last row, -1 for none;
 // a narrow pane wraps it over a few) and what follows it (#322): latest, the input box with
 // no prompt of yours (❯) or reply (⏺) before it; stale, a turn since (a redraw brought back
@@ -377,10 +401,14 @@ func newSession(o sessionOpts) *Session {
 	var shown questionWatch
 	var vt *screen
 	var notes osc9Watch
+	var exitLine codexExitWatch
 	switch o.tool {
 	case "codex":
 		s.runner.OnOutput = func(b []byte) {
 			out := string(b)
+			if id := exitLine.saw(out); id != "" {
+				s.setSessionID(id) // before pix says it exited: its output is read to the end first
+			}
 			stoppedNow := stopped.saw(out, codexInterrupted) && s.currentStatus() != "idle"
 			if stoppedNow {
 				s.clearQuestion("interrupted")
@@ -449,6 +477,9 @@ func newSession(o sessionOpts) *Session {
 // Hook handles the agent's hooks (LocalHandler).
 func (s *Session) Hook(event string, p map[string]any) string {
 	if id, _ := p["session_id"].(string); id != "" {
+		s.setSessionID(id)
+	}
+	if id, _ := p["thread-id"].(string); id != "" { // Codex's notify: the id `codex resume` takes (#468)
 		s.setSessionID(id)
 	}
 	switch event {

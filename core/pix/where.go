@@ -27,9 +27,13 @@ func Where(env func(string) string) string {
 	return "terminal"
 }
 
-// ResumeID is the conversation `claude --resume <id>` resumes (#461); "" for anything else.
-// -r may carry a search term instead of an id, which is harmless: an unknown id changes nothing.
+// ResumeID is the conversation `claude --resume <id>` (#461) or `codex resume <id>` (#468)
+// resumes; "" for anything else. -r may carry a search term, and codex resume a session name,
+// instead of an id, which is harmless: an unknown id changes nothing.
 func ResumeID(tool string, args []string) string {
+	if tool == "codex" {
+		return codexResumeID(args)
+	}
 	if tool != "claude" {
 		return ""
 	}
@@ -40,6 +44,32 @@ func ResumeID(tool string, args []string) string {
 		if (a == "--resume" || a == "-r") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
 			return args[i+1]
 		}
+	}
+	return ""
+}
+
+// codexNoValue: Codex's flags around resume that take no value, so a word after one is not
+// its value (`codex resume --all <id>`).
+var codexNoValue = set("--all", "--include-non-interactive", "--oss", "--search", "--full-auto",
+	"--dangerously-bypass-approvals-and-sandbox", "--yolo", "--no-alt-screen")
+
+// codexResumeID is the id in `codex [flags] resume [flags] <id> [prompt]`; "" for the picker or
+// --last (the most recent, whichever that is).
+func codexResumeID(args []string) string {
+	var words []string // the arguments that are neither a flag nor a flag's value
+	for i, a := range args {
+		switch {
+		case a == "--last":
+			return ""
+		case strings.HasPrefix(a, "-"):
+			continue
+		case i > 0 && strings.HasPrefix(args[i-1], "-") && !strings.Contains(args[i-1], "=") && !codexNoValue[args[i-1]]:
+			continue // likely the flag's value (-c model="o3")
+		}
+		words = append(words, a)
+	}
+	if len(words) >= 2 && words[0] == "resume" {
+		return words[1]
 	}
 	return ""
 }
