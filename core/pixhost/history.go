@@ -16,7 +16,7 @@ import (
 // HistoryLimit is how many past sessions History keeps (#461).
 const HistoryLimit = 20
 
-// HistoryEntry is one Claude conversation you ran through pix (#461).
+// HistoryEntry is one Claude or Codex conversation you ran through pix (#461).
 type HistoryEntry struct {
 	SessionID   string    `json:"sessionId"`
 	Tool        string    `json:"tool"`
@@ -27,7 +27,7 @@ type HistoryEntry struct {
 	Started     time.Time `json:"started"`
 	LastActive  time.Time `json:"lastActive"`
 	Ended       bool      `json:"ended,omitempty"`
-	// Unresumable: a resume of it ended at once without Claude reporting the conversation.
+	// Unresumable: a resume of it ended at once without the agent reporting the conversation.
 	Unresumable bool `json:"unresumable,omitempty"`
 	// HerdrPane: the pane of its tab in the "yours" Herdr session, when it was resumed there.
 	HerdrPane string `json:"herdrPane,omitempty"`

@@ -43,6 +43,12 @@ var (
 // character (Ctrl-C, Enter, Escape) would act before the shell's quoting does.
 var resumableID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
 
+// resumeArgs is the pix command line that resumes a conversation of each tool History keeps.
+var resumeArgs = map[string]func(id string) []string{
+	"claude": func(id string) []string { return []string{"claude", "--resume", id} },
+	"codex":  func(id string) []string { return []string{"codex", "resume", id} }, // #468
+}
+
 // Resume opens id's conversation in a new tab of the yours session, in its folder, and returns
 // the plan that shows that tab.
 func (r *Resumer) Resume(ctx context.Context, id string) (agent.FocusPlan, error) {
@@ -53,7 +59,7 @@ func (r *Resumer) Resume(ctx context.Context, id string) (agent.FocusPlan, error
 		return agent.FocusPlan{}, ErrUnresumable
 	case i < 0:
 		return agent.FocusPlan{}, ErrNotInHistory
-	case list[i].Unresumable:
+	case list[i].Unresumable || resumeArgs[list[i].Tool] == nil:
 		return agent.FocusPlan{}, ErrUnresumable
 	case r.Tabs == nil:
 		return agent.FocusPlan{}, ErrNoHerdr
@@ -61,8 +67,8 @@ func (r *Resumer) Resume(ctx context.Context, id string) (agent.FocusPlan, error
 		return agent.FocusPlan{}, ErrFolderGone
 	}
 	e := list[i]
-	line := terminal.ShellLine([]string{r.Pix, "claude", "--resume", id})
-	// No PIXIE_AGENT_TOKEN: pix wraps Claude as a session of yours, not a worker.
+	line := terminal.ShellLine(append([]string{r.Pix}, resumeArgs[e.Tool](id)...))
+	// No PIXIE_AGENT_TOKEN: pix wraps the agent as a session of yours, not a worker.
 	env := []agent.EnvVar{{Key: "PIX_WHERE", Value: "Herdr"}}
 	label := cmp.Or(e.Description, filepath.Base(e.Cwd))
 	pane, err := r.Tabs.RunInTab(ctx, label, e.Cwd, env, line)
@@ -72,7 +78,7 @@ func (r *Resumer) Resume(ctx context.Context, id string) (agent.FocusPlan, error
 	if err != nil {
 		return agent.FocusPlan{}, err
 	}
-	// Known race, left as is: if Claude forks the conversation under a new id before this
+	// Known race, left as is: if the agent forks the conversation under a new id before this
 	// lands, the old entry is already gone and the new one has no pane; a click on the session
 	// then shows it by its process (the usual planner), not by its tab.
 	r.History.Update(id, func(x *HistoryEntry) { x.HerdrPane = pane })

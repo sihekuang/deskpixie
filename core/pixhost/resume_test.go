@@ -105,6 +105,19 @@ func TestResumeRunsPixInANewTabAndPlansShowingIt(t *testing.T) {
 	}
 }
 
+// A Codex session resumes with `pix codex resume <id>` (#468).
+func TestResumeCodex(t *testing.T) {
+	e := loginBug
+	e.SessionID, e.Tool = "019a5c1e-7f3b-7d20-9c4e-2b8f1a6d3e90", "codex"
+	f := newResumer(t, e)
+	if _, err := f.r.Resume(bg, e.SessionID); err != nil {
+		t.Fatal(err)
+	}
+	if want := "'/Apps/Desk Pixie.app/Contents/MacOS/pix' codex resume " + e.SessionID; len(f.tabs.runs) != 1 || f.tabs.runs[0].line != want {
+		t.Fatalf("%+v", f.tabs.runs)
+	}
+}
+
 // With no description the tab is named after the project folder.
 func TestResumeLabelsAnUndescribedSessionByItsFolder(t *testing.T) {
 	e := loginBug
@@ -123,6 +136,8 @@ func TestResumeRefuses(t *testing.T) {
 	unresumable.Unresumable = true
 	gone := loginBug
 	gone.Cwd = "/x/gone"
+	otherTool := loginBug
+	otherTool.Tool = "aider"
 	// The id is typed into a terminal: control characters would act before the shell's quoting.
 	withID := func(id string) HistoryEntry { e := loginBug; e.SessionID = id; return e }
 	cases := []struct {
@@ -135,6 +150,7 @@ func TestResumeRefuses(t *testing.T) {
 		{"unresumable", unresumable, false, ErrUnresumable},
 		{"no herdr", loginBug, true, ErrNoHerdr},
 		{"folder gone", gone, false, ErrFolderGone},
+		{"unknown tool", otherTool, false, ErrUnresumable},
 	}
 	for _, id := range []string{"s1'; rm -rf ~", "s1\x03", "s1\nrm x", "s1\r", "s1\x1b[A", "s1\x15", "", strings.Repeat("a", 129)} {
 		cases = append(cases, struct {
