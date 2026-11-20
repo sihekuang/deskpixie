@@ -105,6 +105,10 @@ type FakeHerdr struct {
 	holdPending bool
 	// failCloses: this many more pane.close calls fail.
 	failCloses int
+	// busyInputs: this many more pane.send_input calls answer agent_pane_busy (#461).
+	busyInputs int
+	// failInputs: pane.send_input fails from now on (#461).
+	failInputs bool
 
 	listener net.Listener
 	conns    map[net.Conn]bool
@@ -510,6 +514,21 @@ func (f *FakeHerdr) CanonicalAgentStarts(n int) {
 	f.mu.Unlock()
 }
 
+// BusyInputs: the next n pane.send_input calls answer agent_pane_busy, a new tab's shell not
+// at its prompt yet (#461).
+func (f *FakeHerdr) BusyInputs(n int) {
+	f.mu.Lock()
+	f.busyInputs = n
+	f.mu.Unlock()
+}
+
+// FailInputs: pane.send_input fails from now on (#461).
+func (f *FakeHerdr) FailInputs() {
+	f.mu.Lock()
+	f.failInputs = true
+	f.mu.Unlock()
+}
+
 // FailPaneCloses: the next n pane.close calls fail (the pane stays).
 func (f *FakeHerdr) FailPaneCloses(n int) {
 	f.mu.Lock()
@@ -891,6 +910,26 @@ func (f *FakeHerdr) handle(method string, p map[string]any) (result any, code, m
 		}
 		text += "❯ "
 		return map[string]any{"type": "pane_read", "read": map[string]any{"pane_id": id, "text": text}}, "", ""
+	case "pane.send_input":
+		id := str("pane_id")
+		if _, ok := f.panes[id]; !ok {
+			return nil, "pane_not_found", id
+		}
+		if f.failInputs {
+			return nil, "input_failed", fmt.Sprintf("could not write to %s", id)
+		}
+		if f.busyInputs > 0 {
+			f.busyInputs--
+			return nil, "agent_pane_busy", fmt.Sprintf("pane %s is not an available shell", id)
+		}
+		f.panes[id].prompts = append(f.panes[id].prompts, str("text"))
+		return map[string]any{"type": "ok"}, "", ""
+	case "pane.focus":
+		id := str("pane_id")
+		if _, ok := f.panes[id]; !ok {
+			return nil, "pane_not_found", id
+		}
+		return map[string]any{"type": "ok"}, "", ""
 	case "pane.close":
 		id := str("pane_id")
 		if f.failCloses > 0 {

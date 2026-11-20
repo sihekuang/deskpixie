@@ -1440,3 +1440,138 @@ func TestASubscriptionRefusedForAGonePaneRecoversOnEveryProtocol(t *testing.T) {
 		})
 	}
 }
+
+// #461: a resumed session runs in a tab of its own, its command line typed into the tab's
+// shell (agent.start only launches agents Herdr knows).
+func TestRunInTabTypesTheCommandLineInANewTab(t *testing.T) {
+	t.Parallel()
+	server := herdrtest.Start(t)
+	h := newTestHost(t, server)
+	env := []agent.EnvVar{{Key: "PIX_WHERE", Value: "Herdr"}}
+	pane, err := h.RunInTab(bg, "login bug", "/data/ws", env, "'/A pp/pix' claude --resume abc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	made := server.Requests("tab.create")
+	if len(made) != 1 {
+		t.Fatal(made)
+	}
+	params := made[0].(map[string]any)
+	if params["label"] != "login bug" || params["cwd"] != "/data/ws" || !reflect.DeepEqual(params["env"], map[string]any{"PIX_WHERE": "Herdr"}) {
+		t.Fatalf("%v", params)
+	}
+	typed := server.Requests("pane.send_input")
+	want := map[string]any{"pane_id": pane, "text": "'/A pp/pix' claude --resume abc", "keys": []any{"Enter"}}
+	if len(typed) != 1 || !reflect.DeepEqual(typed[0], want) {
+		t.Fatalf("%v", typed)
+	}
+	// The workspace's empty tab goes once ours is up; no agent is named after the tab.
+	if got := server.Tabs(); !reflect.DeepEqual(got, []string{"login bug"}) {
+		t.Fatal(got)
+	}
+	if len(server.Requests("agent.start")) != 0 {
+		t.Fatal("not an agent")
+	}
+}
+
+// A new tab's shell not at its prompt yet: the command line is typed again until it takes.
+func TestRunInTabRetriesWhileTheShellIsNotReady(t *testing.T) {
+	t.Parallel()
+	server := herdrtest.Start(t)
+	server.BusyInputs(2)
+	h := newTestHost(t, server)
+	if _, err := h.RunInTab(bg, "t", "/data/ws", nil, "pix claude"); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(server.Requests("pane.send_input")); n != 3 {
+		t.Fatal(n)
+	}
+	if server.PaneCount() != 1 {
+		t.Fatal(server.PaneCount())
+	}
+}
+
+// Typing fails: the error comes back and the tab is closed, not left as an empty shell.
+func TestRunInTabThatCannotTypeClosesItsTab(t *testing.T) {
+	t.Parallel()
+	server := herdrtest.Start(t)
+	server.FailInputs()
+	h := newTestHost(t, server)
+	if _, err := h.RunInTab(bg, "t", "/data/ws", nil, "pix claude"); err == nil {
+		t.Fatal("want an error")
+	}
+	if server.PaneCount() != 0 {
+		t.Fatal(server.PaneCount())
+	}
+}
+
+// A shell still busy past the limit: the busy error, and no tab left.
+func TestRunInTabBusyPastTheLimitClosesItsTab(t *testing.T) {
+	t.Parallel()
+	server := herdrtest.Start(t)
+	server.BusyInputs(1 << 30)
+	h := newTestHost(t, server)
+	h.paneBusyLimit = 300 * time.Millisecond
+	if _, err := h.RunInTab(bg, "t", "/data/ws", nil, "pix claude"); !IsPaneBusy(err) {
+		t.Fatalf("%#v", err)
+	}
+	if server.PaneCount() != 0 {
+		t.Fatal(server.PaneCount())
+	}
+}
+
+// The server lost our workspace (it restarted): resolved again and the tab made once more.
+func TestRunInTabRecoversALostWorkspace(t *testing.T) {
+	t.Parallel()
+	server := herdrtest.Start(t)
+	h := newTestHost(t, server)
+	if _, err := h.RunInTab(bg, "a", "/data/ws", nil, "pix claude"); err != nil {
+		t.Fatal(err)
+	}
+	server.DropWorkspaces()
+	if _, err := h.RunInTab(bg, "b", "/data/ws", nil, "pix claude"); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(server.Requests("tab.create")); n != 3 {
+		t.Fatalf("one failed attempt, one retry: %d", n)
+	}
+}
+
+// FocusPane brings a tab forward; a pane that is gone is NoAgent.
+func TestFocusPane(t *testing.T) {
+	t.Parallel()
+	server := herdrtest.Start(t)
+	h := newTestHost(t, server)
+	pane, err := h.RunInTab(bg, "t", "/data/ws", nil, "pix claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.FocusPane(bg, pane); err != nil {
+		t.Fatal(err)
+	}
+	if got := server.Requests("pane.focus"); len(got) != 1 || !reflect.DeepEqual(got[0], map[string]any{"pane_id": pane}) {
+		t.Fatal(got)
+	}
+	if err := h.FocusPane(bg, "w1:p99"); !agent.IsHostError(err, agent.HostNoAgent) {
+		t.Fatalf("%#v", err)
+	}
+}
+
+// With no server running there is no pane to focus, and none is started.
+func TestFocusPaneWithNoServerIsNoAgentAndStartsNone(t *testing.T) {
+	t.Parallel()
+	runner := newFakeRunner()
+	runner.answer(hostBin+" status --json", runOK(`{"client":{"protocol":17},"server":{"running":false,"protocol":null,"compatible":null,"socket":"/tmp/shh-none.sock"}}`))
+	sup, err := NewSupervisor(hostBin, pairs("HERDR_SESSION", hostSession), runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := NewHost(hostSession, "/Users/x", sup.WithTiming(10*time.Millisecond, 100*time.Millisecond))
+	defer h.Shutdown()
+	if err := h.FocusPane(bg, "w1:p1"); !agent.IsHostError(err, agent.HostNoAgent) {
+		t.Fatalf("%#v", err)
+	}
+	if runner.spawnedCount() != 0 {
+		t.Fatal("no server was started")
+	}
+}
