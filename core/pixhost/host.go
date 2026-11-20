@@ -483,40 +483,59 @@ func (h *Host) historyOf(s *session) (HistoryStore, HistoryEntry) {
 		Cwd: s.hello.Cwd, GitRoot: s.hello.GitRoot, Where: s.hello.Where, Started: s.started, LastActive: h.now()}
 }
 
-// History is your past Claude sessions, the most recently active first, without the ones
-// running now (connected, reconnecting, or a resume of one); nil when none are kept (#461).
+// History is your Claude sessions, the most recently active first; one running now
+// (connected, reconnecting, or a resume of it) has RunningAs set. Nil when none are kept (#461).
 func (h *Host) History() []HistoryEntry {
-	h.mu.Lock()
-	store := h.history
-	running := map[string]bool{}
-	for _, s := range h.sessions {
-		for _, id := range []string{s.sessionID, s.resumes} {
-			if id != "" {
-				running[id] = true
-			}
-		}
-	}
-	h.mu.Unlock()
+	store, running := h.historyRunning()
 	if store == nil {
 		return nil
 	}
-	return slices.DeleteFunc(store.List(), func(e HistoryEntry) bool { return running[e.SessionID] })
+	list := store.List()
+	for i := range list {
+		list[i].RunningAs = running[list[i].SessionID]
+	}
+	return list
 }
 
-// RemoveHistory forgets one past session.
+// historyRunning is the store, and the address running each conversation id now.
+func (h *Host) historyRunning() (HistoryStore, map[string]string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	running := map[string]string{}
+	for _, s := range h.sessions {
+		for _, id := range []string{s.sessionID, s.resumes} {
+			if id != "" {
+				running[id] = s.addr
+			}
+		}
+	}
+	return h.history, running
+}
+
+// RemoveHistory forgets one past session; one running now stays.
 func (h *Host) RemoveHistory(id string) {
-	if store := h.historyStore(); store != nil {
+	if store, running := h.historyRunning(); store != nil && running[id] == "" {
 		store.Remove(id)
 		h.changed()
 	}
 }
 
-// ClearHistory forgets every past session.
+// ClearHistory forgets every past session, leaving the ones running now.
 func (h *Host) ClearHistory() {
-	if store := h.historyStore(); store != nil {
-		store.Clear()
-		h.changed()
+	store, running := h.historyRunning()
+	if store == nil {
+		return
 	}
+	if len(running) == 0 {
+		store.Clear()
+	} else {
+		for _, e := range store.List() {
+			if running[e.SessionID] == "" {
+				store.Remove(e.SessionID)
+			}
+		}
+	}
+	h.changed()
 }
 
 // HerdrPaneOf is the pane of the Herdr tab the session with pid runs in, when DeskPixie resumed

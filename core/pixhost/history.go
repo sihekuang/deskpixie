@@ -31,6 +31,9 @@ type HistoryEntry struct {
 	Unresumable bool `json:"unresumable,omitempty"`
 	// HerdrPane: the pane of its tab in the "yours" Herdr session, when it was resumed there.
 	HerdrPane string `json:"herdrPane,omitempty"`
+	// RunningAs is the address of the session running it now ("" for none): set by
+	// Host.History when listed, never kept.
+	RunningAs string `json:"-"`
 }
 
 // HistoryStore keeps the past sessions (the pix host's seam; HistoryFile is the real one).

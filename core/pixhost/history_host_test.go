@@ -1,7 +1,9 @@
 package pixhost
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -92,40 +94,70 @@ func TestHistoryRecordsDescriptionChange(t *testing.T) {
 	}
 }
 
-func TestHistoryHidesRunning(t *testing.T) {
+func TestHistoryListsRunningWithItsAddress(t *testing.T) {
 	h, sock, store, clock := newHistoryHost(t)
-	p, _ := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api"})
+	p, r := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api"})
 	sendEvent(p, wire.Msg{Event: "session", SessionID: "s1"})
 	eventually(t, "not recorded", func() bool { _, ok := store.entry("s1"); return ok })
-	if got := h.History(); len(got) != 0 {
-		t.Fatalf("a running session is listed: %+v", got)
+	if got := h.History(); len(got) != 1 || got[0].RunningAs != r.Address {
+		t.Fatalf("a running session isn't listed as running: %+v", got)
 	}
 	clock.add(2 * time.Minute)
 	sendEvent(p, wire.Msg{Event: "exited"})
-	eventually(t, "not listed after exit", func() bool { return len(h.History()) == 1 })
+	eventually(t, "still running after exit", func() bool { l := h.History(); return len(l) == 1 && l[0].RunningAs == "" })
 	if e := h.History()[0]; e.SessionID != "s1" || !e.Ended || !e.LastActive.Equal(at(2)) {
 		t.Fatalf("%+v", e)
 	}
 }
 
-func TestHistoryHidesAnUnreachableSession(t *testing.T) {
+func TestHistoryAnUnreachableSessionIsStillRunning(t *testing.T) {
 	h, sock, store, _ := newHistoryHost(t)
-	p, _ := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api"})
+	p, r := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api"})
 	sendEvent(p, wire.Msg{Event: "session", SessionID: "s1"})
 	eventually(t, "not recorded", func() bool { _, ok := store.entry("s1"); return ok })
 	p.c.Close()
 	eventually(t, "drop not noticed", func() bool { l := listed(t, h); return len(l) == 1 && !l[0].User.Reachable })
-	if got := h.History(); len(got) != 0 {
-		t.Fatalf("a reconnecting session is listed: %+v", got)
+	if got := h.History(); len(got) != 1 || got[0].RunningAs != r.Address {
+		t.Fatalf("%+v", got)
 	}
 }
 
-func TestHistoryHidesAResumeInProgress(t *testing.T) {
+func TestHistoryAResumeInProgressIsRunning(t *testing.T) {
 	// Not reported yet, but its pix runs it: resuming it again would be a second pix on it.
 	h, sock, store, _ := newHistoryHost(t)
 	store.Record(HistoryEntry{SessionID: "old", Tool: "claude", LastActive: at(0)})
-	dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api", Resumes: "old"})
-	if got := h.History(); len(got) != 0 {
+	_, r := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api", Resumes: "old"})
+	if got := h.History(); len(got) != 1 || got[0].RunningAs != r.Address {
+		t.Fatalf("%+v", got)
+	}
+}
+
+// Running is worked out when listed: never written to the file.
+func TestHistoryRunningIsNotKept(t *testing.T) {
+	h, sock, store, _ := newHistoryHost(t)
+	p, r := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api"})
+	sendEvent(p, wire.Msg{Event: "session", SessionID: "s1"})
+	eventually(t, "not recorded", func() bool { _, ok := store.entry("s1"); return ok })
+	h.History()
+	b, err := os.ReadFile(store.path)
+	if err != nil || strings.Contains(string(b), r.Address) || strings.Contains(strings.ToLower(string(b)), "running") {
+		t.Fatalf("%s %v", b, err)
+	}
+}
+
+// Remove leaves a running session's entry; Clear removes only the ones not running.
+func TestHistoryRemoveAndClearLeaveRunning(t *testing.T) {
+	h, sock, store, _ := newHistoryHost(t)
+	store.Record(HistoryEntry{SessionID: "past", Tool: "claude", LastActive: at(0)})
+	p, _ := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api"})
+	sendEvent(p, wire.Msg{Event: "session", SessionID: "live"})
+	eventually(t, "not recorded", func() bool { _, ok := store.entry("live"); return ok })
+	h.RemoveHistory("live")
+	if _, ok := store.entry("live"); !ok {
+		t.Fatal("removed a running session's entry")
+	}
+	h.ClearHistory()
+	if got := store.List(); len(got) != 1 || got[0].SessionID != "live" {
 		t.Fatalf("%+v", got)
 	}
 }
@@ -393,7 +425,7 @@ func TestHistoryChangesSignal(t *testing.T) {
 	drainHistory(h)
 
 	q, _ := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api", Resumes: "s1"})
-	historyChangedSoon(t, h, "a resume hides it")
+	historyChangedSoon(t, h, "a resume runs it")
 	drainHistory(h)
 	sendEvent(q, wire.Msg{Event: "exited", ExitCode: 1})
 	eventually(t, "not unresumable", func() bool { e, _ := store.entry("s1"); return e.Unresumable })
