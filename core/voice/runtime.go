@@ -54,8 +54,8 @@ const micQueueFrames = 32
 // coming back through the mic.
 const EchoTail = 1500 * time.Millisecond
 
-// UIEvent is what the runtime tells the app. Kinds: "state", "mouth", "mic", "status",
-// "transcript", "heard" (the user's words so far, #251), "saying" (Pixie's, #253), "about" (the
+// UIEvent is what the runtime tells the app. Kinds: "state", "mouth", "mic", "conversation"
+// ("open" or "closed", #460), "status", "transcript", "heard" (the user's words so far, #251), "saying" (Pixie's, #253), "about" (the
 // sessions Pixie is about to speak of, #261), "error", "metrics".
 type UIEvent struct {
 	Kind  string `json:"kind"`
@@ -873,6 +873,14 @@ func (r *Runtime) apply(fx Effect) {
 		r.send(Command{Kind: CmdInject, Text: fx.Text, Respond: true})
 	case EfSignal:
 		r.publish(fx.Signal)
+		// The app's own word for it: a conversation that only says updates never turns the
+		// mic on, so the mic's start and stop can't stand for it (#460).
+		switch fx.Signal.Kind {
+		case SigOpened:
+			r.emit(UIEvent{Kind: "conversation", Text: "open"})
+		case SigClosed:
+			r.emit(UIEvent{Kind: "conversation", Text: "closed"})
+		}
 	case EfHandOff:
 		r.handOff(fx.Text, fx.Context, fx.Claim, fx.Answer)
 	}

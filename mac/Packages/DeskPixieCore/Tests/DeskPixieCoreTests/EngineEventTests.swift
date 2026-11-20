@@ -24,6 +24,8 @@ final class EngineEventTests: XCTestCase {
         XCTAssertEqual(d(#"{"kind":"error","text":"boom"}"#), .error("boom"))
         XCTAssertEqual(d(#"{"kind":"mic","text":"start"}"#), .mic(start: true))
         XCTAssertEqual(d(#"{"kind":"mic","text":"stop"}"#), .mic(start: false))
+        XCTAssertEqual(d(#"{"kind":"conversation","text":"open"}"#), .conversation(open: true))
+        XCTAssertEqual(d(#"{"kind":"conversation","text":"closed"}"#), .conversation(open: false))
         XCTAssertEqual(d(#"{"kind":"metrics","text":"{\"a\":1}"}"#), .metrics(#"{"a":1}"#))
     }
 

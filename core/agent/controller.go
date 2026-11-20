@@ -21,6 +21,11 @@ import (
 // terminal hint.
 const BlockedGraceMs Millis = 3_000
 
+// PermissionGuideWaitMs: a permission prompt on the coordinator's screen waits this long for its
+// hook's own request before the user hears about it from the screen (#459: Claude Code's came
+// about 5 s after the prompt showed).
+const PermissionGuideWaitMs Millis = 15_000
+
 const BlockedHint = "The coordinator is waiting at a prompt in its terminal; I'm bringing it up for you."
 
 // unreadableDenial is what the agent is told when a request cannot be read aloud plainly
@@ -106,6 +111,10 @@ type Settings struct {
 	// CoordinatorKind (`agent.coordinatorKind`, #87): the coordinator's agent, named in the
 	// tray when it can't start.
 	CoordinatorKind AgentKind
+	// ReportsSubmits: the coordinator this app runs has the UserPromptSubmit hook (a Claude
+	// Code one; a kept one started otherwise is replaced), so even its first prompt's landing
+	// is checked (#456). Off, that is learned from its first submit.
+	ReportsSubmits bool
 	// SpokenPaths: folders a spoken approval names short (#97).
 	SpokenPaths SpokenPaths
 }
@@ -176,6 +185,7 @@ const (
 	InSessionAnswered                      // Name, Text: EfAnswerSession was taken by the session; Text is its Line (#268)
 	InSubmit                               // Agent, Message: a Claude agent took a prompt (its UserPromptSubmit hook); Message is the prompt
 	InLateSessionSent                      // Job, Name, Text, Message, Reason: a session tool done after its call was answered (#246); Job: the request then in flight ("" = none); Reason: its error
+	InCoordinatorScreen                    // Text: EfReadCoordinator's screen ("": it couldn't be read)
 	InSessionSent                          // Name, Text, Message: the coordinator's message_session reached your session Name, described Text (#177); Message: why it waits ("" = typed, #183)
 	InTextMode                             // Away: text mode on (#221): no conversation is opened for updates
 	InRepliesShown                         // IDs: the reply deck showed these lines (#286)
@@ -385,6 +395,9 @@ func SessionWaitingInput(name, description, reason string) Input {
 // #339): waiting, that message's; sent, every one up to it went in. With no run (a pix too old
 // to number them) it is today's behaviour.
 func (in Input) WithSeq(seq uint64, run string) Input { in.Seq, in.Run = seq, run; return in }
+func CoordinatorScreenInput(text string) Input {
+	return Input{Kind: InCoordinatorScreen, Text: text}
+}
 func WorkerScreenInput(name, text string) Input {
 	return Input{Kind: InWorkerScreen, Name: name, Text: text}
 }
@@ -432,6 +445,7 @@ const (
 	EfDelivered        // Value ([]uint64): outbox lines you heard or saw, read in the chat thread (#302)
 	EfChatEnded        // Job: a typed job ended with no line to say so (Stop): its live step goes (#302)
 	EfWithdrawHeld     // Name, Seq: that session has its messages up to Seq (0: all) now: Pixie drops any notice still waiting to say they don't (#339)
+	EfReadCoordinator  // read the coordinator's screen, waiting at a prompt (answered with InCoordinatorScreen, #459)
 )
 
 // Effect is one thing the caller must do, in order. Err set (non-empty) is the Err branch of
@@ -530,6 +544,14 @@ type AgentController struct {
 	coordinator coordinatorState
 	blocked     optMs
 	hinted      bool
+	// guided: the user was told which prompt the blocked coordinator waits at (#459).
+	guided bool
+	// permGuideAt: the screen shows a permission prompt; unless the coordinator's hook asks
+	// by then, the user hears about it at this time (#459).
+	permGuideAt optMs
+	// heldAtPrompt: the requests that waited while it was at that prompt: once one goes
+	// through, the user hears so (#459).
+	heldAtPrompt map[JobID]bool
 	// disabled: why delegation is off for a runtime reason ("" = it isn't). Restart clears it.
 	disabled string
 	// setupDisabled: why delegation is off for a setup reason (port busy, invalid settings,
@@ -551,8 +573,13 @@ type AgentController struct {
 	// idleWaitAt: an Idle/Done came while awaiting the Stop: if the Stop is lost, ready at this time.
 	idleWaitAt optMs
 	// submits: the coordinator reports each prompt it takes. Only then is a prompt's landing
-	// checked, and a Working with no submitted turn behind it told apart (#127, #128).
+	// checked (#128): known from the start for one this app runs (Settings.ReportsSubmits,
+	// #456), else learned from its first submit.
 	submits bool
+	// submitSeen: it has reported one. Only then is a Working with no submitted turn behind it
+	// a spinner (#127): one adopted mid-turn, or whose hooks the user's settings turn off, is
+	// believed.
+	submitSeen bool
 	// turnOpen: a turn the coordinator took is running (its submit seen, its Stop not yet).
 	turnOpen bool
 	// landing: the prompt in flight (landingRefs, landingText) is not yet seen taken; landBy is
@@ -651,6 +678,7 @@ func NewAgentController(settings Settings) *AgentController {
 		narrator:       NewNarrator(NarrateIntervalMs),
 		updates:        NewUpdatesWith(settings.UpdateQuietMs),
 		settings:       settings,
+		submits:        settings.ReportsSubmits,
 		jobs:           NewJobTable(),
 		inbox:          NewInbox(),
 		outbox:         NewOutbox(),
@@ -669,6 +697,7 @@ func NewAgentController(settings Settings) *AgentController {
 		asking:         map[string]uint64{},
 		announced:      map[string]announcedQuestion{},
 		typed:          map[JobID]bool{},
+		heldAtPrompt:   map[JobID]bool{},
 		fromWindow:     map[JobID]bool{},
 		opener:         newOpener(settings.NotifyPerMinute),
 		modes:          map[string]bool{},
@@ -819,6 +848,7 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 			// The box shows this message now; the window's stay the window's.
 			maps.DeleteFunc(c.typedTo, func(_ string, j JobID) bool { return !c.fromWindow[j] })
 		}
+		c.noteHeldAtPrompt(in.Job, now, &fx)
 	case InTextMode:
 		c.textMode = in.Away
 	case InCancel:
@@ -859,7 +889,8 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 			c.clearTimers()
 			c.promptFailures = 0
 			c.blocked = optMs{}
-			c.hinted = false
+			c.hinted, c.guided, c.permGuideAt = false, false, optMs{}
+			clear(c.heldAtPrompt)
 			c.flush(now, &fx)
 			// #118: kept running while the app is (flush already restarted it if work was queued).
 			if c.coordinator == coordAbsent && !c.shutDown && !c.isDisabled() {
@@ -990,7 +1021,8 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 		c.coordinator = coordAbsent
 		c.clearMode(Coordinator, &fx)
 		c.blocked = optMs{}
-		c.hinted = false
+		c.hinted, c.guided, c.permGuideAt = false, false, optMs{}
+		clear(c.heldAtPrompt)
 		c.promptFailures = 0
 		c.clearTimers()
 		// A setup problem is still there after a restart: its status stays.
@@ -1027,6 +1059,8 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 		c.workerGone(in.Name, now, &fx)
 	case InWorkerScreen:
 		c.onWorkerScreen(in.Name, in.Text, now, &fx)
+	case InCoordinatorScreen:
+		c.guidePrompt(in.Text, now, &fx)
 	case InWorkerPromptFailed:
 		c.workerSendFailed(in.Name, in.Text, now, &fx)
 	case InOpenRefused:
@@ -1296,7 +1330,9 @@ func (c *AgentController) interruptTurn(now Millis, fx *[]Effect) bool {
 // landed: the prompt in flight was seen taken; a stop that came meanwhile stops its turn now.
 func (c *AgentController) landed(now Millis, fx *[]Effect) {
 	stop := c.stopOnLand
+	refs := c.landingRefs
 	c.stopLanding()
+	c.tellPastPrompt(refs, now, fx)
 	if stop {
 		c.interruptTurn(now, fx)
 	}
@@ -1340,11 +1376,14 @@ func (c *AgentController) flush(now Millis, fx *[]Effect) {
 			}
 		}
 		*fx = append(*fx, Effect{Kind: EfPrompt, Text: prompt.Text})
+		if !c.submits {
+			c.tellPastPrompt(prompt.Refs, now, fx) // no landing to wait for: typed is as sure as it gets
+		}
 	}
 }
 
 func (c *AgentController) onCoordinatorStatus(status PaneStatus, now Millis, fx *[]Effect) {
-	if c.submits && status == PaneWorking && !c.turnOpen {
+	if c.submitSeen && status == PaneWorking && !c.turnOpen {
 		// No turn is running: Herdr reads a spinner the TUI keeps while a background agent
 		// runs, at an idle prompt. It neither holds the inbox nor counts as busy (#127).
 		return
@@ -1379,7 +1418,7 @@ func (c *AgentController) onCoordinatorStatus(status PaneStatus, now Millis, fx 
 		}
 	} else {
 		c.blocked = optMs{}
-		c.hinted = false
+		c.hinted, c.guided, c.permGuideAt = false, false, optMs{}
 		if c.status == "Coordinator: waiting in terminal" {
 			c.setStatus(c.notice, fx)
 		}
@@ -1441,10 +1480,10 @@ func (c *AgentController) ensureCoordinator(fx *[]Effect) {
 // carries its refs (or, with none, its text), else another (the user's, or a background agent's
 // notification). Either way it is busy until that turn's Stop.
 func (c *AgentController) onSubmit(prompt string, now Millis, fx *[]Effect) {
-	if !c.submits {
+	if !c.submitSeen {
 		*fx = append(*fx, logEffect("the coordinator reports the prompts it takes: checking that each one lands"))
 	}
-	c.submits = true
+	c.submits, c.submitSeen = true, true
 	c.turnOpen = true
 	c.coordStatus = PaneWorking
 	c.inbox.OnStatus(PaneWorking)
@@ -1540,9 +1579,16 @@ func (c *AgentController) tickInbox(now Millis, fx *[]Effect) {
 		c.watchdogFired(w.jobs, now, fx)
 	}
 	if c.landBy.due(now) {
-		*fx = append(*fx, logEffect("prompt not taken by the coordinator: sending it again"))
-		c.watchdog = nil
-		c.promptFailed(now, fx)
+		if !c.submitSeen && c.coordStatus == PaneWorking {
+			// Working on it, yet no submit ever came: its hooks may be off. Typed again it
+			// would run twice: it counts as taken (#456).
+			*fx = append(*fx, logEffect("prompt taken by a working coordinator that reports no prompts"))
+			c.stopLanding()
+		} else {
+			*fx = append(*fx, logEffect("prompt not taken by the coordinator: sending it again"))
+			c.watchdog = nil
+			c.promptFailed(now, fx)
+		}
 	}
 	settled := c.settleAt.due(now)
 	retry := c.retryAt.due(now)
@@ -2372,16 +2418,124 @@ func (c *AgentController) tick(now Millis, fx *[]Effect) {
 		c.applyDelivery(d, now, fx)
 	}
 	c.tryOpen(now, fx)
+	c.tickPermissionGuide(now, fx)
 	blockedLong := c.blocked.set && satSub(now, c.blocked.v) >= BlockedGraceMs
 	if blockedLong && !c.hinted && !c.confirms.HasPendingFor(Coordinator) {
 		c.hinted = true
 		c.setStatus("Coordinator: waiting in terminal", fx)
-		l := NewLine(LineInfo, BlockedHint)
-		l.Title, l.Brief = "Coordinator", "Waiting at a prompt in its terminal."
-		c.deliver(l, now, fx)
+		// Which prompt it is decides what the user hears (guidePrompt, #459).
+		*fx = append(*fx, Effect{Kind: EfReadCoordinator})
 		// No job: FocusTarget would pick the job's worker; this is the coordinator's own pane.
 		*fx = append(*fx, Effect{Kind: EfShowPane})
 	}
+}
+
+// ---------- a prompt in the coordinator's terminal (#459) ----------
+
+// heldAtPromptText is what a request sent while the coordinator waits at a prompt says.
+const heldAtPromptText = "Your request is waiting: the coordinator is asking you something in its terminal. It goes through once you've answered."
+
+// pastPromptText closes the loop once a request held at a prompt went through.
+const pastPromptText = "The coordinator is past its prompt; your request went through."
+
+// guidePrompt says which prompt the blocked coordinator's screen shows and what to do there,
+// and that the requests waiting on it go through once it's answered. Gone by now, or explained
+// by a permission request of its own: nothing to say.
+func (c *AgentController) guidePrompt(screen string, now Millis, fx *[]Effect) {
+	if !c.blocked.set || !c.hinted || c.guided || c.permGuideAt.set || c.confirms.HasPendingFor(Coordinator) {
+		return
+	}
+	prompt := ClassifyCoordinatorPrompt(c.settings.CoordinatorKind, screen)
+	*fx = append(*fx, logEffect(fmt.Sprintf("the coordinator waits at a prompt: %q", string(prompt))))
+	if prompt == PromptPermission {
+		// Its hook's own request usually follows a few seconds after the prompt shows, and asks
+		// it properly (Allow, or a confirm word): wait for it, and speak only if none comes.
+		c.permGuideAt = someMs(now + PermissionGuideWaitMs)
+		return
+	}
+	c.sayPromptGuide(prompt, now, fx)
+}
+
+// tickPermissionGuide: the permission prompt's wait is over; no request of its own came, and
+// it still waits: say what it is.
+func (c *AgentController) tickPermissionGuide(now Millis, fx *[]Effect) {
+	if !c.permGuideAt.due(now) {
+		return
+	}
+	c.permGuideAt = optMs{}
+	if !c.blocked.set || !c.hinted || c.guided || c.confirms.HasPendingFor(Coordinator) {
+		return
+	}
+	c.sayPromptGuide(PromptPermission, now, fx)
+}
+
+// sayPromptGuide tells the user which prompt the coordinator waits at and what to do there.
+func (c *AgentController) sayPromptGuide(prompt CoordinatorPrompt, now Millis, fx *[]Effect) {
+	c.guided = true
+	kind := c.settings.CoordinatorKind
+	text := BlockedHint
+	if prompt != PromptUnknown {
+		text = CoordinatorPromptGuide(kind, prompt) + " I'm bringing it up for you."
+	}
+	if waiting := c.waitingRequests(); len(waiting) > 0 {
+		for _, id := range waiting {
+			c.heldAtPrompt[id] = true
+		}
+		text += " Your request goes through once you've answered."
+	}
+	l := NewLine(LineInfo, text)
+	l.Title, l.Brief = "Coordinator", "Waiting at a prompt in its terminal."
+	if b := CoordinatorPromptBrief(prompt); b != "" {
+		l.Brief = b
+	}
+	c.deliver(l, now, fx)
+}
+
+// waitingRequests are the open requests the coordinator hasn't taken: queued, or typed and
+// not yet seen landing (#456: typed just as the prompt came up).
+func (c *AgentController) waitingRequests() []JobID {
+	var out []JobID
+	for _, id := range c.OpenJobs() {
+		if c.inbox.Queued(id) || c.landing && slices.Contains(c.landingRefs, id) {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// noteHeldAtPrompt: request job came while the coordinator waits at a prompt the user has
+// been told about: it says it waits, not just "thinking". Before that, the guidance says so.
+func (c *AgentController) noteHeldAtPrompt(job JobID, now Millis, fx *[]Effect) {
+	if !c.guided || !c.blocked.set || !c.inbox.Queued(job) {
+		return
+	}
+	c.heldAtPrompt[job] = true
+	l := NewLine(LineInfo, heldAtPromptText)
+	l.Job, l.Title, l.Brief = job, "Coordinator", "Request waiting on its prompt."
+	c.deliver(l, now, fx)
+}
+
+// tellPastPrompt: of refs, the prompt that went through, those that waited at a prompt (and
+// are still open) get one line saying so, on the first one's route (its text box, if typed).
+func (c *AgentController) tellPastPrompt(refs []JobID, now Millis, fx *[]Effect) {
+	var told JobID
+	for _, id := range refs {
+		if !c.heldAtPrompt[id] {
+			continue
+		}
+		delete(c.heldAtPrompt, id)
+		if told == "" && c.jobs.IsOpen(id) {
+			told = id
+		}
+	}
+	// Closed meanwhile (cancelled, failed): nothing more to say about them.
+	maps.DeleteFunc(c.heldAtPrompt, func(id JobID, _ bool) bool { return !c.jobs.IsOpen(id) })
+	if told == "" {
+		return
+	}
+	l := NewLine(LineInfo, pastPromptText)
+	l.Job, l.Title, l.Brief = told, "Coordinator", "Past its prompt."
+	c.deliver(l, now, fx)
 }
 
 // ---------- helpers ----------

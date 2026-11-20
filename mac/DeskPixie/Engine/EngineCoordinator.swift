@@ -544,8 +544,10 @@ final class EngineCoordinator {
             pixie?.setMouth(level)
         case .mic(let start):
             voiceIO.setMicEnabled(start)
-            roster?.conversation(open: start)
             Self.log.info("mic \(start ? "on" : "off", privacy: .public)")
+        case .conversation(let open):
+            // Not the mic: a conversation that only says updates never turns it on (#460).
+            roster?.conversation(open: open)
         case .status(let text):
             // The tray line comes from app.state; the core follows this with a tray event.
             Self.log.info("status: \(text, privacy: .public)")

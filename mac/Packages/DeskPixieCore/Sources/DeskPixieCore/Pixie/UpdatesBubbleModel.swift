@@ -143,7 +143,8 @@ public enum PopPermission: Sendable {
     case hold
 }
 
-/// The updates bubble's state machine (spec §4): hidden → popped → badge ⇄ expanded. Pure: the
+/// The updates bubble's state machine (spec §4): hidden → popped → badge ⇄ expanded, and the
+/// badge back to hidden after `clearSecs` (#455) until something new comes. Pure: the
 /// window feeds it the core's lists, the pointer and a clock, and draws `phase` / `shown`.
 /// Times are seconds on one clock.
 public struct UpdatesBubbleModel: Sendable {
@@ -176,6 +177,10 @@ public struct UpdatesBubbleModel: Sendable {
     public var popSecs: TimeInterval
     /// `notifications.bubble.lines` (live).
     public var maxLines: Int
+    /// `notifications.bubble.clearSecs` (live, #455): the badge hides this long after it shows;
+    /// 0 keeps it. Presentation only: every line is treated the same, whatever it asks, and
+    /// nothing is reported to the core.
+    public var clearSecs: TimeInterval = 0
 
     public private(set) var phase: Phase = .hidden
     /// The core's list, oldest first.
@@ -202,6 +207,10 @@ public struct UpdatesBubbleModel: Sendable {
     public private(set) var typing: String?
     /// The pointer left while you typed: the bubble closes once the typing ends.
     private var leftWhileTyping = false
+    /// When the badge started showing (set on the first tick it shows; nil when it doesn't).
+    private var badgeSince: TimeInterval?
+    /// The badge ran out (#455): hidden although lines are listed, until a new one comes.
+    public private(set) var cleared = false
 
     public init(popSecs: TimeInterval = 6, maxLines: Int = 5) {
         self.popSecs = popSecs
@@ -282,6 +291,10 @@ public struct UpdatesBubbleModel: Sendable {
             frozen = added.reversed() + (frozen ?? [])
         }
 
+        if !added.isEmpty {  // something new: the badge shows again, its time starting over
+            cleared = false
+            badgeSince = nil
+        }
         if !applied {
             applied = true
             if !isExpanded { phase = lines.isEmpty ? .hidden : .badge }
@@ -307,12 +320,12 @@ public struct UpdatesBubbleModel: Sendable {
             }
             return
         }
-        if phase == .hidden { phase = .badge }
+        if phase == .hidden, !cleared { phase = .badge }
     }
 
     /// The pointer entered the bubble or badge at `at` (a click also lands here): open it.
     public mutating func pointerEntered(now: TimeInterval, at: CGPoint? = nil) {
-        guard !collapsed, !lines.isEmpty || isPopped else { return }
+        guard !collapsed, !lines.isEmpty && !cleared || isPopped else { return }
         leftWhileTyping = false
         phase = .expanded(since: now)
         frozen = lines.reversed()
@@ -374,12 +387,31 @@ public struct UpdatesBubbleModel: Sendable {
         hoverOpened = []
     }
 
-    /// Advances timers: a pop runs out to the badge (unless a question waits on you).
-    /// `holding`: you're around (#286), so a pop doesn't run out yet.
+    /// Advances timers: a pop runs out to the badge (unless a question waits on you), and the
+    /// badge to hidden after `clearSecs` (#455). `holding`: you're around (#286), so a pop
+    /// doesn't run out yet.
     public mutating func tick(now: TimeInterval, holding: Bool = false) {
         defer { noteDecisions(now) }
         if case .popped(let until) = phase, now >= until, !waitsOnYou, !holding {
             phase = .badge
+        }
+        if clearSecs <= 0, cleared {
+            // Set to keep the badge: a hidden one comes back.
+            cleared = false
+            if phase == .hidden, !lines.isEmpty { phase = .badge }
+        }
+        guard phase == .badge, clearSecs > 0 else {
+            badgeSince = nil
+            return
+        }
+        guard let since = badgeSince else {
+            badgeSince = now
+            return
+        }
+        if now - since >= clearSecs {
+            phase = .hidden
+            cleared = true
+            badgeSince = nil
         }
     }
 
@@ -432,6 +464,9 @@ public struct UpdatesBubbleModel: Sendable {
     public mutating func back(now: TimeInterval, pop: PopPermission) {
         if heldPop, !lines.isEmpty, pop == .allowed, !isExpanded {
             phase = .popped(until: now + popSecs)
+            // What came while you were away is shown again, its badge with a fresh time (#455).
+            cleared = false
+            badgeSince = nil
         }
         heldPop = false
         noteDecisions(now)

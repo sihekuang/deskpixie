@@ -99,7 +99,7 @@ func TestTheLiveListIsPinned(t *testing.T) {
 	want := []string{"hotkey", "replyMode", "pack", "scale", "pixiesFolder", "proximityFade.enabled", "proximityFade.radius",
 		"alwaysShowCaption", "captionDismissSecs", "captionFadeSecs", "replyHistoryMins", "chatKeepDays",
 		"voice.inputDevice", "voice.outputDevice", "voice.noiseFilter", "canvas.autoOpen", "agent.markForcedSends", "agent.editor",
-		"notifications.bubble.enabled", "notifications.bubble.popSecs", "notifications.bubble.lines", "notifications.awayAfterMins", "logMaxMB"}
+		"notifications.bubble.enabled", "notifications.bubble.popSecs", "notifications.bubble.clearSecs", "notifications.bubble.lines", "notifications.awayAfterMins", "logMaxMB"}
 	if got := LivePaths(); !reflect.DeepEqual(got, want) {
 		t.Fatal(got)
 	}
@@ -413,7 +413,7 @@ func TestTheCurrentPlatformIsOneOfTheThree(t *testing.T) {
 
 func TestNotificationFieldsAreInTheNotificationsSection(t *testing.T) {
 	for _, p := range []string{"notifications.bubble.enabled", "notifications.bubble.popSecs",
-		"notifications.bubble.lines", "notifications.awayAfterMins"} {
+		"notifications.bubble.clearSecs", "notifications.bubble.lines", "notifications.awayAfterMins"} {
 		f := FieldByPath(p)
 		if f == nil || f.Section != SectionNotifications {
 			t.Fatalf("%s: %+v", p, f)
