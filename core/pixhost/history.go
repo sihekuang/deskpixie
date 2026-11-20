@@ -53,19 +53,19 @@ type HistoryFile struct {
 	entries []HistoryEntry
 }
 
+// NewHistoryFile is History kept at path, loaded from it now. A file that can't be read or is
+// damaged is set aside as path.bad (when it can be moved) and history starts empty.
 func NewHistoryFile(path string) *HistoryFile {
 	h := &HistoryFile{path: path}
 	b, err := os.ReadFile(path)
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
-	case err != nil:
-		log.Printf("pix: history: cannot read %s (%v); starting empty", path, err)
-	default:
-		if err := json.Unmarshal(b, &h.entries); err != nil {
-			log.Printf("pix: history: %s is damaged (%v); starting over", path, err)
+	if err == nil {
+		if err = json.Unmarshal(b, &h.entries); err != nil {
 			h.entries = nil
-			os.Rename(path, path+".bad")
 		}
+	}
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		log.Printf("pix: history: cannot load %s (%v); starting over", path, err)
+		os.Rename(path, path+".bad")
 	}
 	return h
 }
@@ -81,8 +81,8 @@ func (h *HistoryFile) Record(e HistoryEntry) {
 	h.saveLocked()
 }
 
-// merge is old with e's non-zero fields over it. Ended and Unresumable are set by Update only:
-// recorded again, it runs, and Claude has the conversation.
+// merge is old with e's non-zero fields over it. Ended and Unresumable change by Update only,
+// so a late record racing an exit can't undo it.
 func merge(old, e HistoryEntry) HistoryEntry {
 	old.Tool = cmp.Or(e.Tool, old.Tool)
 	old.Description = cmp.Or(e.Description, old.Description)
@@ -96,7 +96,6 @@ func merge(old, e HistoryEntry) HistoryEntry {
 	if e.LastActive.After(old.LastActive) {
 		old.LastActive = e.LastActive
 	}
-	old.Ended, old.Unresumable = false, false
 	return old
 }
 

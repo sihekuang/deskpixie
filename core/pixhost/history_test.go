@@ -93,6 +93,30 @@ func TestHistoryDamagedFileIsSetAside(t *testing.T) {
 	}
 }
 
+func TestHistoryUnreadableFileIsSetAside(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root reads any file")
+	}
+	p := filepath.Join(t.TempDir(), "pix-history.json")
+	if err := os.WriteFile(p, []byte(`[{"sessionId":"kept"}]`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(p, 0); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHistoryFile(p)
+	h.Record(HistoryEntry{SessionID: "a", LastActive: at(1)})
+	if err := os.Chmod(p+".bad", 0o600); err != nil {
+		t.Fatalf("unreadable file not set aside: %v", err)
+	}
+	if b, err := os.ReadFile(p + ".bad"); err != nil || string(b) != `[{"sessionId":"kept"}]` {
+		t.Fatalf("set-aside file lost its bytes: %q %v", b, err)
+	}
+	if got := NewHistoryFile(p).List(); len(got) != 1 || got[0].SessionID != "a" {
+		t.Fatalf("not written after an unreadable file: %+v", got)
+	}
+}
+
 func TestHistoryUnreadableFileStartsEmpty(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "pix-history.json")
 	if err := os.Mkdir(p, 0o700); err != nil { // a folder where the file should be
@@ -130,13 +154,13 @@ func TestHistoryUpdateKeepsOtherFields(t *testing.T) {
 	}
 }
 
-func TestHistoryRecordAgainRuns(t *testing.T) {
-	// Recorded again means Claude reported the conversation: it runs, and can be resumed.
+func TestHistoryRecordKeepsEndedAndUnresumable(t *testing.T) {
+	// A late description racing an exit must not undo it: only Update changes them.
 	h := NewHistoryFile(filepath.Join(t.TempDir(), "pix-history.json"))
 	h.Record(HistoryEntry{SessionID: "a", LastActive: at(1)})
 	h.Update("a", func(e *HistoryEntry) { e.Ended, e.Unresumable = true, true })
-	h.Record(HistoryEntry{SessionID: "a", LastActive: at(2)})
-	if got := h.List(); len(got) != 1 || got[0].Ended || got[0].Unresumable {
+	h.Record(HistoryEntry{SessionID: "a", Description: "late", LastActive: at(2)})
+	if got := h.List(); len(got) != 1 || !got[0].Ended || !got[0].Unresumable || got[0].Description != "late" {
 		t.Fatalf("got %+v", got)
 	}
 }

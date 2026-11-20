@@ -1,6 +1,7 @@
 package pixhost
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -289,7 +290,7 @@ func (h *Host) onMsg(s *session, m wire.Msg) bool {
 			store, e := h.historyOf(s)
 			h.mu.Unlock()
 			if store != nil && e.SessionID != "" {
-				store.Record(HistoryEntry{SessionID: e.SessionID, Description: e.Description, LastActive: e.LastActive})
+				store.Record(e)
 			}
 			h.changed()
 		case "session":
@@ -301,20 +302,20 @@ func (h *Host) onMsg(s *session, m wire.Msg) bool {
 				dup = dup || (o != s && m.SessionID != "" && o.sessionID == m.SessionID)
 				oldRuns = oldRuns || (o != s && s.resumes != "" && o.sessionID == s.resumes)
 			}
-			s.reported = true
-			if !dup {
-				s.sessionID = m.SessionID
+			// Only the first id can be a fork of the resumed one: a later one is a new
+			// conversation (/clear), and the resumed one stays resumable (#461).
+			resumed := ""
+			if !dup && m.SessionID != "" {
+				if !s.reported && s.resumes != m.SessionID && !oldRuns {
+					resumed = s.resumes
+				}
+				s.sessionID, s.reported, s.resumes = m.SessionID, true, ""
 			}
 			conn := s.conn
 			store, e := h.historyOf(s)
-			forked := s.resumes != "" && s.sessionID != s.resumes && !oldRuns
 			h.mu.Unlock()
 			if !dup && store != nil && e.SessionID != "" {
-				store.Record(e)
-				if forked { // Claude resumed it under a new id: the new entry carries it on
-					store.Remove(s.resumes)
-				}
-				h.changed()
+				h.recordReported(store, e, resumed)
 			}
 			if dup {
 				if conn != nil {
@@ -400,6 +401,25 @@ func (h *Host) remove(s *session) {
 		store.Update(e.SessionID, func(x *HistoryEntry) { x.Ended, x.LastActive = true, e.LastActive })
 	}
 	h.broadcast(agent.PaneEvent{Kind: agent.PaneEventExited, Agent: s.addr})
+}
+
+// recordReported records e, the session Claude just reported, as running. forkOf: the
+// conversation it resumed under another id; the new entry carries it on in its place.
+func (h *Host) recordReported(store HistoryStore, e HistoryEntry, forkOf string) {
+	if forkOf != "" {
+		list := store.List()
+		if i := slices.IndexFunc(list, func(x HistoryEntry) bool { return x.SessionID == forkOf }); i >= 0 {
+			old := list[i]
+			e.Description = cmp.Or(e.Description, old.Description)
+			e.HerdrPane = cmp.Or(e.HerdrPane, old.HerdrPane)
+		}
+	}
+	store.Record(e)
+	store.Update(e.SessionID, func(x *HistoryEntry) { x.Ended, x.Unresumable = false, false })
+	if forkOf != "" {
+		store.Remove(forkOf)
+	}
+	h.changed()
 }
 
 // exited: s's agent exited. A resume that ends this soon without Claude reporting the
@@ -547,7 +567,7 @@ func (h *Host) SetDescription(name, text string) error {
 	store, e := h.historyOf(s)
 	h.mu.Unlock()
 	if store != nil && e.SessionID != "" {
-		store.Record(HistoryEntry{SessionID: e.SessionID, Description: e.Description, LastActive: e.LastActive})
+		store.Record(e)
 	}
 	h.changed()
 	return nil

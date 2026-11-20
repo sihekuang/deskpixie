@@ -28,6 +28,7 @@ func Where(env func(string) string) string {
 }
 
 // ResumeID is the conversation `claude --resume <id>` resumes (#461); "" for anything else.
+// -r may carry a search term instead of an id, which is harmless: an unknown id changes nothing.
 func ResumeID(tool string, args []string) string {
 	if tool != "claude" {
 		return ""

@@ -181,7 +181,7 @@ func TestHistoryAResumeThatReportedIsNotMarked(t *testing.T) {
 
 func TestHistoryForkedResumeReplacesOld(t *testing.T) {
 	_, sock, store, _ := newHistoryHost(t)
-	store.Record(HistoryEntry{SessionID: "old", Tool: "claude", Description: "login bug", LastActive: at(0)})
+	store.Record(HistoryEntry{SessionID: "old", Tool: "claude", Description: "login bug", HerdrPane: "w1:p3", LastActive: at(0)})
 	p, _ := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api", Resumes: "old"})
 	sendEvent(p, wire.Msg{Event: "session", SessionID: "new"})
 	eventually(t, "not replaced", func() bool {
@@ -189,6 +189,63 @@ func TestHistoryForkedResumeReplacesOld(t *testing.T) {
 		_, hasNew := store.entry("new")
 		return hasNew && !hasOld
 	})
+	if e, _ := store.entry("new"); e.Description != "login bug" || e.HerdrPane != "w1:p3" || e.GitRoot != "/x/api" {
+		t.Fatalf("the new entry lost the old one's description or pane: %+v", e)
+	}
+}
+
+func TestHistoryALaterIDIsNotAFork(t *testing.T) {
+	// /clear after a resume starts a new conversation: the resumed one stays resumable.
+	_, sock, store, _ := newHistoryHost(t)
+	store.Record(HistoryEntry{SessionID: "old", Tool: "claude", Description: "login bug", LastActive: at(0)})
+	p, _ := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api", Resumes: "old"})
+	sendEvent(p, wire.Msg{Event: "session", SessionID: "old"})
+	sendEvent(p, wire.Msg{Event: "session", SessionID: "new"})
+	eventually(t, "new not recorded", func() bool { _, ok := store.entry("new"); return ok })
+	if _, ok := store.entry("old"); !ok {
+		t.Fatal("a later id removed the resumed conversation")
+	}
+}
+
+func TestHistoryAResumeClearsItsMarks(t *testing.T) {
+	_, sock, store, _ := newHistoryHost(t)
+	store.Record(HistoryEntry{SessionID: "old", Tool: "claude", LastActive: at(0)})
+	store.Update("old", func(e *HistoryEntry) { e.Ended, e.Unresumable = true, true })
+	p, _ := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api", Resumes: "old"})
+	sendEvent(p, wire.Msg{Event: "session", SessionID: "old"})
+	eventually(t, "marks not cleared", func() bool { e, _ := store.entry("old"); return !e.Ended && !e.Unresumable })
+}
+
+func TestHistoryAnEmptySessionIDChangesNothing(t *testing.T) {
+	h, sock, store, _ := newHistoryHost(t)
+	p, _ := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api"})
+	sendEvent(p, wire.Msg{Event: "session", SessionID: "s1"})
+	sendEvent(p, wire.Msg{Event: "session"})
+	sendEvent(p, wire.Msg{Event: "exited"})
+	eventually(t, "not removed", func() bool { return len(listed(t, h)) == 0 })
+	if e, _ := store.entry("s1"); !e.Ended || len(store.List()) != 1 {
+		t.Fatalf("the empty id wiped the session's: %+v", store.List())
+	}
+}
+
+func TestHistoryAClearMidRunRecordsWholeEntries(t *testing.T) {
+	h, sock, store, _ := newHistoryHost(t)
+	p, r := dialPix(t, sock, wire.Msg{Tool: "claude", Cwd: "/x/api", GitRoot: "/x/api", Where: "iTerm"})
+	sendEvent(p, wire.Msg{Event: "session", SessionID: "s1"})
+	eventually(t, "not recorded", func() bool { _, ok := store.entry("s1"); return ok })
+	h.ClearHistory()
+	sendEvent(p, wire.Msg{Event: "description", Source: "agent", Description: "uploads"})
+	eventually(t, "description not recorded", func() bool { _, ok := store.entry("s1"); return ok })
+	if e, _ := store.entry("s1"); e.Tool != "claude" || e.Cwd != "/x/api" || e.Where != "iTerm" || !e.Started.Equal(at(0)) {
+		t.Fatalf("sparse entry: %+v", e)
+	}
+	h.ClearHistory()
+	if err := h.SetDescription(r.Address, "yours"); err != nil {
+		t.Fatal(err)
+	}
+	if e, _ := store.entry("s1"); e.Tool != "claude" || e.GitRoot != "/x/api" || e.Description != "yours" {
+		t.Fatalf("sparse entry: %+v", e)
+	}
 }
 
 func TestHistoryForkKeepsAnOldOneStillRunning(t *testing.T) {
@@ -221,11 +278,11 @@ func TestHistoryRemoveAndClearPassThrough(t *testing.T) {
 }
 
 func TestHistoryLeavesCodexOut(t *testing.T) {
-	_, sock, store, _ := newHistoryHost(t)
+	h, sock, store, _ := newHistoryHost(t)
 	p, _ := dialPix(t, sock, wire.Msg{Tool: "codex", GitRoot: "/x/api"})
 	sendEvent(p, wire.Msg{Event: "session", SessionID: "c1"})
 	sendEvent(p, wire.Msg{Event: "exited"})
-	time.Sleep(50 * time.Millisecond)
+	eventually(t, "not removed", func() bool { return len(listed(t, h)) == 0 })
 	if got := store.List(); len(got) != 0 {
 		t.Fatalf("%+v", got)
 	}
