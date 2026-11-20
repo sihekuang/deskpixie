@@ -16,7 +16,10 @@ type herdrAwareSessions struct {
 }
 
 func (p herdrAwareSessions) PlanSession(pid int) (agent.FocusPlan, error) {
-	if pane, ok := p.paneOf(pid); ok && p.resumer != nil {
+	if p.resumer == nil {
+		return p.inner.PlanSession(pid)
+	}
+	if pane, ok := p.paneOf(pid); ok {
 		return p.resumer.Show(context.Background(), pane)
 	}
 	return p.inner.PlanSession(pid)

@@ -56,6 +56,7 @@ func TestASessionResumedInHerdrIsShownByItsPane(t *testing.T) {
 // Without a Resumer (Herdr not set up) even a resumed session is shown the usual way.
 func TestWithoutAResumerSessionsAreShownTheUsualWay(t *testing.T) {
 	p, inner := herdrAware(map[int]string{42: "w1:p7"}, nil)
+	p.paneOf = func(int) (string, bool) { t.Fatal("no Resumer: History needn't be looked at"); return "", false }
 	if plan, err := p.PlanSession(42); err != nil || plan.ActivateApp == "" || !reflect.DeepEqual(inner.Pids(), []int{42}) {
 		t.Fatalf("%+v %v", plan, err)
 	}
