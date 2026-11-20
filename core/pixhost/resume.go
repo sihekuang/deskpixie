@@ -72,6 +72,9 @@ func (r *Resumer) Resume(ctx context.Context, id string) (agent.FocusPlan, error
 	if err != nil {
 		return agent.FocusPlan{}, err
 	}
+	// Known race, left as is: if Claude forks the conversation under a new id before this
+	// lands, the old entry is already gone and the new one has no pane; a click on the session
+	// then shows it by its process (the usual planner), not by its tab.
 	r.History.Update(id, func(x *HistoryEntry) { x.HerdrPane = pane })
 	return r.Show(ctx, pane)
 }
