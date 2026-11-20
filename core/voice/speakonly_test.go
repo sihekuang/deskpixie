@@ -350,3 +350,30 @@ func TestSpeakListensAnUpdateThenAQuestionThenAnUpdate(t *testing.T) {
 		t.Fatalf("the update after it: %+v", fx)
 	}
 }
+
+func TestRuntimeConversationEventsComeWithoutTheMic(t *testing.T) {
+	// #460: the app hears a conversation that only speaks open and close, though the mic it
+	// went by never turns on.
+	r, m, ui := newTestRuntime(t, "sk-test")
+	if !r.OpenToSpeak() {
+		t.Fatal("refused at rest")
+	}
+	eventually(t, "connect", func() bool { return len(m.connects()) == 1 })
+	m.sess.events <- Event{Kind: EvReady}
+	eventually(t, "conversation open", func() bool { return ui.has(UIEvent{Kind: "conversation", Text: "open"}) })
+	m.sess.events <- Event{Kind: EvError, Fatal: true, Message: "connection lost"} // ended
+	eventually(t, "conversation closed", func() bool { return ui.has(UIEvent{Kind: "conversation", Text: "closed"}) })
+	if ui.has(UIEvent{Kind: "mic", Text: "start"}) || ui.has(UIEvent{Kind: "mic", Text: "stop"}) {
+		t.Fatal("the mic was used")
+	}
+}
+
+func TestRuntimeAListeningConversationAlsoSaysItOpensAndCloses(t *testing.T) {
+	r, m, ui := newTestRuntime(t, "sk-test")
+	r.Open()
+	eventually(t, "connect", func() bool { return len(m.connects()) == 1 })
+	m.sess.events <- Event{Kind: EvReady}
+	eventually(t, "conversation open", func() bool { return ui.has(UIEvent{Kind: "conversation", Text: "open"}) })
+	r.Hotkey()
+	eventually(t, "conversation closed", func() bool { return ui.has(UIEvent{Kind: "conversation", Text: "closed"}) })
+}
