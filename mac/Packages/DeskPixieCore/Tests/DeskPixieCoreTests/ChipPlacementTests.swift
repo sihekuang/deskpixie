@@ -6,6 +6,16 @@ final class ChipPlacementTests: XCTestCase {
     private let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
     private let pixie = CGRect(x: 100, y: 100, width: 128, height: 128)
 
+    func testTheChipKeepsRoomForItsCountsAtTinySizes() {
+        // Tiny (×2) and Extra Small (×3) make Pixie narrower than the chip's counts (#465).
+        XCTAssertEqual(ChipPlacement.maxChipWidth(pixieWidth: 64), 128)
+        XCTAssertEqual(ChipPlacement.maxChipWidth(pixieWidth: 96), 128)
+        XCTAssertEqual(ChipPlacement.maxChipWidth(pixieWidth: 0), 128)
+        // From Small up it is Pixie's width, as before.
+        XCTAssertEqual(ChipPlacement.maxChipWidth(pixieWidth: 128), 128)
+        XCTAssertEqual(ChipPlacement.maxChipWidth(pixieWidth: 256), 256)
+    }
+
     func testCentredUnderPixie() {
         let (f, below) = ChipPlacement.frame(pixie: pixie, panel: CGSize(width: 60, height: 20), screen: screen, openHeight: 200)
         XCTAssertTrue(below)
