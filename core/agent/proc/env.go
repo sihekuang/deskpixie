@@ -18,8 +18,10 @@ var scrubExact = append([]string{"CLAUDECODE", "CLAUDE_PID", "CLAUDE_EFFORT"}, a
 
 // ANTHROPIC_* covers keys, tokens, base URLs, custom headers and ANTHROPIC_FOUNDRY_*;
 // CLAUDE_CODE_* covers CLAUDE_CODE_USE_{BEDROCK,VERTEX,FOUNDRY} and a parent session's ids;
-// HERDR_* covers HERDR_SOCKET_PATH, which would point the CLI at another session.
-var scrubPrefixes = []string{"ANTHROPIC_", "CLAUDE_CODE_", "HERDR_"}
+// HERDR_* covers HERDR_SOCKET_PATH, which would point the CLI at another session; PIX_* covers
+// a pix session DeskPixie was started from (PIX_SESSION would make a pix in a pane run nested,
+// #461).
+var scrubPrefixes = []string{"ANTHROPIC_", "CLAUDE_CODE_", "HERDR_", "PIX_"}
 
 // Scrubbed: key is never passed to a session host's server.
 func Scrubbed(key string) bool {

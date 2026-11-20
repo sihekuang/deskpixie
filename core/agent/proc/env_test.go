@@ -56,3 +56,19 @@ func TestBothAgentTokenNamesAreScrubbed(t *testing.T) {
 		}
 	}
 }
+
+// #461: DeskPixie started from inside a pix session must not hand its PIX_* on to Herdr's or
+// tmux's server: a pix resumed in one of its tabs would see PIX_SESSION and run unwrapped. Only
+// a real PIX_ prefix: PIXIE_* stays as it is (its token aside, scrubbed by name).
+func TestPixVariablesAreScrubbed(t *testing.T) {
+	for _, k := range []string{"PIX_SESSION", "PIX_SOCK", "PIX_WHERE", "PIX_KEYLOG"} {
+		if !Scrubbed(k) {
+			t.Fatalf("%s passed on", k)
+		}
+	}
+	for _, k := range []string{"PIX", "PIXIE_HOME", "DESKPIXIE_PIX_SOCK", "XPIX_SESSION"} {
+		if Scrubbed(k) {
+			t.Fatalf("%s scrubbed", k)
+		}
+	}
+}
