@@ -30,34 +30,45 @@ One entry per Claude conversation with a session id:
 | `unresumable` | set when a resume of it fails at once (below) |
 
 - Written on a new session id, a description change and an exit, to
-  `<support dir>/pix-history.json` (atomic write: temp file then rename).
+  `<support dir>/agent/pix-history.json` (atomic write: temp file then rename).
 - Keyed by `sessionId`: resuming a conversation updates its entry, never adds a second.
 - At most 20 entries, the oldest `lastActive` dropped first.
 - A damaged or unreadable file is set aside as `pix-history.json.bad` and history starts empty;
   it never stops pix sessions from registering.
-- Sessions that are connected now are left out of the list: they are running, not past.
+- Sessions running now (connected, briefly unreachable, or a resume of the entry) stay listed,
+  marked running: worked out when listed, never written to the file. Remove leaves a running
+  one, and Clear removes only the ones not running.
 
 The store is its own type behind a small interface (`HistoryStore`: `Record`, `List`, `Remove`,
 `Clear`), injected into the pix host, so the host's tests use a fake and the store's tests use
 `t.TempDir()`.
 
-### Calls (`dp_call`)
+### Through the tray model
 
-- `pix.history` → the entries, newest first, without running ones.
-- `pix.history.remove {sessionId}`, `pix.history.clear`.
-- `pix.resume {sessionId}` → starts it (Part 2) and returns the `FocusPlan` to show it, or a
-  user-facing error.
-- A `pixHistory` event when the list changes, so open menus and Settings refresh.
+No calls of its own: History rides on the tray model and its actions.
+
+- `app.state` → `agent.history`: `[{"id", "label", "enabled", "running"}]`, newest first,
+  `[]` when there are none. Labels are made in Go: "login bug · deskpixie · 2h ago", or
+  "● login bug · deskpixie · running" for one running now. `enabled` is false for an
+  unresumable entry (a running one is always enabled).
+- `app.action` ids: `agent:history:resume:<sessionId>` (resumes a past one; shows a running one,
+  exactly as a click on its row by the session chip does), `agent:history:remove:<sessionId>`
+  (ignored for a running one), `agent:history:clear`.
+- When History changes (an entry written, a session started or ended), the core refreshes the
+  tray, which pushes `app.state` again; `app.action` also sends `settings.changed`, so an open
+  Settings window refreshes.
 
 ### Where you click it (Swift)
 
 - **Menu bar and Pixie's right-click menu:** both are built from the same `TrayItem` tree
   (`TrayContextMenu`), so one **History ▸** submenu shows in both. Rows: "login bug ·
-  deskpixie · 2h ago" (description, project folder name, relative time); then a separator and
+  deskpixie · 2h ago" (description, project folder name, relative time), or "● login bug ·
+  deskpixie · running" for one running now, which a click brings forward; then a separator and
   **Clear History**. Empty: a greyed "No past sessions". An unresumable entry is shown greyed.
   The tree is built in `DeskPixieCore` (`TrayMenu`) and tested in `TrayMenuTests`.
 - **Settings ▸ Sessions:** a "History" section, hand-drawn in Swift (it is a list, not a
-  setting): each row with **Resume** and a remove button, and **Clear History**.
+  setting): each row with **Resume** and a remove button, and **Clear History**. A running row
+  has **Show** instead of **Resume**, and no remove button.
 
 ### Errors (short, plain)
 
@@ -66,7 +77,7 @@ The store is its own type behind a small interface (`HistoryStore`: `Record`, `L
 | The folder is gone | "That project folder is gone." |
 | Herdr isn't available | "Resuming needs Herdr. Install it, or set its path in Settings ▸ Advanced." |
 | Claude no longer has the conversation | Claude's own error shows in the tab; the pix exits at once, so the entry is marked unresumable and the next try says "This conversation can't be resumed." |
-| Already running elsewhere | Not listed; if it races, pix's existing duplicate refusal names it in the tab title. |
+| Already running elsewhere | Listed with ●; a click shows it instead of resuming. If it starts running after the menu was drawn, the click shows it too; if a second pix still races in, pix's existing duplicate refusal names it in the tab title. |
 
 ## Part 2: starting it in Herdr as your own session
 
@@ -89,7 +100,7 @@ reconciles, replaces or stops it, so:
    Claude as usual) and has `PIX_WHERE=Herdr`; `pix.Where` reads it first.
 3. pix registers with the host as any session you started: listed under ⌨, Pixie can message
    and interrupt it, and asks before closing it.
-4. `pix.resume` returns a `FocusPlan` that opens the chosen terminal (`agent.terminal`: Warp or
+4. The resume makes a `FocusPlan` (sent as the `focusPlan` event) that opens the chosen terminal (`agent.terminal`: Warp or
    iTerm) attached to `deskpixie-yours` with that tab in front. Swift's `TerminalFocusExecutor`
    carries it out.
 
@@ -107,7 +118,7 @@ terminal app by its pid).
 ## Testing
 
 - **Go:** the store (record, update by id, trim to 20, remove, clear, damaged file, unwritable
-  folder); the host recording on session/description/exit and hiding running ones; the resume
+  folder); the host recording on session/description/exit and marking running ones; the resume
   plan (argv, folder, environment without the worker token, `PIX_WHERE`), its errors (folder
   gone, no Herdr) and the unresumable mark; `Where` with `PIX_WHERE`; the Herdr focus rule.
   All with `t.TempDir()`, a temporary `HOME` and a fake session host.
