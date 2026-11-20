@@ -29,6 +29,7 @@ var Extras = []Extra{
 	{"key.gemini", SectionVoice, "Voice service", "Gemini key", "Type the key here to keep it in the Keychain (used first), or set GEMINI_API_KEY in your environment or a .env file. Keys are never shown here.", "", AllPlatforms},
 	{"restartCoordinator", SectionCoordinator, "Coordinator", "Restart coordinator", "Stops the coordinator and starts it again on your next request, with its conversation. Asks first.", "Restart Coordinator…", AllPlatforms},
 	{"pix", SectionSessions, "Sessions you start with pix", "pix command", "Start Claude Code or Codex with `pix claude` or `pix codex` in any terminal (WebStorm, iTerm, …) and Pixie can see, message and interrupt that session. Quitting DeskPixie never ends it.", "", AllPlatforms},
+	{"pixHistory", SectionSessions, "Sessions you start with pix", "History", "Past Claude Code sessions you ran with pix. Resume one to open it in Herdr, in its project folder.", "", AllPlatforms},
 	{"openFile", SectionAdvanced, "Files", "Settings file", "settings.json holds every setting.", "Open Settings File", AllPlatforms},
 	{"exportLogs", SectionAdvanced, "Files", "Logs", "Saves the app's log, pix's log, the voice log and metrics in one zip to share. It can include what you said to Pixie.", "Export Logs…", AllPlatforms},
 }

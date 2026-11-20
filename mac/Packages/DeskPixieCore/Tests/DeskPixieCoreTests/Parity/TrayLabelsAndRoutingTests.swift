@@ -29,7 +29,8 @@ final class TrayLabelsAndRoutingTests: XCTestCase {
         {"state":"idle","packs":[{"id":"bit","name":"Bit"}],"pack":"bit","scale":8,"fade":true,"talking":false,
          "canvasRecent":[{"slug":"q3","title":"Q3 revenue"}],
          "agent":{"enabled":true,"jobs":[{"id":"job_1","label":"Fix the login bug — working, 2 min"},
-                                         {"id":"job_2","label":"Write tests — waiting, 10 s"}]},
+                                         {"id":"job_2","label":"Write tests — waiting, 10 s"}],
+                  "history":[{"id":"s1","label":"login bug · deskpixie · 2h ago","enabled":true,"running":false}]},
          "statusLines":["Coordinator: ready"],"hotkey":"ctrl+alt+Space"}
         """#.utf8))
         let items = TrayMenu.build(s, localStatusLines: ["Hotkey unavailable: ⌃⌥Space"], micModeAvailable: true)
@@ -56,6 +57,10 @@ final class TrayLabelsAndRoutingTests: XCTestCase {
             "    Write tests — waiting, 10 s",
             "  Open coordinator terminal",
             "  Restart coordinator…",
+            "> History",
+            "  login bug · deskpixie · 2h ago",
+            "  ---",
+            "  Clear History",
             "---",
             "Chat… ⌘⇧c",
             "Mic Mode (Voice Isolation)…",
@@ -76,6 +81,8 @@ final class TrayLabelsAndRoutingTests: XCTestCase {
         // #179: asks first (CoordinatorRestart), then sends agent:restart.
         XCTAssertEqual(TrayMenu.route("agent:restart"), .restartCoordinator)
         XCTAssertEqual(TrayMenu.route("agent:cancel:job_1"), .core("agent:cancel:job_1"))
+        XCTAssertEqual(TrayMenu.route("agent:history:resume:s1"), .core("agent:history:resume:s1"))
+        XCTAssertEqual(TrayMenu.route("agent:history:clear"), .core("agent:history:clear"))
         XCTAssertEqual(TrayMenu.route("canvas:open"), .core("canvas:open", focusCanvas: true))
         XCTAssertEqual(TrayMenu.route("canvas:page:q3"), .core("canvas:page:q3", focusCanvas: true))
         XCTAssertEqual(TrayMenu.route("state:happy"), .core("state:happy"))

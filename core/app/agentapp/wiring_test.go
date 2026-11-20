@@ -43,6 +43,7 @@ type recorder struct {
 	notes               [][2]string
 	chats               []any
 	stopFailed          [][3]string
+	focused             []any
 }
 
 func (r *recorder) hooks() app.AgentHooks {
@@ -55,13 +56,20 @@ func (r *recorder) hooks() app.AgentHooks {
 			r.notes = append(r.notes, [2]string{title, body})
 			r.mu.Unlock()
 		},
-		Chat: func(line any) { r.mu.Lock(); r.chats = append(r.chats, line); r.mu.Unlock() },
+		Chat:  func(line any) { r.mu.Lock(); r.chats = append(r.chats, line); r.mu.Unlock() },
+		Focus: func(plan any) { r.mu.Lock(); r.focused = append(r.focused, plan); r.mu.Unlock() },
 		StopFailed: func(name, surface, text string) {
 			r.mu.Lock()
 			r.stopFailed = append(r.stopFailed, [3]string{name, surface, text})
 			r.mu.Unlock()
 		},
 	}
+}
+
+func (r *recorder) refreshes() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.refreshed
 }
 
 func (r *recorder) chatLines() []any {
@@ -156,6 +164,8 @@ func newFixture(t *testing.T, change func(*Config)) *fixture {
 		Listen:    func(uint16) (net.Listener, error) { return net.Listen("tcp", "127.0.0.1:0") },
 		PixSocket: shortSocket(t),
 	}
+	// Never the real herdr (in /opt/homebrew/bin, say): tests that need one set a fake.
+	herdrAt(&cfg, "/definitely/not/herdr")
 	if change != nil {
 		change(&cfg)
 	}

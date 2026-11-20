@@ -4,8 +4,12 @@ package pix
 
 import "strings"
 
-// Where names the terminal or IDE pix runs in, shown with the session in Bit's list.
+// Where names the terminal or IDE pix runs in, shown with the session in Bit's list. PIX_WHERE
+// wins: DeskPixie sets it on the Herdr tab it resumes a session in (#461).
 func Where(env func(string) string) string {
+	if w := env("PIX_WHERE"); w != "" {
+		return w
+	}
 	if env("TERMINAL_EMULATOR") == "JetBrains-JediTerm" {
 		if id := env("__CFBundleIdentifier"); strings.HasPrefix(id, "com.jetbrains.") {
 			return strings.TrimPrefix(id, "com.jetbrains.")
@@ -21,6 +25,23 @@ func Where(env func(string) string) string {
 		return "Terminal"
 	}
 	return "terminal"
+}
+
+// ResumeID is the conversation `claude --resume <id>` resumes (#461); "" for anything else.
+// -r may carry a search term instead of an id, which is harmless: an unknown id changes nothing.
+func ResumeID(tool string, args []string) string {
+	if tool != "claude" {
+		return ""
+	}
+	for i, a := range args {
+		if id, ok := strings.CutPrefix(a, "--resume="); ok {
+			return id
+		}
+		if (a == "--resume" || a == "-r") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+			return args[i+1]
+		}
+	}
+	return ""
 }
 
 // AppID is the bundle id of the app pix runs in: macOS sets __CFBundleIdentifier for an app and

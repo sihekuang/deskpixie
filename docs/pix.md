@@ -97,6 +97,23 @@ A session started by an older `pix`, or in a terminal Pixie doesn't recognise, i
 its row isn't clickable. A session Pixie just lost contact with shows greyed out and isn't
 counted until it reconnects.
 
+## Picking up a past session
+
+DeskPixie remembers your last 20 Claude Code sessions that ran through pix. Find them under
+**History** in the menu bar, in Pixie's right-click menu, or in Settings ▸ Sessions. History
+needs the coordinator to be on. Codex sessions aren't listed yet.
+
+- **A past session:** click it (or **Resume** in Settings). It opens in a new tab of a Herdr
+  session of its own, named after yours with `-yours` added (`deskpixie-yours`), in the
+  project folder it ran in, as `pix claude --resume …`. Your terminal opens attached to it.
+  It is still your session: Pixie can message it, asks before closing it, and quitting
+  DeskPixie never ends it. Clicking its row under Pixie later brings that Herdr tab back.
+- **A running session** is marked ●. Clicking it brings it forward, the same as clicking its
+  row under Pixie. Nothing new is started.
+- **Remove** (in Settings) and **Clear History** forget past sessions only; running ones stay.
+
+Resuming needs Herdr installed, even when the coordinator runs in tmux.
+
 ## Pixie never types over you
 
 For Claude Code, Pixie's messages go into Claude's own inbox, so your typing is never touched.
@@ -135,3 +152,6 @@ tab title starts with 📨 and the count.
 | The tab title says "pix: this conversation is already connected …" | Two pix sessions resumed the same conversation; this one runs without Pixie. |
 | The tab title starts with 📨 | Pixie's message is waiting: finish or clear what you've typed, and let the agent finish its turn. |
 | `pix claude` inside a session Pixie started | pix just runs `claude`; the outer session is the one Pixie knows. |
+| "Couldn't resume: That project folder is gone." | The folder the session ran in was moved or deleted. Remove the entry from History. |
+| "Couldn't resume: Resuming needs Herdr. …" | Install Herdr, or set its path in Settings ▸ Advanced. |
+| A History entry is greyed out | Claude no longer has that conversation (its last resume ended at once). Remove it. |

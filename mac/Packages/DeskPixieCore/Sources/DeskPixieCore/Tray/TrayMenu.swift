@@ -30,15 +30,44 @@ public struct TrayAppState: Decodable, Sendable, Equatable {
         public var copy: String?
     }
 
+    /// One pix session in History (#461). `label` arrives preformatted ("login bug · deskpixie ·
+    /// 2h ago", or "● … · running" for one running now); `enabled` is false when it can't be
+    /// resumed.
+    public struct HistoryRef: Decodable, Sendable, Equatable {
+        public var id: String
+        public var label: String
+        public var enabled: Bool
+        public var running: Bool
+
+        public init(id: String, label: String, enabled: Bool = true, running: Bool = false) {
+            self.id = id
+            self.label = label
+            self.enabled = enabled
+            self.running = running
+        }
+
+        private enum CodingKeys: String, CodingKey { case id, label, enabled, running }
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            id = try c.decode(String.self, forKey: .id)
+            label = try c.decode(String.self, forKey: .label)
+            enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+            running = try c.decodeIfPresent(Bool.self, forKey: .running) ?? false
+        }
+    }
+
     public struct Agent: Decodable, Sendable, Equatable {
         public var enabled: Bool
         public var jobs: [Job]
+        /// Past and running pix sessions, newest first (#461).
+        public var history: [HistoryRef]
 
-        private enum CodingKeys: String, CodingKey { case enabled, jobs }
+        private enum CodingKeys: String, CodingKey { case enabled, jobs, history }
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
             jobs = try c.decodeIfPresent([Job].self, forKey: .jobs) ?? []
+            history = try c.decodeIfPresent([HistoryRef].self, forKey: .history) ?? []
         }
     }
 
@@ -188,6 +217,18 @@ public enum TrayMenu {
         }
     }
 
+    /// Tray ▸ History (#461): pix sessions, newest first; a click resumes a past one in Herdr or
+    /// shows a running one (the core decides which). An unresumable one is greyed. Clear History
+    /// only when there is something it would clear.
+    public static func historyItems(_ rows: [TrayAppState.HistoryRef]) -> [TrayItem] {
+        guard !rows.isEmpty else { return [.action(Row(id: "agent:history:none", title: HistoryActions.emptyText, enabled: false))] }
+        var items: [TrayItem] = rows.map { .action(Row(id: HistoryActions.resumeID($0.id), title: $0.label, enabled: $0.enabled)) }
+        if HistoryActions.offersClear(rows) {
+            items += [.separator, .action(Row(id: HistoryActions.clearID, title: "Clear History"))]
+        }
+        return items
+    }
+
     /// Tray ▸ Pixie: the pixies, the ones that didn't load and why, then your pixies folder
     /// (#266).
     static func pixieItems(_ s: TrayAppState) -> [TrayItem] {
@@ -248,6 +289,7 @@ public enum TrayMenu {
                 sub.append(.action(Row(id: "agent:open", title: "Open coordinator terminal")))
                 sub.append(.action(Row(id: CoordinatorRestart.actionID, title: "Restart coordinator…")))
                 items.append(.submenu(title: "Coordinator", enabled: true, items: sub))
+                items.append(.submenu(title: "History", enabled: true, items: historyItems(agent.history)))
             }
             items.append(.separator)
         }

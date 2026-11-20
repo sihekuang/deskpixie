@@ -102,6 +102,7 @@ func interruptOnScreen(lines []string) (at int, latest, stale bool) {
 
 type sessionOpts struct {
 	tool, description, daemonSock, home, where, app string
+	resumes                                         string // the conversation it resumes (#461)
 	stdin, stdout                                   *os.File
 	agent                                           Launch
 	log                                             *Log // nil: none
@@ -1244,7 +1245,7 @@ func (s *Session) start(ctx context.Context) error {
 		Sock: s.o.daemonSock,
 		Hello: wire.Msg{Kind: wire.KindRegister, Tool: s.o.tool, Cwd: cwd, GitRoot: gitRoot(cwd),
 			Where: s.o.where, App: s.o.app, Description: s.o.description, Build: wire.SelfBuild(),
-			Run: rand.Text()},
+			Run: rand.Text(), Resumes: s.o.resumes},
 		OnCommand: s.command,
 		OnRegistered: func(reply wire.Msg) {
 			s.o.log.Printf("registered with DeskPixie as %s (outdated %v)", reply.Address, reply.Outdated)
@@ -1335,7 +1336,7 @@ func Run(args []string, env func(string) string, home string) int {
 	}
 	appData := AppData(home, env)
 	s := newSession(sessionOpts{tool: tool, description: desc, home: home, stdin: os.Stdin, stdout: os.Stdout,
-		agent: launch, where: Where(env), app: AppID(env), daemonSock: DaemonSocket(home, env),
+		agent: launch, where: Where(env), app: AppID(env), resumes: ResumeID(tool, rest), daemonSock: DaemonSocket(home, env),
 		log: openLog(LogFile(appData), logMax(appData), tool)})
 	stop, err := ServeLocal(localSock, s)
 	if err != nil {

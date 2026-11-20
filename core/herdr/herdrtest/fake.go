@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -105,6 +106,13 @@ type FakeHerdr struct {
 	holdPending bool
 	// failCloses: this many more pane.close calls fail.
 	failCloses int
+	// canonicalInputs: this many more pane.send_input calls answer pane_send_failed (a long
+	// line before the shell's prompt, #461).
+	canonicalInputs int
+	// failInputs: pane.send_input fails from now on (#461).
+	failInputs bool
+	// typed: every text pane.send_input typed.
+	typed []string
 
 	listener net.Listener
 	conns    map[net.Conn]bool
@@ -510,6 +518,28 @@ func (f *FakeHerdr) CanonicalAgentStarts(n int) {
 	f.mu.Unlock()
 }
 
+// CanonicalInputs: the next n pane.send_input calls answer pane_send_failed, like Herdr 0.9.5
+// when a long line meets a new tab's terminal still in canonical mode (#461).
+func (f *FakeHerdr) CanonicalInputs(n int) {
+	f.mu.Lock()
+	f.canonicalInputs = n
+	f.mu.Unlock()
+}
+
+// Typed is every text pane.send_input typed, oldest first.
+func (f *FakeHerdr) Typed() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.typed)
+}
+
+// FailInputs: pane.send_input fails from now on (#461).
+func (f *FakeHerdr) FailInputs() {
+	f.mu.Lock()
+	f.failInputs = true
+	f.mu.Unlock()
+}
+
 // FailPaneCloses: the next n pane.close calls fail (the pane stays).
 func (f *FakeHerdr) FailPaneCloses(n int) {
 	f.mu.Lock()
@@ -891,6 +921,26 @@ func (f *FakeHerdr) handle(method string, p map[string]any) (result any, code, m
 		}
 		text += "❯ "
 		return map[string]any{"type": "pane_read", "read": map[string]any{"pane_id": id, "text": text}}, "", ""
+	case "pane.send_input":
+		id := str("pane_id")
+		if _, ok := f.panes[id]; !ok {
+			return nil, "pane_not_found", id
+		}
+		if f.failInputs {
+			return nil, "input_failed", fmt.Sprintf("could not write to %s", id)
+		}
+		if f.canonicalInputs > 0 {
+			f.canonicalInputs--
+			return nil, "pane_send_failed", "input contains a 1511-byte line but the terminal is in canonical mode with a 1024-byte limit; wait for the shell prompt and retry"
+		}
+		f.typed = append(f.typed, str("text"))
+		return map[string]any{"type": "ok"}, "", ""
+	case "pane.focus":
+		id := str("pane_id")
+		if _, ok := f.panes[id]; !ok {
+			return nil, "pane_not_found", id
+		}
+		return map[string]any{"type": "ok"}, "", ""
 	case "pane.close":
 		id := str("pane_id")
 		if f.failCloses > 0 {

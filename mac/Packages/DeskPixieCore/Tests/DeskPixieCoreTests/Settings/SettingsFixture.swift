@@ -1096,7 +1096,7 @@ enum SettingsFixture {
 
     /// Go `ExtraViews(Macos)`.
     static let extrasJSON = #"""
-[{"id": "resetPosition", "section": "General", "group": "Look"}, {"id": "key.openai", "section": "Voice", "group": "Voice service"}, {"id": "key.gemini", "section": "Voice", "group": "Voice service"}, {"id": "restartCoordinator", "section": "Coordinator", "group": "Coordinator"}, {"id": "pix", "section": "Sessions", "group": "Sessions you start with pix"}, {"id": "openFile", "section": "Advanced", "group": "Files"}, {"id": "exportLogs", "section": "Advanced", "group": "Files"}]
+[{"id": "resetPosition", "section": "General", "group": "Look"}, {"id": "key.openai", "section": "Voice", "group": "Voice service"}, {"id": "key.gemini", "section": "Voice", "group": "Voice service"}, {"id": "restartCoordinator", "section": "Coordinator", "group": "Coordinator"}, {"id": "pix", "section": "Sessions", "group": "Sessions you start with pix"}, {"id": "pixHistory", "section": "Sessions", "group": "Sessions you start with pix"}, {"id": "openFile", "section": "Advanced", "group": "Files"}, {"id": "exportLogs", "section": "Advanced", "group": "Files"}]
 """#
 
     static let extras: [SettingsExtraPlace] = try! JSONDecoder().decode([SettingsExtraPlace].self, from: Data(extrasJSON.utf8))

@@ -57,12 +57,31 @@ public final class SettingsModel {
     /// supplies it (see `DeskPixieApp`); when nil the combo is saved without binding.
     public var rebindHotkey: HotkeyBinder?
 
+    /// History's sessions (#461), as the tray last read them. The app reads its tray state here,
+    /// so a view that lists them redraws whenever the tray is read again.
+    @ObservationIgnored public var historySource: @MainActor () -> [TrayAppState.HistoryRef] = { [] }
+    /// Whether History can be had: the coordinator is on (in the tray state the app reads).
+    @ObservationIgnored public var historyAvailable: @MainActor () -> Bool = { false }
+    /// Runs an `app.action` id the way a tray click does (the app sets it); nil = History's
+    /// buttons do nothing.
+    @ObservationIgnored public var performAction: (@MainActor (String) -> Void)?
+
     @ObservationIgnored private let client: SettingsClient
     @ObservationIgnored private static let log = Logger(subsystem: "com.sihekuang.deskpixie", category: "settings")
 
     public init(client: SettingsClient) {
         self.client = client
     }
+
+    // MARK: History (#461)
+
+    /// What Settings ▸ Sessions ▸ History shows; read once per draw.
+    public var history: HistoryActions.SettingsList {
+        HistoryActions.settingsList(available: historyAvailable(), historyAvailable() ? historySource() : [])
+    }
+
+    /// A History button: resume or show, remove, or Clear History.
+    public func historyAction(_ id: String) { performAction?(id) }
 
     // MARK: Reading
 

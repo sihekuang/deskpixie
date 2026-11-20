@@ -75,7 +75,7 @@ final class TrayMenuTests: XCTestCase {
             "label:Voice: connection lost", "--",
             "label:Coordinator: herdr not found", "--",
             "menu:Size", "reset-position", "menu:Pixie", "menu:Canvas",
-            "menu:Coordinator", "--", "chat", "mic-mode", "onboarding", "settings", "--", "quit",
+            "menu:Coordinator", "menu:History", "--", "chat", "mic-mode", "onboarding", "settings", "--", "quit",
         ])
         XCTAssertTrue(items.contains(.action(.init(id: "settings", title: "Settings…", shortcut: ","))))
         let pixie = try XCTUnwrap(submenu(items, "Pixie"))
@@ -117,6 +117,7 @@ final class TrayMenuTests: XCTestCase {
         let s = try state(#"{"state":"idle","packs":[],"pack":"","scale":8,"statusLines":[]}"#)
         let items = TrayMenu.build(s, localStatusLines: [], micModeAvailable: false)
         XCTAssertNil(submenu(items, "Coordinator"))
+        XCTAssertNil(submenu(items, "History"))
         XCTAssertNil(submenu(items, "Pixie"), "no packs, no Pixie submenu")
         XCTAssertFalse(titles(items).contains("mic-mode"))
         let recent = try XCTUnwrap(submenu(try XCTUnwrap(submenu(items, "Canvas")).items, "Recent"))
@@ -133,6 +134,59 @@ final class TrayMenuTests: XCTestCase {
         let s = try state(#"{"state":"idle","agent":{"enabled":true,"jobs":[]}}"#)
         let agent = try XCTUnwrap(submenu(TrayMenu.build(s, localStatusLines: [], micModeAvailable: true), "Coordinator"))
         XCTAssertEqual(try XCTUnwrap(submenu(agent.items, "Cancel job")).enabled, false)
+    }
+
+    // MARK: History (#461)
+
+    func test_no_history_shows_one_greyed_row() throws {
+        XCTAssertEqual(TrayMenu.historyItems([]),
+                       [.action(.init(id: "agent:history:none", title: "No past sessions", enabled: false))])
+        // An app.state without history (an older core) decodes as none.
+        let s = try state(#"{"state":"idle","agent":{"enabled":true,"jobs":[]}}"#)
+        XCTAssertEqual(s.agent?.history, [])
+        let history = try XCTUnwrap(submenu(TrayMenu.build(s, localStatusLines: [], micModeAvailable: true), "History"))
+        XCTAssertTrue(history.enabled)
+        XCTAssertEqual(history.items, TrayMenu.historyItems([]))
+    }
+
+    func test_history_rows_resume_by_id_then_clear() throws {
+        let s = try state(#"""
+        {"state":"idle","agent":{"enabled":true,"jobs":[],"history":[
+          {"id":"s-run","label":"● login bug · deskpixie · running","enabled":true,"running":true},
+          {"id":"s-old","label":"login bug · deskpixie · 2h ago","enabled":true,"running":false},
+          {"id":"s-gone","label":"tidy up · notes · 3d ago","enabled":false,"running":false}]}}
+        """#)
+        let rows = try XCTUnwrap(s.agent?.history)
+        XCTAssertEqual(rows.map(\.running), [true, false, false])
+        let history = try XCTUnwrap(submenu(TrayMenu.build(s, localStatusLines: [], micModeAvailable: true), "History"))
+        XCTAssertEqual(history.items, [
+            .action(.init(id: "agent:history:resume:s-run", title: "● login bug · deskpixie · running")),
+            .action(.init(id: "agent:history:resume:s-old", title: "login bug · deskpixie · 2h ago")),
+            .action(.init(id: "agent:history:resume:s-gone", title: "tidy up · notes · 3d ago", enabled: false)),
+            .separator,
+            .action(.init(id: "agent:history:clear", title: "Clear History")),
+        ])
+    }
+
+    func test_only_running_sessions_offer_no_clear() {
+        // Clear keeps running sessions, so with only those listed there is nothing to clear.
+        let running = TrayAppState.HistoryRef(id: "s-run", label: "● login bug · deskpixie · running", running: true)
+        XCTAssertEqual(TrayMenu.historyItems([running]),
+                       [.action(.init(id: "agent:history:resume:s-run", title: "● login bug · deskpixie · running"))])
+    }
+
+    func test_history_rows_go_to_the_core() {
+        for id in ["agent:history:resume:s-old", "agent:history:remove:s-old", "agent:history:clear"] {
+            XCTAssertEqual(TrayMenu.route(id), .core(id, focusCanvas: false))
+            XCTAssertFalse(TrayMenu.isLocal(id))
+        }
+    }
+
+    func test_history_is_hidden_while_the_coordinator_is_off() throws {
+        let s = try state(#"{"state":"idle","agent":{"enabled":false,"history":[{"id":"s","label":"x · y · 1m ago"}]}}"#)
+        XCTAssertNil(submenu(TrayMenu.build(s, localStatusLines: [], micModeAvailable: true), "History"))
+        // enabled/running missing: resumable, not running.
+        XCTAssertEqual(s.agent?.history, [.init(id: "s", label: "x · y · 1m ago", enabled: true, running: false)])
     }
 
     func testDuplicateStatusLinesShownOnce() throws {

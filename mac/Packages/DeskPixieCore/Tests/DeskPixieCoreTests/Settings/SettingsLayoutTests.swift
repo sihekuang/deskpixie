@@ -333,9 +333,11 @@ final class SettingsLayoutTests: XCTestCase {
                     help: "Type the key here to keep it in the Keychain (used first), or set GEMINI_API_KEY in your environment or a .env file. Keys are never shown here."),
         ])
         XCTAssertTrue(SettingsFixture.extras(on: .workers).isEmpty)
-        guard case .pix(let help)? = SettingsFixture.extras(on: .sessions).first, SettingsFixture.extras(on: .sessions).count == 1
+        guard case .pix(let help)? = SettingsFixture.extras(on: .sessions).first, SettingsFixture.extras(on: .sessions).count == 2
         else { return XCTFail("the sessions page has the pix command row") }
         XCTAssertTrue(help.contains("pix claude"), help)
+        // #461: History, right after it.
+        XCTAssertEqual(SettingsFixture.extras(on: .sessions).last, .pixHistory(help: SettingsLayout.pixHistoryHelp))
         // #179: Restart Coordinator…, which asks first.
         guard case .button(let label, _, let t3, let a3)? = SettingsFixture.extras(on: .coordinator).last,
               SettingsFixture.extras(on: .coordinator).count == 1 else { return XCTFail() }

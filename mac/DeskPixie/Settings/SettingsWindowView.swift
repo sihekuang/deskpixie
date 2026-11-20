@@ -477,6 +477,52 @@ struct SettingsTabView: View {
                         .font(.subheadline)
                 }
             }
+        case .pixHistory(let help):
+            // #461: read from the tray state, once per draw, so the list redraws whenever the
+            // tray is read again.
+            let history = model.history
+            row(label: extra.label, id: extra.path) {
+                EmptyView()
+            } note: {
+                VStack(alignment: .leading, spacing: 2) {
+                    NoteText(text: help, isError: false)
+                    if let note = history.note {
+                        NoteText(text: note, isError: false)
+                    }
+                }
+            }
+            // The name is hidden in `row`; with no control to carry it, the row is the heading.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(extra.label)
+            .accessibilityValue(history.note ?? "")
+            .accessibilityHint(help)
+            .accessibilityAddTraits(.isHeader)
+            ForEach(history.rows) { session in
+                LabeledContent {
+                    HStack(spacing: 6) {
+                        Button(session.buttonTitle) { model.historyAction(session.buttonID) }
+                            .disabled(!session.buttonEnabled)
+                            .accessibilityLabel("\(session.buttonTitle): \(session.label)")
+                        if let remove = session.removeID {
+                            Button { model.historyAction(remove) } label: { Image(systemName: "trash") }
+                                .buttonStyle(.borderless)
+                                .help(HistoryActions.removeHelp)
+                                .accessibilityLabel("\(HistoryActions.removeHelp): \(session.label)")
+                        }
+                    }
+                } label: {
+                    Text(session.label)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .help(session.label)
+                }
+            }
+            if history.offersClear {
+                HStack {
+                    Spacer()
+                    Button("Clear History") { model.historyAction(HistoryActions.clearID) }
+                }
+            }
         case .secret(let id, let label, let help):
             row(label: label, id: extra.path) {
                 HStack(spacing: 6) {

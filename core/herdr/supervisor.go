@@ -35,9 +35,12 @@ const (
 	SupervisorStartTimeout = 15 * time.Second
 )
 
+// MaxSession is the longest session name CheckSession takes.
+const MaxSession = 48
+
 // CheckSession: ^[a-z0-9][a-z0-9-]{0,47}$ and not Herdr's "default" session.
 func CheckSession(session string) error {
-	ok := len(session) >= 1 && len(session) <= 48 && session != "default"
+	ok := len(session) >= 1 && len(session) <= MaxSession && session != "default"
 	for i := 0; ok && i < len(session); i++ {
 		c := session[i]
 		lower := c >= 'a' && c <= 'z'

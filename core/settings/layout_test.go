@@ -139,6 +139,7 @@ func TestTheSnapshotPlacesTheExtraRows(t *testing.T) {
 		{"key.gemini", SectionVoice, "Voice service"},
 		{"restartCoordinator", SectionCoordinator, "Coordinator"},
 		{"pix", SectionSessions, "Sessions you start with pix"},
+		{"pixHistory", SectionSessions, "Sessions you start with pix"},
 		{"openFile", SectionAdvanced, "Files"},
 		{"exportLogs", SectionAdvanced, "Files"},
 	}

@@ -100,13 +100,15 @@ func otherWithPrefix(err error, prefix string) bool {
 // IsPaneBusy: agent.start on a pane whose shell is not at its prompt yet (a tab just created).
 func IsPaneBusy(err error) bool { return otherWithPrefix(err, "agent_pane_busy:") }
 
-// IsInputNotReady: agent.start whose command line is longer than the new tab's terminal takes
-// before its shell is at its prompt (Herdr 0.9: "input contains a N-byte line but the terminal
-// is in canonical mode with a 1024-byte limit; wait for the shell prompt and retry"). A Codex
+// IsInputNotReady: agent.start or pane.send_input with a line longer than the new tab's
+// terminal takes before its shell is at its prompt (Herdr 0.9: "input contains a N-byte line
+// but the terminal is in canonical mode with a 1024-byte limit; wait for the shell prompt and
+// retry"; agent_start_input_failed, or pane_send_failed for send_input, #461). A Codex
 // coordinator's command line (its hooks and their trust, #87) is that long.
 func IsInputNotReady(err error) bool {
 	var he agent.HostError
-	return otherWithPrefix(err, "agent_start_input_failed:") && errors.As(err, &he) && strings.Contains(he.Detail, "canonical mode")
+	return (otherWithPrefix(err, "agent_start_input_failed:") || otherWithPrefix(err, "pane_send_failed:")) &&
+		errors.As(err, &he) && strings.Contains(he.Detail, "canonical mode")
 }
 
 // IsAgentNotReady: the agent exists but is still launching (launch_pending).
@@ -351,6 +353,19 @@ func (c *Client) Read(ctx context.Context, target string, lines uint16) (string,
 	all := rustLines(text)
 	from := max(len(all)-int(lines), 0)
 	return strings.Join(all[from:], "\n"), nil
+}
+
+// SendInput types text into a pane's terminal, then presses keys (#461: a command line, then
+// Enter).
+func (c *Client) SendInput(ctx context.Context, paneID, text string, keys []string) error {
+	_, err := c.call(ctx, "pane.send_input", paneID, map[string]any{"pane_id": paneID, "text": text, "keys": nonNil(keys)})
+	return err
+}
+
+// FocusPane brings a pane (and its tab) to the front of its session.
+func (c *Client) FocusPane(ctx context.Context, paneID string) error {
+	_, err := c.call(ctx, "pane.focus", paneID, map[string]any{"pane_id": paneID})
+	return err
 }
 
 func (c *Client) ClosePane(ctx context.Context, paneID string) error {

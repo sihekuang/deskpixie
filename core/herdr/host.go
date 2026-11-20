@@ -463,6 +463,60 @@ func (h *Host) start(ctx context.Context, spec agent.AgentSpec, replaceLive bool
 	return info, nil
 }
 
+// RunInTab opens a tab labeled label in cwd with env and types line into its shell (#461: a
+// session you resume, which DeskPixie doesn't run as an agent, so agent.start can't start
+// it). A line typed before the shell's prompt waits in the terminal and runs (Behavior); one
+// too long for that is retried until the prompt, like start's. The tab is closed if the line
+// never goes in. Returns the tab's pane.
+func (h *Host) RunInTab(ctx context.Context, label, cwd string, env []agent.EnvVar, line string) (string, error) {
+	client, workspace, err := h.client(ctx)
+	if err != nil {
+		return "", err
+	}
+	pane, _, err := client.CreateTab(ctx, workspace, label, cwd, env)
+	if err != nil && IsWorkspaceNotFound(err) {
+		// The server restarted and lost our workspace: resolve it again and retry once.
+		h.forgetLive()
+		if client, workspace, err = h.client(ctx); err != nil {
+			return "", err
+		}
+		pane, _, err = client.CreateTab(ctx, workspace, label, cwd, env)
+	}
+	if err != nil {
+		return "", err
+	}
+	busyUntil := time.Now().Add(h.paneBusyLimit)
+	for {
+		err := client.SendInput(ctx, pane, line, []string{"Enter"})
+		if err == nil {
+			break
+		}
+		if IsInputNotReady(err) && time.Now().Before(busyUntil) {
+			if sleepCtx(ctx, StartPoll) {
+				continue
+			}
+			err = ctx.Err()
+		}
+		closeQuietly(context.WithoutCancel(ctx), client, pane)
+		return "", err
+	}
+	h.closeDefaultTab(ctx, client, workspace)
+	return pane, nil
+}
+
+// FocusPane brings pane's tab to the front of the session; with no server running there is no
+// pane to focus (ErrNoAgent, and none is started).
+func (h *Host) FocusPane(ctx context.Context, pane string) error {
+	client, err := h.runningClient(ctx)
+	if err != nil {
+		return err
+	}
+	if client == nil {
+		return agent.ErrNoAgent(pane)
+	}
+	return client.FocusPane(ctx, pane)
+}
+
 // closeDefaultTab closes the empty tab Herdr opened with our workspace, once an agent's tab is
 // up beside it (closing a workspace's last tab would close the workspace).
 func (h *Host) closeDefaultTab(ctx context.Context, client *Client, workspace string) {
