@@ -105,8 +105,11 @@ func TestLivePromptGuideClaude(t *testing.T) {
 	t.Log("step 2: a second request while it waits says it waits")
 	mark := len(v.all())
 	tool(t, a, "delegate", `{"task":"Then also reply with exactly the one word MANGO."}`)
+	v.waitFor(t, "the second request says it waits", 10*time.Second, func() bool {
+		return hasEvent(v.all()[mark:], "Your request is waiting: the coordinator is asking you something in its terminal.")
+	})
+	t.Log("ok   the second request says it waits")
 	time.Sleep(watchPause)
-	t.Logf("     after the second request: %q", v.all()[mark:])
 
 	t.Log("step 3: answer the prompt as the user would: Yes, add it")
 	screen := func(when string) string {

@@ -57,7 +57,8 @@ func ClassifyCoordinatorPrompt(kind AgentKind, screen string) CoordinatorPrompt 
 			return PromptTrust
 		case has("Update available · "):
 			return PromptUpdate
-		case has("Would you like to"):
+		case has("Would you like to") && strings.Contains(strings.ToLower(last), "esc"):
+			// Its approval's key line, not a reply that ends with a question.
 			return PromptPermission
 		case codexPickerFoot.MatchString(last), strings.Contains(last, "esc back") && strings.Contains(last, "enter open"):
 			return PromptMenu
@@ -71,7 +72,7 @@ func ClassifyCoordinatorPrompt(kind AgentKind, screen string) CoordinatorPrompt 
 		return PromptTrust
 	case has("Do you want to", "Esc to cancel"):
 		return PromptPermission
-	case has("Enter to confirm"), strings.HasSuffix(last, "again to exit"):
+	case has("Enter to confirm"):
 		return PromptMenu
 	}
 	return PromptUnknown

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -92,6 +93,22 @@ const codexApprovalScreen = `  Would you like to run the following command?
 
   Press enter to confirm or esc to cancel`
 
+// codexAskingScreen: a reply that ends with a question, at a Codex prompt.
+const codexAskingScreen = `• I updated the parser.
+
+  Would you like to also update the tests? Press enter to send.
+
+╭──╮
+│ › Ask Codex to do anything │
+╰──╯
+  ? for shortcuts`
+
+// claudeCtrlCScreen: one Ctrl-C at Claude Code's prompt.
+const claudeCtrlCScreen = `────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────
+  Press Ctrl-C again to exit`
+
 const codexAgentsScreen = `  Agent command center
 › explorer   running
   reviewer   idle
@@ -104,6 +121,7 @@ func TestClaudeCodesCoordinatorPromptsAreTold(t *testing.T) {
 		claudePermissionScreen: PromptPermission,
 		claudeModelMenuScreen:  PromptMenu,
 		claudeIdleScreen:       PromptUnknown,
+		claudeCtrlCScreen:      PromptUnknown, // not a menu: Esc won't help
 		"":                     PromptUnknown,
 		// Codex's screens mean nothing from Claude Code.
 		codexUpdateScreen: PromptUnknown,
@@ -123,6 +141,7 @@ func TestCodexsCoordinatorPromptsAreTold(t *testing.T) {
 		codexApprovalScreen:    PromptPermission,
 		codexAgentsScreen:      PromptMenu,
 		codexIdleScreenText:    PromptUnknown,
+		codexAskingScreen:      PromptUnknown, // its reply asks, not an approval
 		"":                     PromptUnknown,
 		claudeAddDirScreen:     PromptUnknown,
 	} {
@@ -189,7 +208,9 @@ func TestARequestWaitingAtThePromptIsToldAndClosedOnceItLands(t *testing.T) {
 	// 2026-11-20 11:03: asked while Claude Code asked to add the canvas; Pixie only "thought".
 	c := blockedAtPrompt(t, Claude)
 	fx := visible(c.Step(DelegateInput(job(1), "summarise the issues", ""), T0+3_050))
-	wantPrompts(t, fx) // held: it's at a prompt
+	// Held: it's at a prompt. Not told yet: the guidance, a moment later, says it.
+	wantPrompts(t, fx)
+	wantNotContains(t, fx, eNotify(heldAtPromptText))
 	fx = visible(c.Step(CoordinatorScreenInput(claudeAddDirScreen), T0+3_100))
 	wantEffects(t, fx, eChime, eNotify(addDirGuide+" Your request goes through once you've answered."))
 	// Answered: the request goes out, and once it's taken the user hears it went through.
@@ -241,4 +262,64 @@ func TestARestartForgetsARequestHeldAtThePrompt(t *testing.T) {
 	c.Step(paneExited(Coordinator), T0+4_000)
 	c.Step(CoordinatorUpInput(PaneIdle), T0+10_000)
 	wantNotContains(t, submit(c, firstPrompt, T0+10_500), eNotify(pastPromptText))
+}
+
+func TestARequestTypedJustAsThePromptCameIsHeldAndClosed(t *testing.T) {
+	// #456 itself: typed, not yet landed, when Claude Code put its prompt up.
+	c := ctlWith(func(s *Settings) { s.ReportsSubmits = true })
+	c.Step(CoordinatorUpInput(PaneIdle), T0)
+	wantPrompts(t, c.Step(DelegateInput(job(1), "summarise the issues", ""), T0), firstPrompt)
+	c.Step(coordStatus(PaneBlocked), T0+100)
+	c.Step(TickInput(), T0+100+BlockedGraceMs)
+	fx := visible(c.Step(CoordinatorScreenInput(claudeAddDirScreen), T0+3_200))
+	wantEffects(t, fx, eChime, eNotify(addDirGuide+" Your request goes through once you've answered."))
+	c.Step(coordStatus(PaneIdle), T0+5_000)
+	wantContains(t, visible(submit(c, firstPrompt, T0+5_100)), eNotify(pastPromptText))
+}
+
+func TestACancelledHeldRequestIsNotSaidToGoThroughLater(t *testing.T) {
+	c := blockedAtPrompt(t, Claude)
+	c.Step(DelegateInput(job(1), "summarise the issues", ""), T0+3_050)
+	c.Step(CoordinatorScreenInput(claudeAddDirScreen), T0+3_100)
+	c.Step(CancelInput(job(1)), T0+4_000)
+	c.Step(coordStatus(PaneIdle), T0+10_000)
+	// Much later, another request goes through: nothing about a prompt.
+	c.Step(DelegateInput(job(2), "second", ""), T0+600_000)
+	wantNotContains(t, submit(c, secondPrompt, T0+600_500), eNotify(pastPromptText))
+}
+
+func TestATypedRequestHearsItWentThroughInItsBox(t *testing.T) {
+	c := blockedAtPrompt(t, Claude)
+	c.Step(CoordinatorScreenInput(claudeAddDirScreen), T0+3_100)
+	fx := c.Step(TypedDelegateInput(job(1), "summarise the issues", ""), T0+4_000)
+	wantChatSays(t, fx, heldAtPromptText)
+	c.Step(coordStatus(PaneIdle), T0+10_000)
+	fx = submit(c, firstPrompt, T0+10_500)
+	wantChatSays(t, fx, pastPromptText)
+	wantNotContains(t, fx, eNotify(pastPromptText))
+}
+
+func TestAPermissionRequestComingFirstLeavesNoPromptGuidance(t *testing.T) {
+	// The Allow bubble says it: no second "asking permission" from the screen.
+	c := blockedAtPrompt(t, Claude)
+	askPush(c, 7, T0+3_050)
+	wantNotContains(t, visible(c.Step(CoordinatorScreenInput(claudePermissionScreen), T0+3_100)), eNotify(CoordinatorPromptGuide(Claude, PromptPermission)+" I'm bringing it up for you."))
+}
+
+func TestOnlyTheFirstScreenReadIsSaid(t *testing.T) {
+	// A late read after the timed-out one's generic hint: said once.
+	c := blockedAtPrompt(t, Claude)
+	wantContains(t, visible(c.Step(CoordinatorScreenInput(""), T0+3_100)), eNotify(BlockedHint))
+	wantNone(t, visible(c.Step(CoordinatorScreenInput(claudeAddDirScreen), T0+20_000)))
+}
+
+// wantChatSays: fx has a chat line (the text box) whose text has want.
+func wantChatSays(t *testing.T, fx []Effect, want string) {
+	t.Helper()
+	for _, e := range fx {
+		if e.Kind == EfChat && strings.Contains(fmt.Sprint(e.Chat), want) {
+			return
+		}
+	}
+	t.Fatalf("no chat line with %q in %v", want, fx)
 }

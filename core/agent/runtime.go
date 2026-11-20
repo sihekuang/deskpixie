@@ -1185,6 +1185,10 @@ func (h *AgentHandle) runOp(op hostOp) {
 		// of life and fails its jobs if none comes.
 		h.Input(PromptTimedOutInput())
 	}
+	if op.kind == opRead && !h.quitting() {
+		// Unread: the generic hint (a late read is ignored once it's said).
+		h.Input(CoordinatorScreenInput(""))
+	}
 	if op.kind == opStart && !h.quitting() {
 		// The controller must leave Starting: its waiting jobs fail under the usual rules.
 		h.Input(CoordinatorFailedInput(HostError{Kind: HostTimeout, Detail: "the coordinator did not start in time"}))
@@ -1248,10 +1252,10 @@ func (h *AgentHandle) runOpInner(ctx context.Context, op hostOp) {
 	case opRead:
 		text, err := host.Session().Read(ctx, Coordinator, 40)
 		if ctx.Err() != nil {
-			return
+			return // runOp gave up on it and said so
 		}
 		if err != nil {
-			text = "" // the generic hint, then
+			text = "" // unread: the generic hint, then
 		}
 		h.Input(CoordinatorScreenInput(text))
 	}

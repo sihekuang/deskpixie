@@ -539,9 +539,11 @@ type AgentController struct {
 	coordinator coordinatorState
 	blocked     optMs
 	hinted      bool
-	// heldAtPrompt: a request waited while the coordinator was at a prompt in its terminal:
-	// once it goes through, the user hears so (#459).
-	heldAtPrompt bool
+	// guided: the user was told which prompt the blocked coordinator waits at (#459).
+	guided bool
+	// heldAtPrompt: the requests that waited while it was at that prompt: once one goes
+	// through, the user hears so (#459).
+	heldAtPrompt map[JobID]bool
 	// disabled: why delegation is off for a runtime reason ("" = it isn't). Restart clears it.
 	disabled string
 	// setupDisabled: why delegation is off for a setup reason (port busy, invalid settings,
@@ -687,6 +689,7 @@ func NewAgentController(settings Settings) *AgentController {
 		asking:         map[string]uint64{},
 		announced:      map[string]announcedQuestion{},
 		typed:          map[JobID]bool{},
+		heldAtPrompt:   map[JobID]bool{},
 		fromWindow:     map[JobID]bool{},
 		opener:         newOpener(settings.NotifyPerMinute),
 		modes:          map[string]bool{},
@@ -878,7 +881,8 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 			c.clearTimers()
 			c.promptFailures = 0
 			c.blocked = optMs{}
-			c.hinted, c.heldAtPrompt = false, false
+			c.hinted, c.guided = false, false
+			clear(c.heldAtPrompt)
 			c.flush(now, &fx)
 			// #118: kept running while the app is (flush already restarted it if work was queued).
 			if c.coordinator == coordAbsent && !c.shutDown && !c.isDisabled() {
@@ -1009,7 +1013,8 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 		c.coordinator = coordAbsent
 		c.clearMode(Coordinator, &fx)
 		c.blocked = optMs{}
-		c.hinted, c.heldAtPrompt = false, false
+		c.hinted, c.guided = false, false
+		clear(c.heldAtPrompt)
 		c.promptFailures = 0
 		c.clearTimers()
 		// A setup problem is still there after a restart: its status stays.
@@ -1317,8 +1322,9 @@ func (c *AgentController) interruptTurn(now Millis, fx *[]Effect) bool {
 // landed: the prompt in flight was seen taken; a stop that came meanwhile stops its turn now.
 func (c *AgentController) landed(now Millis, fx *[]Effect) {
 	stop := c.stopOnLand
+	refs := c.landingRefs
 	c.stopLanding()
-	c.tellPastPrompt(now, fx)
+	c.tellPastPrompt(refs, now, fx)
 	if stop {
 		c.interruptTurn(now, fx)
 	}
@@ -1363,7 +1369,7 @@ func (c *AgentController) flush(now Millis, fx *[]Effect) {
 		}
 		*fx = append(*fx, Effect{Kind: EfPrompt, Text: prompt.Text})
 		if !c.submits {
-			c.tellPastPrompt(now, fx) // no landing to wait for: typed is as sure as it gets
+			c.tellPastPrompt(prompt.Refs, now, fx) // no landing to wait for: typed is as sure as it gets
 		}
 	}
 }
@@ -1404,7 +1410,7 @@ func (c *AgentController) onCoordinatorStatus(status PaneStatus, now Millis, fx 
 		}
 	} else {
 		c.blocked = optMs{}
-		c.hinted = false
+		c.hinted, c.guided = false, false
 		if c.status == "Coordinator: waiting in terminal" {
 			c.setStatus(c.notice, fx)
 		}
@@ -2424,11 +2430,13 @@ const heldAtPromptText = "Your request is waiting: the coordinator is asking you
 const pastPromptText = "The coordinator is past its prompt; your request went through."
 
 // guidePrompt says which prompt the blocked coordinator's screen shows and what to do there,
-// and that what waits goes through once it's answered. Gone by now: nothing to say.
+// and that the requests waiting on it go through once it's answered. Gone by now, or explained
+// by a permission request of its own: nothing to say.
 func (c *AgentController) guidePrompt(screen string, now Millis, fx *[]Effect) {
-	if !c.blocked.set || !c.hinted {
+	if !c.blocked.set || !c.hinted || c.guided || c.confirms.HasPendingFor(Coordinator) {
 		return
 	}
+	c.guided = true
 	kind := c.settings.CoordinatorKind
 	prompt := ClassifyCoordinatorPrompt(kind, screen)
 	*fx = append(*fx, logEffect(fmt.Sprintf("the coordinator waits at a prompt: %q", string(prompt))))
@@ -2436,8 +2444,10 @@ func (c *AgentController) guidePrompt(screen string, now Millis, fx *[]Effect) {
 	if prompt != PromptUnknown {
 		text = CoordinatorPromptGuide(kind, prompt) + " I'm bringing it up for you."
 	}
-	if c.waitingRequests() {
-		c.heldAtPrompt = true
+	if waiting := c.waitingRequests(); len(waiting) > 0 {
+		for _, id := range waiting {
+			c.heldAtPrompt[id] = true
+		}
 		text += " Your request goes through once you've answered."
 	}
 	l := NewLine(LineInfo, text)
@@ -2448,36 +2458,50 @@ func (c *AgentController) guidePrompt(screen string, now Millis, fx *[]Effect) {
 	c.deliver(l, now, fx)
 }
 
-// waitingRequests: a request the user made waits in the inbox.
-func (c *AgentController) waitingRequests() bool {
+// waitingRequests are the open requests the coordinator hasn't taken: queued, or typed and
+// not yet seen landing (#456: typed just as the prompt came up).
+func (c *AgentController) waitingRequests() []JobID {
+	var out []JobID
 	for _, id := range c.OpenJobs() {
-		if c.inbox.Queued(id) {
-			return true
+		if c.inbox.Queued(id) || c.landing && slices.Contains(c.landingRefs, id) {
+			out = append(out, id)
 		}
 	}
-	return false
+	return out
 }
 
 // noteHeldAtPrompt: request job came while the coordinator waits at a prompt the user has
-// been told about: it says it waits, not just "thinking".
+// been told about: it says it waits, not just "thinking". Before that, the guidance says so.
 func (c *AgentController) noteHeldAtPrompt(job JobID, now Millis, fx *[]Effect) {
-	if !c.hinted || !c.blocked.set || !c.inbox.Queued(job) {
+	if !c.guided || !c.blocked.set || !c.inbox.Queued(job) {
 		return
 	}
-	c.heldAtPrompt = true
+	c.heldAtPrompt[job] = true
 	l := NewLine(LineInfo, heldAtPromptText)
 	l.Job, l.Title, l.Brief = job, "Coordinator", "Request waiting on its prompt."
 	c.deliver(l, now, fx)
 }
 
-// tellPastPrompt: what waited at the prompt went through.
-func (c *AgentController) tellPastPrompt(now Millis, fx *[]Effect) {
-	if !c.heldAtPrompt {
+// tellPastPrompt: of refs, the prompt that went through, those that waited at a prompt (and
+// are still open) get one line saying so, on the first one's route (its text box, if typed).
+func (c *AgentController) tellPastPrompt(refs []JobID, now Millis, fx *[]Effect) {
+	var told JobID
+	for _, id := range refs {
+		if !c.heldAtPrompt[id] {
+			continue
+		}
+		delete(c.heldAtPrompt, id)
+		if told == "" && c.jobs.IsOpen(id) {
+			told = id
+		}
+	}
+	// Closed meanwhile (cancelled, failed): nothing more to say about them.
+	maps.DeleteFunc(c.heldAtPrompt, func(id JobID, _ bool) bool { return !c.jobs.IsOpen(id) })
+	if told == "" {
 		return
 	}
-	c.heldAtPrompt = false
 	l := NewLine(LineInfo, pastPromptText)
-	l.Title, l.Brief = "Coordinator", "Past its prompt."
+	l.Job, l.Title, l.Brief = told, "Coordinator", "Past its prompt."
 	c.deliver(l, now, fx)
 }
 
