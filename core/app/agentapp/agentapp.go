@@ -220,7 +220,8 @@ func Build(c Config) *Agent {
 	paths := a.paths
 
 	// Settings, CLAUDE.md and MCP configs live only under app data (R-k); trust is granted only
-	// for the app's own workspace (and, for workers, their worktrees under the projects root).
+	// for the app's own workspace and canvas (and, for workers, their worktrees under the
+	// projects root).
 	problem := ""
 	setProblem := func(line string) {
 		if problem == "" {
@@ -246,9 +247,13 @@ func Build(c Config) *Agent {
 	}
 	// MCP configs left by an earlier run hold its (now dead) tokens.
 	agentfs.ClearMcpDir(paths.McpDir)
-	trust := agentfs.NewClaudeTrustStore(filepath.Join(c.Home, ".claude.json"), []string{paths.Workspace})
+	trust := agentfs.NewClaudeTrustStore(filepath.Join(c.Home, ".claude.json"), []string{paths.Workspace, paths.Canvas})
 	if _, err := trust.Grant(paths.Workspace); err != nil {
 		log.Printf("agent: could not pre-trust the workspace: %v", err)
+	}
+	// The coordinator's --add-dir: else Claude Code asks about it at the start (#457).
+	if _, err := trust.Grant(paths.Canvas); err != nil {
+		log.Printf("agent: could not pre-trust the canvas: %v", err)
 	}
 
 	hd := HostDeps{Settings: s, Home: c.Home, Runner: c.Runner, Hint: a.setHint, Environ: c.Environ}
@@ -411,6 +416,7 @@ func Build(c Config) *Agent {
 			AlwaysForceSend:     s.AlwaysForceSend,
 			MarkForcedSends:     s.MarkForcedSends,
 			CoordinatorKind:     kind,
+			ReportsSubmits:      CoordinatorReportsSubmits(kind),
 			SpokenPaths:         spoken,
 		},
 		Warm: s.Warm,

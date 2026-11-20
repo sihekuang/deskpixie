@@ -413,7 +413,7 @@ func TestBuildIsOffWhenTheAgentIsDisabled(t *testing.T) {
 	}
 }
 
-func TestBuildInstallsFilesClearsStaleMcpAndTrustsTheWorkspace(t *testing.T) {
+func TestBuildInstallsFilesClearsStaleMcpAndTrustsTheWorkspaceAndCanvas(t *testing.T) {
 	data, home := t.TempDir(), t.TempDir()
 	paths := NewPaths(data)
 	if err := os.MkdirAll(paths.McpDir, 0o700); err != nil {
@@ -431,9 +431,19 @@ func TestBuildInstallsFilesClearsStaleMcpAndTrustsTheWorkspace(t *testing.T) {
 	if readFile(t, paths.Settings) != shippedCoordinatorSettings(t, paths, settings.Default().Agent.Port) {
 		t.Fatal("settings not installed")
 	}
-	claude := readFile(t, filepath.Join(home, ".claude.json"))
-	if !strings.Contains(claude, paths.Workspace) {
-		t.Fatal("workspace not trusted:", claude)
+	var claude struct {
+		Projects map[string]struct {
+			HasTrustDialogAccepted bool `json:"hasTrustDialogAccepted"`
+		} `json:"projects"`
+	}
+	if err := json.Unmarshal([]byte(readFile(t, filepath.Join(home, ".claude.json"))), &claude); err != nil {
+		t.Fatal(err)
+	}
+	// The canvas is the coordinator's --add-dir: untrusted, Claude Code asks about it (#457).
+	for _, dir := range []string{paths.Workspace, paths.Canvas} {
+		if !claude.Projects[dir].HasTrustDialogAccepted {
+			t.Fatal("not trusted:", dir, claude.Projects)
+		}
 	}
 }
 
