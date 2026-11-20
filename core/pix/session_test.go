@@ -727,8 +727,8 @@ func TestCodexNotifySetsSessionIDOnce(t *testing.T) {
 func TestCodexExitLineSetsSessionID(t *testing.T) {
 	const id = "019a5c1e-7f3b-7d20-9c4e-2b8f1a6d3e90"
 	h := newHarness(t, "codex", Launch{Path: "/bin/sh", Args: []string{"-c",
-		`printf 'Token usage: total=0\r\nTo continue this session, run: \033[36mcodex resume ` + id + `\033[39m\r\n'`}})
-	h.s.finish()
+		`read x; printf 'Token usage: total=0\r\nTo continue this session, run: \033[36mcodex resume ` + id + `\033[39m\r\n'`}})
+	exitAfterAPrompt(t, h)
 	m := waitEvent(t, h.d.events, "session or exit", func(m wire.Msg) bool { return m.Event == "session" || m.Event == "exited" })
 	if m.Event != "session" || m.SessionID != id {
 		t.Fatalf("want the session id before the exit, got %+v", m)
@@ -738,8 +738,8 @@ func TestCodexExitLineSetsSessionID(t *testing.T) {
 // Only Codex's own exit line counts: the same words in a reply mid-session name no conversation.
 func TestCodexResumeTextIsNotAnExitLine(t *testing.T) {
 	h := newHarness(t, "codex", Launch{Path: "/bin/sh", Args: []string{"-c",
-		`printf 'try codex resume 019a5c1e-7f3b-7d20-9c4e-2b8f1a6d3e90\r\n'`}})
-	h.s.finish()
+		`read x; printf 'try codex resume 019a5c1e-7f3b-7d20-9c4e-2b8f1a6d3e90\r\n'`}})
+	exitAfterAPrompt(t, h)
 	m := waitEvent(t, h.d.events, "session or exit", func(m wire.Msg) bool { return m.Event == "session" || m.Event == "exited" })
 	if m.Event != "exited" {
 		t.Fatalf("%+v", m)
@@ -2555,6 +2555,15 @@ func TestHelloSaysWhichConversationItResumes(t *testing.T) {
 	h := newHarnessWith(t, sessionOpts{tool: "claude", resumes: "abc", agent: Launch{Path: "/bin/sh", Args: []string{"-c", "sleep 30"}}})
 	waitEvent(t, h.d.events, "hello", func(m wire.Msg) bool { return m.Kind == wire.KindRegister && m.Resumes == "abc" })
 	h.s.runner.Hangup()
+	h.s.finish()
+}
+
+// exitAfterAPrompt types a line into an agent that exits on it, and waits for the exit. The
+// prompt's result comes back over the connection, so pix is registered before the agent ends.
+func exitAfterAPrompt(t *testing.T, h *harness) {
+	t.Helper()
+	wire.Encode(h.conn, wire.Msg{Kind: wire.KindCommand, ID: "1", Command: "prompt", Text: "bye"})
+	waitEvent(t, h.d.events, "prompt result", func(m wire.Msg) bool { return m.Kind == wire.KindResult && m.ID == "1" })
 	h.s.finish()
 }
 
