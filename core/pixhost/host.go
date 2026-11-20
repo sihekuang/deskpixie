@@ -72,25 +72,62 @@ type Host struct {
 	build    string              // the build of the pix this app ships (SetBuild)
 	subs     []chan agent.PaneEvent
 	changes  chan struct{}
-	seq      atomic.Uint64
-	history  HistoryStore     // nil: none kept (SetHistory)
-	now      func() time.Time // History's clock, and when sessions started
+	// historyChanges: what History lists may have changed (#461; coalesced like changes).
+	historyChanges chan struct{}
+	seq            atomic.Uint64
+	history        HistoryStore     // nil: none kept (SetHistory)
+	now            func() time.Time // History's clock, and when sessions started
 }
 
 // New is a host listening on sock once Listen is called; taken lists the names already in
 // use elsewhere (Pixie's workers), so addresses never collide with them.
 func New(sock string, taken func() []string) *Host {
 	return &Host{sock: sock, taken: taken, unreachableFor: UnreachableFor, sessions: map[string]*session{}, changes: make(chan struct{}, 1),
-		now: time.Now}
+		historyChanges: make(chan struct{}, 1), now: time.Now}
 }
 
 // SetHistory keeps your Claude sessions in store, timed by now (#461). Without it (nil, the
 // default) none are kept.
 func (h *Host) SetHistory(store HistoryStore, now func() time.Time) {
 	h.mu.Lock()
-	h.history, h.now = store, now
+	h.history, h.now = nil, now
+	if store != nil {
+		h.history = signalling{store, h.historyChanged}
+	}
 	h.mu.Unlock()
 }
+
+// HistoryChanges signals that History may have changed: an entry was written, or a session
+// started or ended, hiding or showing one (coalesced; never without History).
+func (h *Host) HistoryChanges() <-chan struct{} { return h.historyChanges }
+
+func (h *Host) historyChanged() {
+	select {
+	case h.historyChanges <- struct{}{}:
+	default:
+	}
+}
+
+// historyShown: the sessions running changed, so History may list another set (h.mu not held).
+func (h *Host) historyShown() {
+	if h.historyStore() != nil {
+		h.historyChanged()
+	}
+}
+
+// signalling is a HistoryStore that signals each write.
+type signalling struct {
+	HistoryStore
+	changed func()
+}
+
+func (s signalling) Record(e HistoryEntry) { s.HistoryStore.Record(e); s.changed() }
+func (s signalling) Update(id string, f func(*HistoryEntry)) {
+	s.HistoryStore.Update(id, f)
+	s.changed()
+}
+func (s signalling) Remove(id string) { s.HistoryStore.Remove(id); s.changed() }
+func (s signalling) Clear()           { s.HistoryStore.Clear(); s.changed() }
 
 // Changes signals that List may have changed (coalesced: one pending signal at most).
 func (h *Host) Changes() <-chan struct{} { return h.changes }
@@ -180,6 +217,7 @@ func (h *Host) serve(c net.Conn) {
 		return
 	}
 	h.changed()
+	h.historyShown()
 	h.mu.Lock()
 	outdated := h.outdated(s)
 	tell := outdated && !s.toldOld
@@ -400,6 +438,7 @@ func (h *Host) remove(s *session) {
 	if store != nil && e.SessionID != "" {
 		store.Update(e.SessionID, func(x *HistoryEntry) { x.Ended, x.LastActive = true, e.LastActive })
 	}
+	h.historyShown()
 	h.broadcast(agent.PaneEvent{Kind: agent.PaneEventExited, Agent: s.addr})
 }
 

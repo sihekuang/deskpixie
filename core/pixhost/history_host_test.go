@@ -353,3 +353,70 @@ func TestHerdrPaneOfOtherSessions(t *testing.T) {
 		t.Fatal(pane)
 	}
 }
+
+// historyChangedSoon waits for HistoryChanges, then drains any signal left, so the next wait
+// sees only what comes after.
+func historyChangedSoon(t *testing.T, h *Host, what string) {
+	t.Helper()
+	select {
+	case <-h.HistoryChanges():
+	case <-time.After(time.Second):
+		t.Fatal("no history signal: " + what)
+	}
+}
+
+func drainHistory(h *Host) {
+	select {
+	case <-h.HistoryChanges():
+	default:
+	}
+}
+
+// #461: the tray's History follows each change: recorded, described, hidden while it runs,
+// ended, marked unresumable, removed, cleared.
+func TestHistoryChangesSignal(t *testing.T) {
+	h, sock, store, _ := newHistoryHost(t)
+	p, r := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api"})
+	historyChangedSoon(t, h, "register")
+	sendEvent(p, wire.Msg{Event: "session", SessionID: "s1"})
+	eventually(t, "not recorded", func() bool { _, ok := store.entry("s1"); return ok })
+	historyChangedSoon(t, h, "record")
+	drainHistory(h)
+	if err := h.SetDescription(r.Address, "uploads"); err != nil {
+		t.Fatal(err)
+	}
+	historyChangedSoon(t, h, "description")
+	drainHistory(h)
+	sendEvent(p, wire.Msg{Event: "exited"})
+	eventually(t, "not ended", func() bool { e, _ := store.entry("s1"); return e.Ended })
+	historyChangedSoon(t, h, "ended")
+	drainHistory(h)
+
+	q, _ := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api", Resumes: "s1"})
+	historyChangedSoon(t, h, "a resume hides it")
+	drainHistory(h)
+	sendEvent(q, wire.Msg{Event: "exited", ExitCode: 1})
+	eventually(t, "not unresumable", func() bool { e, _ := store.entry("s1"); return e.Unresumable })
+	historyChangedSoon(t, h, "unresumable")
+	eventually(t, "not removed", func() bool { return len(listed(t, h)) == 0 })
+	drainHistory(h)
+
+	h.RemoveHistory("s1")
+	historyChangedSoon(t, h, "remove")
+	h.ClearHistory()
+	historyChangedSoon(t, h, "clear")
+}
+
+// Without History nothing signals it; a status change alone doesn't either.
+func TestHistoryChangesQuietOtherwise(t *testing.T) {
+	h, sock := newHost(t)
+	p, _ := dialPix(t, sock, wire.Msg{Tool: "claude", GitRoot: "/x/api"})
+	sendEvent(p, wire.Msg{Event: "description", Source: "agent", Description: "x"})
+	eventually(t, "description", func() bool { return listed(t, h)[0].User.Description == "x" })
+	h.ClearHistory()
+	select {
+	case <-h.HistoryChanges():
+		t.Fatal("a host without History signalled a History change")
+	case <-time.After(50 * time.Millisecond):
+	}
+}
