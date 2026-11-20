@@ -6,6 +6,7 @@ package app
 // TrayMenuTests).
 
 import (
+	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
@@ -55,6 +56,8 @@ func TestHistoryRowsShowDescriptionFolderAndAge(t *testing.T) {
 		{ID: "g", Description: strings.Repeat("y", 50), Folder: "api", LastActive: ago(time.Minute), Unresumable: true},
 		{ID: "h", Description: "clock skew", LastActive: now.Add(time.Minute)},
 		{ID: "i", Description: "two\n  lines\t here", Folder: "api"},
+		{ID: "j", Description: "uploads", Folder: "api", LastActive: ago(time.Hour), Running: true, Unresumable: true},
+		{ID: "k", Folder: "api", Running: true},
 	}, now)
 	want := []HistoryRef{
 		{ID: "a", Label: "login bug · deskpixie · just now", Enabled: true},
@@ -66,6 +69,8 @@ func TestHistoryRowsShowDescriptionFolderAndAge(t *testing.T) {
 		{ID: "g", Label: strings.Repeat("y", 39) + "… · api · 1 min ago", Enabled: false},
 		{ID: "h", Label: "clock skew · just now", Enabled: true},
 		{ID: "i", Label: "two lines here · api", Enabled: true}, // no time: no age
+		{ID: "j", Label: "● uploads · api · running", Enabled: true, Running: true},
+		{ID: "k", Label: "● api · running", Enabled: true, Running: true},
 	}
 	if !slices.Equal(rows, want) {
 		t.Fatalf("%+v", rows)
@@ -75,5 +80,12 @@ func TestHistoryRowsShowDescriptionFolderAndAge(t *testing.T) {
 func TestNoHistoryRowsIsAnEmptyList(t *testing.T) {
 	if rows := HistoryItems(nil, time.Now()); rows == nil || len(rows) != 0 {
 		t.Fatalf("%#v", rows)
+	}
+}
+
+func TestAHistoryRowEncodesWhetherItRuns(t *testing.T) {
+	b, err := json.Marshal(HistoryRef{ID: "s1", Label: "x", Enabled: true})
+	if err != nil || string(b) != `{"id":"s1","label":"x","enabled":true,"running":false}` {
+		t.Fatal(string(b), err)
 	}
 }

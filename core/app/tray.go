@@ -50,7 +50,8 @@ type CanvasPage struct {
 type AgentState struct {
 	Enabled bool     `json:"enabled"`
 	Jobs    []JobRef `json:"jobs"`
-	// History is Tray ▸ History (#461): a click resumes with `agent:history:resume:<id>`.
+	// History is Tray ▸ History (#461): a click is `agent:history:resume:<id>`, which resumes a
+	// past session or brings a running one forward.
 	History []HistoryRef `json:"history"`
 }
 
@@ -61,14 +62,17 @@ type HistoryRow struct {
 	Folder          string // the git root's or cwd's base name
 	LastActive      time.Time
 	Unresumable     bool
+	Running         bool // a session runs it now
 }
 
-// HistoryRef is one Tray ▸ History row: "login bug · deskpixie · 2h ago"; not Enabled when it
-// can't be resumed.
+// HistoryRef is one Tray ▸ History row: "login bug · deskpixie · 2h ago", or "● login bug ·
+// deskpixie · running" for one running now. Not Enabled when it can't be resumed (a running
+// one always is: a click shows it).
 type HistoryRef struct {
 	ID      string `json:"id"`
 	Label   string `json:"label"`
 	Enabled bool   `json:"enabled"`
+	Running bool   `json:"running"`
 }
 
 // JobRef is one agent job row; Label is preformatted by JobItems.
@@ -108,8 +112,8 @@ func JobItems(jobs []JobRow) []JobRef {
 }
 
 // HistoryItems are the Tray ▸ History rows: the description (on one line, ≤ 40 chars, cut with
-// "…"), the folder and how long ago it was active, each left out when unknown ([] for none,
-// never nil).
+// "…"), the folder and how long ago it was active ("running", after a "●", for one running
+// now), each left out when unknown ([] for none, never nil).
 func HistoryItems(rows []HistoryRow, now time.Time) []HistoryRef {
 	const maxDesc = 40
 	out := make([]HistoryRef, 0, len(rows))
@@ -120,7 +124,10 @@ func HistoryItems(rows []HistoryRow, now time.Time) []HistoryRef {
 		}
 		var parts []string
 		age := ""
-		if !r.LastActive.IsZero() {
+		switch {
+		case r.Running:
+			age = "running"
+		case !r.LastActive.IsZero():
 			age = ago(now.Sub(r.LastActive))
 		}
 		for _, p := range []string{desc, r.Folder, age} {
@@ -128,7 +135,11 @@ func HistoryItems(rows []HistoryRow, now time.Time) []HistoryRef {
 				parts = append(parts, p)
 			}
 		}
-		out = append(out, HistoryRef{ID: r.ID, Label: strings.Join(parts, " · "), Enabled: !r.Unresumable})
+		label := strings.Join(parts, " · ")
+		if r.Running {
+			label = "● " + label
+		}
+		out = append(out, HistoryRef{ID: r.ID, Label: label, Enabled: r.Running || !r.Unresumable, Running: r.Running})
 	}
 	return out
 }
