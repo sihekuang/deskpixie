@@ -144,6 +144,7 @@ const (
 	opInterrupt
 	opStop    // Escape, then close the pane
 	opRelabel // tab: the coordinator's tab label
+	opRead    // its screen, for the prompt it waits at (#459)
 )
 
 type hostOp struct {
@@ -1244,6 +1245,15 @@ func (h *AgentHandle) runOpInner(ctx context.Context, op hostOp) {
 		}
 	case opRelabel:
 		relabelQuietly(ctx, host.Session(), Coordinator, op.tab)
+	case opRead:
+		text, err := host.Session().Read(ctx, Coordinator, 40)
+		if ctx.Err() != nil {
+			return
+		}
+		if err != nil {
+			text = "" // the generic hint, then
+		}
+		h.Input(CoordinatorScreenInput(text))
 	}
 }
 
@@ -2110,6 +2120,8 @@ func (h *AgentHandle) apply(e Effect) {
 		}
 	case EfStopCoordinator:
 		h.queueOp(hostOp{kind: opStop})
+	case EfReadCoordinator:
+		h.queueOp(hostOp{kind: opRead})
 	case EfLabel:
 		h.queueOp(hostOp{kind: opRelabel, tab: e.Tab})
 	case EfResetHost:
