@@ -67,6 +67,8 @@ func TestSearchFindsTheWindowsOtherRows(t *testing.T) {
 		"export logs":         "extra:exportLogs",
 		"restart coordinator": "extra:restartCoordinator",
 		"pix":                 "extra:pix",
+		"resume":              "extra:pixHistory",
+		"history":             "extra:pixHistory",
 		"reset position":      "extra:resetPosition",
 	} {
 		hits := Search(q, Macos, Default())
