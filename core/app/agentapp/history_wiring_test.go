@@ -7,9 +7,11 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/sihekuang/deskpixie/core/herdr"
 	"github.com/sihekuang/deskpixie/core/pix/wire"
 	"github.com/sihekuang/deskpixie/core/pixhost"
 )
@@ -17,6 +19,22 @@ import (
 func TestYoursSessionIsItsOwn(t *testing.T) {
 	if got := YoursSession("deskpixie"); got != "deskpixie-yours" {
 		t.Fatal(got)
+	}
+}
+
+// A long agent.session still makes a valid Herdr session name: cut to fit, never ending the
+// cut part on a '-'.
+func TestYoursSessionFitsALongSession(t *testing.T) {
+	long := strings.Repeat("a", 48)
+	dashed := strings.Repeat("b", 41) + "-cdef" // the cut lands just after the '-'
+	for in, want := range map[string]string{
+		long:   strings.Repeat("a", 42) + "-yours",
+		dashed: strings.Repeat("b", 41) + "-yours",
+	} {
+		got := YoursSession(in)
+		if got != want || herdr.CheckSession(got) != nil {
+			t.Fatalf("%q: %q (%v)", in, got, herdr.CheckSession(got))
+		}
 	}
 }
 

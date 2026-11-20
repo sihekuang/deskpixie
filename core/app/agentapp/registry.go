@@ -67,8 +67,15 @@ func newHerdrHost(d HostDeps) (agent.SessionHost, error) {
 }
 
 // YoursSession is the Herdr session your resumed sessions run in (#461): never the
-// coordinator's, so DeskPixie never reconciles, replaces or stops them.
-func YoursSession(session string) string { return session + "-yours" }
+// coordinator's, so DeskPixie never reconciles, replaces or stops them. A long session is cut
+// so the name stays one Herdr takes.
+func YoursSession(session string) string {
+	const suffix = "-yours"
+	if len(session) > herdr.MaxSession-len(suffix) {
+		session = strings.TrimRight(session[:herdr.MaxSession-len(suffix)], "-")
+	}
+	return session + suffix
+}
 
 // newYoursHerdr is the Herdr host of YoursSession, whatever agent.sessionHost is: resuming
 // needs only Herdr installed. No integration check: nothing there is Pixie's agent.
