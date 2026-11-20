@@ -267,7 +267,9 @@ func TestHistoryAClearMidRunRecordsWholeEntries(t *testing.T) {
 	eventually(t, "not recorded", func() bool { _, ok := store.entry("s1"); return ok })
 	h.ClearHistory()
 	sendEvent(p, wire.Msg{Event: "description", Source: "agent", Description: "uploads"})
-	eventually(t, "description not recorded", func() bool { _, ok := store.entry("s1"); return ok })
+	// A clear leaves a running session's entry, so wait for the description itself: the write
+	// must not land after the test's folder is gone.
+	eventually(t, "description not recorded", func() bool { e, _ := store.entry("s1"); return e.Description == "uploads" })
 	if e, _ := store.entry("s1"); e.Tool != "claude" || e.Cwd != "/x/api" || e.Where != "iTerm" || !e.Started.Equal(at(0)) {
 		t.Fatalf("sparse entry: %+v", e)
 	}
