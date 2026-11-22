@@ -81,7 +81,8 @@ func GetJSON(ctx context.Context, c *http.Client, what, u string, header http.He
 		}
 		_ = json.Unmarshal(body, &e)
 		if m := strings.TrimSpace(e.Error.Message); m != "" {
-			return fail(fmt.Sprintf("http %d: %s", resp.StatusCode, clipTo(m, listMsgLimit)))
+			// Blanked before it is clipped: a clipped key would no longer match.
+			return fail(fmt.Sprintf("http %d: %s", resp.StatusCode, clipTo(blankHeaders(m, header), listMsgLimit)))
 		}
 		return fail(fmt.Sprintf("http %d", resp.StatusCode))
 	}

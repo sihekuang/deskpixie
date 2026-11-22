@@ -95,3 +95,19 @@ func TestGetJSONTransportErrorsHoldNoURL(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// The key is blanked before the message is clipped, so a key across the clip point can't
+// leave a piece of itself behind.
+func TestGetJSONBlanksTheKeyBeforeClipping(t *testing.T) {
+	key := "sk-secret-0123456789abcdef"
+	for cut := 1; cut < len(key); cut += 5 {
+		msg := strings.Repeat("m", listMsgLimit-cut) + key + " more"
+		_, err := getJSON(t, func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(401)
+			w.Write([]byte(`{"error":{"message":"` + msg + `"}}`))
+		}, http.Header{"Authorization": {"Bearer " + key}})
+		if err == nil || strings.Contains(err.Error(), "sk-se") || strings.Contains(err.Error(), "0123") {
+			t.Fatal(cut, err)
+		}
+	}
+}
