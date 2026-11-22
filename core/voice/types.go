@@ -128,6 +128,12 @@ func CapabilitiesOf(m Model) Capabilities {
 	return Capabilities{Truncate: true}
 }
 
+// ModelCatalog is optional for a Model: the provider's conversation models apiKey can use,
+// the default first, then by name (#477). An error is short and never holds the key.
+type ModelCatalog interface {
+	ListModels(ctx context.Context, apiKey string) ([]string, error)
+}
+
 // Model is a speech-to-speech provider.
 type Model interface {
 	Name() string

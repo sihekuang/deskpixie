@@ -122,6 +122,40 @@ func TestSessionStartShape(t *testing.T) {
 	}
 }
 
+// Another provider's model or voice left in settings (gpt-realtime, Puck) gets GPT-Live's own:
+// OpenAI refuses the session otherwise (#473). A GPT-Live model and a custom voice id stay.
+func TestSessionStartUsesGPTLiveModelAndVoice(t *testing.T) {
+	for _, c := range []struct{ model, voice, wantModel, wantVoice string }{
+		{"gpt-realtime", "marin", DefaultModel, "marin"},
+		{"gpt-realtime-mini", "Puck", DefaultModel, DefaultVoice},
+		{"gemini-3.8-live", "Cedar", DefaultModel, "cedar"},
+		{"gpt-live-2", "verse", "gpt-live-2", "verse"},
+	} {
+		var got map[string]any
+		_ = json.Unmarshal(msg(sessionStart(voice.SessionConfig{Model: c.model, Voice: c.voice}, "c_1")), &got)
+		s := got["session"].(map[string]any)
+		if v := s["audio"].(map[string]any)["output"].(map[string]any)["voice"]; s["model"] != c.wantModel || v != c.wantVoice {
+			t.Errorf("%s/%s: model %v voice %v", c.model, c.voice, s["model"], v)
+		}
+	}
+}
+
+// Resolve notes each replacement (logged once by Connect); an empty setting or a custom voice
+// id needs none. A name the model check would refuse (models/…) is replaced first (#473).
+func TestResolveNotesReplacements(t *testing.T) {
+	cfg, notes := Resolve(voice.SessionConfig{Model: "models/gemini-3.8-live", Voice: "Puck"})
+	if cfg.Model != DefaultModel || cfg.Voice != DefaultVoice || len(notes) != 2 ||
+		notes[0] != `voice.liveModel "models/gemini-3.8-live" is not a GPT-Live model; using gpt-live-1` ||
+		notes[1] != `voice.voice "Puck" is not a GPT-Live voice; using marin` {
+		t.Fatalf("%+v %q", cfg, notes)
+	}
+	for _, c := range []voice.SessionConfig{{}, {Model: "gpt-live-1", Voice: "voice_abc"}, {Model: " gpt-live-1 ", Voice: "Cedar"}} {
+		if got, notes := Resolve(c); len(notes) != 0 || !strings.HasPrefix(got.Model, "gpt-live") || got.Voice == "" {
+			t.Errorf("%+v: %+v %q", c, got, notes)
+		}
+	}
+}
+
 func TestReadyOnce(t *testing.T) {
 	c := newCodec()
 	wantKinds(t, c.decode(msg(map[string]any{"type": "session.started"}), at(0)), voice.EvReady)
@@ -392,7 +426,8 @@ func TestStartupFailures(t *testing.T) {
 		"model_not_found":    "Voice: this API key has no GPT-Live access",
 		"permission_denied":  "Voice: this API key has no GPT-Live access",
 		"insufficient_quota": "Voice: OpenAI quota or rate limit reached",
-		"something_else":     "Voice: model error",
+		"something_else":     "Voice: GPT-Live couldn't start (something_else)",
+		"":                   "Voice: model error",
 	} {
 		if got := startupFailure(apiError{Code: code}).Status(); got != want {
 			t.Errorf("%s: %q", code, got)
@@ -402,6 +437,12 @@ func TestStartupFailures(t *testing.T) {
 		if f, ok := httpFailure(status); !ok || f.Status() != want {
 			t.Errorf("%d: %q", status, f.Status())
 		}
+	}
+	if got := startupFailure(apiError{Type: "server_error"}).Status(); got != "Voice: GPT-Live couldn't start (server_error)" {
+		t.Errorf("type only: %q", got)
+	}
+	if got := startupFailure(apiError{Code: strings.Repeat("x", 60)}).Status(); got != "Voice: GPT-Live couldn't start ("+strings.Repeat("x", 40)+"…)" {
+		t.Errorf("long code: %q", got)
 	}
 	if _, ok := httpFailure(500); ok {
 		t.Error("500 typed")

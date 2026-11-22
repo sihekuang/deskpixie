@@ -490,15 +490,20 @@ func withValue(current Config, field *FieldSpec, value any) (Config, string) {
 	return Config{}, "Not a valid value for this setting"
 }
 
-// sourcesFor is src with the voice provider of c, so the model and voice choices follow it.
+// sourcesFor is src with the voice provider and saved models of c, so the voice choices
+// follow the provider and each model field lists its value.
 func sourcesFor(src OptionSources, c Config) OptionSources {
 	src.VoiceProvider = c.Voice.Provider
+	src.VoiceModelsSaved = map[string]string{
+		ProviderOpenAI: c.Voice.OpenAIModel, ProviderGemini: c.Voice.GeminiModel, ProviderOpenAILive: c.Voice.LiveModel,
+	}
 	return src
 }
 
-// swapProviderDefaults: after voice.provider changes, a model or voice that is another
-// provider's default becomes the new provider's default (gpt-realtime <-> gemini-3.8-live,
-// marin <-> Puck). Anything else is left alone; the adapter substitutes what it can't use.
+// swapProviderDefaults: after voice.provider changes, a voice that is another provider's
+// default becomes the new provider's default (marin <-> Puck). Anything else is left alone;
+// the adapter substitutes what it can't use. Each provider has its own model (#477), so the
+// model stays.
 func swapProviderDefaults(c *Config) {
 	to, ok := ProviderDefaults[c.Voice.Provider]
 	if !ok {
@@ -507,9 +512,6 @@ func swapProviderDefaults(c *Config) {
 	for name, d := range ProviderDefaults {
 		if name == c.Voice.Provider {
 			continue
-		}
-		if c.Voice.Model == d.Model {
-			c.Voice.Model = to.Model
 		}
 		if c.Voice.Voice == d.Voice {
 			c.Voice.Voice = to.Voice

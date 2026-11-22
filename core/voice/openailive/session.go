@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"regexp"
 	"sync"
@@ -30,9 +31,24 @@ var modelRe = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
 type model struct {
 	baseURL      string
+	apiURL       string       // the REST API, for ListModels
+	client       *http.Client // for ListModels
 	pingEvery    time.Duration
 	idleDeadline time.Duration
 	now          func() time.Time
+
+	warned sync.Map // the Resolve notes already logged, each once
+}
+
+// resolve is Resolve, logging each replacement the first time it happens (as Gemini does).
+func (m *model) resolve(cfg voice.SessionConfig) voice.SessionConfig {
+	cfg, notes := Resolve(cfg)
+	for _, n := range notes {
+		if _, seen := m.warned.LoadOrStore(n, true); !seen {
+			log.Printf("voice-gpt-live: %s", n)
+		}
+	}
+	return cfg
 }
 
 // New returns the GPT-Live model. An empty baseURL means DefaultURL.
@@ -40,7 +56,8 @@ func New(baseURL string) voice.Model {
 	if baseURL == "" {
 		baseURL = DefaultURL
 	}
-	return &model{baseURL: baseURL, pingEvery: pingEvery, idleDeadline: idleDeadline, now: time.Now}
+	return &model{baseURL: baseURL, apiURL: DefaultAPIURL, client: http.DefaultClient,
+		pingEvery: pingEvery, idleDeadline: idleDeadline, now: time.Now}
 }
 
 func (m *model) Name() string { return Name }
@@ -51,7 +68,8 @@ func (m *model) Capabilities() voice.Capabilities {
 }
 
 func (m *model) Connect(ctx context.Context, cfg voice.SessionConfig, apiKey string) (voice.Session, error) {
-	if cfg.Model != "" && !modelRe.MatchString(cfg.Model) {
+	cfg = m.resolve(cfg) // before the check: a model it replaces never reaches OpenAI
+	if !modelRe.MatchString(cfg.Model) {
 		return nil, errors.New("gpt-live: invalid model name")
 	}
 	if cfg.BackendModel != "" && !modelRe.MatchString(cfg.BackendModel) {

@@ -25,7 +25,7 @@ func TestOpenaiDefaultsBecomeGeminiDefaults(t *testing.T) {
 	if !reflect.DeepEqual(subs, want) {
 		t.Fatalf("subs %+v", subs)
 	}
-	if got := subs[0].Describe(); got != `voice.model "gpt-realtime" is not a Gemini model; using gemini-3.8-live` {
+	if got := subs[0].Describe(); got != `voice.geminiModel "gpt-realtime" is not a Gemini model; using gemini-3.8-live` {
 		t.Fatal(got)
 	}
 	if got := subs[1].Describe(); got != `voice.voice "marin" is not a Gemini voice; using Puck` {

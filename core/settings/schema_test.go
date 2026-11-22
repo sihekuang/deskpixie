@@ -546,7 +546,7 @@ func TestTheGPTLiveFieldsShowOnlyForGPTLiveRightUnderTheVoiceService(t *testing.
 			voice = append(voice, f.Path)
 		}
 	}
-	if !reflect.DeepEqual(voice[:4], []string{"voice.provider", "voice.liveDelegation", "voice.liveBackendModel", "voice.model"}) {
+	if !reflect.DeepEqual(voice[:4], []string{"voice.provider", "voice.liveDelegation", "voice.liveBackendModel", "voice.openaiModel"}) {
 		t.Fatal(voice)
 	}
 	for _, p := range []string{"voice.liveDelegation", "voice.liveBackendModel"} {

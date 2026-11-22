@@ -16,8 +16,8 @@
 // are short (they end after seconds of silence), so session resumption is not used: goAway
 // is reported as a warning and the close ends the conversation like any lost connection.
 //
-// The key is only ever in the request URL; every error string and close reason is scrubbed
-// of it.
+// The key is only ever in the WebSocket request URL (ListModels sends it as a header); every
+// error string and close reason is scrubbed of it.
 package gemini
 
 import (
@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -48,6 +49,8 @@ const (
 
 type model struct {
 	baseURL      string
+	apiURL       string       // the REST API, for ListModels
+	client       *http.Client // for ListModels
 	pingEvery    time.Duration
 	idleDeadline time.Duration
 	// Each settings substitution is logged once per adapter, not once per conversation.
@@ -62,7 +65,7 @@ func newModel(baseURL string, ping, idle time.Duration) *model {
 	if baseURL == "" {
 		baseURL = DefaultURL
 	}
-	return &model{baseURL: baseURL, pingEvery: ping, idleDeadline: idle}
+	return &model{baseURL: baseURL, apiURL: DefaultAPIURL, client: http.DefaultClient, pingEvery: ping, idleDeadline: idle}
 }
 
 func (m *model) Name() string { return Name }

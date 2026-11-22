@@ -54,7 +54,7 @@ func TestTheExportIncludesTheMetricsLog(t *testing.T) {
 // (DESKPIXIE_SUPPORT_DIR) never writes the real user's; nothing is written before Configure.
 func TestTheMetricsLogIsInTheAppsLogsFolder(t *testing.T) {
 	dir := t.TempDir()
-	e := New(Options{MetricsInterval: 20 * time.Millisecond, Secrets: noSecrets, Agent: NoAgent,
+	e := New(Options{MetricsInterval: 20 * time.Millisecond, Secrets: noSecrets, Agent: NoAgent, ModelCatalog: NoModelLists,
 		Run: func(string, ...string) error { return nil }})
 	t.Cleanup(e.Close)
 	time.Sleep(80 * time.Millisecond)

@@ -136,7 +136,8 @@ func TestConnectSendsSessionUpdateAndWaitsForUpdated(t *testing.T) {
 }
 
 func TestConnectRejectsBadModel(t *testing.T) {
-	for _, bad := range []string{"", "gpt realtime", "a&b=c", "x/../y", "m?x"} {
+	// Resolve replaces what isn't a Realtime model (models_test.go); these are, by name.
+	for _, bad := range []string{"gpt-realtime x", "gpt-realtime&b=c", "gpt-realtime/../y", "gpt-realtime?x"} {
 		c := cfg()
 		c.Model = bad
 		if _, err := New("ws://127.0.0.1:1/v1/realtime").Connect(context.Background(), c, "k"); err == nil || !strings.Contains(err.Error(), "invalid model") {

@@ -57,7 +57,7 @@ func dirNames(t *testing.T, dir string) []string {
 
 func TestVoiceDefaultsMatchTheSpec(t *testing.T) {
 	v := Default().Voice
-	if v.Provider != "openai-realtime" || v.Audio != "macos-vpio" || v.Model != "gpt-realtime" || v.Voice != "marin" {
+	if v.Provider != "openai-realtime" || v.Audio != "macos-vpio" || v.Model() != "gpt-realtime" || v.Voice != "marin" {
 		t.Fatalf("%+v", v)
 	}
 	if !v.Chimes || v.IdleTimeoutSecs != 7 || v.PersonaPath != nil {

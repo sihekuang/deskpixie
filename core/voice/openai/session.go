@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
+	"net/http"
 	"net/url"
 	"regexp"
 	"sync"
@@ -32,8 +34,23 @@ var modelRe = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
 type model struct {
 	baseURL      string
+	apiURL       string       // the REST API, for ListModels
+	client       *http.Client // for ListModels
 	pingEvery    time.Duration
 	idleDeadline time.Duration
+
+	warned sync.Map // the Resolve notes already logged, each once
+}
+
+// resolve is Resolve, logging each replacement the first time it happens (as GPT-Live does).
+func (m *model) resolve(cfg voice.SessionConfig) voice.SessionConfig {
+	cfg, notes := Resolve(cfg)
+	for _, n := range notes {
+		if _, seen := m.warned.LoadOrStore(n, true); !seen {
+			log.Printf("voice-openai: %s", n)
+		}
+	}
+	return cfg
 }
 
 // New returns the OpenAI Realtime model. An empty baseURL means DefaultURL.
@@ -41,12 +58,14 @@ func New(baseURL string) voice.Model {
 	if baseURL == "" {
 		baseURL = DefaultURL
 	}
-	return &model{baseURL: baseURL, pingEvery: pingEvery, idleDeadline: idleDeadline}
+	return &model{baseURL: baseURL, apiURL: DefaultAPIURL, client: http.DefaultClient,
+		pingEvery: pingEvery, idleDeadline: idleDeadline}
 }
 
 func (m *model) Name() string { return Name }
 
 func (m *model) Connect(ctx context.Context, cfg voice.SessionConfig, apiKey string) (voice.Session, error) {
+	cfg = m.resolve(cfg) // before the check: a model it replaces never reaches OpenAI
 	if !modelRe.MatchString(cfg.Model) {
 		return nil, errors.New("openai: invalid model name")
 	}

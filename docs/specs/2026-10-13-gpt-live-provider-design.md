@@ -267,7 +267,7 @@ Wire details to get right:
 | Path | Change |
 |---|---|
 | `voice.provider` | New choice `openai-live`, labelled **"OpenAI GPT-Live"** (`settings.ProviderOpenAILive`; `providerNames`; registered in `app.Providers()`). `ApplyRestart` as today. |
-| `voice.model` | `OpenAILiveModels = [{"gpt-live-1", "GPT-Live 1"}]`. Open choice, as today, so a future id can be typed. |
+| `voice.model` | `OpenAILiveModels = [{"gpt-live-1", "GPT-Live 1"}]`. Open choice, as today, so a future id can be typed. *Since #477 each provider has its own model setting: GPT-Live's is `voice.liveModel` (Realtime `voice.openaiModel`, Gemini `voice.geminiModel`), listed from OpenAI's `/v1/models`; `voice.model` is only read to migrate an older settings.json.* |
 | `voice.voice` | `OpenAILiveVoices` = the 31 built-in names (§2.2). Open choice: a custom voice id (`voice_…`) can be typed. |
 | `ProviderDefaults` | `openai-live: {"gpt-live-1", "marin"}` |
 | **new** `voice.liveBackendModel` | "Backend model (GPT-Live)": the Responses model that runs Bit's tools. Open choice: `gpt-6-luna` (default, faster and cheaper), `gpt-6-sol` (harder tasks). Description says it only applies to OpenAI GPT-Live. `ApplyRestart`. |
@@ -285,7 +285,7 @@ A test keeps the settings lists in step with `openailive.Voices` / `DefaultModel
 | **No GPT-Live access** (alpha not enabled, free tier) | dial HTTP 403/404, or a startup `error` whose code is `model_not_found`, `permission_denied`, `insufficient_permissions` or `unsupported_model`, or whose message names the model or access. **The exact codes are undocumented**: the access probe (§10) records the real one and the test table is fixed from it. | `Voice: this API key has no GPT-Live access` (`FailNoAccess`). Settings ▸ Voice shows the same text under `voice.provider`. |
 | Free tier / rate limited | `rate_limit_exceeded`, `insufficient_quota`, or too many concurrent sessions | `Voice: OpenAI quota or rate limit reached` |
 | Bad backend model / tools | `responses_validation_failed` | fatal: `Voice: GPT-Live backend settings rejected` |
-| Strict-config rejection (unknown field) | startup `error` with `param` | `Voice: model error`; logged with code + param (never the key) |
+| Strict-config rejection (unknown field) | startup `error` with `param` | `Voice: GPT-Live couldn't start (<code>)`; voice.log has `connect failed:` with code, param and message (never the key) |
 | Moderation cut | `error` mid-session, session stays open | warning; the span closes by silence |
 | `session.closed` `expired` / `content` / `connection_lost` / WS drop | read loop | `Voice: GPT-Live session expired` / `Voice: ended by the safety filter` / `Voice: connection lost` |
 | Session ends while a tool runs | runtime generation check (existing) | stale result dropped |

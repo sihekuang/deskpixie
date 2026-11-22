@@ -86,7 +86,14 @@ type Options struct {
 	// Agent builds the delegation agent; nil = agentapp.Factory (herdr, the hook server on
 	// 127.0.0.1:agent.port, ~/.claude.json trust). Tests pass NoAgent.
 	Agent app.AgentFactory
+	// ModelCatalog replaces the voice providers' model lists (#477); nil = their APIs. Tests
+	// pass NoModelLists.
+	ModelCatalog func(provider string) voice.ModelCatalog
 }
+
+// NoModelLists lists no provider's models: the model choices stay the built-in ones and
+// nothing reaches the network.
+func NoModelLists(string) voice.ModelCatalog { return nil }
 
 // NoAgent is an agent factory that never builds one (delegation off).
 var NoAgent app.AgentFactory = func(settings.Config, string, app.AgentHooks) app.Agent { return nil }
@@ -172,6 +179,7 @@ func (e *Engine) configure(jsonCfg []byte) error {
 		OnMicSent: e.onMicSent,
 		Agent:     e.agentFactory(),
 
+		ModelCatalog:   e.opts.ModelCatalog,
 		MetricsLogPath: metricsPath,
 	})
 	if err != nil {

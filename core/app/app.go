@@ -99,6 +99,9 @@ type Deps struct {
 	Agent AgentFactory
 	// MetricsLogPath is the engine's metrics log, exported with the others (#225); "" = none.
 	MetricsLogPath string
+	// ModelCatalog lists a voice provider's models from its API (#477); nil = the registered
+	// adapter's (tests inject fakes: no network).
+	ModelCatalog func(provider string) voice.ModelCatalog
 }
 
 // MouthMeter is the voice loop's view of a pack change.
@@ -128,6 +131,9 @@ type App struct {
 	shown *packStamp
 	store *settings.FileStore
 	api   *settings.API
+
+	// models loads the voice providers' model lists for Settings (#477).
+	models *voice.Refresher
 
 	rt        *voice.Runtime // nil when the voice loop could not be set up
 	setupFail *voice.Failure
@@ -219,6 +225,7 @@ func New(d Deps) (*App, error) {
 	a.shown = a.shownStamp() // what Swift draws first (dp_pack_json)
 	a.hotkey.bound = cfg.Hotkey
 
+	a.setupModels() // before the settings API, whose Env reads it
 	platform := settings.Platform(p.Platform)
 	if platform == "" {
 		platform = settings.CurrentPlatform()
@@ -431,6 +438,7 @@ func (a *App) Close() {
 		if a.agent != nil {
 			a.agent.Shutdown()
 		}
+		a.models.Close()
 		close(a.stop)
 		a.talkMu.Lock()
 		a.talkClosed = true
@@ -1001,14 +1009,16 @@ func (a *App) settingsEnv(p settings.Platform) settings.Env {
 	}
 	a.mu.Unlock()
 	sort.Slice(pairs, func(i, j int) bool { return pairs[i].Value < pairs[j].Value })
-	return settings.Env{Home: home, Platform: p, Sources: settings.OptionSources{
+	src := settings.OptionSources{
 		Packs:     pairs,
 		Providers: ProviderNames(),
 		Audio:     AudioBackends(),
 		// The session host and terminals are P12/P13's; their names are fixed.
 		Hosts:     []string{"herdr", "tmux"},
 		Terminals: []string{"warp", "iterm"},
-	}}
+	}
+	a.modelSources(&src)
+	return settings.Env{Home: home, Platform: p, Sources: src}
 }
 
 // secretStatus adapts the voice secrets to the settings window's key rows (found/missing and
@@ -1126,7 +1136,11 @@ func (a *App) setSetting(field string, value json.RawMessage) settings.Snapshot 
 		old, a.hotkey.bound = a.hotkey.bound, combo
 		a.mu.Unlock()
 	}
+	provider := a.store.Current().Voice.Provider
 	snap := a.api.Set(field, value)
+	if a.store.Current().Voice.Provider != provider {
+		a.refreshModels() // set, or hand-edited and picked up by Set; never under the settings lock
+	}
 	if isHotkey {
 		a.mu.Lock()
 		if snap.SetError != nil {
@@ -1182,6 +1196,17 @@ func decodeArgs(method string, args json.RawMessage, v any) error {
 // Register adds every app method and the settings.* methods.
 func (a *App) Register(r Registrar) {
 	a.api.Register(r)
+	// A snapshot (the window opening) or a reload (it got focus) also loads the current
+	// provider's model list when it is due; the load tells the window when it lands.
+	r.Register("settings.snapshot", func(json.RawMessage) (any, error) {
+		a.refreshModels()
+		return a.api.Snapshot(), nil
+	})
+	r.Register("settings.reload", func(json.RawMessage) (any, error) {
+		snap, _ := a.api.Reload()
+		a.refreshModels() // after the reload: a hand-edited voice.provider is the one to load
+		return snap, nil
+	})
 	r.Register("settings.set", func(args json.RawMessage) (any, error) {
 		var in struct {
 			Field string          `json:"field"`
@@ -1247,7 +1272,9 @@ func (a *App) Register(r Registrar) {
 		if !ok {
 			return nil, errors.New("secrets.keychain: this secret source takes no Keychain values")
 		}
+		before := a.keysNow()
 		sink.SetKeychain(in.Values)
+		a.keysChanged(before) // a key saved or removed: its lists load again
 		return nil, nil
 	})
 	r.Register("app.state", func(json.RawMessage) (any, error) { return a.State(), nil })

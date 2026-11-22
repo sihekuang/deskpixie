@@ -1,6 +1,7 @@
 package openailive
 
 import (
+	"cmp"
 	"encoding/base64"
 	"encoding/json"
 	"strings"
@@ -41,15 +42,10 @@ Pixie's instructions:
 
 // sessionStart builds the session.start message. The config is strict: no unknown fields.
 func sessionStart(cfg voice.SessionConfig, eventID string) obj {
+	cfg, _ = Resolve(cfg)
 	model := cfg.Model
-	if model == "" {
-		model = DefaultModel
-	}
 	var v any = cfg.Voice
-	switch {
-	case cfg.Voice == "":
-		v = DefaultVoice
-	case strings.HasPrefix(cfg.Voice, "voice_"):
+	if strings.HasPrefix(cfg.Voice, "voice_") {
 		v = obj{"id": cfg.Voice}
 	}
 	noisy := ""
@@ -176,6 +172,13 @@ func startupFailure(e apiError) voice.Failure {
 		return voice.SetupFailure("OpenAI rejected the API key")
 	case "permission_error":
 		return voice.Failure{Kind: voice.FailNoAccess, Msg: "GPT-Live"}
+	}
+	// One we don't know: name OpenAI's code, so the status line says more than "model error" (#471).
+	if why := cmp.Or(e.Code, e.Type); why != "" {
+		if r := []rune(why); len(r) > 40 { // the server's text: keep the status line short
+			why = string(r[:40]) + "…"
+		}
+		return voice.Failure{Kind: voice.FailModelError, Msg: "GPT-Live couldn't start (" + why + ")"}
 	}
 	return voice.Failure{Kind: voice.FailModelError}
 }

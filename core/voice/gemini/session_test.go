@@ -311,7 +311,7 @@ func TestAPolicyCloseMidSessionIsAFatalError(t *testing.T) {
 }
 
 func TestInvalidModelNameIsRejected(t *testing.T) {
-	for _, bad := range []string{"gemini-a b", "gemini-a&b=c", "gemini-x/../y"} {
+	for _, bad := range []string{"gemini-live a b", "gemini-live&b=c", "gemini-live/../y"} {
 		c := cfg()
 		c.Model = bad
 		_, err := New("ws://127.0.0.1:1/ws").Connect(context.Background(), c, "k")

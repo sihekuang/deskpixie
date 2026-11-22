@@ -84,6 +84,7 @@ Read the Rust source with `git -C ~/Documents/Projects/ai-moscot show origin/mai
              "workers": { "enabled": false, "max": 4, "kinds": ["claude", "codex"] } } }
 ```
 (`agent.session` default renamed `ai-mascot` → `deskpixie`, spec §6.)
+(`voice.model` is one per provider here, #477: `voice.openaiModel`, `voice.geminiModel`, `voice.liveModel`.)
 
 ## Tray tree
 ```

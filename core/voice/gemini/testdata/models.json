@@ -1,0 +1,503 @@
+[
+{
+"name": "models/gemini-2.5-flash",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens",
+"createCachedContent",
+"batchGenerateContent"
+]
+},
+{
+"name": "models/gemini-2.5-pro",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens",
+"createCachedContent",
+"batchGenerateContent"
+]
+},
+{
+"name": "models/gemini-2.5-flash-preview-tts",
+"supportedGenerationMethods": [
+"countTokens",
+"generateContent"
+]
+},
+{
+"name": "models/gemini-2.5-pro-preview-tts",
+"supportedGenerationMethods": [
+"countTokens",
+"generateContent",
+"batchGenerateContent"
+]
+},
+{
+"name": "models/gemma-4-26b-a4b-it",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens"
+]
+},
+{
+"name": "models/gemma-4-31b-it",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens"
+]
+},
+{
+"name": "models/gemini-flash-latest",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens",
+"createCachedContent",
+"batchGenerateContent"
+]
+},
+{
+"name": "models/gemini-flash-lite-latest",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens",
+"createCachedContent",
+"batchGenerateContent"
+]
+},
+{
+"name": "models/gemini-pro-latest",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens",
+"createCachedContent",
+"batchGenerateContent"
+]
+},
+{
+"name": "models/gemini-2.5-flash-lite",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens",
+"createCachedContent",
+"batchGenerateContent"
+]
+},
+{
+"name": "models/gemini-2.5-flash-image",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens",
+"batchGenerateContent"
+]
+},
+{
+"name": "models/gemini-3-flash-preview",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens",
+"createCachedContent",
+"batchGenerateContent"
+]
+},
+{
+"name": "models/gemini-3.1-pro-preview",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens",
+"createCachedContent",
+"batchGenerateContent"
+]
+},
+{
+"name": "models/gemini-3.1-pro-preview-customtools",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens",
+"createCachedContent",
+"batchGenerateContent"
+]
+},
+{
+"name": "models/gemini-3.1-flash-lite-preview",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens",
+"createCachedContent",
+"batchGenerateContent"
+]
+},
+{
+"name": "models/gemini-3.1-flash-lite",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens",
+"createCachedContent",
+"batchGenerateContent"
+]
+},
+{
+"name": "models/gemini-3-pro-image-preview",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens",
+"batchGenerateContent"
+]
+},
+{
+"name": "models/gemini-3-pro-image",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens",
+"batchGenerateContent"
+]
+},
+{
+"name": "models/nano-banana-pro-preview",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens",
+"batchGenerateContent"
+]
+},
+{
+"name": "models/gemini-3.1-flash-image-preview",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens",
+"batchGenerateContent"
+]
+},
+{
+"name": "models/gemini-3.1-flash-image",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens",
+"batchGenerateContent"
+]
+},
+{
+"name": "models/gemini-3.1-flash-lite-image",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens",
+"batchGenerateContent"
+]
+},
+{
+"name": "models/gemini-nano-banana-2.1",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens",
+"batchGenerateContent"
+]
+},
+{
+"name": "models/gemini-3.5-flash",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens",
+"createCachedContent",
+"batchGenerateContent"
+]
+},
+{
+"name": "models/gemini-3.5-flash-lite",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens",
+"createCachedContent",
+"batchGenerateContent"
+]
+},
+{
+"name": "models/gemini-omni-flash-preview",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens"
+]
+},
+{
+"name": "models/gemini-omni-1.1-flash",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens"
+]
+},
+{
+"name": "models/gemini-omni-1.2-flash",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens"
+]
+},
+{
+"name": "models/gemini-3.5-transcribe",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens"
+]
+},
+{
+"name": "models/gemini-3.6-flash",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens",
+"createCachedContent",
+"batchGenerateContent"
+]
+},
+{
+"name": "models/gemini-3.7-flash",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens",
+"createCachedContent",
+"batchGenerateContent"
+]
+},
+{
+"name": "models/gemini-3.8-flash",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens",
+"createCachedContent",
+"batchGenerateContent"
+]
+},
+{
+"name": "models/gemini-4-argon",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens",
+"batchGenerateContent"
+]
+},
+{
+"name": "models/gemini-4-carbon",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens",
+"batchGenerateContent"
+]
+},
+{
+"name": "models/gemini-4-hydrogen",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens",
+"batchGenerateContent"
+]
+},
+{
+"name": "models/gemini-4-neon",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens",
+"batchGenerateContent"
+]
+},
+{
+"name": "models/lyria-3-clip-preview",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens"
+]
+},
+{
+"name": "models/lyria-3-pro-preview",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens"
+]
+},
+{
+"name": "models/lyria-3.5",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens"
+]
+},
+{
+"name": "models/gemini-3.1-flash-tts-preview",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens",
+"batchGenerateContent"
+]
+},
+{
+"name": "models/gemini-3.8-flash-tts",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens",
+"batchGenerateContent"
+]
+},
+{
+"name": "models/gemini-3.8-flash-lite-tts",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens",
+"batchGenerateContent"
+]
+},
+{
+"name": "models/gemini-robotics-er-2-preview",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens",
+"createCachedContent",
+"batchGenerateContent"
+]
+},
+{
+"name": "models/gemini-2.5-computer-use-preview-10-2025",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens"
+]
+},
+{
+"name": "models/antigravity-preview-05-2026",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens"
+]
+},
+{
+"name": "models/antigravity-preview-09-2026",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens"
+]
+},
+{
+"name": "models/antigravity-preview-latest",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens"
+]
+},
+{
+"name": "models/deep-research-max-preview-04-2026",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens"
+]
+},
+{
+"name": "models/deep-research-preview-04-2026",
+"supportedGenerationMethods": [
+"generateContent",
+"countTokens"
+]
+},
+{
+"name": "models/gemini-embedding-001",
+"supportedGenerationMethods": [
+"embedContent",
+"countTextTokens",
+"countTokens",
+"asyncBatchEmbedContent"
+]
+},
+{
+"name": "models/gemini-embedding-2-preview",
+"supportedGenerationMethods": [
+"embedContent",
+"countTextTokens",
+"countTokens",
+"asyncBatchEmbedContent"
+]
+},
+{
+"name": "models/gemini-embedding-2",
+"supportedGenerationMethods": [
+"embedContent",
+"countTextTokens",
+"countTokens",
+"asyncBatchEmbedContent"
+]
+},
+{
+"name": "models/aqa",
+"supportedGenerationMethods": [
+"generateAnswer"
+]
+},
+{
+"name": "models/gemini-3.5-transcribe-live",
+"supportedGenerationMethods": [
+"bidiGenerateContent"
+]
+},
+{
+"name": "models/gemini-2.5-flash-native-audio-latest",
+"supportedGenerationMethods": [
+"countTokens",
+"bidiGenerateContent"
+]
+},
+{
+"name": "models/gemini-2.5-flash-native-audio-preview-09-2025",
+"supportedGenerationMethods": [
+"countTokens",
+"bidiGenerateContent"
+]
+},
+{
+"name": "models/gemini-2.5-flash-native-audio-preview-12-2025",
+"supportedGenerationMethods": [
+"countTokens",
+"bidiGenerateContent"
+]
+},
+{
+"name": "models/gemini-3.1-flash-live-preview",
+"supportedGenerationMethods": [
+"bidiGenerateContent"
+]
+},
+{
+"name": "models/gemini-3.8-live",
+"supportedGenerationMethods": [
+"bidiGenerateContent"
+]
+},
+{
+"name": "models/gemini-3.8-live-extended-thinking",
+"supportedGenerationMethods": [
+"bidiGenerateContent"
+]
+},
+{
+"name": "models/genie-4",
+"supportedGenerationMethods": [
+"bidiGenerateContent"
+]
+},
+{
+"name": "models/gemini-robotics-er-2-streaming-preview",
+"supportedGenerationMethods": [
+"bidiGenerateContent"
+]
+},
+{
+"name": "models/gemini-3.5-live-translate-preview",
+"supportedGenerationMethods": [
+"bidiGenerateContent"
+]
+},
+{
+"name": "models/lyria-realtime-exp",
+"supportedGenerationMethods": [
+"bidiGenerateMusic"
+]
+},
+{
+"name": "models/gemini-decision-1",
+"supportedGenerationMethods": [
+"createDecision"
+]
+}
+]

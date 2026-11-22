@@ -3,6 +3,7 @@ package settings
 import (
 	"encoding/json"
 	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/sihekuang/deskpixie/core/herdr/compat"
@@ -91,7 +92,8 @@ const (
 	SourceInputDevices
 	// SourceOutputDevices: connected speakers, after "System Default" (stored as null).
 	SourceOutputDevices
-	// SourceVoiceModels: the models of the current voice.provider (OptionSources.VoiceProvider).
+	// SourceVoiceModels: the models of Choices.Provider, as loaded from its API
+	// (OptionSources.VoiceModels) or else the built-in list, plus the saved one.
 	SourceVoiceModels
 	// SourceVoiceVoices: the voices of the current voice.provider.
 	SourceVoiceVoices
@@ -107,6 +109,8 @@ type Choices struct {
 	Open bool
 	// Null: an option with the value "" stands for null (agent.model's "Default").
 	Null bool
+	// Provider is the voice provider whose models SourceVoiceModels lists.
+	Provider string
 }
 
 // Nullable reports whether null is a value: the first option ("System Default", "Default")
@@ -210,8 +214,19 @@ func concat(groups ...[]FieldSpec) []FieldSpec {
 	return out
 }
 
+// providerIs is the condition that the voice service is provider.
+func providerIs(provider string) Condition {
+	return Condition{Key: "voice.provider", In: []string{provider}}
+}
+
 // gptLiveOnly is the condition that the voice service is OpenAI GPT-Live.
-var gptLiveOnly = Condition{Key: "voice.provider", In: []string{ProviderOpenAILive}}
+var gptLiveOnly = providerIs(ProviderOpenAILive)
+
+// modelField is provider's voice model field (#477): shown only for it, its choices its models.
+func modelField(path, provider, help string) FieldSpec {
+	return visibleWhen(spec(path, "Model", help, openChoice(Choices{Source: SourceVoiceModels, Provider: provider}), ApplyRestart),
+		providerIs(provider))
+}
 
 // spec is a field; group sets its section and heading.
 func spec(path string, label, help string, kind Kind, apply Apply) FieldSpec {
@@ -289,19 +304,24 @@ var LiveDelegations = []Opt{
 	{LiveDelegationAgent, "Straight to the coordinator (experimental)", AllPlatforms},
 }
 
-// Suggested voice models and voices per provider. The Gemini lists mirror core/voice/gemini
-// (DefaultModel, the legacy preview its docs name, and Voices); a test keeps them in step.
+// Suggested voice models and voices per provider, for when the provider's list hasn't loaded
+// (#477; the models are what the APIs listed on 2026-11-22). The Gemini lists mirror
+// core/voice/gemini (DefaultModel, the legacy preview its docs name, and Voices); a test keeps
+// them in step.
 var (
 	OpenAIModels = []Opt{
 		{"gpt-realtime", "GPT Realtime", AllPlatforms},
+		{"gpt-realtime-2", "GPT Realtime 2", AllPlatforms},
+		{"gpt-realtime-2.1", "GPT Realtime 2.1", AllPlatforms},
 		{"gpt-realtime-mini", "GPT Realtime mini", AllPlatforms},
+		{"gpt-realtime-2.1-mini", "GPT Realtime 2.1 mini", AllPlatforms},
 	}
 	GeminiModels = []Opt{
 		{"gemini-3.8-live", "Gemini 3.8 Live", AllPlatforms},
 		{"gemini-3.1-flash-live-preview", "Gemini 3.1 Flash Live (preview)", AllPlatforms},
 	}
 	// OpenAILiveModels / OpenAILiveVoices mirror core/voice/openailive (DefaultModel, Voices).
-	OpenAILiveModels = []Opt{{"gpt-live-1", "GPT-Live 1", AllPlatforms}}
+	OpenAILiveModels = []Opt{{"gpt-live-1", "GPT-Live 1", AllPlatforms}, {"gpt-live-1.1", "GPT-Live 1.1", AllPlatforms}}
 	OpenAILiveVoices = titled(
 		"alloy", "ash", "ballad", "beacon", "bossa", "brise", "cedar", "cinder", "coral", "delta",
 		"echo", "flitz", "gleam", "harema", "juni", "marin", "meridian", "nira", "noeul", "nuri",
@@ -325,7 +345,8 @@ var (
 // ProviderDefault is a voice provider's default model and voice.
 type ProviderDefault struct{ Model, Voice string }
 
-// ProviderDefaults: switching voice.provider swaps one provider's default for the other's.
+// ProviderDefaults are each provider's model and voice on a new install; switching
+// voice.provider swaps one provider's default voice for the other's.
 var ProviderDefaults = map[string]ProviderDefault{
 	ProviderOpenAI:     {"gpt-realtime", "marin"},
 	ProviderGemini:     {"gemini-3.8-live", "Puck"},
@@ -465,8 +486,11 @@ var Fields = concat(
 		visibleWhen(spec("voice.liveBackendModel", "Backend model (GPT-Live)", "The model that runs Pixie's tools while GPT-Live talks.", openChoice(Choices{Source: SourceStatic, Static: LiveBackendModels}), ApplyRestart),
 			gptLiveOnly, Condition{Key: "voice.liveDelegation", In: []string{LiveDelegationBackend}}),
 		// voice.model, voice.voice and agent.model are free Text in Rust; here they are open
-		// choices (suggestions; any text still validates) — a deliberate deviation (#45).
-		spec("voice.model", "Model", "The voice model. The choices follow the voice service.", openChoice(Choices{Source: SourceVoiceModels}), ApplyRestart),
+		// choices (suggestions; any text still validates) — a deliberate deviation (#45). Each
+		// provider has its own model (#477), listed from its API when that worked.
+		modelField("voice.openaiModel", ProviderOpenAI, "The OpenAI Realtime model Pixie talks with."),
+		modelField("voice.geminiModel", ProviderGemini, "The Gemini Live model Pixie talks with."),
+		modelField("voice.liveModel", ProviderOpenAILive, "The GPT-Live model Pixie talks with."),
 		spec("voice.voice", "Voice", "The voice Pixie speaks with. The choices follow the voice service.", openChoice(Choices{Source: SourceVoiceVoices}), ApplyRestart),
 	),
 	group(SectionVoice, "Microphone and speaker",
@@ -594,9 +618,18 @@ type OptionSources struct {
 	Inputs []Pair
 	// Outputs are speakers as (UID, label), like Inputs.
 	Outputs []Pair
-	// VoiceProvider is the current voice.provider; the model and voice choices follow it.
+	// VoiceProvider is the current voice.provider; the voice choices follow it.
 	// Snapshot fills it from the config.
 	VoiceProvider string
+	// VoiceModels are the models each provider's API listed (#477), the default first; a
+	// provider without a list shows the built-in one.
+	VoiceModels map[string][]string
+	// VoiceModelsNote is why a provider's list didn't load, short; its model field's help
+	// says so.
+	VoiceModelsNote map[string]string
+	// VoiceModelsSaved is each provider's saved model, always among its choices. Snapshot
+	// fills it from the config.
+	VoiceModelsSaved map[string]string
 }
 
 // The value and label that stand for null in a device choice, and the labels of a saved
@@ -681,11 +714,60 @@ func Options(c Choices, src OptionSources) []OptionView {
 	case SourceOutputDevices:
 		return devices(src.Outputs)
 	case SourceVoiceModels:
-		return static(map[string][]Opt{ProviderOpenAI: OpenAIModels, ProviderGemini: GeminiModels, ProviderOpenAILive: OpenAILiveModels}[src.VoiceProvider])
+		return voiceModels(c.Provider, src)
 	case SourceVoiceVoices:
 		return static(map[string][]Opt{ProviderOpenAI: OpenAIVoices, ProviderGemini: GeminiVoices, ProviderOpenAILive: OpenAILiveVoices}[src.VoiceProvider])
 	}
 	return []OptionView{}
+}
+
+// voiceModels is provider's loaded models or else its built-in ones, with the saved model
+// added when it isn't among them. A loaded id the built-in list knows keeps its label; any
+// other is labelled with the id.
+func voiceModels(provider string, src OptionSources) []OptionView {
+	builtIn := map[string][]Opt{ProviderOpenAI: OpenAIModels, ProviderGemini: GeminiModels, ProviderOpenAILive: OpenAILiveModels}[provider]
+	out := static(builtIn)
+	if ids := src.VoiceModels[provider]; len(ids) > 0 {
+		out = []OptionView{}
+		for _, id := range ids {
+			o := Opt{id, id, AllPlatforms}
+			if i := slices.IndexFunc(builtIn, func(b Opt) bool { return b.Value == id }); i >= 0 {
+				o = builtIn[i]
+			}
+			out = append(out, viewOf(o))
+		}
+	}
+	saved := src.VoiceModelsSaved[provider]
+	if saved == "" || slices.ContainsFunc(out, func(o OptionView) bool { return o.Value == saved }) {
+		return out
+	}
+	return append(out, viewOf(Opt{saved, saved, AllPlatforms}))
+}
+
+// providerCompany names who runs a voice provider, for the model help's note.
+var providerCompany = map[string]string{ProviderOpenAI: "OpenAI", ProviderOpenAILive: "OpenAI", ProviderGemini: "Google"}
+
+// noteRunes is the most of a failure reason the model help shows.
+const noteRunes = 80
+
+// helpOf is f's help, plus a line when its provider's model list didn't load, saying which
+// list shows instead.
+func helpOf(f FieldSpec, src OptionSources) string {
+	if f.Kind.Choices.Source != SourceVoiceModels {
+		return f.Help
+	}
+	note := src.VoiceModelsNote[f.Kind.Choices.Provider]
+	if note == "" {
+		return f.Help
+	}
+	if r := []rune(note); len(r) > noteRunes {
+		note = string(r[:noteRunes]) + "…"
+	}
+	shown := "the built-in list"
+	if len(src.VoiceModels[f.Kind.Choices.Provider]) > 0 {
+		shown = "the last loaded list"
+	}
+	return f.Help + "\nCouldn't load the list from " + providerCompany[f.Kind.Choices.Provider] + " (" + note + "); showing " + shown + "."
 }
 
 func static(opts []Opt) []OptionView {
@@ -790,7 +872,7 @@ func Views(src OptionSources) []FieldView {
 			k.Options = Options(f.Kind.Choices, src)
 		}
 		out = append(out, FieldView{
-			Path: f.Path, Section: f.Section, Group: f.Group, Label: f.Label, Help: f.Help, Kind: k, Apply: f.Apply,
+			Path: f.Path, Section: f.Section, Group: f.Group, Label: f.Label, Help: helpOf(f, src), Kind: k, Apply: f.Apply,
 			Platforms:   append([]Platform{}, f.Platforms...),
 			VisibleWhen: conditionsView(f.VisibleWhen),
 			EnabledWhen: conditionsView(f.EnabledWhen),
