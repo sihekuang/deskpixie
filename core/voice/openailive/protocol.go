@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"encoding/base64"
 	"encoding/json"
+	"slices"
 	"strings"
 
 	"github.com/sihekuang/deskpixie/core/audio"
@@ -42,16 +43,17 @@ Pixie's instructions:
 
 // sessionStart builds the session.start message. The config is strict: no unknown fields.
 func sessionStart(cfg voice.SessionConfig, eventID string) obj {
+	// Settings may still hold another provider's model or voice (gpt-realtime, Puck), which
+	// OpenAI refuses: GPT-Live uses its own instead (#473), as Gemini does (gemini.Resolve).
 	model := cfg.Model
-	if model == "" {
+	if !strings.HasPrefix(model, "gpt-live") {
 		model = DefaultModel
 	}
-	var v any = cfg.Voice
-	switch {
-	case cfg.Voice == "":
-		v = DefaultVoice
-	case strings.HasPrefix(cfg.Voice, "voice_"):
+	var v any = DefaultVoice
+	if strings.HasPrefix(cfg.Voice, "voice_") {
 		v = obj{"id": cfg.Voice}
+	} else if i := slices.IndexFunc(Voices, func(n string) bool { return strings.EqualFold(n, cfg.Voice) }); i >= 0 {
+		v = Voices[i]
 	}
 	noisy := ""
 	if cfg.NoisyRoom {

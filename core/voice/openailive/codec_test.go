@@ -122,6 +122,24 @@ func TestSessionStartShape(t *testing.T) {
 	}
 }
 
+// Another provider's model or voice left in settings (gpt-realtime, Puck) gets GPT-Live's own:
+// OpenAI refuses the session otherwise (#473). A GPT-Live model and a custom voice id stay.
+func TestSessionStartUsesGPTLiveModelAndVoice(t *testing.T) {
+	for _, c := range []struct{ model, voice, wantModel, wantVoice string }{
+		{"gpt-realtime", "marin", DefaultModel, "marin"},
+		{"gpt-realtime-mini", "Puck", DefaultModel, DefaultVoice},
+		{"gemini-3.8-live", "Cedar", DefaultModel, "cedar"},
+		{"gpt-live-2", "verse", "gpt-live-2", "verse"},
+	} {
+		var got map[string]any
+		_ = json.Unmarshal(msg(sessionStart(voice.SessionConfig{Model: c.model, Voice: c.voice}, "c_1")), &got)
+		s := got["session"].(map[string]any)
+		if v := s["audio"].(map[string]any)["output"].(map[string]any)["voice"]; s["model"] != c.wantModel || v != c.wantVoice {
+			t.Errorf("%s/%s: model %v voice %v", c.model, c.voice, s["model"], v)
+		}
+	}
+}
+
 func TestReadyOnce(t *testing.T) {
 	c := newCodec()
 	wantKinds(t, c.decode(msg(map[string]any{"type": "session.started"}), at(0)), voice.EvReady)
