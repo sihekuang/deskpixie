@@ -131,6 +131,11 @@ func TestRuntimeLogsAFailedConnect(t *testing.T) {
 	if b, _ := os.ReadFile(path); strings.Contains(string(b), "sk-test") {
 		t.Fatalf("the key is in the log:\n%s", b)
 	}
+	for _, e := range ui.all() {
+		if strings.Contains(e.Text, "sk-test") {
+			t.Fatalf("the key is in a UI event: %+v", e)
+		}
+	}
 }
 
 type turnOwningModel struct{ failingModel }

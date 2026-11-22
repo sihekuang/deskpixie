@@ -759,7 +759,7 @@ func (r *Runtime) onConnected(c connectResult) {
 		go func() { _ = c.sess.Close() }() // a stale attempt
 	case current:
 		r.cfg.Log.Printf("connect failed: %s", c.why) // the provider's own reason (#471)
-		r.emit(UIEvent{Kind: "error", Text: "connect: " + c.err.Error()})
+		r.emit(UIEvent{Kind: "error", Text: "connect: " + c.why})
 		f := Failure{Kind: FailConnectionLost}
 		var fe FailureError
 		if errors.As(c.err, &fe) {

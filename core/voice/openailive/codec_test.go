@@ -392,7 +392,7 @@ func TestStartupFailures(t *testing.T) {
 		"model_not_found":    "Voice: this API key has no GPT-Live access",
 		"permission_denied":  "Voice: this API key has no GPT-Live access",
 		"insufficient_quota": "Voice: OpenAI quota or rate limit reached",
-		"something_else":     "Voice: GPT-Live refused the session (something_else)",
+		"something_else":     "Voice: GPT-Live couldn't start (something_else)",
 		"":                   "Voice: model error",
 	} {
 		if got := startupFailure(apiError{Code: code}).Status(); got != want {
@@ -404,8 +404,11 @@ func TestStartupFailures(t *testing.T) {
 			t.Errorf("%d: %q", status, f.Status())
 		}
 	}
-	if got := startupFailure(apiError{Type: "server_error"}).Status(); got != "Voice: GPT-Live refused the session (server_error)" {
+	if got := startupFailure(apiError{Type: "server_error"}).Status(); got != "Voice: GPT-Live couldn't start (server_error)" {
 		t.Errorf("type only: %q", got)
+	}
+	if got := startupFailure(apiError{Code: strings.Repeat("x", 60)}).Status(); got != "Voice: GPT-Live couldn't start ("+strings.Repeat("x", 40)+"…)" {
+		t.Errorf("long code: %q", got)
 	}
 	if _, ok := httpFailure(500); ok {
 		t.Error("500 typed")

@@ -285,7 +285,7 @@ A test keeps the settings lists in step with `openailive.Voices` / `DefaultModel
 | **No GPT-Live access** (alpha not enabled, free tier) | dial HTTP 403/404, or a startup `error` whose code is `model_not_found`, `permission_denied`, `insufficient_permissions` or `unsupported_model`, or whose message names the model or access. **The exact codes are undocumented**: the access probe (§10) records the real one and the test table is fixed from it. | `Voice: this API key has no GPT-Live access` (`FailNoAccess`). Settings ▸ Voice shows the same text under `voice.provider`. |
 | Free tier / rate limited | `rate_limit_exceeded`, `insufficient_quota`, or too many concurrent sessions | `Voice: OpenAI quota or rate limit reached` |
 | Bad backend model / tools | `responses_validation_failed` | fatal: `Voice: GPT-Live backend settings rejected` |
-| Strict-config rejection (unknown field) | startup `error` with `param` | `Voice: GPT-Live refused the session (<code>)`; voice.log has `connect failed:` with code, param and message (never the key) |
+| Strict-config rejection (unknown field) | startup `error` with `param` | `Voice: GPT-Live couldn't start (<code>)`; voice.log has `connect failed:` with code, param and message (never the key) |
 | Moderation cut | `error` mid-session, session stays open | warning; the span closes by silence |
 | `session.closed` `expired` / `content` / `connection_lost` / WS drop | read loop | `Voice: GPT-Live session expired` / `Voice: ended by the safety filter` / `Voice: connection lost` |
 | Session ends while a tool runs | runtime generation check (existing) | stale result dropped |

@@ -180,7 +180,10 @@ func startupFailure(e apiError) voice.Failure {
 	}
 	// One we don't know: name OpenAI's code, so the status line says more than "model error" (#471).
 	if why := cmp.Or(e.Code, e.Type); why != "" {
-		return voice.Failure{Kind: voice.FailModelError, Msg: "GPT-Live refused the session (" + why + ")"}
+		if r := []rune(why); len(r) > 40 { // the server's text: keep the status line short
+			why = string(r[:40]) + "…"
+		}
+		return voice.Failure{Kind: voice.FailModelError, Msg: "GPT-Live couldn't start (" + why + ")"}
 	}
 	return voice.Failure{Kind: voice.FailModelError}
 }
