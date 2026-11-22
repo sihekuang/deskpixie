@@ -286,3 +286,120 @@ func TestGetReturnsACopy(t *testing.T) {
 		t.Fatal("the cache was changed through Get")
 	}
 }
+
+// OnChange runs off the caller's goroutine, so a caller holding a lock OnChange takes (the
+// settings snapshot does) doesn't deadlock, the no-key path included.
+func TestOnChangeNeverRunsOnTheCallersGoroutine(t *testing.T) {
+	var mu sync.Mutex
+	g := newRig(t, keys{})
+	told := make(chan string, 4)
+	g.r.OnChange = func(p string) { mu.Lock(); mu.Unlock(); told <- p }
+	done := make(chan struct{})
+	go func() {
+		mu.Lock()
+		g.r.Refresh("p")
+		mu.Unlock()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Refresh waited for OnChange")
+	}
+	g.r.Wait()
+	if p := <-told; p != "p" {
+		t.Fatal(p)
+	}
+}
+
+// ctxCatalog waits for its context, as a slow network does.
+type ctxCatalog struct{ started chan struct{} }
+
+func (c ctxCatalog) ListModels(ctx context.Context, _ string) ([]string, error) {
+	close(c.started)
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestCloseCancelsALoadAndStopsRefreshing(t *testing.T) {
+	g := newRig(t, keys{"p": "k"})
+	cat := ctxCatalog{started: make(chan struct{})}
+	g.r.Catalog = func(string) ModelCatalog { return cat }
+	g.r.Refresh("p")
+	<-cat.started
+	closed := make(chan struct{})
+	go func() { g.r.Close(); close(closed) }()
+	select {
+	case <-closed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close didn't cancel the load")
+	}
+	if got := g.r.Cache.Get("p"); !reflect.DeepEqual(got, ModelList{}) || g.changes() != 0 {
+		t.Fatal("a cancelled load stores nothing:", got, g.changed)
+	}
+	g.r.Catalog = func(string) ModelCatalog { return g.cat }
+	g.r.Refresh("p")
+	g.r.Wait()
+	if g.cat.count() != 0 {
+		t.Fatal("refreshed after Close")
+	}
+}
+
+func TestAFetchedTimeInTheFutureIsStale(t *testing.T) {
+	g := newRig(t, keys{"p": "k"})
+	g.r.Cache.set("p", ModelList{Models: []string{"old"}, Fetched: g.clock.Now().Add(24 * time.Hour)})
+	g.cat.set([]string{"m1"}, nil)
+	g.refresh()
+	if g.cat.count() != 1 {
+		t.Fatal(g.cat.count())
+	}
+}
+
+// RefreshNow (a key saved or removed) loads even a fresh list again, and right after a failure.
+func TestRefreshNowIgnoresTheWaits(t *testing.T) {
+	g := newRig(t, keys{"p": "k"})
+	g.cat.set([]string{"m1"}, nil)
+	g.refresh()
+	g.r.RefreshNow("p")
+	g.r.Wait()
+	g.cat.set(nil, errors.New("x"))
+	g.r.RefreshNow("p")
+	g.r.Wait()
+	g.r.RefreshNow("p")
+	g.r.Wait()
+	if g.cat.count() != 4 {
+		t.Fatal(g.cat.count())
+	}
+}
+
+// Without a key while a load runs, the load's result stands.
+func TestNoKeyDoesntOverwriteALoadInFlight(t *testing.T) {
+	k := keys{"p": "k"}
+	g := newRig(t, k)
+	gate := make(chan struct{})
+	g.cat.gate = gate
+	g.cat.set([]string{"m1"}, nil)
+	g.r.Refresh("p")
+	delete(k, "p")
+	g.r.Refresh("p")
+	close(gate)
+	g.r.Wait()
+	if got := g.r.Cache.Get("p"); got.Error != "" || len(got.Models) != 1 {
+		t.Fatal(got)
+	}
+}
+
+func TestAFileThatCantBeReadIsSetAside(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads anything")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "models.json")
+	os.WriteFile(path, []byte(`{"p":{"models":["m1"]}}`), 0o000)
+	if got := NewModelCache(dir).Get("p"); !reflect.DeepEqual(got, ModelList{}) {
+		t.Fatal(got)
+	}
+	if _, err := os.Stat(path + ".bad"); err != nil {
+		t.Fatal(err)
+	}
+}
