@@ -140,6 +140,22 @@ func TestSessionStartUsesGPTLiveModelAndVoice(t *testing.T) {
 	}
 }
 
+// Resolve notes each replacement (logged once by Connect); an empty setting or a custom voice
+// id needs none. A name the model check would refuse (models/…) is replaced first (#473).
+func TestResolveNotesReplacements(t *testing.T) {
+	cfg, notes := Resolve(voice.SessionConfig{Model: "models/gemini-3.8-live", Voice: "Puck"})
+	if cfg.Model != DefaultModel || cfg.Voice != DefaultVoice || len(notes) != 2 ||
+		notes[0] != `voice.model "models/gemini-3.8-live" is not a GPT-Live model; using gpt-live-1` ||
+		notes[1] != `voice.voice "Puck" is not a GPT-Live voice; using marin` {
+		t.Fatalf("%+v %q", cfg, notes)
+	}
+	for _, c := range []voice.SessionConfig{{}, {Model: "gpt-live-1", Voice: "voice_abc"}, {Model: " gpt-live-1 ", Voice: "Cedar"}} {
+		if got, notes := Resolve(c); len(notes) != 0 || !strings.HasPrefix(got.Model, "gpt-live") || got.Voice == "" {
+			t.Errorf("%+v: %+v %q", c, got, notes)
+		}
+	}
+}
+
 func TestReadyOnce(t *testing.T) {
 	c := newCodec()
 	wantKinds(t, c.decode(msg(map[string]any{"type": "session.started"}), at(0)), voice.EvReady)
