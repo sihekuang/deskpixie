@@ -129,6 +129,8 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 			h.mu.Unlock()
 		},
 		Secrets: voice.NewEnvSecretsWithLookup(nil, func(string) (string, bool) { return "", false }),
+		// No network: a key a test sets would otherwise load the real model lists (#477).
+		ModelCatalog: (&fakeLists{}).catalog,
 		Run: func(program string, args ...string) error {
 			h.mu.Lock()
 			h.runs = append(h.runs, append([]string{program}, args...))
