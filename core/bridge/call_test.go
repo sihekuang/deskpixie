@@ -260,7 +260,7 @@ func TestGlobalCall(t *testing.T) {
 	if got := string(Call("app.state", nil)); got != `{"error":"unknown method app.state"}` {
 		t.Fatalf("before Init: %s", got)
 	}
-	defaultOptions = Options{MetricsLogPath: filepath.Join(t.TempDir(), "metrics.log"), Secrets: noSecrets}
+	defaultOptions = Options{MetricsLogPath: filepath.Join(t.TempDir(), "metrics.log"), Secrets: noSecrets, ModelCatalog: NoModelLists}
 	t.Cleanup(func() { defaultOptions = Options{} })
 	Init()
 	t.Cleanup(Destroy)

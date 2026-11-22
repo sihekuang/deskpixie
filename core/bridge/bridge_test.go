@@ -69,6 +69,9 @@ func newEngine(t *testing.T, o Options) *Engine {
 	if o.Agent == nil {
 		o.Agent = NoAgent // never the real herdr, port 48217 or ~/.claude.json
 	}
+	if o.ModelCatalog == nil {
+		o.ModelCatalog = NoModelLists // never the real model lists
+	}
 	e := New(o)
 	t.Cleanup(e.Close)
 	return e
@@ -373,7 +376,7 @@ func TestBridgeMetricsEventAndLog(t *testing.T) {
 }
 
 func TestGlobalAPI(t *testing.T) {
-	defaultOptions = Options{MetricsLogPath: filepath.Join(t.TempDir(), "metrics.log"), Secrets: noSecrets, Run: func(string, ...string) error { return nil }, Agent: NoAgent}
+	defaultOptions = Options{MetricsLogPath: filepath.Join(t.TempDir(), "metrics.log"), Secrets: noSecrets, Run: func(string, ...string) error { return nil }, Agent: NoAgent, ModelCatalog: NoModelLists}
 	t.Cleanup(func() { defaultOptions = Options{} })
 	Destroy()
 	if err := Configure(cfgJSON(t, "")); !errors.Is(err, ErrNotInit) {
@@ -426,4 +429,22 @@ func waitGlobal(t *testing.T, match func(voice.UIEvent) bool) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatal("event not seen")
+}
+
+// The engine hands its ModelCatalog to the app, which asks it for the current provider's list.
+func TestTheModelCatalogReachesTheApp(t *testing.T) {
+	asked := make(chan string, 8)
+	e := newEngine(t, Options{ModelCatalog: func(p string) voice.ModelCatalog { asked <- p; return nil }})
+	if err := e.Configure(cfgJSON(t, "")); err != nil {
+		t.Fatal(err)
+	}
+	e.Call("settings.snapshot", nil)
+	select {
+	case p := <-asked:
+		if p != "openai-realtime" {
+			t.Fatal(p)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the app never asked the engine's ModelCatalog")
+	}
 }
