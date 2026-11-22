@@ -267,7 +267,7 @@ Wire details to get right:
 | Path | Change |
 |---|---|
 | `voice.provider` | New choice `openai-live`, labelled **"OpenAI GPT-Live"** (`settings.ProviderOpenAILive`; `providerNames`; registered in `app.Providers()`). `ApplyRestart` as today. |
-| `voice.model` | `OpenAILiveModels = [{"gpt-live-1", "GPT-Live 1"}]`. Open choice, as today, so a future id can be typed. |
+| `voice.model` | `OpenAILiveModels = [{"gpt-live-1", "GPT-Live 1"}]`. Open choice, as today, so a future id can be typed. *Since #477 each provider has its own model setting: GPT-Live's is `voice.liveModel` (Realtime `voice.openaiModel`, Gemini `voice.geminiModel`), listed from OpenAI's `/v1/models`; `voice.model` is only read to migrate an older settings.json.* |
 | `voice.voice` | `OpenAILiveVoices` = the 31 built-in names (§2.2). Open choice: a custom voice id (`voice_…`) can be typed. |
 | `ProviderDefaults` | `openai-live: {"gpt-live-1", "marin"}` |
 | **new** `voice.liveBackendModel` | "Backend model (GPT-Live)": the Responses model that runs Bit's tools. Open choice: `gpt-6-luna` (default, faster and cheaper), `gpt-6-sol` (harder tasks). Description says it only applies to OpenAI GPT-Live. `ApplyRestart`. |

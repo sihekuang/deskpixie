@@ -78,3 +78,27 @@ Not in scope: voices (neither API lists them).
 - **C** — settings: three fields, migration, options + note, swap change, docs/search entries.
 - **D** — app wiring, `settings.changed` on refresh, docs (`docs/` mentions of `voice.model`),
   then an isolated test build checked by hand.
+
+## As built
+
+Where the build differs from the design above, or adds to it:
+
+- **Lists.** The shared code is `voice.GetJSON` and `voice.OrderModels` (`core/voice/modellist.go`).
+  An error is short ("openai models: http 401: …"). The key is blanked out before the message is
+  clipped, and the URL is never in it. Gemini's list is an error, not part of a list, when a page
+  token repeats or it runs past 20 pages. The REST base URL is a field next to the WebSocket one.
+- **Cache.** A failed load keeps the models from before and records only the error. With no key
+  the error is "no API key" and nothing is fetched. `Refresher.RefreshNow` skips the hour and
+  minute waits; the app calls it when a provider's key is saved or removed. `Close` cancels the
+  loads. `OnChange` always runs on its own goroutine, so a caller holding a lock it takes can't
+  deadlock.
+- **Settings.** `OptionSources.VoiceModelsSaved` (filled from the config, like `VoiceProvider`)
+  keeps each saved model among its choices. A loaded id that the built-in list knows keeps its
+  label ("GPT Realtime mini"); any other id is its own label. The help line is "Couldn't load the
+  list from OpenAI|Google (<reason>); showing the last loaded list." when a list loaded before,
+  else "…; showing the built-in list." The reason is clipped to 80 characters. A `voice.model`
+  that matches no family, with a provider this version doesn't know, is dropped and the drop is
+  logged.
+- **App.** `Deps.ModelCatalog` replaces the adapters' lists in tests, so they never reach the
+  network. `settings.snapshot` and `settings.reload` refresh before they answer, outside the
+  settings lock. The adapters' "replaced" log lines name the new settings (`voice.openaiModel`, …).
