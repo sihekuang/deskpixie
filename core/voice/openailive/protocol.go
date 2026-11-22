@@ -1,6 +1,7 @@
 package openailive
 
 import (
+	"cmp"
 	"encoding/base64"
 	"encoding/json"
 	"strings"
@@ -176,6 +177,10 @@ func startupFailure(e apiError) voice.Failure {
 		return voice.SetupFailure("OpenAI rejected the API key")
 	case "permission_error":
 		return voice.Failure{Kind: voice.FailNoAccess, Msg: "GPT-Live"}
+	}
+	// One we don't know: name OpenAI's code, so the status line says more than "model error" (#471).
+	if why := cmp.Or(e.Code, e.Type); why != "" {
+		return voice.Failure{Kind: voice.FailModelError, Msg: "GPT-Live refused the session (" + why + ")"}
 	}
 	return voice.Failure{Kind: voice.FailModelError}
 }

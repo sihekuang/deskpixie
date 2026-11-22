@@ -105,6 +105,7 @@ type connectResult struct {
 	gen  uint64
 	sess Session
 	err  error
+	why  string // err's text without the API key, for the voice log
 }
 
 // handOffResult is a finished hand-off (EfHandOff), tagged like toolResult.
@@ -757,6 +758,7 @@ func (r *Runtime) onConnected(c connectResult) {
 	case c.err == nil:
 		go func() { _ = c.sess.Close() }() // a stale attempt
 	case current:
+		r.cfg.Log.Printf("connect failed: %s", c.why) // the provider's own reason (#471)
 		r.emit(UIEvent{Kind: "error", Text: "connect: " + c.err.Error()})
 		f := Failure{Kind: FailConnectionLost}
 		var fe FailureError
@@ -797,9 +799,17 @@ func (r *Runtime) apply(fx Effect) {
 			cfg.Instructions = withFacts(cfg.Instructions, r.cfg.Facts.Facts())
 		}
 		go func() {
-			s, err := model.Connect(ctx, cfg, key.Expose())
+			secret := key.Expose()
+			s, err := model.Connect(ctx, cfg, secret)
+			res := connectResult{gen: gen, sess: s, err: err}
+			if err != nil {
+				res.why = err.Error()
+				if secret != "" {
+					res.why = strings.ReplaceAll(res.why, secret, "…")
+				}
+			}
 			select {
-			case r.connected <- connectResult{gen: gen, sess: s, err: err}:
+			case r.connected <- res:
 			case <-r.done:
 				if err == nil {
 					_ = s.Close()

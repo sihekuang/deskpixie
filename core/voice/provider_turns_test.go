@@ -3,7 +3,10 @@ package voice
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -107,6 +110,26 @@ func TestRuntimeConnectFailureErrorStatus(t *testing.T) {
 			t.Fatalf("no error state: %+v", ui.all())
 		}
 		r.Close()
+	}
+}
+
+// A failed connect leaves the provider's own reason in the voice log (#471), never the API key.
+func TestRuntimeLogsAFailedConnect(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "voice.log")
+	err := errors.New("gpt-live: some_new_code: The model gpt-live-1 is busy (key sk-test)")
+	ui := &uiLog{}
+	r := NewRuntime(failingModel{err}, audio.Passthrough{}, RuntimeConfig{
+		Session: testSessionCfg, APIKey: "sk-test", Conversation: DefaultConversationConfig(), Log: NewVoiceLog(path, nil),
+	}, ui.emit)
+	defer r.Close()
+	r.Hotkey()
+	want := "connect failed: gpt-live: some_new_code: The model gpt-live-1 is busy (key …)"
+	eventually(t, "the connect line", func() bool {
+		b, _ := os.ReadFile(path)
+		return strings.Contains(string(b), want)
+	})
+	if b, _ := os.ReadFile(path); strings.Contains(string(b), "sk-test") {
+		t.Fatalf("the key is in the log:\n%s", b)
 	}
 }
 
