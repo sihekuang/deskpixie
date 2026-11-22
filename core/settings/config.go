@@ -80,9 +80,14 @@ type Fade struct {
 
 // VoiceSettings is the voice block.
 type VoiceSettings struct {
-	Provider        string  `json:"provider"`
-	Audio           string  `json:"audio"`
-	Model           string  `json:"model"`
+	Provider string `json:"provider"`
+	Audio    string `json:"audio"`
+	// OpenAIModel, GeminiModel and LiveModel are each provider's model (#477): switching
+	// provider keeps each one's. Model is the current provider's. They replace voice.model,
+	// which ParseConfig reads from an older settings.json.
+	OpenAIModel     string  `json:"openaiModel"`
+	GeminiModel     string  `json:"geminiModel"`
+	LiveModel       string  `json:"liveModel"`
 	Voice           string  `json:"voice"`
 	Chimes          bool    `json:"chimes"`
 	IdleTimeoutSecs uint64  `json:"idleTimeoutSecs"`
@@ -219,8 +224,10 @@ func Default() Config {
 		LogMaxMB:           2,
 		ProximityFade:      Fade{Enabled: false, Radius: 150},
 		Voice: VoiceSettings{
-			Provider: "openai-realtime", Audio: "macos-vpio", Model: "gpt-realtime", Voice: "marin",
-			Chimes: true, IdleTimeoutSecs: 7, NoiseModel: "hush", LiveBackendModel: "gpt-6-luna",
+			Provider: "openai-realtime", Audio: "macos-vpio", Voice: "marin",
+			OpenAIModel: ProviderDefaults[ProviderOpenAI].Model, GeminiModel: ProviderDefaults[ProviderGemini].Model,
+			LiveModel: ProviderDefaults[ProviderOpenAILive].Model,
+			Chimes:    true, IdleTimeoutSecs: 7, NoiseModel: "hush", LiveBackendModel: "gpt-6-luna",
 			LiveDelegation:    LiveDelegationBackend,
 			HandOffWhenUnsure: true, CheckClaims: true,
 		},
@@ -386,7 +393,63 @@ func ParseConfig(b []byte) (Config, error) {
 		return Default(), withLine(b, err)
 	}
 	migrateListenAfterUpdates(b, &c)
+	migrateVoiceModel(b, &c)
 	return c, nil
+}
+
+// modelField is v's model field for provider (nil for an unknown one).
+func (v *VoiceSettings) modelField(provider string) *string {
+	switch provider {
+	case ProviderOpenAI:
+		return &v.OpenAIModel
+	case ProviderGemini:
+		return &v.GeminiModel
+	case ProviderOpenAILive:
+		return &v.LiveModel
+	}
+	return nil
+}
+
+// Model is the current provider's model ("" for an unknown provider).
+func (v VoiceSettings) Model() string {
+	if f := v.modelField(v.Provider); f != nil {
+		return *f
+	}
+	return ""
+}
+
+// migrateVoiceModel: a settings.json from before a model per provider (#477) moves its
+// voice.model to the field of the family it names (gpt-live, gpt-realtime, gemini-), else to
+// the current provider's; the others keep their defaults.
+func migrateVoiceModel(b []byte, c *Config) {
+	var old struct {
+		Voice struct {
+			Model       *string `json:"model"`
+			OpenAIModel *string `json:"openaiModel"`
+			GeminiModel *string `json:"geminiModel"`
+			LiveModel   *string `json:"liveModel"`
+		} `json:"voice"`
+	}
+	if json.Unmarshal(b, &old) != nil {
+		return
+	}
+	v := old.Voice
+	if v.Model == nil || v.OpenAIModel != nil || v.GeminiModel != nil || v.LiveModel != nil {
+		return
+	}
+	m := *v.Model
+	provider := c.Voice.Provider
+	switch {
+	case strings.HasPrefix(m, "gpt-live"):
+		provider = ProviderOpenAILive
+	case strings.HasPrefix(m, "gpt-realtime"):
+		provider = ProviderOpenAI
+	case strings.HasPrefix(m, "gemini-"), strings.HasPrefix(m, "models/gemini-"):
+		provider = ProviderGemini
+	}
+	if f := c.Voice.modelField(provider); f != nil {
+		*f = m
+	}
 }
 
 // SpeakUpdatesOnly: the conversation an update opens only says it, with no mic, unless the

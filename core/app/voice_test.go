@@ -82,10 +82,14 @@ func TestRegistryNamesAreListedForTheSettingsPage(t *testing.T) {
 
 func TestSessionConfigComesFromSettingsAndPersona(t *testing.T) {
 	s := settings.Default().Voice
-	s.Model, s.Voice = "gpt-realtime-mini", "cedar"
+	s.OpenAIModel, s.Voice = "gpt-realtime-mini", "cedar"
 	c := SessionConfig(s, "You are Pixie.")
 	if c.Model != "gpt-realtime-mini" || c.Voice != "cedar" || c.Instructions != "You are Pixie." {
 		t.Fatalf("%+v", c)
+	}
+	s.Provider, s.LiveModel = settings.ProviderOpenAILive, "gpt-live-1.1"
+	if c := SessionConfig(s, ""); c.Model != "gpt-live-1.1" {
+		t.Fatal("the current provider's model:", c.Model)
 	}
 	if c.TurnDetection != voice.TurnSemantic {
 		t.Error("turn detection")

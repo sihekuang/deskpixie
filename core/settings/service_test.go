@@ -223,7 +223,7 @@ func TestAnInvalidSetSavesNothing(t *testing.T) {
 		{"scale", `"big"`, one("scale", Whole)},
 		{"agent.port", `70000`, one("agent.port", RangeMessage(1024, 65535))},
 		{"voice.idleTimeoutSecs", `-1`, one("voice.idleTimeoutSecs", RangeMessage(1, 600))},
-		{"voice.model", `"  "`, one("voice.model", Empty)},
+		{"voice.openaiModel", `"  "`, one("voice.openaiModel", Empty)},
 		{"pack", `"zed"`, one("pack", NotAChoice)},
 		{"nope", `1`, one("nope", "Unknown setting")},
 		{"canvas.window", `null`, one("canvas.window", "This setting is managed by the app")},

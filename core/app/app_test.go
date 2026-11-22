@@ -1053,12 +1053,12 @@ func TestABrokenSettingsFileAtLaunchIsLeftAloneAndShowsTheBanner(t *testing.T) {
 
 func TestAHandEditSurvivesADragAndATraySize(t *testing.T) {
 	h := newHarness(t)
-	h.handEdit(func(c *settings.Config) { c.Hotkey = "ctrl+shift+K"; c.Voice.Model = "hand-picked" })
+	h.handEdit(func(c *settings.Config) { c.Hotkey = "ctrl+shift+K"; c.Voice.OpenAIModel = "hand-picked" })
 	h.call("pixie.moved", map[string]float64{"x": 10, "y": 20})
 	h.action("size:5")
 	got := h.saved()
-	if got.Hotkey != "ctrl+shift+K" || got.Voice.Model != "hand-picked" {
-		t.Fatalf("hand edit lost: hotkey %q model %q", got.Hotkey, got.Voice.Model)
+	if got.Hotkey != "ctrl+shift+K" || got.Voice.OpenAIModel != "hand-picked" {
+		t.Fatalf("hand edit lost: hotkey %q model %q", got.Hotkey, got.Voice.OpenAIModel)
 	}
 	if got.Scale != 5 || got.Position == nil || *got.Position != [2]float64{10, 20} {
 		t.Fatalf("app writes lost: scale %d position %v", got.Scale, got.Position)

@@ -61,7 +61,7 @@ func PickModel(reg map[string]ModelFactory, s settings.VoiceSettings) (voice.Mod
 // SessionConfig is the session from settings and the instructions.
 func SessionConfig(s settings.VoiceSettings, instructions string) voice.SessionConfig {
 	return voice.SessionConfig{
-		Model:        s.Model,
+		Model:        s.Model(),
 		Voice:        s.Voice,
 		Instructions: instructions,
 		BackendModel: s.LiveBackendModel,
