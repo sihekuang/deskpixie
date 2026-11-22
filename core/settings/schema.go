@@ -721,14 +721,20 @@ func Options(c Choices, src OptionSources) []OptionView {
 	return []OptionView{}
 }
 
-// voiceModels is provider's loaded models (labelled with the id) or else its built-in ones,
-// with the saved model added when it isn't among them.
+// voiceModels is provider's loaded models or else its built-in ones, with the saved model
+// added when it isn't among them. A loaded id the built-in list knows keeps its label; any
+// other is labelled with the id.
 func voiceModels(provider string, src OptionSources) []OptionView {
-	out := static(map[string][]Opt{ProviderOpenAI: OpenAIModels, ProviderGemini: GeminiModels, ProviderOpenAILive: OpenAILiveModels}[provider])
+	builtIn := map[string][]Opt{ProviderOpenAI: OpenAIModels, ProviderGemini: GeminiModels, ProviderOpenAILive: OpenAILiveModels}[provider]
+	out := static(builtIn)
 	if ids := src.VoiceModels[provider]; len(ids) > 0 {
 		out = []OptionView{}
 		for _, id := range ids {
-			out = append(out, viewOf(Opt{id, id, AllPlatforms}))
+			o := Opt{id, id, AllPlatforms}
+			if i := slices.IndexFunc(builtIn, func(b Opt) bool { return b.Value == id }); i >= 0 {
+				o = builtIn[i]
+			}
+			out = append(out, viewOf(o))
 		}
 	}
 	saved := src.VoiceModelsSaved[provider]
@@ -744,7 +750,8 @@ var providerCompany = map[string]string{ProviderOpenAI: "OpenAI", ProviderOpenAI
 // noteRunes is the most of a failure reason the model help shows.
 const noteRunes = 80
 
-// helpOf is f's help, plus a line when its provider's model list didn't load.
+// helpOf is f's help, plus a line when its provider's model list didn't load, saying which
+// list shows instead.
 func helpOf(f FieldSpec, src OptionSources) string {
 	if f.Kind.Choices.Source != SourceVoiceModels {
 		return f.Help
@@ -756,7 +763,11 @@ func helpOf(f FieldSpec, src OptionSources) string {
 	if r := []rune(note); len(r) > noteRunes {
 		note = string(r[:noteRunes]) + "…"
 	}
-	return f.Help + "\nCouldn't load the list from " + providerCompany[f.Kind.Choices.Provider] + " (" + note + "); showing the saved one."
+	shown := "the built-in list"
+	if len(src.VoiceModels[f.Kind.Choices.Provider]) > 0 {
+		shown = "the last loaded list"
+	}
+	return f.Help + "\nCouldn't load the list from " + providerCompany[f.Kind.Choices.Provider] + " (" + note + "); showing " + shown + "."
 }
 
 func static(opts []Opt) []OptionView {

@@ -4,6 +4,8 @@ package settings
 
 import (
 	"encoding/json"
+	"log"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -127,7 +129,8 @@ func TestModelOptionsAreTheLoadedListWithTheSavedOne(t *testing.T) {
 	ch := FieldByPath("voice.liveModel").Kind.Choices
 	src := OptionSources{VoiceModels: map[string][]string{ProviderOpenAILive: {"gpt-live-1", "gpt-live-2"}}}
 	got := Options(ch, src)
-	if !reflect.DeepEqual(pairsOf(got), [][2]string{{"gpt-live-1", "gpt-live-1"}, {"gpt-live-2", "gpt-live-2"}}) {
+	// A known id keeps its built-in label; an unknown one is labelled with the id.
+	if !reflect.DeepEqual(pairsOf(got), [][2]string{{"gpt-live-1", "GPT-Live 1"}, {"gpt-live-2", "gpt-live-2"}}) {
 		t.Fatal(pairsOf(got))
 	}
 	src.VoiceModelsSaved = map[string]string{ProviderOpenAILive: "gpt-live-0"}
@@ -149,16 +152,21 @@ func TestAFailedLoadIsNotedInTheModelsHelp(t *testing.T) {
 	src := OptionSources{VoiceModelsNote: map[string]string{ProviderOpenAI: "openai models: http 401: bad key", ProviderGemini: strings.Repeat("x", 300)}}
 	views := Views(src)
 	openaiHelp := viewAt(views, "voice.openaiModel").Help
-	if !strings.HasSuffix(openaiHelp, "\nCouldn't load the list from OpenAI (openai models: http 401: bad key); showing the saved one.") ||
+	if !strings.HasSuffix(openaiHelp, "\nCouldn't load the list from OpenAI (openai models: http 401: bad key); showing the built-in list.") ||
 		!strings.HasPrefix(openaiHelp, FieldByPath("voice.openaiModel").Help) {
 		t.Fatal(openaiHelp)
 	}
 	g := viewAt(views, "voice.geminiModel").Help
-	if !strings.Contains(g, "Couldn't load the list from Google (xxx") || !strings.Contains(g, "…); showing the saved one.") || len(g) > 300 {
+	if !strings.Contains(g, "Couldn't load the list from Google (xxx") || !strings.Contains(g, "…); showing the built-in list.") || len(g) > 300 {
 		t.Fatal("a long reason is clipped:", g)
 	}
 	if h := viewAt(views, "voice.liveModel").Help; h != FieldByPath("voice.liveModel").Help {
 		t.Fatal("no note, no line:", h)
+	}
+	// A later failure over a list that loaded before: that list is what shows.
+	src.VoiceModels = map[string][]string{ProviderOpenAI: {"gpt-realtime"}}
+	if h := viewAt(Views(src), "voice.openaiModel").Help; !strings.HasSuffix(h, "(openai models: http 401: bad key); showing the last loaded list.") {
+		t.Fatal(h)
 	}
 }
 
@@ -186,5 +194,24 @@ func TestSearchFindsTheCurrentProvidersModel(t *testing.T) {
 	}
 	if !reflect.DeepEqual(found, []string{"voice.geminiModel"}) {
 		t.Fatal(found)
+	}
+}
+
+// A voice.model that names no family, with a provider this version doesn't know, has no field
+// to go to: it is dropped, and the log says so.
+func TestAnOldModelWithNowhereToGoIsLogged(t *testing.T) {
+	var buf strings.Builder
+	log.SetOutput(&buf)
+	defer log.SetOutput(os.Stderr)
+	c, err := ParseConfig([]byte(`{"voice":{"provider":"future-voice","model":"x-1"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := Default().Voice
+	if c.Voice.OpenAIModel != d.OpenAIModel || c.Voice.GeminiModel != d.GeminiModel || c.Voice.LiveModel != d.LiveModel {
+		t.Fatal(c.Voice)
+	}
+	if !strings.Contains(buf.String(), `voice.model "x-1"`) {
+		t.Fatal(buf.String())
 	}
 }

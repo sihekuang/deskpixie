@@ -449,7 +449,9 @@ func migrateVoiceModel(b []byte, c *Config) {
 	}
 	if f := c.Voice.modelField(provider); f != nil {
 		*f = m
+		return
 	}
+	log.Printf("settings: voice.model %q names no provider's model and voice.provider %q is unknown; it is dropped", m, c.Voice.Provider)
 }
 
 // SpeakUpdatesOnly: the conversation an update opens only says it, with no mic, unless the

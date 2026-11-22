@@ -5,8 +5,9 @@ import Foundation
 /// (packs bit/dino, both providers with openai-realtime current, macos-vpio, herdr/tmux, warp/iterm,
 /// one mic, no speakers), and
 /// `settings.Default()` as JSON. Generated from core/settings on 2026-10-13; pages, groups, labels, help, units
-/// and rules updated from it on 2026-10-24 (#290); voice.model became voice.openaiModel (one per
-/// provider) on 2026-11-22 (#477). Regenerate if the schema changes.
+/// and rules updated from it on 2026-10-24 (#290). On 2026-11-22 voice.model became
+/// voice.openaiModel (#477); of the three model fields (one per provider) this holds only that
+/// one, and the GPT-Live fields aren't here either. Regenerate if the schema changes.
 enum SettingsFixture {
     static let fieldsJSON = #"""
 [
