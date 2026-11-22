@@ -31,6 +31,8 @@ var modelRe = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
 type model struct {
 	baseURL      string
+	apiURL       string       // the REST API, for ListModels
+	client       *http.Client // for ListModels
 	pingEvery    time.Duration
 	idleDeadline time.Duration
 	now          func() time.Time
@@ -54,7 +56,8 @@ func New(baseURL string) voice.Model {
 	if baseURL == "" {
 		baseURL = DefaultURL
 	}
-	return &model{baseURL: baseURL, pingEvery: pingEvery, idleDeadline: idleDeadline, now: time.Now}
+	return &model{baseURL: baseURL, apiURL: DefaultAPIURL, client: http.DefaultClient,
+		pingEvery: pingEvery, idleDeadline: idleDeadline, now: time.Now}
 }
 
 func (m *model) Name() string { return Name }

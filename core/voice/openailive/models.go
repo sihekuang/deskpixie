@@ -6,7 +6,9 @@
 package openailive
 
 import (
+	"context"
 	"fmt"
+	"net/http"
 	"slices"
 	"strings"
 
@@ -17,7 +19,9 @@ const (
 	// Name is the provider's registry and secrets name (key: OPENAI_API_KEY).
 	Name       = "openai-live"
 	DefaultURL = "wss://api.openai.com/v1/live/sessions"
-	// DefaultModel is the only GPT-Live model.
+	// DefaultAPIURL is where the model list is (GET /v1/models).
+	DefaultAPIURL = "https://api.openai.com"
+	// DefaultModel is the first GPT-Live model; the account's others come from ListModels.
 	DefaultModel = "gpt-live-1"
 	// DefaultVoice is GPT-Live's default voice.
 	DefaultVoice = "marin"
@@ -33,13 +37,19 @@ var Voices = []string{
 	"vesper", "willow",
 }
 
+// IsModel reports whether id is a GPT-Live conversation model: gpt-live-…, not the
+// transcriber (gpt-live-transcribe). Checked against /v1/models on 2026-11-22.
+func IsModel(id string) bool {
+	return strings.HasPrefix(id, "gpt-live-") && !strings.Contains(id, "transcribe")
+}
+
 // Resolve returns cfg with a GPT-Live model and voice, plus a line for each setting it had to
 // replace. Settings may still hold another provider's (gpt-realtime, Puck), which OpenAI
 // refuses (#473); Gemini does the same (gemini.Resolve). An empty one takes the default
 // without a note, and a custom voice id ("voice_…") stays.
 func Resolve(cfg voice.SessionConfig) (voice.SessionConfig, []string) {
 	var notes []string
-	if m := strings.TrimSpace(cfg.Model); strings.HasPrefix(m, "gpt-live") {
+	if m := strings.TrimSpace(cfg.Model); IsModel(m) {
 		cfg.Model = m
 	} else {
 		if m != "" {
@@ -60,4 +70,27 @@ func Resolve(cfg voice.SessionConfig) (voice.SessionConfig, []string) {
 		cfg.Voice = DefaultVoice
 	}
 	return cfg, notes
+}
+
+// ListModels is the GPT-Live models apiKey can use (GET /v1/models), the default first.
+func (m *model) ListModels(ctx context.Context, apiKey string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, voice.ListTimeout)
+	defer cancel()
+	var list struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	err := voice.GetJSON(ctx, m.client, "openai models", m.apiURL+"/v1/models",
+		http.Header{"Authorization": {"Bearer " + apiKey}}, &list)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for _, d := range list.Data {
+		if IsModel(d.ID) {
+			ids = append(ids, d.ID)
+		}
+	}
+	return voice.OrderModels(ids, DefaultModel), nil
 }
