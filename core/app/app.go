@@ -1136,9 +1136,10 @@ func (a *App) setSetting(field string, value json.RawMessage) settings.Snapshot 
 		old, a.hotkey.bound = a.hotkey.bound, combo
 		a.mu.Unlock()
 	}
+	provider := a.store.Current().Voice.Provider
 	snap := a.api.Set(field, value)
-	if field == "voice.provider" && snap.SetError == nil {
-		a.refreshModels() // after Set: never under the settings lock
+	if a.store.Current().Voice.Provider != provider {
+		a.refreshModels() // set, or hand-edited and picked up by Set; never under the settings lock
 	}
 	if isHotkey {
 		a.mu.Lock()
@@ -1202,8 +1203,8 @@ func (a *App) Register(r Registrar) {
 		return a.api.Snapshot(), nil
 	})
 	r.Register("settings.reload", func(json.RawMessage) (any, error) {
-		a.refreshModels()
 		snap, _ := a.api.Reload()
+		a.refreshModels() // after the reload: a hand-edited voice.provider is the one to load
 		return snap, nil
 	})
 	r.Register("settings.set", func(args json.RawMessage) (any, error) {

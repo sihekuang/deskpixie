@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/sihekuang/deskpixie/core/settings"
 	"github.com/sihekuang/deskpixie/core/voice"
@@ -191,5 +192,65 @@ func TestTheRealCatalogsAreTheAdapters(t *testing.T) {
 	}
 	if a.catalog("nope") != nil {
 		t.Fatal("an unknown provider lists nothing")
+	}
+}
+
+// withModelsFile writes <app data>/voice/models.json before the app starts.
+func withModelsFile(lists map[string]voice.ModelList) harnessOpt {
+	return func(d *Deps, h *harness) {
+		b, err := json.Marshal(lists)
+		if err == nil {
+			err = os.MkdirAll(filepath.Join(d.Paths.AppSupport, "voice"), 0o700)
+		}
+		if err == nil {
+			err = os.WriteFile(filepath.Join(d.Paths.AppSupport, "voice", "models.json"), b, 0o600)
+		}
+		if err != nil {
+			h.t.Fatal(err)
+		}
+	}
+}
+
+// At launch Swift hands over the stored keys: lists loaded less than an hour ago (in an
+// earlier run) aren't loaded again.
+func TestTheLaunchKeyPushLoadsNoFreshList(t *testing.T) {
+	f := &fakeLists{}
+	recent := time.Now().Add(-10 * time.Minute)
+	h := newHarness(t, withLists(f), withModelsFile(map[string]voice.ModelList{
+		settings.ProviderOpenAI:     {Models: []string{"gpt-realtime"}, Fetched: recent},
+		settings.ProviderOpenAILive: {Models: []string{"gpt-live-1"}, Fetched: recent},
+	}))
+	h.call("secrets.keychain", map[string]any{"values": map[string]string{"OPENAI_API_KEY": "sk-stored"}})
+	h.call("settings.snapshot", nil)
+	h.app.models.Wait()
+	if len(f.calls) != 0 {
+		t.Fatal(f.calls)
+	}
+	if h.settingsChanged() != 0 {
+		t.Fatal("nothing changed, nothing to tell")
+	}
+}
+
+// A hand edit of voice.provider, picked up by a reload or a set, loads the new provider's list.
+func TestAHandEditedProviderLoadsItsList(t *testing.T) {
+	for _, method := range []string{"settings.reload", "settings.set"} {
+		f := &fakeLists{models: map[string][]string{settings.ProviderGemini: {"gemini-3.8-live"}}}
+		h := newHarness(t, withLists(f), withKeys(map[string]string{"GEMINI_API_KEY": "g", "OPENAI_API_KEY": "o"}))
+		h.call("settings.snapshot", nil)
+		h.app.models.Wait()
+		c := settings.Default()
+		c.Voice.Provider = settings.ProviderGemini
+		if err := c.Save(filepath.Join(h.dir, "settings.json")); err != nil {
+			t.Fatal(err)
+		}
+		if method == "settings.reload" {
+			h.call(method, nil)
+		} else {
+			h.call(method, map[string]any{"field": "scale", "value": 4})
+		}
+		h.app.models.Wait()
+		if f.callsFor(settings.ProviderGemini) != 1 {
+			t.Fatal(method, f.calls)
+		}
 	}
 }
