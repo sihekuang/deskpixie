@@ -123,6 +123,33 @@ func TestClientResendsStateOnRegister(t *testing.T) {
 	waitEvent(t, d.events, "resent status", func(m wire.Msg) bool { return m.Event == "status" && m.Status == "working" })
 }
 
+// A Send while registering doesn't go out before the resend as well, so the state isn't sent
+// twice (#475): OnRegistered runs in that window, so a Send from it stands for any.
+func TestClientSendWhileRegisteringIsNotSentTwice(t *testing.T) {
+	d, sock := newFakeDaemon(t, "")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	session := wire.Msg{Kind: wire.KindEvent, Event: "session", SessionID: "s1"}
+	var c *Client
+	c = &Client{Sock: sock, Hello: wire.Msg{Kind: wire.KindRegister},
+		OnRegistered: func(wire.Msg) { c.Send(session) },
+		OnCommand:    func(wire.Msg) wire.Msg { return wire.Msg{} },
+		Resend: func() []wire.Msg {
+			return []wire.Msg{session, {Kind: wire.KindEvent, Event: "status", Status: "working"}}
+		}}
+	go c.Run(ctx)
+	n := 0
+	waitEvent(t, d.events, "resent status", func(m wire.Msg) bool {
+		if m.Event == "session" {
+			n++
+		}
+		return m.Event == "status"
+	})
+	if n != 1 {
+		t.Fatalf("session sent %d times", n)
+	}
+}
+
 func TestRefusedRunsStandalone(t *testing.T) {
 	_, sock := newFakeDaemon(t, "already connected")
 	refused := make(chan string, 1)

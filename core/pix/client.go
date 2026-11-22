@@ -79,22 +79,21 @@ func (c *Client) connect(ctx context.Context) (registered, refused bool) {
 		}
 		return false, true
 	}
-	c.mu.Lock()
-	c.conn = conn
-	c.Hello.Address = reply.Address // asked for again after a reconnect
-	c.mu.Unlock()
 	if c.OnRegistered != nil {
 		c.OnRegistered(reply)
 	}
+	// Connected and resent under one lock: a Send before it is dropped (the resend carries the
+	// state), one meanwhile (a question gone) waits and follows it, so nothing goes twice (#475).
+	c.mu.Lock()
+	c.conn = conn
+	c.Hello.Address = reply.Address // asked for again after a reconnect
 	if c.Resend != nil {
-		// Taken and written under mu: a Send meanwhile (a question gone) waits and follows it.
-		c.mu.Lock()
 		for _, m := range c.Resend() {
 			c.conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
 			wire.Encode(c.conn, m)
 		}
-		c.mu.Unlock()
 	}
+	c.mu.Unlock()
 	for {
 		m, err := dec.Next()
 		if err != nil {
