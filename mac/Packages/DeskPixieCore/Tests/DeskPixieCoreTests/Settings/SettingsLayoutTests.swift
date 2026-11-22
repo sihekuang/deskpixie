@@ -145,14 +145,16 @@ final class SettingsLayoutTests: XCTestCase {
         XCTAssertEqual(spec("canvas.autoOpen", ["canvas": ["autoOpen": true]]).control, .switch(on: true))
     }
 
-    // Not a Rust port: voice.model, voice.voice and agent.model are free text there; here they are
-    // pop-ups of suggested values (#45). A value not offered stays selected as "(not found)".
+    // Not a Rust port: voice.model (here one per provider, #477), voice.voice and agent.model are
+    // free text there; here they are pop-ups of suggested values (#45). A value not offered stays
+    // selected as "(not found)".
     func test_model_and_voice_pickers_offer_the_providers_choices() {
-        guard case .menu(let models, let m) = spec("voice.model", defaults).control,
+        guard case .menu(let models, let m) = spec("voice.openaiModel", defaults).control,
               case .menu(let voices, let v) = spec("voice.voice", defaults).control else {
             return XCTFail("model and voice are pop-ups")
         }
-        XCTAssertEqual(models.map(\.label), ["GPT Realtime", "GPT Realtime mini"])
+        XCTAssertEqual(models.map(\.label), ["GPT Realtime", "GPT Realtime 2", "GPT Realtime 2.1",
+                                              "GPT Realtime mini", "GPT Realtime 2.1 mini"])
         XCTAssertEqual(m.map { models[$0].value }, "gpt-realtime")
         XCTAssertEqual(voices.count, 10)
         XCTAssertEqual(v.map { voices[$0].value }, "marin")
@@ -160,7 +162,7 @@ final class SettingsLayoutTests: XCTestCase {
     }
 
     func test_a_custom_model_or_voice_shows_as_not_found_and_stays_selected() {
-        let custom = spec("voice.model", ["voice": ["model": "gpt-realtime-2025-08-28"]])
+        let custom = spec("voice.openaiModel", ["voice": ["openaiModel": "gpt-realtime-2025-08-28"]])
         guard case .menu(let items, let selected) = custom.control else { return XCTFail("pop-up") }
         XCTAssertEqual(items.last, L.MenuItem(label: "gpt-realtime-2025-08-28 (not found)",
                                               value: "gpt-realtime-2025-08-28", enabled: false))
@@ -282,7 +284,7 @@ final class SettingsLayoutTests: XCTestCase {
         XCTAssertEqual(L.bannerText("line 3"), "settings.json has a syntax error; fix it or reset it (line 3)")
         let fields = SettingsFixture.fields
         XCTAssertNil(L.restartText([], fields: fields))
-        XCTAssertEqual(L.restartText(["voice.provider", "voice.model"], fields: fields),
+        XCTAssertEqual(L.restartText(["voice.provider", "voice.openaiModel"], fields: fields),
                        "Changed: Voice service, Model")
         XCTAssertEqual(L.saveNotice("disk full"), "Couldn't save settings: disk full")
     }

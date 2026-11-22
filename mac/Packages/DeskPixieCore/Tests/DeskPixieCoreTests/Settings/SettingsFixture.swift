@@ -5,7 +5,8 @@ import Foundation
 /// (packs bit/dino, both providers with openai-realtime current, macos-vpio, herdr/tmux, warp/iterm,
 /// one mic, no speakers), and
 /// `settings.Default()` as JSON. Generated from core/settings on 2026-10-13; pages, groups, labels, help, units
-/// and rules updated from it on 2026-10-24 (#290). Regenerate if the schema changes.
+/// and rules updated from it on 2026-10-24 (#290); voice.model became voice.openaiModel (one per
+/// provider) on 2026-11-22 (#477). Regenerate if the schema changes.
 enum SettingsFixture {
     static let fieldsJSON = #"""
 [
@@ -161,17 +162,35 @@ enum SettingsFixture {
   ]
  },
  {
-  "path": "voice.model",
+  "path": "voice.openaiModel",
   "section": "Voice",
   "group": "Voice service",
   "label": "Model",
-  "help": "The voice model. The choices follow the voice service.",
+  "help": "The OpenAI Realtime model Pixie talks with.",
   "kind": {
    "type": "choice",
    "options": [
     {
      "value": "gpt-realtime",
      "label": "GPT Realtime",
+     "platforms": [
+      "macos",
+      "windows",
+      "linux"
+     ]
+    },
+    {
+     "value": "gpt-realtime-2",
+     "label": "GPT Realtime 2",
+     "platforms": [
+      "macos",
+      "windows",
+      "linux"
+     ]
+    },
+    {
+     "value": "gpt-realtime-2.1",
+     "label": "GPT Realtime 2.1",
      "platforms": [
       "macos",
       "windows",
@@ -186,6 +205,15 @@ enum SettingsFixture {
       "windows",
       "linux"
      ]
+    },
+    {
+     "value": "gpt-realtime-2.1-mini",
+     "label": "GPT Realtime 2.1 mini",
+     "platforms": [
+      "macos",
+      "windows",
+      "linux"
+     ]
     }
    ]
   },
@@ -194,6 +222,14 @@ enum SettingsFixture {
    "macos",
    "windows",
    "linux"
+  ],
+  "visibleWhen": [
+   {
+    "key": "voice.provider",
+    "in": [
+     "openai-realtime"
+    ]
+   }
   ]
  },
  {
@@ -1091,7 +1127,7 @@ enum SettingsFixture {
 """#
 
     static let defaultsJSON = #"""
-{"hotkey": "ctrl+alt+Space", "pack": "bit", "scale": 8, "position": null, "proximityFade": {"enabled": false, "radius": 150}, "voice": {"provider": "openai-realtime", "audio": "macos-vpio", "model": "gpt-realtime", "voice": "marin", "chimes": true, "idleTimeoutSecs": 7, "personaPath": null, "noiseFilter": false, "noiseModel": "hush", "noisyRoom": false, "inputDevice": null, "outputDevice": null, "homeCity": null}, "canvas": {"autoOpen": true, "keep": 50, "window": null}, "agent": {"enabled": true, "sessionHost": "herdr", "session": "deskpixie", "terminal": "warp", "herdrPath": null, "tmuxPath": null, "model": null, "warm": false, "port": 48217, "keepPanesOnQuit": true, "holdOpenSecs": 180, "permissionTimeoutSecs": 120, "notifyPerMinute": 4, "narration": true, "projectsRoot": "~/Documents/deskpixie", "workers": {"enabled": false, "max": 4, "kinds": ["claude", "codex"]}}}
+{"hotkey": "ctrl+alt+Space", "pack": "bit", "scale": 8, "position": null, "proximityFade": {"enabled": false, "radius": 150}, "voice": {"provider": "openai-realtime", "audio": "macos-vpio", "openaiModel": "gpt-realtime", "geminiModel": "gemini-3.8-live", "liveModel": "gpt-live-1", "voice": "marin", "chimes": true, "idleTimeoutSecs": 7, "personaPath": null, "noiseFilter": false, "noiseModel": "hush", "noisyRoom": false, "inputDevice": null, "outputDevice": null, "homeCity": null}, "canvas": {"autoOpen": true, "keep": 50, "window": null}, "agent": {"enabled": true, "sessionHost": "herdr", "session": "deskpixie", "terminal": "warp", "herdrPath": null, "tmuxPath": null, "model": null, "warm": false, "port": 48217, "keepPanesOnQuit": true, "holdOpenSecs": 180, "permissionTimeoutSecs": 120, "notifyPerMinute": 4, "narration": true, "projectsRoot": "~/Documents/deskpixie", "workers": {"enabled": false, "max": 4, "kinds": ["claude", "codex"]}}}
 """#
 
     /// Go `ExtraViews(Macos)`.

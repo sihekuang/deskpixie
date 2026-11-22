@@ -147,7 +147,7 @@ final class SettingsModelTests: XCTestCase {
                     "kind":{"type":"int","min":1,"max":1000,"menu":false,"unit":"pages"},"apply":"restart",
                     "enabledWhen":[{"key":"agent.enabled","in":["true"]}]}],
          "extras":[{"id":"resetPosition","section":"General","group":"Look"}],
-         "restartPending":["voice.model"],"fileError":null,"warning":"w","seq":42,
+         "restartPending":["voice.openaiModel"],"fileError":null,"warning":"w","seq":42,
          "setError":{"kind":"invalid","errors":[{"path":"scale","message":"bad"}]}}
         """#
         let s = try JSONDecoder().decode(SettingsSnapshot.self, from: Data(json.utf8))
@@ -163,7 +163,7 @@ final class SettingsModelTests: XCTestCase {
         XCTAssertTrue(s.fields.last!.isEnabled(["agent": ["enabled": true]]))
         XCTAssertTrue(s.fields.first!.isEnabled([:]))
         XCTAssertEqual(s.extras, [SettingsExtraPlace(id: "resetPosition", section: .general, group: "Look")])
-        XCTAssertEqual(s.restartPending, ["voice.model"])
+        XCTAssertEqual(s.restartPending, ["voice.openaiModel"])
         XCTAssertNil(s.fileError)
         XCTAssertEqual(s.warning, "w")
         XCTAssertEqual(s.setError, .invalid([.init(path: "scale", message: "bad")]))
@@ -321,7 +321,7 @@ final class SettingsModelTests: XCTestCase {
     func test_chrome_follows_the_snapshot() {
         client.fileError = "line 3"
         client.warning = "Size couldn't be applied now (x); it applies after a restart."
-        client.restartPending = ["voice.provider", "voice.model"]
+        client.restartPending = ["voice.provider", "voice.openaiModel"]
         model.focusGained()
         XCTAssertFalse(model.enabled, "a broken file disables the controls")
         XCTAssertEqual(model.bannerText, "settings.json has a syntax error; fix it or reset it (line 3)")
