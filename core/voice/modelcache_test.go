@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -355,20 +356,103 @@ func TestAFetchedTimeInTheFutureIsStale(t *testing.T) {
 	}
 }
 
-// RefreshNow (a key saved or removed) loads even a fresh list again, and right after a failure.
-func TestRefreshNowIgnoresTheWaits(t *testing.T) {
-	g := newRig(t, keys{"p": "k"})
+// RefreshNow (a key saved or removed) loads again only when the key isn't the one that loaded
+// the list; the same key keeps the waits.
+func TestRefreshNowLoadsAgainForAnotherKey(t *testing.T) {
+	k := keys{"p": "k1"}
+	g := newRig(t, k)
 	g.cat.set([]string{"m1"}, nil)
 	g.refresh()
 	g.r.RefreshNow("p")
 	g.r.Wait()
+	if g.cat.count() != 1 {
+		t.Fatal("the same key loads nothing:", g.cat.count())
+	}
+	k["p"] = "k2"
+	g.r.RefreshNow("p")
+	g.r.Wait()
+	if g.cat.count() != 2 || g.cat.keys[1] != "k2" {
+		t.Fatal(g.cat.count(), g.cat.keys)
+	}
 	g.cat.set(nil, errors.New("x"))
+	k["p"] = "k3"
 	g.r.RefreshNow("p")
 	g.r.Wait()
-	g.r.RefreshNow("p")
+	g.r.RefreshNow("p") // the same key right after its failure: the minute's wait holds
 	g.r.Wait()
-	if g.cat.count() != 4 {
+	if g.cat.count() != 3 {
 		t.Fatal(g.cat.count())
+	}
+}
+
+// At launch the app hands over the stored keys: a key it can't tell from the one that loaded
+// a fresh list on disk loads nothing, and becomes the key that list is from.
+func TestTheFirstKeyOverAFreshListOnDiskLoadsNothing(t *testing.T) {
+	k := keys{"p": "k1"}
+	g := newRig(t, k)
+	g.r.Cache.set("p", ModelList{Models: []string{"m1"}, Fetched: g.clock.Now().Add(-time.Minute)})
+	g.r.RefreshNow("p")
+	g.r.Wait()
+	if g.cat.count() != 0 {
+		t.Fatal(g.cat.count())
+	}
+	k["p"] = "k2"
+	g.r.RefreshNow("p")
+	g.r.Wait()
+	if g.cat.count() != 1 {
+		t.Fatal("a new key after that loads:", g.cat.count())
+	}
+}
+
+// A key changed while its provider's list is loading loads again with the new key when that
+// load ends; a key removed then ends with the no-key note.
+func TestAKeyChangedDuringALoadLoadsAgainAfterIt(t *testing.T) {
+	k := keys{"p": "k1"}
+	g := newRig(t, k)
+	gate := make(chan struct{})
+	g.cat.gate = gate
+	g.cat.set([]string{"m1"}, nil)
+	g.r.Refresh("p")
+	k["p"] = "k2"
+	g.r.RefreshNow("p")
+	g.r.RefreshNow("p")
+	close(gate)
+	g.r.Wait()
+	if g.cat.count() != 2 || g.cat.keys[1] != "k2" {
+		t.Fatal(g.cat.count(), g.cat.keys)
+	}
+
+	g = newRig(t, keys{"p": "k1"})
+	gate = make(chan struct{})
+	g.cat.gate = gate
+	g.cat.set([]string{"m1"}, nil)
+	g.r.Refresh("p")
+	delete(g.r.Secrets.(keys), "p")
+	g.r.RefreshNow("p")
+	close(gate)
+	g.r.Wait()
+	if got := g.r.Cache.Get("p"); got.Error != ModelsNoKey || !reflect.DeepEqual(got.Models, []string{"m1"}) || g.cat.count() != 1 {
+		t.Fatal(got, g.cat.count())
+	}
+}
+
+// A provider's error may show the key it was sent, masked (OpenAI) or whole (Google): no
+// key-shaped token is stored.
+func TestKeyShapedTokensAreNotStored(t *testing.T) {
+	for _, msg := range []string{
+		"openai models: http 401: Incorrect API key provided: sk-abc1*****wxyz.",
+		"openai models: http 401: Incorrect API key provided: sk-proj-AbC_d-123***************xyZ9. You can find…",
+		"gemini models: http 400: API key AIzaSyD-abc_123XYZ not valid.",
+	} {
+		g := newRig(t, keys{"p": "k"})
+		g.cat.set(nil, errors.New(msg))
+		g.refresh()
+		got := g.r.Cache.Get("p").Error
+		for _, bad := range []string{"abc1", "wxyz", "AbC_d", "xyZ9", "AIza", "123XYZ"} {
+			if strings.Contains(got, bad) || !strings.Contains(got, "***") {
+				t.Fatal(got)
+			}
+		}
 	}
 }
 

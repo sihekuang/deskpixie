@@ -5,12 +5,14 @@ package voice
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sync"
 	"time"
@@ -117,69 +119,97 @@ type Refresher struct {
 	// Now is the clock (nil: time.Now).
 	Now func() time.Time
 
-	mu       sync.Mutex
-	ctx      context.Context // ends at Close; the loads run under it
-	cancel   context.CancelFunc
-	closed   bool
-	inFlight map[string]bool
-	tried    map[string]time.Time // the last failed load, per provider
-	wg       sync.WaitGroup       // the loads and OnChange calls running
+	mu      sync.Mutex
+	ctx     context.Context // ends at Close; the loads run under it
+	cancel  context.CancelFunc
+	closed  bool
+	loading map[string]keySum    // the loads running: provider → the key it uses
+	pending map[string]bool      // a key changed while its provider was loading: load again after
+	keyOf   map[string]keySum    // the key each provider's list is from (in memory only)
+	tried   map[string]time.Time // the last failed load, per provider
+	wg      sync.WaitGroup       // the loads and OnChange calls running
 }
+
+// keySum stands for a key, so the Refresher can tell keys apart without keeping them.
+type keySum [sha256.Size]byte
 
 // Refresh loads provider's list in the background, unless it is loading, fresh, or failed
 // less than ModelListRetry ago. Without a key nothing is fetched and the error is ModelsNoKey.
 func (r *Refresher) Refresh(provider string) { r.refresh(provider, false) }
 
-// RefreshNow is Refresh without the waits (a key was saved or removed); one load still runs
-// at a time.
+// RefreshNow is for a key saved or removed: when provider's key isn't the one its list is
+// from, it loads without the waits (after the load running, if any); the same key is a
+// Refresh. A key first seen over a fresh list (one loaded in an earlier run) is taken as the
+// one it is from.
 func (r *Refresher) RefreshNow(provider string) { r.refresh(provider, true) }
 
 func (r *Refresher) refresh(provider string, force bool) {
-	cat := r.Catalog(provider)
-	if cat == nil {
-		return
-	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.closed || r.inFlight[provider] {
+	r.refreshLocked(provider, force)
+}
+
+func (r *Refresher) refreshLocked(provider string, force bool) {
+	cat := r.Catalog(provider)
+	if cat == nil || r.closed {
 		return
 	}
 	if r.ctx == nil {
 		r.ctx, r.cancel = context.WithCancel(context.Background())
-		r.inFlight, r.tried = map[string]bool{}, map[string]time.Time{}
+		r.loading, r.pending, r.keyOf, r.tried = map[string]keySum{}, map[string]bool{}, map[string]keySum{}, map[string]time.Time{}
 	}
-	now := r.now()
-	cur := r.Cache.Get(provider)
 	key, ok := r.Secrets.APIKey(provider)
+	var sum keySum
+	if ok {
+		sum = sha256.Sum256([]byte(key.Expose()))
+	}
+	if running, busy := r.loading[provider]; busy {
+		if force && (!ok || sum != running) {
+			r.pending[provider] = true
+		}
+		return
+	}
+	cur := r.Cache.Get(provider)
 	if !ok {
+		delete(r.keyOf, provider)
+		delete(r.tried, provider) // no key isn't a failed load: a key typed in loads at once
 		cur.Error = ModelsNoKey
 		if r.Cache.set(provider, cur) {
 			r.notifyLocked(provider)
 		}
 		return
 	}
+	now := r.now()
 	fresh := cur.Error == "" && !cur.Fetched.IsZero() && !cur.Fetched.After(now) && now.Sub(cur.Fetched) < ModelListFresh
 	retryLater := cur.Error != "" && now.Sub(r.tried[provider]) < ModelListRetry
-	if !force && (fresh || retryLater) {
+	known, has := r.keyOf[provider]
+	if !has && fresh {
+		r.keyOf[provider], known, has = sum, sum, true
+	}
+	if force && has && known != sum {
+		fresh, retryLater = false, false
+	}
+	if fresh || retryLater {
 		return
 	}
-	r.inFlight[provider] = true
+	r.loading[provider] = sum
 	r.wg.Add(1)
-	go r.load(r.ctx, provider, cat, key)
+	go r.load(r.ctx, provider, cat, key, sum)
 }
 
-func (r *Refresher) load(ctx context.Context, provider string, cat ModelCatalog, key Secret) {
+func (r *Refresher) load(ctx context.Context, provider string, cat ModelCatalog, key Secret, sum keySum) {
 	defer r.wg.Done()
 	models, err := cat.ListModels(ctx, key.Expose())
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	delete(r.inFlight, provider)
+	delete(r.loading, provider)
 	if ctx.Err() != nil {
 		return // closed: what a cancelled load says isn't the provider's answer
 	}
+	r.keyOf[provider] = sum
 	l := r.Cache.Get(provider)
 	if err != nil {
-		l.Error = err.Error()
+		l.Error = blankKeys(err.Error())
 		r.tried[provider] = r.now()
 	} else {
 		l = ModelList{Models: models, Fetched: r.now()}
@@ -187,7 +217,18 @@ func (r *Refresher) load(ctx context.Context, provider string, cat ModelCatalog,
 	if r.Cache.set(provider, l) {
 		r.notifyLocked(provider)
 	}
+	if r.pending[provider] {
+		delete(r.pending, provider)
+		r.refreshLocked(provider, true) // with the key as it is now
+	}
 }
+
+// keyLike is a token shaped like a provider's key: OpenAI's sk-… (masked in its errors:
+// sk-abc1****wxyz) and Google's AIza….
+var keyLike = regexp.MustCompile(`(sk-|AIza)[A-Za-z0-9_*\-]+`)
+
+// blankKeys is msg with every key-shaped token replaced by ***.
+func blankKeys(msg string) string { return keyLike.ReplaceAllString(msg, "***") }
 
 // notifyLocked tells OnChange about provider on a goroutine of its own (r.mu held).
 func (r *Refresher) notifyLocked(provider string) {
