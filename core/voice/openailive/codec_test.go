@@ -145,7 +145,7 @@ func TestSessionStartUsesGPTLiveModelAndVoice(t *testing.T) {
 func TestResolveNotesReplacements(t *testing.T) {
 	cfg, notes := Resolve(voice.SessionConfig{Model: "models/gemini-3.8-live", Voice: "Puck"})
 	if cfg.Model != DefaultModel || cfg.Voice != DefaultVoice || len(notes) != 2 ||
-		notes[0] != `voice.model "models/gemini-3.8-live" is not a GPT-Live model; using gpt-live-1` ||
+		notes[0] != `voice.liveModel "models/gemini-3.8-live" is not a GPT-Live model; using gpt-live-1` ||
 		notes[1] != `voice.voice "Puck" is not a GPT-Live voice; using marin` {
 		t.Fatalf("%+v %q", cfg, notes)
 	}

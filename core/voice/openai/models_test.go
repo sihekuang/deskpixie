@@ -48,7 +48,7 @@ func TestTheFamilyIsTheConversationModelsOfTheRealList(t *testing.T) {
 func TestResolveReplacesAnotherProvidersModel(t *testing.T) {
 	for _, m := range []string{"gpt-live-1", "gemini-3.8-live", "gpt-realtime-translate", "gpt-4o"} {
 		c, notes := Resolve(voice.SessionConfig{Model: m})
-		if c.Model != DefaultModel || len(notes) != 1 || notes[0] != `voice.model "`+m+`" is not an OpenAI Realtime model; using gpt-realtime` {
+		if c.Model != DefaultModel || len(notes) != 1 || notes[0] != `voice.openaiModel "`+m+`" is not an OpenAI Realtime model; using gpt-realtime` {
 			t.Errorf("%q: %q %q", m, c.Model, notes)
 		}
 	}

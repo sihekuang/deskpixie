@@ -3,6 +3,7 @@ package gemini
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -113,14 +114,23 @@ func TestListModelsWantsBidi(t *testing.T) {
 	}
 }
 
-func TestListModelsStopsOnARepeatedPageToken(t *testing.T) {
+// A list that repeats a page or never ends is an error, not part of a list.
+func TestListModelsRefusesAListThatDoesntEnd(t *testing.T) {
 	n := 0
 	m := listServer(t, func(w http.ResponseWriter, r *http.Request) {
 		n++
-		json.NewEncoder(w).Encode(map[string]any{"models": []listedModel{}, "nextPageToken": "same"})
+		json.NewEncoder(w).Encode(map[string]any{"models": []listedModel{{Name: "models/gemini-9-live", Methods: []string{"bidiGenerateContent"}}}, "nextPageToken": "same"})
 	})
-	if _, err := m.ListModels(context.Background(), "k"); err != nil || n != 2 {
-		t.Fatal(n, err)
+	if got, err := m.ListModels(context.Background(), "k"); err == nil || err.Error() != "gemini models: the list repeats" || got != nil || n != 2 {
+		t.Fatal(got, err, n)
+	}
+	n = 0
+	m = listServer(t, func(w http.ResponseWriter, r *http.Request) {
+		n++
+		json.NewEncoder(w).Encode(map[string]any{"models": []listedModel{}, "nextPageToken": fmt.Sprint("p", n)})
+	})
+	if got, err := m.ListModels(context.Background(), "k"); err == nil || err.Error() != "gemini models: too many pages" || got != nil || n != listPages {
+		t.Fatal(got, err, n)
 	}
 }
 

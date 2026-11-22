@@ -2,9 +2,10 @@ package gemini
 
 // Which Gemini model and voice a session uses. Pure. Port of voice-gemini/src/models.rs.
 //
-// voice.model and voice.voice in settings default to OpenAI values (gpt-realtime, marin).
-// Switching only voice.provider to gemini-live must still work, so anything that is not a
-// Gemini model id or a Gemini voice is replaced by the defaults here and never sent to Google.
+// voice.voice in settings defaults to an OpenAI voice (marin), and voice.geminiModel may hold
+// anything typed or migrated (#477). Switching only voice.provider to gemini-live must still
+// work, so anything that is not a Gemini Live model id or a Gemini voice is replaced by the
+// defaults here and never sent to Google.
 //
 // Models: https://ai.google.dev/gemini-api/docs/models lists gemini-3.8-live as the stable
 // default Live model (gemini-3.1-flash-live-preview is the legacy preview).
@@ -13,6 +14,7 @@ package gemini
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -53,7 +55,7 @@ type Substitution struct {
 
 func (s Substitution) Describe() string {
 	if s.Kind == SubModel {
-		return fmt.Sprintf("voice.model %q is not a Gemini model; using %s", s.Requested, s.Used)
+		return fmt.Sprintf("voice.geminiModel %q is not a Gemini model; using %s", s.Requested, s.Used)
 	}
 	return fmt.Sprintf("voice.voice %q is not a Gemini voice; using %s", s.Requested, s.Used)
 }
@@ -104,7 +106,7 @@ func Resolve(cfg voice.SessionConfig) (voice.SessionConfig, []Substitution) {
 	return out, subs
 }
 
-// listPages bounds how many pages ListModels follows.
+// listPages bounds how many pages ListModels follows; a longer list is an error.
 const listPages = 20
 
 // ListModels is the Live models apiKey can use (GET /v1beta/models, every page), the
@@ -113,6 +115,7 @@ func (m *model) ListModels(ctx context.Context, apiKey string) ([]string, error)
 	ctx, cancel := context.WithTimeout(ctx, voice.ListTimeout)
 	defer cancel()
 	var ids []string
+	seen := map[string]bool{}
 	token := ""
 	for range listPages {
 		q := url.Values{"pageSize": {"1000"}}
@@ -136,10 +139,14 @@ func (m *model) ListModels(ctx context.Context, apiKey string) ([]string, error)
 				ids = append(ids, id)
 			}
 		}
-		if page.NextPageToken == "" || page.NextPageToken == token {
-			break
+		if page.NextPageToken == "" {
+			return voice.OrderModels(ids, DefaultModel), nil
 		}
+		if seen[page.NextPageToken] {
+			return nil, errors.New("gemini models: the list repeats")
+		}
+		seen[page.NextPageToken] = true
 		token = page.NextPageToken
 	}
-	return voice.OrderModels(ids, DefaultModel), nil
+	return nil, errors.New("gemini models: too many pages")
 }

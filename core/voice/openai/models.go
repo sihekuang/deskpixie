@@ -40,7 +40,7 @@ func Resolve(cfg voice.SessionConfig) (voice.SessionConfig, []string) {
 		cfg.Model = m
 	} else {
 		if m != "" {
-			notes = append(notes, fmt.Sprintf("voice.model %q is not an OpenAI Realtime model; using %s", cfg.Model, DefaultModel))
+			notes = append(notes, fmt.Sprintf("voice.openaiModel %q is not an OpenAI Realtime model; using %s", cfg.Model, DefaultModel))
 		}
 		cfg.Model = DefaultModel
 	}
