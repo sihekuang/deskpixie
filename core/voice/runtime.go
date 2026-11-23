@@ -160,6 +160,7 @@ const (
 	ctlWithdrawHeld
 	ctlOpenToSpeak
 	ctlPlayClip
+	ctlAppendClip
 	ctlStopClip
 )
 
@@ -414,6 +415,12 @@ func (r *Runtime) PlayClip(pcm []int16) bool {
 	}
 	r.control(control{kind: ctlPlayClip, clip: append([]int16(nil), pcm...)})
 	return true
+}
+
+// AppendClip adds pcm to the end of the clip PlayClip started (a preview still arriving); nothing
+// once StopClip or a conversation ended it.
+func (r *Runtime) AppendClip(pcm []int16) {
+	r.control(control{kind: ctlAppendClip, clip: append([]int16(nil), pcm...)})
 }
 
 // StopClip stops a clip PlayClip started; it leaves a conversation's audio alone.
@@ -718,6 +725,10 @@ func (r *Runtime) onControl(c control) {
 			r.pb.flush()
 			r.pb.enqueue(c.clip)
 			r.clip = true
+		}
+	case ctlAppendClip:
+		if r.clip && r.conv.Phase() == PhaseIdle {
+			r.pb.enqueue(c.clip)
 		}
 	case ctlStopClip:
 		if r.clip {

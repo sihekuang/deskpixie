@@ -67,6 +67,10 @@ type Previews struct {
 	Timeout time.Duration
 	// Settle is how long to wait for more of the line after a reply ends (0: previewSettle).
 	Settle time.Duration
+	// Log gets one line per clip made, with its timings (optional).
+	Log *VoiceLog
+	// Now is the clock (nil: time.Now).
+	Now func() time.Time
 }
 
 // Cached is the kept clip of voice, if there is one.
@@ -88,13 +92,18 @@ func (p *Previews) Cached(provider, model, voice string) ([]int16, bool) {
 }
 
 // Get is voice's clip: the kept one, or else one made now by the provider (and kept when it is
-// whole). ErrPreviewCancelled when ctx ends first.
-func (p *Previews) Get(ctx context.Context, provider, model, voice string) ([]int16, error) {
+// whole). onAudio (optional) gets the clip as it comes, to play it at once: the kept one in one
+// piece, a new one piece by piece as the provider sends it. ErrPreviewCancelled when ctx ends
+// first.
+func (p *Previews) Get(ctx context.Context, provider, model, voice string, onAudio func([]int16)) ([]int16, error) {
 	path, err := p.path(provider, model, voice)
 	if err != nil {
 		return nil, err
 	}
 	if pcm, ok := p.Cached(provider, model, voice); ok {
+		if onAudio != nil {
+			onAudio(pcm)
+		}
 		return pcm, nil
 	}
 	newModel := p.Model
@@ -120,7 +129,13 @@ func (p *Previews) Get(ctx context.Context, provider, model, voice string) ([]in
 	if settle <= 0 {
 		settle = previewSettle
 	}
-	pcm, err := makePreview(ctx, m, SessionConfig{Model: model, Voice: voice, Instructions: previewInstructions}, key, PreviewLine(voice), settle)
+	now := p.Now
+	if now == nil {
+		now = time.Now
+	}
+	t := previewTimes{start: now(), now: now}
+	pcm, err := makePreview(ctx, m, SessionConfig{Model: model, Voice: voice, Instructions: previewInstructions}, key, PreviewLine(voice), settle, &t, onAudio)
+	p.Log.Printf("voice preview %s %s %s: %s", provider, model, voice, t.summary(len(pcm), err))
 	if err != nil {
 		if parent.Err() != nil {
 			return nil, ErrPreviewCancelled
@@ -146,8 +161,37 @@ func (p *Previews) path(provider, model, voice string) (string, error) {
 	return filepath.Join(p.Dir, provider, model, fmt.Sprintf("%s-v%d.pcm", voice, previewVersion)), nil
 }
 
-// makePreview opens a session in cfg's voice, has it say line, and returns the audio.
-func makePreview(ctx context.Context, m Model, cfg SessionConfig, key Secret, line string, settle time.Duration) ([]int16, error) {
+// previewTimes is how making one clip went, for the log: when the session was ready, the
+// first audio came and the line was whole, from the start.
+type previewTimes struct {
+	start               time.Time
+	now                 func() time.Time
+	ready, first, whole time.Duration
+}
+
+func (t *previewTimes) mark(d *time.Duration) {
+	if *d == 0 {
+		*d = t.now().Sub(t.start)
+	}
+}
+
+func (t *previewTimes) summary(samples int, err error) string {
+	ms := func(d time.Duration) string {
+		if d == 0 {
+			return "-"
+		}
+		return fmt.Sprintf("%d ms", d.Milliseconds())
+	}
+	out := fmt.Sprintf("ready %s, first audio %s, whole %s (%d ms of audio)", ms(t.ready), ms(t.first), ms(t.whole), samples*1000/audio.SampleRate)
+	if err != nil {
+		out += ", failed: " + err.Error()
+	}
+	return out
+}
+
+// makePreview opens a session in cfg's voice, has it say line, and returns the audio, handing
+// each piece to onAudio (optional) as it comes.
+func makePreview(ctx context.Context, m Model, cfg SessionConfig, key Secret, line string, settle time.Duration, t *previewTimes, onAudio func([]int16)) ([]int16, error) {
 	s, err := m.Connect(ctx, cfg, key.Expose())
 	if err != nil {
 		return nil, err
@@ -162,6 +206,7 @@ func makePreview(ctx context.Context, m Model, cfg SessionConfig, key Secret, li
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-settled:
+			t.mark(&t.whole)
 			return pcm, nil
 		case e, ok := <-s.Events():
 			if !ok {
@@ -172,6 +217,7 @@ func makePreview(ctx context.Context, m Model, cfg SessionConfig, key Secret, li
 			}
 			switch e.Kind {
 			case EvReady:
+				t.mark(&t.ready)
 				if !sent {
 					sent = true
 					if err := s.Send(Command{Kind: CmdInject, Text: "Say this line: " + line, Respond: true}); err != nil {
@@ -180,10 +226,19 @@ func makePreview(ctx context.Context, m Model, cfg SessionConfig, key Secret, li
 				}
 			case EvAudioDelta:
 				if sent {
+					t.mark(&t.first)
 					settled = nil
-					pcm = append(pcm, e.Audio...)
+					piece := e.Audio
+					if room := previewMaxSamples - len(pcm); len(piece) > room {
+						piece = piece[:room]
+					}
+					pcm = append(pcm, piece...)
+					if onAudio != nil && len(piece) > 0 {
+						onAudio(piece)
+					}
 					if len(pcm) >= previewMaxSamples {
-						return pcm[:previewMaxSamples], nil
+						t.mark(&t.whole)
+						return pcm, nil
 					}
 				}
 			case EvResponseDone:

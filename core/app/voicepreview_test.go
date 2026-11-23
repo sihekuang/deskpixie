@@ -17,12 +17,14 @@ import (
 )
 
 // sampleModel says a preview line in 1.6 s of audio (long enough to be kept); hold keeps it
-// from answering, fail makes it refuse to connect.
+// from answering, fail makes it refuse to connect. With rest set, it sends the first half and
+// the second once rest is closed (a service still sending).
 type sampleModel struct {
 	mu       sync.Mutex
 	connects []voice.SessionConfig
 	hold     bool
 	fail     error
+	rest     chan struct{}
 }
 
 const sampleSamples = 38400
@@ -57,8 +59,17 @@ func (s *sampleSession) Events() <-chan voice.Event { return s.events }
 func (s *sampleSession) Close() error               { s.once.Do(func() { close(s.events) }); return nil }
 func (s *sampleSession) Send(c voice.Command) error {
 	if c.Kind == voice.CmdInject && !s.m.hold && strings.Contains(c.Text, "Hi, I'm") {
-		s.events <- voice.Event{Kind: voice.EvAudioDelta, Audio: make([]int16, sampleSamples)}
-		s.events <- voice.Event{Kind: voice.EvResponseDone}
+		if s.m.rest == nil {
+			s.events <- voice.Event{Kind: voice.EvAudioDelta, Audio: make([]int16, sampleSamples)}
+			s.events <- voice.Event{Kind: voice.EvResponseDone}
+			return nil
+		}
+		s.events <- voice.Event{Kind: voice.EvAudioDelta, Audio: make([]int16, sampleSamples/2)}
+		go func() {
+			<-s.m.rest
+			s.events <- voice.Event{Kind: voice.EvAudioDelta, Audio: make([]int16, sampleSamples/2)}
+			s.events <- voice.Event{Kind: voice.EvResponseDone}
+		}()
 	}
 	return nil
 }
@@ -210,5 +221,30 @@ func TestVoicePreviewStopAndTakeOver(t *testing.T) {
 	}
 	if n := played(h); n != 0 {
 		t.Fatalf("%d samples played after Stop", n)
+	}
+}
+
+// A preview being made starts playing once its first audio is in, before the service has sent
+// the rest; the rest plays as it comes, and the row is done after it.
+func TestVoicePreviewPlaysWhileItIsMade(t *testing.T) {
+	m := &sampleModel{rest: make(chan struct{})}
+	h := newHarness(t, withSampleModel(m), withSettings(liveSettings), withKeys(map[string]string{"OPENAI_API_KEY": "sk-test"}))
+	h.call("voice.preview", map[string]string{"voice": "marin"})
+	waitState(t, h, "marin", "playing")
+	if n := played(h); n != sampleSamples/2 {
+		t.Fatalf("played %d samples before the rest came, want the first %d", n, sampleSamples/2)
+	}
+	close(m.rest)
+	deadline := time.Now().Add(3 * time.Second)
+	got := 0
+	for got < sampleSamples/2 && time.Now().Before(deadline) {
+		got += played(h)
+	}
+	if got != sampleSamples/2 {
+		t.Fatalf("played %d more samples, want the other %d", got, sampleSamples/2)
+	}
+	waitState(t, h, "marin", "done")
+	if got := previewStates(h, "marin"); len(got) != 3 {
+		t.Fatalf("events %v, want loading, playing, done", got)
 	}
 }
