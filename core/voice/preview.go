@@ -135,7 +135,7 @@ func (p *Previews) Get(ctx context.Context, provider, model, voice string, onAud
 	}
 	t := previewTimes{start: now(), now: now}
 	pcm, err := makePreview(ctx, m, SessionConfig{Model: model, Voice: voice, Instructions: previewInstructions}, key, PreviewLine(voice), settle, &t, onAudio)
-	p.Log.Printf("voice preview %s %s %s: %s", provider, model, voice, t.summary(len(pcm), err))
+	p.Log.Printf("voice preview %s %s %s: %s", provider, model, voice, t.summary(err))
 	if err != nil {
 		if parent.Err() != nil {
 			return nil, ErrPreviewCancelled
@@ -167,6 +167,7 @@ type previewTimes struct {
 	start               time.Time
 	now                 func() time.Time
 	ready, first, whole time.Duration
+	heard               int // samples that came, even of a clip that then failed
 }
 
 func (t *previewTimes) mark(d *time.Duration) {
@@ -175,14 +176,14 @@ func (t *previewTimes) mark(d *time.Duration) {
 	}
 }
 
-func (t *previewTimes) summary(samples int, err error) string {
+func (t *previewTimes) summary(err error) string {
 	ms := func(d time.Duration) string {
 		if d == 0 {
 			return "-"
 		}
 		return fmt.Sprintf("%d ms", d.Milliseconds())
 	}
-	out := fmt.Sprintf("ready %s, first audio %s, whole %s (%d ms of audio)", ms(t.ready), ms(t.first), ms(t.whole), samples*1000/audio.SampleRate)
+	out := fmt.Sprintf("ready %s, first audio %s, whole %s (%d ms of audio)", ms(t.ready), ms(t.first), ms(t.whole), t.heard*1000/audio.SampleRate)
 	if err != nil {
 		out += ", failed: " + err.Error()
 	}
@@ -233,6 +234,7 @@ func makePreview(ctx context.Context, m Model, cfg SessionConfig, key Secret, li
 						piece = piece[:room]
 					}
 					pcm = append(pcm, piece...)
+					t.heard = len(pcm)
 					if onAudio != nil && len(piece) > 0 {
 						onAudio(piece)
 					}

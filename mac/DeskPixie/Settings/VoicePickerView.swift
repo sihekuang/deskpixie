@@ -69,21 +69,28 @@ struct VoicePickerView: View {
                 .help(state == .playing || state == .loading ? "Stop" : "Hear \(item.label)")
                 .accessibilityLabel(state == .playing || state == .loading ? "Stop \(item.label)" : "Hear \(item.label)")
                 .accessibilityIdentifier("voice.preview.\(name)")
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(item.label).fontWeight(picked ? .semibold : .regular)
-                    if let detail = item.detail, !detail.isEmpty {
-                        Text(detail).font(.caption).foregroundStyle(.secondary)
+                // The rest of the row is one plain button: a click anywhere on it picks the voice
+                // (a tap gesture lost clicks that landed on the name's text).
+                Button { pick(index) } label: {
+                    HStack(spacing: 8) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(item.label).fontWeight(picked ? .semibold : .regular)
+                            if let detail = item.detail, !detail.isEmpty {
+                                Text(detail).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer(minLength: 4)
+                        if picked {
+                            Image(systemName: "checkmark").foregroundStyle(Color.accentColor)
+                        }
                     }
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .disabled(!item.enabled)
                 .accessibilityElement(children: .combine)
-                .accessibilityAddTraits(picked ? [.isButton, .isSelected] : .isButton)
-                .accessibilityAction { pick(index) }
+                .accessibilityAddTraits(picked ? .isSelected : [])
                 .accessibilityIdentifier("voice.row.\(name)")
-                Spacer(minLength: 4)
-                if picked {
-                    Image(systemName: "checkmark").foregroundStyle(Color.accentColor)
-                        .accessibilityLabel("Selected")
-                }
             }
             if case .failed(let reason) = state {
                 Text(reason).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
@@ -92,8 +99,6 @@ struct VoicePickerView: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
         .background(picked ? Color.accentColor.opacity(0.12) : Color.clear)
-        .contentShape(Rectangle())
-        .onTapGesture { pick(index) }
     }
 
     private func pick(_ index: Int) {
