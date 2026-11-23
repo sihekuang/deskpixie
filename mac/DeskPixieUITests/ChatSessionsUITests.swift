@@ -224,8 +224,9 @@ final class ChatSessionsUITests: XCTestCase {
     /// and Claude's review comes as the next card, whose Submit answers sends them.
     func testAQuestionOfSeveralPicksIsTickedAndSent() throws {
         let (h, window, _) = try start()
+        // Claude Code 2.1.330's review, with no "Ready to submit your answers?" (#485).
         let review = "←  ☒ Pick  ✔ Submit  →\r\nReview your answers\r\n ● Which toppings?\r\n   → Cheese, Olives\r\n"
-            + "Ready to submit your answers?\r\n❯ 1. Submit answers\r\n  2. Cancel"
+            + "❯ 1. Submit answers\r\n  2. Cancel"
         try h.askMenu("alpha", input: ["questions": [["question": "Which toppings?", "header": "Pick", "multiSelect": true,
                                                        "options": [["label": "Cheese"], ["label": "Ham"], ["label": "Olives"]]]]],
                       screen: Self.toppings([]),
