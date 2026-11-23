@@ -679,7 +679,13 @@ func (c *Conversation) onModel(ev Event, now time.Time, fx []Effect) []Effect {
 		c.pendingTools++
 		c.toolTurns[ev.CallID] = c.turn
 		inv := Effect{Kind: EfInvokeTool, CallID: ev.CallID, ToolName: ev.ToolName, Args: ev.Args}
-		if ev.ToolName == ClientDelegationTool {
+		speaksForUser := ev.ToolName == ClientDelegationTool || ev.ToolName == DelegateTool || ev.ToolName == AnswerJobTool
+		if c.speakOnly && speaksForUser {
+			inv.Canned = nobodySpoke
+			if ev.ToolName == ClientDelegationTool {
+				inv.Canned = nobodySpokeClient
+			}
+		} else if ev.ToolName == ClientDelegationTool {
 			if c.hoHandedOff {
 				inv.Canned = alreadyHandedOff
 			} else {
@@ -1163,6 +1169,13 @@ func (c *Conversation) clientDelegationArgs() json.RawMessage {
 
 // alreadyHandedOff answers a delegate call in a turn the app already handed off.
 var alreadyHandedOff = json.RawMessage(`{"status":"already handed off","note":"The app already gave this request to the coordinator. Don't hand it off again; just say you'll let the user know."}`)
+
+// nobodySpoke answers a call that would speak for the user in a conversation opened only to
+// speak: the mic is off, so they said nothing (#486).
+var nobodySpoke = json.RawMessage(`{"error":"Nothing was sent. The mic is off and the user hasn't said anything. Only say the update you were given; don't say you passed anything on."}`)
+
+// nobodySpokeClient is nobodySpoke for a client delegation, whose error GPT-Live would tell you.
+var nobodySpokeClient = json.RawMessage(`{"routed":"none","note":"the mic is off and the user hasn't said anything"}`)
 
 func pixieFx(s PixieState) Effect { return Effect{Kind: EfPixie, State: s} }
 

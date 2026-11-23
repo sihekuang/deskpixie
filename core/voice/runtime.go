@@ -984,7 +984,7 @@ func (r *Runtime) apply(fx Effect) {
 	case EfInvokeTool:
 		if fx.Canned != nil {
 			gen, callID, out := r.gen, fx.CallID, fx.Canned
-			log.Printf("voice: a late delegate call in a turn already handed off; not starting a second job")
+			log.Printf("voice: not running a %s call: %s", fx.ToolName, out)
 			go func() {
 				select {
 				case r.toolDone <- toolResult{gen: gen, callID: callID, outcome: ToolOutcome{Output: out}}:
@@ -1170,7 +1170,7 @@ func (r *Runtime) logEffect(fx Effect) {
 		l.Printf("connecting to %s", r.model.Name())
 	case EfInvokeTool:
 		if fx.Canned != nil {
-			l.Printf("tool call %s %s (%s): already handed off, not run", fx.ToolName, fx.CallID, clipLog(string(fx.Args)))
+			l.Printf("tool call %s %s (%s): not run: %s", fx.ToolName, fx.CallID, clipLog(string(fx.Args)), clipLog(string(fx.Canned)))
 			return
 		}
 		l.Printf("tool call %s %s: %s", fx.ToolName, fx.CallID, clipLog(string(fx.Args)))

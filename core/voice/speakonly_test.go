@@ -1,6 +1,7 @@
 package voice
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 )
@@ -382,4 +383,58 @@ func TestRuntimeAListeningConversationAlsoSaysItOpensAndCloses(t *testing.T) {
 	eventually(t, "conversation open", func() bool { return ui.has(UIEvent{Kind: "conversation", Text: "open"}) })
 	r.Hotkey()
 	eventually(t, "conversation closed", func() bool { return ui.has(UIEvent{Kind: "conversation", Text: "closed"}) })
+}
+
+// invoked: the tool calls among fx.
+func invoked(fx []Effect) []Effect {
+	var out []Effect
+	for _, e := range fx {
+		if e.Kind == EfInvokeTool {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// #486: with the mic off nobody can have answered or asked for anything: told "picked A", Pixie
+// called answer_job with it, and the words went to the coordinator as a new request.
+func TestSpeakOnlyRefusesToSpeakForTheUser(t *testing.T) {
+	for tool, want := range map[string]json.RawMessage{
+		AnswerJobTool: nobodySpoke, DelegateTool: nobodySpoke, ClientDelegationTool: nobodySpokeClient,
+	} {
+		c := openedToSpeak(t)
+		c.Step(InjectInput(notice("deskpixie: picked $30 / $30")), ms(t0(), 30))
+		fx := invoked(model(c, toolCall(tool), ms(t0(), 40)))
+		if len(fx) != 1 || string(fx[0].Canned) != string(want) {
+			t.Errorf("%s: %+v", tool, fx)
+		}
+	}
+}
+
+func TestSpeakOnlyStillRunsOtherTools(t *testing.T) {
+	c := openedToSpeak(t)
+	c.Step(InjectInput(notice("Coordinator reply: done.")), ms(t0(), 30))
+	fx := invoked(model(c, toolCall(EndConversationTool), ms(t0(), 40)))
+	if len(fx) != 1 || fx[0].Canned != nil {
+		t.Fatalf("%+v", fx)
+	}
+}
+
+// Once the hotkey turns the mic on, you can answer and ask as usual.
+func TestSpeakOnlyTurnedOnByTheHotkeyTakesAnswers(t *testing.T) {
+	c := openedToSpeak(t)
+	c.Step(InjectInput(notice("Coordinator question: deploy now or wait?")), ms(t0(), 30))
+	c.Step(HotkeyInput(), ms(t0(), 35))
+	fx := invoked(model(c, toolCall(AnswerJobTool), ms(t0(), 40)))
+	if len(fx) != 1 || fx[0].Canned != nil {
+		t.Fatalf("%+v", fx)
+	}
+}
+
+// GPT-Live says nothing of a client delegation the app refused.
+func TestNobodySpokeClientRoutesNowhere(t *testing.T) {
+	var r ClientDelegationResult
+	if err := json.Unmarshal(nobodySpokeClient, &r); err != nil || r.Routed != "none" || r.Note == "" || r.Error != "" {
+		t.Fatalf("%+v %v", r, err)
+	}
 }
