@@ -111,6 +111,9 @@ type Choices struct {
 	Null bool
 	// Provider is the voice provider whose models SourceVoiceModels lists.
 	Provider string
+	// Preview: each option can be heard before it's picked (voice.voice, #480); the window
+	// shows a list with a play button per option instead of a pop-up.
+	Preview bool
 }
 
 // Nullable reports whether null is a value: the first option ("System Default", "Default")
@@ -340,6 +343,20 @@ var (
 		"Laomedeia", "Achernar", "Alnilam", "Schedar", "Gacrux", "Pulcherrima", "Achird",
 		"Zubenelgenubi", "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat",
 	)
+	// VoiceDetails describe each provider's voices in the voice picker (#480): Google's own
+	// one-word descriptions of the Gemini voices. OpenAI publishes none for its voices.
+	VoiceDetails = map[string]map[string]string{
+		ProviderGemini: {
+			"Zephyr": "Bright", "Puck": "Upbeat", "Charon": "Informative", "Kore": "Firm",
+			"Fenrir": "Excitable", "Leda": "Youthful", "Orus": "Firm", "Aoede": "Breezy",
+			"Callirrhoe": "Easy-going", "Autonoe": "Bright", "Enceladus": "Breathy", "Iapetus": "Clear",
+			"Umbriel": "Easy-going", "Algieba": "Smooth", "Despina": "Smooth", "Erinome": "Clear",
+			"Algenib": "Gravelly", "Rasalgethi": "Informative", "Laomedeia": "Upbeat", "Achernar": "Soft",
+			"Alnilam": "Firm", "Schedar": "Even", "Gacrux": "Mature", "Pulcherrima": "Forward",
+			"Achird": "Friendly", "Zubenelgenubi": "Casual", "Vindemiatrix": "Gentle", "Sadachbia": "Lively",
+			"Sadaltager": "Knowledgeable", "Sulafat": "Warm",
+		},
+	}
 )
 
 // ProviderDefault is a voice provider's default model and voice.
@@ -491,7 +508,7 @@ var Fields = concat(
 		modelField("voice.openaiModel", ProviderOpenAI, "The OpenAI Realtime model Pixie talks with."),
 		modelField("voice.geminiModel", ProviderGemini, "The Gemini Live model Pixie talks with."),
 		modelField("voice.liveModel", ProviderOpenAILive, "The GPT-Live model Pixie talks with."),
-		spec("voice.voice", "Voice", "The voice Pixie speaks with. The choices follow the voice service.", openChoice(Choices{Source: SourceVoiceVoices}), ApplyRestart),
+		spec("voice.voice", "Voice", "The voice Pixie speaks with. The choices follow the voice service. Press ▶ to hear one: the first time, the voice service makes the sample (a cent or so).", openChoice(Choices{Source: SourceVoiceVoices, Preview: true}), ApplyRestart),
 	),
 	group(SectionVoice, "Microphone and speaker",
 		macOnly(spec("voice.inputDevice", "Microphone", "The mic Pixie listens with. If it isn't connected, Pixie uses the system default until it is. Bluetooth mics are slow to start and can cut off your first words.", choiceKind(SourceInputDevices), ApplyLive)),
@@ -660,6 +677,8 @@ type OptionView struct {
 	Value     string     `json:"value"`
 	Label     string     `json:"label"`
 	Platforms []Platform `json:"platforms"`
+	// Detail describes the option under its label (a voice's style); left out when empty.
+	Detail string `json:"detail,omitempty"`
 }
 
 func viewOf(o Opt) OptionView {
@@ -716,7 +735,11 @@ func Options(c Choices, src OptionSources) []OptionView {
 	case SourceVoiceModels:
 		return voiceModels(c.Provider, src)
 	case SourceVoiceVoices:
-		return static(map[string][]Opt{ProviderOpenAI: OpenAIVoices, ProviderGemini: GeminiVoices, ProviderOpenAILive: OpenAILiveVoices}[src.VoiceProvider])
+		out := static(map[string][]Opt{ProviderOpenAI: OpenAIVoices, ProviderGemini: GeminiVoices, ProviderOpenAILive: OpenAILiveVoices}[src.VoiceProvider])
+		for i := range out {
+			out[i].Detail = VoiceDetails[src.VoiceProvider][out[i].Value]
+		}
+		return out
 	}
 	return []OptionView{}
 }
@@ -797,6 +820,8 @@ type KindView struct {
 	Menu     bool
 	Unit     string
 	Options  []OptionView
+	// Preview: choice options can be heard before one is picked (Choices.Preview).
+	Preview  bool
 	Optional bool
 	Dir      bool
 }
@@ -826,7 +851,8 @@ func (k KindView) MarshalJSON() ([]byte, error) {
 		return json.Marshal(struct {
 			Type    string       `json:"type"`
 			Options []OptionView `json:"options"`
-		}{name, opts})
+			Preview bool         `json:"preview,omitempty"`
+		}{name, opts, k.Preview})
 	case KindText:
 		return json.Marshal(struct {
 			Type     string `json:"type"`
@@ -870,6 +896,7 @@ func Views(src OptionSources) []FieldView {
 		k := KindView{Type: f.Kind.Type, Min: f.Kind.Min, Max: f.Kind.Max, Menu: f.Kind.Menu, Unit: f.Kind.Unit, Optional: f.Kind.Optional, Dir: f.Kind.Dir}
 		if f.Kind.Type == KindChoice || f.Kind.Type == KindMultiChoice {
 			k.Options = Options(f.Kind.Choices, src)
+			k.Preview = f.Kind.Choices.Preview
 		}
 		out = append(out, FieldView{
 			Path: f.Path, Section: f.Section, Group: f.Group, Label: f.Label, Help: helpOf(f, src), Kind: k, Apply: f.Apply,

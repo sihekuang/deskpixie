@@ -159,6 +159,8 @@ const (
 	ctlOpen
 	ctlWithdrawHeld
 	ctlOpenToSpeak
+	ctlPlayClip
+	ctlStopClip
 )
 
 type control struct {
@@ -168,6 +170,7 @@ type control struct {
 	levels int
 	held   string
 	upTo   uint64
+	clip   []int16
 }
 
 // playbackQueue is the Go side of playback: samples waiting for Swift to pull, plus what
@@ -279,6 +282,7 @@ type Runtime struct {
 	voiceEnd      time.Time    // capture time of the last mic frame with speech in it, this turn
 	replyTiming   *replyTiming // a reply waiting for its first sample to play (#481)
 	replyFlow     replyFlow    // how the current reply's audio arrived (#481)
+	clip          bool         // pb holds a clip PlayClip queued (#480), not a conversation's audio
 	pending       []Input
 	recorder      *MicRecorder
 	take          *MicTake // the current conversation's recording
@@ -395,6 +399,25 @@ func (r *Runtime) OpenToSpeak() bool {
 	r.control(control{kind: ctlOpenToSpeak})
 	return true
 }
+
+// PlayClip plays pcm (a voice preview, #480) through Pixie's speaker, in place of a clip still
+// playing. False, and nothing plays, while a conversation is open or after Close; one that opens
+// cuts the clip off.
+func (r *Runtime) PlayClip(pcm []int16) bool {
+	select {
+	case <-r.done:
+		return false
+	default:
+	}
+	if !r.resting.Load() {
+		return false
+	}
+	r.control(control{kind: ctlPlayClip, clip: append([]int16(nil), pcm...)})
+	return true
+}
+
+// StopClip stops a clip PlayClip started; it leaves a conversation's audio alone.
+func (r *Runtime) StopClip() { r.control(control{kind: ctlStopClip}) }
 
 // Hotkey starts or ends a conversation.
 func (r *Runtime) Hotkey() {
@@ -690,6 +713,17 @@ func (r *Runtime) onControl(c control) {
 		r.input(OpenToSpeakInput())
 	case ctlWithdrawHeld:
 		r.input(WithdrawHeldInput(c.held, c.upTo))
+	case ctlPlayClip:
+		if r.conv.Phase() == PhaseIdle {
+			r.pb.flush()
+			r.pb.enqueue(c.clip)
+			r.clip = true
+		}
+	case ctlStopClip:
+		if r.clip {
+			r.pb.flush()
+			r.clip = false
+		}
 	}
 }
 
@@ -842,6 +876,10 @@ func (r *Runtime) apply(fx Effect) {
 	r.logEffect(fx)
 	switch fx.Kind {
 	case EfConnect:
+		if r.clip {
+			r.pb.flush() // a preview stops when a conversation starts
+			r.clip = false
+		}
 		r.gen++
 		r.waited = nil // a new conversation doesn't wait on the last one's calls
 		key, ok := r.secrets.APIKey(r.model.Name())

@@ -134,6 +134,9 @@ type App struct {
 
 	// models loads the voice providers' model lists for Settings (#477).
 	models *voice.Refresher
+	// previews make the voice samples Settings plays (#480); previewing is the one at a time.
+	previews   *voice.Previews
+	previewing previewer
 
 	rt        *voice.Runtime // nil when the voice loop could not be set up
 	setupFail *voice.Failure
@@ -226,6 +229,7 @@ func New(d Deps) (*App, error) {
 	a.hotkey.bound = cfg.Hotkey
 
 	a.setupModels() // before the settings API, whose Env reads it
+	a.setupPreviews()
 	platform := settings.Platform(p.Platform)
 	if platform == "" {
 		platform = settings.CurrentPlatform()
@@ -439,6 +443,7 @@ func (a *App) Close() {
 			a.agent.Shutdown()
 		}
 		a.models.Close()
+		a.previews.Stop()
 		close(a.stop)
 		a.talkMu.Lock()
 		a.talkClosed = true
@@ -1322,6 +1327,7 @@ func (a *App) Register(r Registrar) {
 		return struct{}{}, nil
 	})
 	a.registerChat(r)
+	a.registerPreview(r)
 	a.registerThread(r)
 	a.registerAttachments(r)
 	a.registerLogs(r)
