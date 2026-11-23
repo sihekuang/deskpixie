@@ -66,10 +66,12 @@ speaker setting and needs no new Swift audio code.
 Settings stays drawn from the schema. Go decides, and Swift only draws and forwards clicks.
 
 - **Schema.**
-  - `Opt` gains `Detail` (the description).
+  - `VoiceDetails` (provider → voice → description) fills each voice option's `Detail`.
+    `Opt` keeps its three fields, since it is written as a positional literal everywhere.
   - `Choices` gains `Preview bool`, set on `voice.voice`.
   - `KindView`'s choice JSON gains `"preview": true`, and each option gains `"detail"`.
-  - Search (`settings.search`) also matches a voice's description.
+  - The voice list's own search field matches names and descriptions. Settings search is
+    unchanged.
 - **Calls.**
   - `voice.preview {voice}` plays that voice for the current provider and its saved model. It
     returns at once with `{state: "loading" | "playing"}`, or with an error:
@@ -79,8 +81,9 @@ Settings stays drawn from the schema. Go decides, and Swift only draws and forwa
 - **Events.** `voice.preview {voice, state: "loading" | "playing" | "done" | "error", error}`,
   so the row's button follows the preview.
 - **Swift.**
-  - `SettingsKind.choice` decodes `preview` and `detail`. `SettingsLayout` gives a preview
-    choice the control `.voices(items, selected)`. The filter and row state logic live in the
+  - A choice with `preview` decodes as `SettingsKind.previewChoice`, and options decode
+    `detail`. `SettingsLayout` gives it the control `.voices(items, selected)`, which commits
+    like `.menu`. The filter and row state logic live in the
     package (`VoicePickerModel`), so they get unit tests.
   - The app target adds `VoicePickerView`: the search field, the list and the rows. Its ▶ calls
     `voice.preview`.
@@ -100,11 +103,13 @@ Settings stays drawn from the schema. Go decides, and Swift only draws and forwa
     reply, a damaged cache file, an unwritable folder, and a second request cancelling the
     first.
   - `PlayClip` refused during a conversation, and flushed when one starts.
-- **Go, settings.** `voice.voice` has `preview` and Gemini details in its view. Search matches a
-  description. The descriptions match the adapter's voices (a test keeps them in step).
+- **Go, settings.** `voice.voice` has `preview` and Gemini details in its view. The
+  descriptions match the adapter's voices (a test keeps them in step).
 - **Go, app.** `voice.preview` with no key, during a conversation, from the cache, and while
   generating (the events in order). Everything runs in `t.TempDir()`, with no network.
 - **Swift package.** Decoding `preview` and `detail`, filtering, and the row state for each
   event.
+- **UI test** (offline, in CI): search by description, ▶ with no key says why under the row,
+  and clicking a row picks the voice.
 - **By hand.** An isolated build: play a voice from each provider, play from the cache, stop a
   preview, ▶ while Pixie talks, no key.

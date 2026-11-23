@@ -7,7 +7,8 @@ import Foundation
 /// `settings.Default()` as JSON. Generated from core/settings on 2026-10-13; pages, groups, labels, help, units
 /// and rules updated from it on 2026-10-24 (#290). On 2026-11-22 voice.model became
 /// voice.openaiModel (#477); of the three model fields (one per provider) this holds only that
-/// one, and the GPT-Live fields aren't here either. Regenerate if the schema changes.
+/// one, and the GPT-Live fields aren't here either. On 2026-11-23 voice.voice became a previewable
+/// choice (#480). Regenerate if the schema changes.
 enum SettingsFixture {
     static let fieldsJSON = #"""
 [
@@ -238,9 +239,10 @@ enum SettingsFixture {
   "section": "Voice",
   "group": "Voice service",
   "label": "Voice",
-  "help": "The voice Pixie speaks with. The choices follow the voice service.",
+  "help": "The voice Pixie speaks with. The choices follow the voice service. Press ▶ to hear one: the first time, the voice service makes the sample (a cent or so).",
   "kind": {
    "type": "choice",
+   "preview": true,
    "options": [
     {
      "value": "alloy",

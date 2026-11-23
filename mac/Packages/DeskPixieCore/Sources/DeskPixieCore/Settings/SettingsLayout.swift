@@ -84,7 +84,7 @@ public enum SettingsLayout {
     // MARK: Controls
 
     public enum ControlKind: Equatable, Sendable {
-        case `switch`, menu, stepper, checks, text, path, hotkey
+        case `switch`, menu, voices, stepper, checks, text, path, hotkey
     }
 
     /// The control for a kind. Exhaustive, so a new kind does not compile until it is mapped.
@@ -93,6 +93,7 @@ public enum SettingsLayout {
         case .bool: return .switch
         case .int(_, _, let menu): return menu ? .menu : .stepper
         case .choice: return .menu
+        case .previewChoice: return .voices
         case .multiChoice: return .checks
         case .text: return .text
         case .path: return .path
@@ -105,11 +106,14 @@ public enum SettingsLayout {
         /// What choosing it commits.
         public var value: JSONValue
         public var enabled: Bool
+        /// The option's description, shown under its label in the voice list.
+        public var detail: String?
 
-        public init(label: String, value: JSONValue, enabled: Bool) {
+        public init(label: String, value: JSONValue, enabled: Bool, detail: String? = nil) {
             self.label = label
             self.value = value
             self.enabled = enabled
+            self.detail = detail
         }
     }
 
@@ -130,6 +134,8 @@ public enum SettingsLayout {
     public enum Control: Equatable, Sendable {
         case `switch`(on: Bool)
         case menu(items: [MenuItem], selected: Int?)
+        /// A list of voices, each with a play button (#480); picking one commits like `.menu`.
+        case voices(items: [MenuItem], selected: Int?)
         case stepper(min: Int64, max: Int64, value: Int64, text: String)
         /// `current` is the stored list, in order; a toggle changes only its own entry.
         case checks(items: [CheckItem], current: [String])
@@ -143,6 +149,7 @@ public enum SettingsLayout {
             switch self {
             case .switch: return .switch
             case .menu: return .menu
+            case .voices: return .voices
             case .stepper: return .stepper
             case .checks: return .checks
             case .text: return .text
@@ -194,7 +201,7 @@ public enum SettingsLayout {
                                    current: String) -> [MenuItem] {
         var items = options.filter { availableOn($0.platforms, platform) }.map {
             // An empty value ("System Default") stands for null.
-            MenuItem(label: $0.label, value: $0.value.isEmpty ? .null : .string($0.value), enabled: true)
+            MenuItem(label: $0.label, value: $0.value.isEmpty ? .null : .string($0.value), enabled: true, detail: $0.detail)
         }
         if !current.isEmpty, !items.contains(where: { $0.value.stringValue == current }) {
             items.append(MenuItem(label: unavailableLabel(options, current), value: .string(current), enabled: false))
@@ -256,6 +263,10 @@ public enum SettingsLayout {
             let current = textOf(value)
             let items = choiceItems(options, platform: platform, current: current)
             control = .menu(items: items, selected: items.firstIndex { textOf($0.value) == current })
+        case .previewChoice(let options):
+            let current = textOf(value)
+            let items = choiceItems(options, platform: platform, current: current)
+            control = .voices(items: items, selected: items.firstIndex { textOf($0.value) == current })
         case .multiChoice(let options):
             let current = value?.arrayValue?.compactMap(\.stringValue) ?? []
             control = .checks(items: checkItems(options, platform: platform, current: current), current: current)
@@ -323,7 +334,7 @@ public enum SettingsLayout {
         switch (spec.control, input) {
         case (.switch, .switch(let on)):
             return .success(.bool(on))
-        case (.menu(let items, _), .menu(let i)):
+        case (.menu(let items, _), .menu(let i)), (.voices(let items, _), .menu(let i)):
             guard items.indices.contains(i), items[i].enabled else { return .failure(CommitError(notAvailable)) }
             return .success(items[i].value)
         case (.stepper, .step(let n)):

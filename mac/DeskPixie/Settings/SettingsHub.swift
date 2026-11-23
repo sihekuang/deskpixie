@@ -9,6 +9,16 @@ import os
 enum SettingsHub {
     /// The model, once the Settings scene has been built.
     private(set) static var shared: SettingsModel?
+    /// The voice list's previews (#480), once the model is made; `voice.preview` events go here.
+    private(set) static var previewModel: VoicePreviewModel?
+    /// The previews the voice list shows (made with the model; a stand-in that does nothing
+    /// before then, which the window never shows).
+    static var previews: VoicePreviewModel { previewModel ?? VoicePreviewModel(client: NoPreviews()) }
+
+    private struct NoPreviews: VoicePreviewClient {
+        func preview(_ voice: String) throws -> String { throw DeskPixieEngineError.refused("Previews aren't ready yet.") }
+        func stop() throws {}
+    }
 
     /// The model for the app's engine, made on first use, with the hotkey rebind hook set.
     static func model(for composition: CompositionRoot) -> SettingsModel {
@@ -25,6 +35,7 @@ enum SettingsHub {
         // Off (or before the core answers) the core sends no sessions: say so, not "none".
         model.historyAvailable = { [weak composition] in composition?.appState.core?.agent?.enabled == true }
         model.performAction = { [weak composition] id in composition?.coordinator.perform(id) }
+        previewModel = VoicePreviewModel(client: EngineVoicePreviewClient(engine: composition.engine))
         shared = model
         return model
     }

@@ -24,6 +24,12 @@ const (
 	previewErrRunes = 120
 )
 
+// previewRefusal is why a preview can't play, in words for the picker to show as they are.
+type previewRefusal string
+
+func (r previewRefusal) Error() string { return string(r) }
+func (r previewRefusal) Code() string  { return "refused" }
+
 // previewer is the one preview at a time: the voice it is for and its gen, so a late result
 // of one taken over is dropped.
 type previewer struct {
@@ -67,23 +73,23 @@ func (a *App) registerPreview(r Registrar) {
 // kept, else once the service has made it. The result is the state it starts in.
 func (a *App) preview(voiceName string) (map[string]any, error) {
 	if a.rt == nil {
-		return nil, errors.New(previewNoRT)
+		return nil, previewRefusal(previewNoRT)
 	}
 	if a.rt.IsOpen() {
-		return nil, errors.New(previewBusy)
+		return nil, previewRefusal(previewBusy)
 	}
 	v := a.store.Current().Voice
 	provider, model := v.Provider, v.Model()
 	gen := a.takePreview(voiceName)
 	if pcm, ok := a.previews.Cached(provider, model, voiceName); ok {
 		if !a.playPreview(gen, voiceName, pcm) {
-			return nil, errors.New(previewBusy)
+			return nil, previewRefusal(previewBusy)
 		}
 		return map[string]any{"state": "playing"}, nil
 	}
 	if _, ok := a.deps.Secrets.APIKey(provider); !ok {
 		a.endPreview(gen)
-		return nil, errors.New(previewNoKey)
+		return nil, previewRefusal(previewNoKey)
 	}
 	go func() {
 		pcm, err := a.previews.Get(context.Background(), provider, model, voiceName)

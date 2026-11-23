@@ -31,6 +31,9 @@ struct SettingsControlView: View {
                 .labelsHidden()
                 .pickerStyle(.menu)
                 .fixedSize()
+            case .voices(let items, let selected):
+                VoicePickerView(model: model, spec: spec, items: items, selected: selected,
+                                previews: SettingsHub.previews)
             case .stepper(let min, let max, let value, _):
                 HStack(spacing: 4) {
                     CommitTextField(model: model, spec: spec, width: 80)

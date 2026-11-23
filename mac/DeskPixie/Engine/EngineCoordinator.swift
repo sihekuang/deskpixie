@@ -573,6 +573,8 @@ final class EngineCoordinator {
             applyIcons()
         case .position(let x, let y):
             pixie?.moveTo(x: x, y: y)
+        case .voicePreview(let voice, let state, let error):
+            SettingsHub.previewModel?.apply(voice: voice, state: state, error: error)
         case .settingsChanged:
             // The pixie follows proximityFade.{enabled,radius}; the open Settings window re-reads;
             // the bubbles' links and files are found again (agent.editor, #277).

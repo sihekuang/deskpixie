@@ -42,4 +42,35 @@ final class SettingsUITests: XCTestCase {
         // Not on General, the page Settings opens on: only the search shows it.
         XCTAssertTrue(window.waitForText("Always send messages at once", timeout: 5), "no result for it")
     }
+
+    /// #480: Voice is a list with a search field and ▶ per voice. The search finds a voice by its
+    /// description, ▶ with no API key (this build has its own empty Keychain) says so under the
+    /// row, and clicking a row picks the voice.
+    func testTheVoiceListSearchesPreviewsAndPicks() throws {
+        let h = try UITestApp(settings: ["voice": ["provider": "gemini-live", "voice": "Puck"]])
+        harness = h
+        h.launch()
+        let window = openSettings(h)
+        let tab = window.staticTexts["Voice"].firstMatch
+        XCTAssertTrue(tab.waitForExistence(timeout: 10), "no Voice page in the sidebar")
+        tab.click()
+        let search = window.textFields["voice.search"]
+        XCTAssertTrue(search.waitForExistence(timeout: 10), "no voice search field")
+        let kore = window.buttons["voice.preview.Kore"]
+        XCTAssertTrue(kore.waitForExistence(timeout: 5), "no ▶ for Kore")
+
+        search.click()
+        search.typeText("firm")
+        XCTAssertTrue(window.waitForText("Firm", timeout: 5))
+        XCTAssertFalse(window.buttons["voice.preview.Puck"].exists, "Puck (Upbeat) still listed for “firm”")
+        kore.click()
+        XCTAssertTrue(window.waitForText("Add the voice service's API key to hear previews.", timeout: 10),
+                      "no word on why the preview can't play")
+
+        search.doubleClick()
+        search.typeKey(.delete, modifierFlags: [])
+        search.typeText("kore")
+        window.staticTexts["Kore"].firstMatch.click()
+        XCTAssertTrue(window.waitForText("Changed: Voice", timeout: 10), "picking Kore asked for no restart")
+    }
 }
