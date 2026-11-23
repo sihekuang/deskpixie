@@ -56,6 +56,9 @@ func (s *fakeLive) sent(typ string) []map[string]any {
 	return out
 }
 
+// commentaryLandMs: how much input audio after a commentary the fake waits before saying it.
+const commentaryLandMs = 200
+
 type fakeConn struct {
 	c   *websocket.Conn
 	ctx context.Context
@@ -148,6 +151,8 @@ func (s *fakeLive) serve(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	f := &fakeConn{c: c, ctx: ctx, srv: s}
 	talking, quiet := false, 0
+	var inputMs int64   // input audio received so far
+	landAt := int64(-1) // inputMs at which a waiting commentary lands; -1: none waiting
 	for {
 		_, data, err := c.Read(ctx)
 		if err != nil {
@@ -179,6 +184,11 @@ func (s *fakeLive) serve(w http.ResponseWriter, r *http.Request) {
 		case "session.input_audio.append":
 			raw, _ := base64.StdEncoding.DecodeString(m.Audio)
 			pcm, _ := audio.DecodeLE(raw)
+			inputMs += int64(len(pcm)) * 1000 / audio.SampleRate
+			if landAt >= 0 && inputMs >= landAt {
+				landAt = -1
+				f.startReply(confReply{frames: 3}) // the commentary landed: GPT-Live says it
+			}
 			if voice.RMS(pcm) > 0.05 {
 				quiet = 0
 				s.mu.Lock()
@@ -203,9 +213,15 @@ func (s *fakeLive) serve(w http.ResponseWriter, r *http.Request) {
 					f.startReply(f.nextReply())
 				}
 			}
-		case "response.create", "session.commentary.append":
-			// GPT-Live speaks a commentary (paraphrased), as it does a backend result.
+		case "response.create":
+			// GPT-Live speaks a backend result.
 			f.startReply(confReply{frames: 3})
+		case "session.commentary.append":
+			// GPT-Live speaks a commentary (paraphrased), but as the real one does (#482) only once
+			// its timeline has moved past it: that takes input audio, the mic's or silence.
+			if landAt < 0 {
+				landAt = inputMs + commentaryLandMs
+			}
 		case "session.close":
 			f.mu.Lock()
 			f.write(map[string]any{"type": "session.closed", "reason": "close_requested", "usage": map[string]any{"seconds": 1}})

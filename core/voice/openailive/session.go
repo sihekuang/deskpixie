@@ -118,6 +118,7 @@ func (m *model) Connect(ctx context.Context, cfg voice.SessionConfig, apiKey str
 		cd.decode(data, m.now()) // anything before session.started is setup noise
 	}
 
+	cd.inputUntil = m.now() // input audio starts now: with no mic, idleInput keeps it moving (#482)
 	sctx, scancel := context.WithCancel(context.Background())
 	s := &session{
 		conn: conn, cd: cd, now: m.now, events: make(chan voice.Event, eventBuffer),
@@ -262,6 +263,7 @@ func (s *session) clock() {
 			now := s.now()
 			s.queue(s.cd.poll(now))
 			_ = s.write(s.cd.timeContext(now)) // a failed write ends the session
+			_ = s.write(s.cd.idleInput(now))
 		}
 		s.mu.Unlock()
 	}

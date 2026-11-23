@@ -70,6 +70,28 @@ type codec struct {
 	byeCalls    map[string]bool
 	byeSeq      int
 	timeSent    string
+
+	// inputUntil: the time the input audio sent so far covers (#482). GPT-Live's timeline only
+	// moves with input audio, so while the mic is off idleInput sends silence up to now.
+	inputUntil time.Time
+}
+
+const (
+	// idleGap: input audio this far behind now is filled with silence (the mic sends every 40 ms).
+	idleGap = 100 * time.Millisecond
+	// maxIdleFill bounds one fill, so a stalled process doesn't send minutes of silence at once.
+	maxIdleFill = time.Second
+)
+
+// idleInput is the silence that brings the input timeline up to now, when the mic hasn't (#482).
+func (c *codec) idleInput(now time.Time) []obj {
+	gap := now.Sub(c.inputUntil)
+	if gap < idleGap {
+		return nil
+	}
+	c.inputUntil = now
+	n := int(min(gap, maxIdleFill).Milliseconds()) * audio.SampleRate / 1000
+	return []obj{{"type": "session.input_audio.append", "event_id": c.nextID(), "audio": pcmToBase64(make([]int16, n))}}
 }
 
 func newCodec() *codec {
@@ -342,6 +364,7 @@ func (c *codec) poll(now time.Time) []voice.Event {
 func (c *codec) encode(cmd voice.Command, now time.Time) ([]obj, []voice.Event) {
 	switch cmd.Kind {
 	case voice.CmdAudio:
+		c.inputUntil = now
 		return []obj{{"type": "session.input_audio.append", "event_id": c.nextID(), "audio": pcmToBase64(cmd.Audio)}}, nil
 	case voice.CmdCancelResponse:
 		// No truncate on GPT-Live: end the reply locally and drop its tail until it goes quiet.
