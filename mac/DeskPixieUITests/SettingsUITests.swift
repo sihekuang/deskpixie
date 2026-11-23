@@ -70,7 +70,9 @@ final class SettingsUITests: XCTestCase {
         search.doubleClick()
         search.typeKey(.delete, modifierFlags: [])
         search.typeText("kore")
-        window.staticTexts["Kore"].firstMatch.click()
+        let row = window.descendants(matching: .any)["voice.row.Kore"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "no row for Kore")
+        row.click()
         XCTAssertTrue(window.waitForText("Changed: Voice", timeout: 10), "picking Kore asked for no restart")
     }
 }

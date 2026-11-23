@@ -6,6 +6,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -15,12 +16,16 @@ import (
 	"github.com/sihekuang/deskpixie/core/voice"
 )
 
-// sampleModel says a preview line in 0.1 s of audio; hold keeps it from answering.
+// sampleModel says a preview line in 1.6 s of audio (long enough to be kept); hold keeps it
+// from answering, fail makes it refuse to connect.
 type sampleModel struct {
 	mu       sync.Mutex
 	connects []voice.SessionConfig
 	hold     bool
+	fail     error
 }
+
+const sampleSamples = 38400
 
 func (m *sampleModel) Name() string { return settings.ProviderOpenAILive }
 
@@ -28,6 +33,9 @@ func (m *sampleModel) Connect(_ context.Context, cfg voice.SessionConfig, _ stri
 	m.mu.Lock()
 	m.connects = append(m.connects, cfg)
 	m.mu.Unlock()
+	if m.fail != nil {
+		return nil, m.fail
+	}
 	s := &sampleSession{m: m, events: make(chan voice.Event, 16)}
 	s.events <- voice.Event{Kind: voice.EvReady}
 	return s, nil
@@ -49,7 +57,7 @@ func (s *sampleSession) Events() <-chan voice.Event { return s.events }
 func (s *sampleSession) Close() error               { s.once.Do(func() { close(s.events) }); return nil }
 func (s *sampleSession) Send(c voice.Command) error {
 	if c.Kind == voice.CmdInject && !s.m.hold && strings.Contains(c.Text, "Hi, I'm") {
-		s.events <- voice.Event{Kind: voice.EvAudioDelta, Audio: make([]int16, 2400)}
+		s.events <- voice.Event{Kind: voice.EvAudioDelta, Audio: make([]int16, sampleSamples)}
 		s.events <- voice.Event{Kind: voice.EvResponseDone}
 	}
 	return nil
@@ -92,10 +100,17 @@ func played(h *harness) int {
 // waitState waits for voiceName's preview to reach state (events stay for previewStates).
 func waitState(t *testing.T, h *harness, voiceName, state string) {
 	t.Helper()
-	waitFor(t, voiceName+" "+state, func() bool {
+	deadline := time.Now().Add(5 * time.Second)
+	for {
 		got := previewStates(h, voiceName)
-		return len(got) > 0 && got[len(got)-1] == state
-	})
+		if len(got) > 0 && got[len(got)-1] == state {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s never got to %s: %v", voiceName, state, got)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func liveSettings(c *settings.Config) { c.Voice.Provider = settings.ProviderOpenAILive }
@@ -109,8 +124,8 @@ func TestVoicePreviewIsMadeThenKeptAndPlays(t *testing.T) {
 		t.Fatalf("first preview state %q, want loading", res.State)
 	}
 	waitState(t, h, "marin", "playing")
-	if n := played(h); n != 2400 {
-		t.Fatalf("played %d samples, want the 2400 made", n)
+	if n := played(h); n != sampleSamples {
+		t.Fatalf("played %d samples, want the %d made", n, sampleSamples)
 	}
 	if c := m.connects[0]; c.Voice != "marin" || c.Model != h.app.store.Current().Voice.Model() {
 		t.Fatalf("made with %+v, want marin on the saved model", c)
@@ -118,7 +133,7 @@ func TestVoicePreviewIsMadeThenKeptAndPlays(t *testing.T) {
 	waitState(t, h, "marin", "done")
 
 	json.Unmarshal(h.call("voice.preview", map[string]string{"voice": "marin"}), &res)
-	if res.State != "playing" || m.count() != 1 || played(h) != 2400 {
+	if res.State != "playing" || m.count() != 1 || played(h) != sampleSamples {
 		t.Fatalf("second preview: state %q, %d connects; want it played from the kept clip", res.State, m.count())
 	}
 	if got := previewStates(h, "marin"); strings.Join(got, ",") != "loading,playing,done,playing" {
@@ -126,11 +141,43 @@ func TestVoicePreviewIsMadeThenKeptAndPlays(t *testing.T) {
 	}
 }
 
+// No key: the refusal says so, and no event follows it to clear the row's message.
 func TestVoicePreviewWithoutAKey(t *testing.T) {
 	h := newHarness(t, withSampleModel(&sampleModel{}), withSettings(liveSettings))
 	_, err := h.callErr("voice.preview", map[string]string{"voice": "marin"})
 	if err == nil || err.Error() != previewNoKey {
 		t.Fatalf("err = %v, want %q", err, previewNoKey)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if got := previewStates(h, "marin"); len(got) != 0 {
+		t.Fatalf("events after the refusal: %v", got)
+	}
+}
+
+// A failure right away still comes after "loading", so the row doesn't spin on.
+func TestVoicePreviewQuickFailureComesAfterLoading(t *testing.T) {
+	for range 20 {
+		m := &sampleModel{fail: errors.New("dial tcp: no route to host")}
+		h := newHarness(t, withSampleModel(m), withSettings(liveSettings), withKeys(map[string]string{"OPENAI_API_KEY": "sk-test"}))
+		h.call("voice.preview", map[string]string{"voice": "marin"})
+		waitState(t, h, "marin", "error: Couldn't make the preview: dial tcp: no route to host")
+		if got := previewStates(h, "marin"); len(got) != 2 || got[0] != "loading" {
+			t.Fatalf("events %v, want loading then the error", got)
+		}
+	}
+}
+
+// Two previews in quick succession: the newer one plays, whatever order their work runs in.
+func TestVoicePreviewQuickTakeOverPlaysTheNewer(t *testing.T) {
+	for range 10 {
+		m := &sampleModel{}
+		h := newHarness(t, withSampleModel(m), withSettings(liveSettings), withKeys(map[string]string{"OPENAI_API_KEY": "sk-test"}))
+		h.call("voice.preview", map[string]string{"voice": "marin"})
+		h.call("voice.preview", map[string]string{"voice": "cedar"})
+		waitState(t, h, "cedar", "playing")
+		if got := previewStates(h, "marin"); got[len(got)-1] != "done" {
+			t.Fatalf("marin's events %v, want it ended", got)
+		}
 	}
 }
 

@@ -34,6 +34,8 @@ struct SettingsControlView: View {
             case .voices(let items, let selected):
                 VoicePickerView(model: model, spec: spec, items: items, selected: selected,
                                 previews: SettingsHub.previews)
+                    // Each row and button keeps its own name under the field's label (as .checks, #435).
+                    .accessibilityElement(children: .contain)
             case .stepper(let min, let max, let value, _):
                 HStack(spacing: 4) {
                     CommitTextField(model: model, spec: spec, width: 80)

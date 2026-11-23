@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 	"unicode"
 
@@ -26,6 +25,12 @@ const (
 	PreviewTimeout = 20 * time.Second
 	// previewMaxSamples bounds a clip (15 s): a provider that keeps talking is cut off.
 	previewMaxSamples = 15 * audio.SampleRate
+	// previewKeepSamples: a clip shorter than this (1.5 s; the line takes about 3) is played but
+	// not kept, since the reply was likely cut short (a failed or interrupted response).
+	previewKeepSamples = 3 * audio.SampleRate / 2
+	// previewSettle: after a reply ends, more audio this soon is still the line (GPT-Live ends a
+	// reply at a pause between its sentences).
+	previewSettle = 800 * time.Millisecond
 
 	previewInstructions = "You are reading a voice sample. When you are given a line, say " +
 		"exactly that line, word for word, in a natural, friendly tone, then stop. Add nothing."
@@ -50,8 +55,8 @@ func PreviewLine(voice string) string {
 	return "Hi, I'm " + string(r) + ". This is how I sound."
 }
 
-// Previews makes and keeps voice previews. One clip is made at a time: asking for another
-// cancels the one being made.
+// Previews makes and keeps voice previews. Its caller decides which preview runs: Get stops
+// when its ctx ends.
 type Previews struct {
 	// Dir holds the clips: <Dir>/<provider>/<model>/<voice>-v<n>.pcm (24 kHz mono s16le).
 	Dir     string
@@ -60,10 +65,8 @@ type Previews struct {
 	Model func(provider string) Model
 	// Timeout bounds making one clip (0: PreviewTimeout).
 	Timeout time.Duration
-
-	mu     sync.Mutex
-	cancel context.CancelFunc
-	gen    int
+	// Settle is how long to wait for more of the line after a reply ends (0: previewSettle).
+	Settle time.Duration
 }
 
 // Cached is the kept clip of voice, if there is one.
@@ -84,15 +87,14 @@ func (p *Previews) Cached(provider, model, voice string) ([]int16, bool) {
 	return pcm, true
 }
 
-// Get is voice's clip: the kept one, or else one made now by the provider (and kept). It
-// cancels a clip still being made for an earlier Get.
+// Get is voice's clip: the kept one, or else one made now by the provider (and kept when it is
+// whole). ErrPreviewCancelled when ctx ends first.
 func (p *Previews) Get(ctx context.Context, provider, model, voice string) ([]int16, error) {
 	path, err := p.path(provider, model, voice)
 	if err != nil {
 		return nil, err
 	}
 	if pcm, ok := p.Cached(provider, model, voice); ok {
-		p.Stop()
 		return pcm, nil
 	}
 	newModel := p.Model
@@ -111,49 +113,31 @@ func (p *Previews) Get(ctx context.Context, provider, model, voice string) ([]in
 	if timeout <= 0 {
 		timeout = PreviewTimeout
 	}
+	parent := ctx
 	ctx, cancel := context.WithTimeout(ctx, timeout)
-	p.mu.Lock()
-	if p.cancel != nil {
-		p.cancel()
+	defer cancel()
+	settle := p.Settle
+	if settle <= 0 {
+		settle = previewSettle
 	}
-	p.gen++
-	gen := p.gen
-	p.cancel = cancel
-	p.mu.Unlock()
-	defer func() {
-		p.mu.Lock()
-		if p.gen == gen {
-			p.cancel = nil
-		}
-		p.mu.Unlock()
-		cancel()
-	}()
-
-	pcm, err := makePreview(ctx, m, SessionConfig{Model: model, Voice: voice, Instructions: previewInstructions}, key, PreviewLine(voice))
+	pcm, err := makePreview(ctx, m, SessionConfig{Model: model, Voice: voice, Instructions: previewInstructions}, key, PreviewLine(voice), settle)
 	if err != nil {
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return nil, errPreviewTimeout
+		if parent.Err() != nil {
+			return nil, ErrPreviewCancelled
 		}
 		if ctx.Err() != nil {
-			return nil, ErrPreviewCancelled
+			return nil, errPreviewTimeout
 		}
 		return nil, err
 	}
-	_ = writeClip(path, pcm) // not kept: still played, and made again next time
+	if len(pcm) >= previewKeepSamples {
+		_ = writeClip(path, pcm) // not kept: still played, and made again next time
+	}
 	return pcm, nil
 }
 
-// Stop cancels the clip being made, if any.
-func (p *Previews) Stop() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.cancel != nil {
-		p.cancel()
-		p.cancel = nil
-	}
-}
-
 func (p *Previews) path(provider, model, voice string) (string, error) {
+	model = strings.TrimPrefix(model, "models/") // Gemini's ids may carry it
 	for _, s := range []string{provider, model, voice} {
 		if !safeName.MatchString(s) || strings.Contains(s, "..") {
 			return "", fmt.Errorf("no preview for %q", s)
@@ -163,7 +147,7 @@ func (p *Previews) path(provider, model, voice string) (string, error) {
 }
 
 // makePreview opens a session in cfg's voice, has it say line, and returns the audio.
-func makePreview(ctx context.Context, m Model, cfg SessionConfig, key Secret, line string) ([]int16, error) {
+func makePreview(ctx context.Context, m Model, cfg SessionConfig, key Secret, line string, settle time.Duration) ([]int16, error) {
 	s, err := m.Connect(ctx, cfg, key.Expose())
 	if err != nil {
 		return nil, err
@@ -171,10 +155,14 @@ func makePreview(ctx context.Context, m Model, cfg SessionConfig, key Secret, li
 	defer s.Close()
 	var pcm []int16
 	sent := false
+	lastErr := ""                // the provider's last non-fatal error, for a reply with no audio
+	var settled <-chan time.Time // a reply ended with audio: done unless more comes by then
 	for {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
+		case <-settled:
+			return pcm, nil
 		case e, ok := <-s.Events():
 			if !ok {
 				if ctx.Err() != nil {
@@ -192,6 +180,7 @@ func makePreview(ctx context.Context, m Model, cfg SessionConfig, key Secret, li
 				}
 			case EvAudioDelta:
 				if sent {
+					settled = nil
 					pcm = append(pcm, e.Audio...)
 					if len(pcm) >= previewMaxSamples {
 						return pcm[:previewMaxSamples], nil
@@ -199,15 +188,18 @@ func makePreview(ctx context.Context, m Model, cfg SessionConfig, key Secret, li
 				}
 			case EvResponseDone:
 				if sent && len(pcm) > 0 {
-					return pcm, nil
-				}
-				if sent {
+					settled = time.After(settle)
+				} else if sent {
+					if lastErr != "" {
+						return nil, errors.New(lastErr)
+					}
 					return nil, errPreviewSilent
 				}
 			case EvError:
 				if e.Fatal {
 					return nil, errors.New(e.Message)
 				}
+				lastErr = e.Message
 			}
 		}
 	}

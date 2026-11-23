@@ -69,6 +69,8 @@ func (s *previewSession) Send(c Command) error {
 	return nil
 }
 
+// spoken is a reply of n+3 samples. Clips shorter than previewKeepSamples aren't kept, so tests
+// of keeping use long ones.
 func spoken(n int) []Event {
 	return []Event{
 		{Kind: EvResponseCreated},
@@ -78,6 +80,8 @@ func spoken(n int) []Event {
 	}
 }
 
+const long = 3 * 24000 // a whole line: 3 s
+
 func newPreviews(t *testing.T, m *previewModel, key bool) *Previews {
 	t.Helper()
 	secrets := fixedSecrets{}
@@ -86,6 +90,7 @@ func newPreviews(t *testing.T, m *previewModel, key bool) *Previews {
 	}
 	return &Previews{
 		Dir: filepath.Join(t.TempDir(), "previews"), Secrets: secrets, Timeout: 2 * time.Second,
+		Settle: 20 * time.Millisecond,
 		Model: func(p string) Model {
 			if p == "openai-live" {
 				return m
@@ -96,11 +101,11 @@ func newPreviews(t *testing.T, m *previewModel, key bool) *Previews {
 }
 
 func TestPreviewIsMadeOnceThenKept(t *testing.T) {
-	m := &previewModel{reply: spoken(100)}
+	m := &previewModel{reply: spoken(long)}
 	p := newPreviews(t, m, true)
 	pcm, err := p.Get(context.Background(), "openai-live", "gpt-live-1", "marin")
-	if err != nil || len(pcm) != 103 {
-		t.Fatalf("Get = %d samples, %v; want 103, nil", len(pcm), err)
+	if err != nil || len(pcm) != long+3 {
+		t.Fatalf("Get = %d samples, %v; want %d, nil", len(pcm), err, long+3)
 	}
 	if c := m.connects[0]; c.Voice != "marin" || c.Model != "gpt-live-1" || len(c.Tools) != 0 {
 		t.Fatalf("connected with %+v, want the voice and model, no tools", c)
@@ -109,7 +114,7 @@ func TestPreviewIsMadeOnceThenKept(t *testing.T) {
 		t.Fatalf("injected %q, want the preview line", m.injected)
 	}
 	again, err := p.Get(context.Background(), "openai-live", "gpt-live-1", "marin")
-	if err != nil || len(again) != 103 || again[102] != 3 || m.calls() != 1 {
+	if err != nil || len(again) != long+3 || again[long+2] != 3 || m.calls() != 1 {
 		t.Fatalf("second Get = %d samples, %v after %d connects; want the kept clip, no connect", len(again), err, m.calls())
 	}
 	if _, ok := p.Cached("openai-live", "gpt-live-1", "marin"); !ok {
@@ -133,6 +138,7 @@ func TestPreviewFailures(t *testing.T) {
 		{"never answers", &previewModel{hold: true}, true, "took too long"},
 		{"no audio", &previewModel{reply: []Event{{Kind: EvResponseCreated}, {Kind: EvResponseDone}}}, true, "no audio"},
 		{"fatal error", &previewModel{reply: []Event{{Kind: EvError, Fatal: true, Message: "rate limited"}}}, true, "rate limited"},
+		{"failed reply", &previewModel{reply: []Event{{Kind: EvError, Message: "response failed: quota"}, {Kind: EvResponseDone}}}, true, "quota"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := newPreviews(t, tc.m, tc.key)
@@ -169,13 +175,13 @@ func TestPreviewRefusesUnknownOrUnsafeNames(t *testing.T) {
 }
 
 func TestPreviewDamagedClipIsMadeAgain(t *testing.T) {
-	m := &previewModel{reply: spoken(10)}
+	m := &previewModel{reply: spoken(long)}
 	p := newPreviews(t, m, true)
 	path, _ := p.path("openai-live", "gpt-live-1", "marin")
 	os.MkdirAll(filepath.Dir(path), 0o755)
 	os.WriteFile(path, []byte{1}, 0o644) // half a sample
 	pcm, err := p.Get(context.Background(), "openai-live", "gpt-live-1", "marin")
-	if err != nil || len(pcm) != 13 || m.calls() != 1 {
+	if err != nil || len(pcm) != long+3 || m.calls() != 1 {
 		t.Fatalf("Get = %d samples, %v, %d connects; want it made again", len(pcm), err, m.calls())
 	}
 }
@@ -190,27 +196,28 @@ func TestPreviewUnwritableFolderStillPlays(t *testing.T) {
 	}
 }
 
-// A second preview, or Stop, cancels the one being made.
-func TestPreviewANewOneCancelsTheOld(t *testing.T) {
+// The caller's ctx ending cancels the clip being made.
+func TestPreviewEndsWithItsContext(t *testing.T) {
 	m := &previewModel{hold: true}
 	p := newPreviews(t, m, true)
+	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		_, err := p.Get(context.Background(), "openai-live", "gpt-live-1", "marin")
+		_, err := p.Get(ctx, "openai-live", "gpt-live-1", "marin")
 		done <- err
 	}()
 	deadline := time.Now().Add(time.Second)
 	for m.calls() == 0 && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
 	}
-	p.Stop()
+	cancel()
 	select {
 	case err := <-done:
 		if !errors.Is(err, ErrPreviewCancelled) {
 			t.Fatalf("err = %v, want cancelled", err)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("Stop didn't cancel the preview being made")
+		t.Fatal("cancelling didn't stop the preview being made")
 	}
 }
 
@@ -245,5 +252,43 @@ func TestRuntimePlayClip(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	if n := r.queuedSamples(); n != 1200 {
 		t.Fatalf("StopClip cut the conversation's audio: %d queued, want 1200", n)
+	}
+}
+
+// A short reply (cut off, failed) is played but not kept; a line split over two replies (GPT-Live
+// ends a reply at a pause) is kept whole.
+func TestPreviewKeepsOnlyAWholeLine(t *testing.T) {
+	m := &previewModel{reply: spoken(100)}
+	p := newPreviews(t, m, true)
+	if pcm, err := p.Get(context.Background(), "openai-live", "gpt-live-1", "marin"); err != nil || len(pcm) != 103 {
+		t.Fatalf("Get = %d samples, %v", len(pcm), err)
+	}
+	if _, ok := p.Cached("openai-live", "gpt-live-1", "marin"); ok {
+		t.Fatal("a 4 ms clip was kept")
+	}
+
+	half := long / 2
+	m = &previewModel{reply: append(spoken(half), spoken(half)...)}
+	p = newPreviews(t, m, true)
+	p.Settle = 300 * time.Millisecond
+	pcm, err := p.Get(context.Background(), "openai-live", "gpt-live-1", "cedar")
+	if err != nil || len(pcm) != 2*(half+3) {
+		t.Fatalf("Get = %d samples, %v; want both halves, %d", len(pcm), err, 2*(half+3))
+	}
+	if _, ok := p.Cached("openai-live", "gpt-live-1", "cedar"); !ok {
+		t.Fatal("the whole line wasn't kept")
+	}
+}
+
+// Gemini's model ids may carry "models/": the clip is kept under the bare id.
+func TestPreviewGeminiModelsPrefix(t *testing.T) {
+	m := &previewModel{reply: spoken(long)}
+	p := newPreviews(t, m, true)
+	p.Model = func(string) Model { return m }
+	if _, err := p.Get(context.Background(), "gemini-live", "models/gemini-3.8-live", "Kore"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := p.Cached("gemini-live", "gemini-3.8-live", "Kore"); !ok {
+		t.Fatal("not kept under the bare model id")
 	}
 }

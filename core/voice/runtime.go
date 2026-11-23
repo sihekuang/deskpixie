@@ -282,7 +282,7 @@ type Runtime struct {
 	voiceEnd      time.Time    // capture time of the last mic frame with speech in it, this turn
 	replyTiming   *replyTiming // a reply waiting for its first sample to play (#481)
 	replyFlow     replyFlow    // how the current reply's audio arrived (#481)
-	clip          bool         // pb holds a clip PlayClip queued (#480), not a conversation's audio
+	clip          bool         // PlayClip queued a clip (#480) since the last StopClip or conversation
 	pending       []Input
 	recorder      *MicRecorder
 	take          *MicTake // the current conversation's recording

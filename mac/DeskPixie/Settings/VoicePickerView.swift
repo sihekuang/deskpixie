@@ -78,6 +78,7 @@ struct VoicePickerView: View {
                 .accessibilityElement(children: .combine)
                 .accessibilityAddTraits(picked ? [.isButton, .isSelected] : .isButton)
                 .accessibilityAction { pick(index) }
+                .accessibilityIdentifier("voice.row.\(name)")
                 Spacer(minLength: 4)
                 if picked {
                     Image(systemName: "checkmark").foregroundStyle(Color.accentColor)

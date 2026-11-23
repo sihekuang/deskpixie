@@ -443,7 +443,7 @@ func (a *App) Close() {
 			a.agent.Shutdown()
 		}
 		a.models.Close()
-		a.previews.Stop()
+		a.closePreviews()
 		close(a.stop)
 		a.talkMu.Lock()
 		a.talkClosed = true

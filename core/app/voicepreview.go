@@ -30,13 +30,14 @@ type previewRefusal string
 func (r previewRefusal) Error() string { return string(r) }
 func (r previewRefusal) Code() string  { return "refused" }
 
-// previewer is the one preview at a time: the voice it is for and its gen, so a late result
-// of one taken over is dropped.
+// previewer is the one preview at a time. gen tells a preview's late results from the current
+// one's; voice is the voice whose row shows loading or playing ("" when none does).
 type previewer struct {
-	mu    sync.Mutex
-	gen   int
-	voice string
-	timer *time.Timer // ends "playing" when the clip has played
+	mu     sync.Mutex
+	gen    int
+	voice  string
+	cancel context.CancelFunc // ends the clip being made
+	timer  *time.Timer        // ends "playing" when the clip has played
 }
 
 func (a *App) setupPreviews() {
@@ -70,7 +71,8 @@ func (a *App) registerPreview(r Registrar) {
 }
 
 // preview plays voiceName's clip for the current voice service and model: at once when it is
-// kept, else once the service has made it. The result is the state it starts in.
+// kept, else once the service has made it. The result is the state it starts in; a refusal
+// sends no event (the picker shows the refusal itself).
 func (a *App) preview(voiceName string) (map[string]any, error) {
 	if a.rt == nil {
 		return nil, previewRefusal(previewNoRT)
@@ -80,22 +82,26 @@ func (a *App) preview(voiceName string) (map[string]any, error) {
 	}
 	v := a.store.Current().Voice
 	provider, model := v.Provider, v.Model()
-	gen := a.takePreview(voiceName)
-	if pcm, ok := a.previews.Cached(provider, model, voiceName); ok {
+	pcm, cached := a.previews.Cached(provider, model, voiceName)
+	if !cached {
+		if _, ok := a.deps.Secrets.APIKey(provider); !ok {
+			return nil, previewRefusal(previewNoKey)
+		}
+	}
+	gen, ctx := a.takePreview(voiceName)
+	if cached {
 		if !a.playPreview(gen, voiceName, pcm) {
 			return nil, previewRefusal(previewBusy)
 		}
 		return map[string]any{"state": "playing"}, nil
 	}
-	if _, ok := a.deps.Secrets.APIKey(provider); !ok {
-		a.endPreview(gen)
-		return nil, previewRefusal(previewNoKey)
-	}
+	// Before the work starts, so a quick failure can't overtake it in the event queue.
+	a.emit("voice.preview", map[string]any{"voice": voiceName, "state": "loading"})
 	go func() {
-		pcm, err := a.previews.Get(context.Background(), provider, model, voiceName)
+		pcm, err := a.previews.Get(ctx, provider, model, voiceName)
 		switch {
 		case errors.Is(err, voice.ErrPreviewCancelled):
-			return // a newer preview or Stop took over: it reports for itself
+			a.endPreview(gen) // a newer preview or Stop took over: nothing, unless it's still ours
 		case errors.Is(err, voice.ErrPreviewNoKey):
 			a.previewFailed(gen, voiceName, previewNoKey)
 		case err != nil:
@@ -104,29 +110,32 @@ func (a *App) preview(voiceName string) (map[string]any, error) {
 			a.previewFailed(gen, voiceName, previewBusy)
 		}
 	}()
-	a.emit("voice.preview", map[string]any{"voice": voiceName, "state": "loading"})
 	return map[string]any{"state": "loading"}, nil
 }
 
-// takePreview makes voiceName the preview, stopping any before it, and returns its gen.
-func (a *App) takePreview(voiceName string) int {
+// takePreview makes voiceName the preview ("" for none), ending the one before it (its clip
+// being made is cancelled, its sound stopped, its row told done). It returns the new gen and
+// the context its clip is made under.
+func (a *App) takePreview(voiceName string) (int, context.Context) {
 	p := &a.previewing
+	ctx, cancel := context.WithCancel(context.Background())
 	p.mu.Lock()
 	old := p.voice
+	if p.cancel != nil {
+		p.cancel()
+	}
 	if p.timer != nil {
 		p.timer.Stop()
-		p.timer = nil
 	}
 	p.gen++
 	gen := p.gen
-	p.voice = voiceName
+	p.voice, p.cancel, p.timer = voiceName, cancel, nil
 	p.mu.Unlock()
-	a.previews.Stop()
 	a.rt.StopClip()
 	if old != "" {
 		a.emit("voice.preview", map[string]any{"voice": old, "state": "done"})
 	}
-	return gen
+	return gen, ctx
 }
 
 // playPreview plays pcm if gen is still the preview and Pixie is at rest, and reports it.
@@ -179,10 +188,19 @@ func (a *App) stopPreview() {
 		return
 	}
 	a.takePreview("")
+}
+
+// closePreviews cancels a clip being made, at quit.
+func (a *App) closePreviews() {
 	p := &a.previewing
 	p.mu.Lock()
-	p.voice = ""
-	p.mu.Unlock()
+	defer p.mu.Unlock()
+	if p.cancel != nil {
+		p.cancel()
+	}
+	if p.timer != nil {
+		p.timer.Stop()
+	}
 }
 
 func clipRunes(s string, n int) string {
