@@ -236,11 +236,12 @@ func claudeTicked(headers []string, k int) string {
 	return strings.TrimSuffix(tab, "☐"+headers[k]) + "☒" + headers[k]
 }
 
-// claudeReview is Claude Code 2.1.311's page after a menu's tabs: "Submit answers" sends them,
-// "Cancel" drops the menu.
+// claudeReview is Claude Code's page after a menu's tabs: "Submit answers" sends them, "Cancel"
+// drops the menu. It is told by its title and its first option: 2.1.311 asked "Ready to submit
+// your answers?" above them, 2.1.330 doesn't (#485).
 var claudeReview = menuPart{text: "Ready to submit your answers?", title: "Ready to submit your answers?",
 	labels: []string{"Submit answers", "Cancel"}, details: []string{"", ""}, review: true, marker: "Review your answers",
-	detail: noSpace("Ready to submit your answers?")}
+	detail: noSpace("1. Submit answers")}
 
 // answer is choice as the part's review shows it: the option, the options, or your words.
 func (p menuPart) answer(choice string) string {

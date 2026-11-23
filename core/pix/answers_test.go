@@ -537,7 +537,14 @@ func claudeTabPage(tabs, question string, options []string, ticked map[int]bool,
 	return strings.Join(lines, "\r\n")
 }
 
+// claudeReviewPage is Claude Code 2.1.330's review: no "Ready to submit your answers?" (#485).
 func claudeReviewPage(answers ...string) string {
+	return "←  ☒ Color  ✔ Submit  →\r\nReview your answers\r\n" + strings.Join(answers, "\r\n") +
+		"\r\n❯ 1. Submit answers\r\n  2. Cancel"
+}
+
+// claudeReviewPage311 is Claude Code 2.1.311's review, which asks it first.
+func claudeReviewPage311(answers ...string) string {
 	return "←  ☒ Color  ✔ Submit  →\r\nReview your answers\r\n" + strings.Join(answers, "\r\n") +
 		"\r\nReady to submit your answers?\r\n❯ 1. Submit answers\r\n  2. Cancel"
 }
@@ -585,7 +592,8 @@ func answered(t *testing.T, evs []wire.Msg, id string) *wire.Msg {
 }
 
 // Each question is answered on its tab, as Claude goes on to the next; then its review, whose
-// Submit answers sends them, shows what each was answered.
+// Submit answers sends them, shows what each was answered. Claude Code 2.1.330's review no
+// longer asks "Ready to submit your answers?" (#485); the test of several picks draws 2.1.311's.
 func TestAMenuOfSeveralQuestionsIsAnsweredInTurn(t *testing.T) {
 	h := pipeHarness(t, "claude")
 	h.s.Hook("PreToolUse", claudeTwo())
@@ -648,7 +656,7 @@ func TestAQuestionOfSeveralPicksTicksEach(t *testing.T) {
 	waitTyped(t, h, "13")
 	draw(h, claudeTabPage("☒ Pick", "Which toppings?", opts, map[int]bool{1: true, 3: true}, true, 1))
 	waitTyped(t, h, "13\t")
-	draw(h, claudeReviewPage(" ● Which toppings?", "   → Cheese, Olives"))
+	draw(h, claudeReviewPage311(" ● Which toppings?", "   → Cheese, Olives"))
 	q2 := answered(t, <-evs, q.ID)
 	if q2 == nil || q2.Text != "Ready to submit your answers? Which toppings? → Cheese, Olives" {
 		t.Fatalf("%+v", q2)
