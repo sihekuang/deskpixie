@@ -330,7 +330,7 @@ func TestClientDelegationJoinsASplitUtterance(t *testing.T) {
 // the session's option rather than going to it as a new message.
 func TestClientDelegationASplitAnswerIsStillAnAnswer(t *testing.T) {
 	c := newClientConv()
-	c.Step(InjectInput(Notice{Text: "Coordinator replies while you were away:\n- Coordinator question: jira is asking: Create these 2 stories? Choose Create both, unassigned or Change something first."}), ms(t0(), 100))
+	c.Step(InjectInput(Notice{Text: "Coordinator updates:\n- Coordinator question: jira is asking: Create these 2 stories? Choose Create both, unassigned or Change something first."}), ms(t0(), 100))
 	reply(c, "Should it create both unassigned, or change something first?", ms(t0(), 400))
 	userTurn(c, "Create both unassigned", ms(t0(), 2000))
 	userTurn(c, "Three points each is fine", ms(t0(), 3000))
@@ -361,13 +361,13 @@ func TestClientModeOnItWithoutAHandOffIsHandedOff(t *testing.T) {
 // starts) asks too: the next turn answers it, unless the question is a confirm prompt.
 func TestClientDelegationAfterAReplayedQuestionIsAnAnswer(t *testing.T) {
 	c := newClientConv()
-	c.Step(InjectInput(Notice{Text: "Coordinator replies while you were away:\n- Coordinator reply: Found it.\n- Coordinator question: Which repo should I push?"}), ms(t0(), 100))
+	c.Step(InjectInput(Notice{Text: "Coordinator updates:\n- Coordinator reply: Found it.\n- Coordinator question: Which repo should I push?"}), ms(t0(), 100))
 	reply(c, "Which repo should I push?", ms(t0(), 400))
 	userTurn(c, "the spacex one", ms(t0(), 2000))
 	if _, a := clientCall(c, "item_1", ms(t0(), 2100)); !a.Answer {
 		t.Fatalf("%+v", a)
 	}
-	c.Step(InjectInput(Notice{Text: "Coordinator replies while you were away:\n- Coordinator question: Run git push? Say confirm hawk."}), ms(t0(), 9000))
+	c.Step(InjectInput(Notice{Text: "Coordinator updates:\n- Coordinator question: Run git push? Say confirm hawk."}), ms(t0(), 9000))
 	userTurn(c, "yes do it", ms(t0(), 12000))
 	if _, a := clientCall(c, "item_2", ms(t0(), 12100)); a.Answer {
 		t.Fatalf("%+v", a)
@@ -386,7 +386,7 @@ func TestClientDelegationAnswersASessionsQuestion(t *testing.T) {
 	}
 	for text, want := range map[string]bool{
 		"Session update: deskpixie: hand-off is asking: should I rebuild it and open the PR?":     true,
-		"Coordinator replies while you were away:\n- Session update: api is asking: ship it?":     true,
+		"Coordinator updates:\n- Session update: api is asking: ship it?":                         true,
 		"Session update: deskpixie is asking: Which file? Pick 1 or 2 in the bubble.":             false,
 		"Session update: deskpixie is asking: Which file? Choose 1 or 2.":                         true, // #330
 		"Coordinator question: deskpixie is asking: Which file? Choose 1 or 2.":                   true,

@@ -144,6 +144,10 @@ func (o *Outbox) Undelivered() []OutboxLine {
 	return out
 }
 
+// updatesHeader starts a notice listing lines from the outbox. Not that you were away: you often
+// aren't, and Pixie said so (#491).
+const updatesHeader = "Coordinator updates:\n"
+
 // Replay (on Opened) returns every undelivered line, in order, as one notice; each is marked
 // delivered. Permission questions whose token is no longer pending (decided or expired) are
 // dropped. Returns the notice (nil if nothing is left) and the jsonl records to append.
@@ -163,7 +167,7 @@ func (o *Outbox) Replay(tokenPending func(string) bool) (*Notice, []string) {
 	if len(items) == 0 {
 		return nil, records
 	}
-	return &Notice{Text: "Coordinator replies while you were away:\n" + strings.Join(items, "\n")}, records
+	return &Notice{Text: updatesHeader + strings.Join(items, "\n")}, records
 }
 
 // MarkSeen (the updates bubble was looked at) marks those undelivered lines delivered, except

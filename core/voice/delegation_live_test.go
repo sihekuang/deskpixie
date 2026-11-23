@@ -371,7 +371,7 @@ func TestLiveASplitAnswerIsStillAnAnswer(t *testing.T) {
 	if _, ok := secrets.APIKey(openailive.Name); !ok {
 		t.Skip("no GPT-Live key")
 	}
-	notice := "Coordinator replies while you were away:\n- Coordinator question: OVA-23377: convert four subtasks to stories is asking: Create these 2 stories under OVA-23377? Choose Create both, unassigned, Create both, assign to me or Change something first."
+	notice := "Coordinator updates:\n- Coordinator question: OVA-23377: convert four subtasks to stories is asking: Create these 2 stories under OVA-23377? Choose Create both, unassigned, Create both, assign to me or Change something first."
 	first, second := liveSpeech(t, "Create both unassigned."), liveSpeech(t, "Three points each is fine.")
 	lead, pause := make([]int16, audio.SampleRate/2), make([]int16, audio.SampleRate*3/2)
 	var mu sync.Mutex

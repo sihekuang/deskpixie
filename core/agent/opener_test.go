@@ -44,7 +44,7 @@ func TestADoneLineWhileClosedOpensAConversationAndIsSaidOnce(t *testing.T) {
 	// Today's chime and notification, then the open.
 	wantEffects(t, fx, eChime, eNotify("There are 12 open issues."), eOpen, eCue(CueHappy), eHold(false))
 	fx = visible(c.Step(voiceOpened(), T0+800))
-	wantEffects(t, fx, eInject("Coordinator replies while you were away:\n- Coordinator reply: There are 12 open issues."))
+	wantEffects(t, fx, eInject("Coordinator updates:\n- Coordinator reply: There are 12 open issues."))
 	if n := len(c.outbox.Undelivered()); n != 0 {
 		t.Fatalf("%d lines still undelivered", n)
 	}
@@ -73,7 +73,7 @@ func TestAPermissionQuestionOpensAConversation(t *testing.T) {
 	fx := visible(askPush(c, 7, T0))
 	wantContains(t, fx, eOpen)
 	fx = visible(c.Step(voiceOpened(), T0+500))
-	wantEffects(t, fx, eInject("Coordinator replies while you were away:\n- Coordinator question: Run git push in coordinator? Say confirm hawk."))
+	wantEffects(t, fx, eInject("Coordinator updates:\n- Coordinator question: Run git push in coordinator? Say confirm hawk."))
 }
 
 func TestProgressAndUnsolicitedLinesDoNotOpenAConversation(t *testing.T) {
@@ -102,7 +102,7 @@ func TestAProgressReplyWhileClosedNeitherChimesNorNotifies(t *testing.T) {
 	wantContains(t, fx, eChime)
 	wantContains(t, fx, eOpen)
 	fx = visible(c.Step(voiceOpened(), T0+5800))
-	wantEffects(t, fx, eInject("Coordinator replies while you were away:\n- Coordinator reply: Halfway through.\n- Coordinator reply: There are 12 open issues."))
+	wantEffects(t, fx, eInject("Coordinator updates:\n- Coordinator reply: Halfway through.\n- Coordinator reply: There are 12 open issues."))
 }
 
 func TestAnOpenConversationGetsTheLineInjectedAsToday(t *testing.T) {
@@ -126,7 +126,7 @@ func TestABurstOpensOneConversation(t *testing.T) {
 		t.Fatalf("%d opens: %s", n, fmtEffects(visible(fx)))
 	}
 	fx = visible(c.Step(voiceOpened(), T0+2000))
-	wantEffects(t, fx, eInject("Coordinator replies while you were away:\n- Coordinator reply: A done.\n- Coordinator reply: B done.\n- Coordinator question: Which repo?"))
+	wantEffects(t, fx, eInject("Coordinator updates:\n- Coordinator reply: A done.\n- Coordinator reply: B done.\n- Coordinator question: Which repo?"))
 }
 
 func TestOpensAreCappedPerMinuteAndResumeWhenASlotFrees(t *testing.T) {
@@ -176,7 +176,7 @@ func TestARefusedOpenIsRetriedOnTheNextTick(t *testing.T) {
 		t.Fatal("refusals must not use up the cap")
 	}
 	fx := visible(c.Step(voiceOpened(), T0+3000))
-	wantEffects(t, fx, eInject("Coordinator replies while you were away:\n- Coordinator reply: There are 12 open issues."))
+	wantEffects(t, fx, eInject("Coordinator updates:\n- Coordinator reply: There are 12 open issues."))
 	if opens(c.Step(TickInput(), T0+4000)) != 0 {
 		t.Fatal("opened again after Opened")
 	}
@@ -188,7 +188,7 @@ func TestAConversationTheUserOpenedMeanwhileTakesTheUpdate(t *testing.T) {
 	stop(c, doneStop, T0)
 	c.Step(OpenRefusedInput(), T0) // the user was already starting one
 	fx := visible(c.Step(voiceOpened(), T0+500))
-	wantContains(t, fx, eInject("Coordinator replies while you were away:\n- Coordinator reply: There are 12 open issues."))
+	wantContains(t, fx, eInject("Coordinator updates:\n- Coordinator reply: There are 12 open issues."))
 	if opens(c.Step(TickInput(), T0+1000)) != 0 {
 		t.Fatal("nothing is left to say")
 	}
@@ -222,7 +222,7 @@ func TestAWorkerReportOpensAConversation(t *testing.T) {
 		t.Fatal(fmtEffects(visible(fx)))
 	}
 	fx = visible(c.Step(VoiceInput(VoiceSignal{Kind: voice.SigOpened}), T0+UpdateQuietMs+500))
-	wantContains(t, fx, eInject("Coordinator replies while you were away:\n- The upload worker in focus says it's done: Fixed the flaky test."))
+	wantContains(t, fx, eInject("Coordinator updates:\n- The upload worker in focus says it's done: Fixed the flaky test."))
 }
 
 func TestABurstOfWorkerReportsIsOneLineAndOneConversation(t *testing.T) {
@@ -260,7 +260,7 @@ func TestABurstOfWorkerReportsIsOneLineAndOneConversation(t *testing.T) {
 		t.Fatalf("%d opens for the coalesced line, want 1", n)
 	}
 	fx = visible(c.Step(voiceOpened(), T0+5_000+UpdateQuietMs+500))
-	wantEffects(t, fx, eInject("Coordinator replies while you were away:\n- "+line))
+	wantEffects(t, fx, eInject("Coordinator updates:\n- "+line))
 	c.Step(voiceClosed(), T0+5_000+UpdateQuietMs+20_000)
 	for at := T0 + 5_000 + UpdateQuietMs + 21_000; at < T0+3*NotifyWindowMs; at += 1000 {
 		if fx := visible(c.Step(TickInput(), at)); anyKind(fx, EfOpenConversation, EfInject, EfNotify) {
@@ -327,7 +327,7 @@ func TestSpeakUpdatesOnlyOpensOnlyToSpeak(t *testing.T) {
 		}
 		// Opened to speak, it replays the outbox as any open does.
 		fx := visible(c.Step(voiceOpened(), T0+800))
-		wantEffects(t, fx, eInject("Coordinator replies while you were away:\n- Coordinator reply: There are 12 open issues."))
+		wantEffects(t, fx, eInject("Coordinator updates:\n- Coordinator reply: There are 12 open issues."))
 	}
 }
 

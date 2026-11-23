@@ -222,7 +222,7 @@ func TestAChatReadWhileItOpensStillLetsPixieSayIt(t *testing.T) {
 	lines := outboxLines(sessionTurn(c, longTurn, T0))
 	c.Step(RepliesShownInput([]uint64{lines[0].ID}), T0+100)
 	wantContains(t, c.Step(voiceOpened(), T0+300),
-		eInject("Coordinator replies while you were away:\n- Session update: "+longTurnLine), "said")
+		eInject("Coordinator updates:\n- Session update: "+longTurnLine), "said")
 }
 
 // #319: a card shown after a failed open isn't held again by the next update, so the deck's

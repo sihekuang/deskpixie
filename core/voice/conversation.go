@@ -299,12 +299,13 @@ type Conversation struct {
 const SpeakOnlyWait = 5 * time.Second
 
 // speakOnlyNote follows a notice Pixie says with the mic off, so it doesn't ask a follow-up
-// nobody can answer ("Anything else?") (#436).
-const speakOnlyNote = "\n(The user can't answer right now: say this update, then stop. Don't add a question of your own or offer more help.)"
+// nobody can answer ("Anything else?") (#436). It says the mic is off, not that you can't
+// answer: Pixie told you so, with you right there (#491).
+const speakOnlyNote = "\n(The mic is off for this one: say this update, then stop. Don't add a question of your own or offer more help, and say nothing about the mic, or whether the user is around or can answer.)"
 
 // speakOnlyQuestionNote follows a question Pixie says with the mic off (#443): it says what is
 // asked so you can answer later (the hotkey, the chat window), and adds nothing of its own.
-const speakOnlyQuestionNote = "\n(The user can't answer right now: say this, including what it asks, so they can answer later, then stop. Don't add a question of your own or offer more help.)"
+const speakOnlyQuestionNote = "\n(The mic is off for this one: say this, including what it asks, then stop. Don't add a question of your own or offer more help, and say nothing about the mic, or whether the user is around or can answer.)"
 
 // NewConversation starts in PhaseIdle.
 func NewConversation(cfg ConversationConfig) *Conversation {

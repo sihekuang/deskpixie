@@ -45,7 +45,7 @@ func TestAMenuSaidBeforeTheConversationDroppedIsSaidAgainOnce(t *testing.T) {
 	if !asksAgain(fx) {
 		t.Fatalf("not said again: %q", injectsOf(fx))
 	}
-	if n := effectsOfKind(fx, EfInject); len(n) == 0 || !strings.HasPrefix(n[len(n)-1].Notice.Text, "Coordinator replies while you were away:\n- ") || len(n[len(n)-1].Notice.Sessions) != 1 {
+	if n := effectsOfKind(fx, EfInject); len(n) == 0 || !strings.HasPrefix(n[len(n)-1].Notice.Text, "Coordinator updates:\n- ") || len(n[len(n)-1].Notice.Sessions) != 1 {
 		t.Fatalf("%+v", n)
 	}
 	// Only once: quiet again, it is left to the badge.
