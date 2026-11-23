@@ -134,6 +134,10 @@ type App struct {
 
 	// models loads the voice providers' model lists for Settings (#477).
 	models *voice.Refresher
+	// previews make the voice samples Settings plays (#480); previewing is the one at a time.
+	previews   *voice.Previews
+	voiceLog   *voice.VoiceLog // voice.log: the conversation's lines and previews' timings
+	previewing previewer
 
 	rt        *voice.Runtime // nil when the voice loop could not be set up
 	setupFail *voice.Failure
@@ -226,6 +230,8 @@ func New(d Deps) (*App, error) {
 	a.hotkey.bound = cfg.Hotkey
 
 	a.setupModels() // before the settings API, whose Env reads it
+	a.voiceLog = voice.NewVoiceLog(voice.VoiceLogPath(a.paths.AppSupport), a.LogMaxBytes)
+	a.setupPreviews()
 	platform := settings.Platform(p.Platform)
 	if platform == "" {
 		platform = settings.CurrentPlatform()
@@ -339,7 +345,7 @@ func (a *App) buildVoice(cfg settings.Config) {
 		MouthLevels:  MouthLevels(levels, ok),
 		Conversation: voice.ConversationConfig{IdleTimeout: idle, HoldTimeout: hold, HandOff: cfg.Voice.HandOffWhenUnsure, CheckClaims: cfg.Voice.CheckClaims, SpeakListens: cfg.Agent.ListenAfterQuestion()},
 		OnMicSent:    a.deps.OnMicSent,
-		Log:          voice.NewVoiceLog(voice.VoiceLogPath(a.paths.AppSupport), a.LogMaxBytes),
+		Log:          a.voiceLog,
 	}, a.onVoiceEvent)
 	a.mu.Lock()
 	a.meter = a.rt
@@ -439,6 +445,7 @@ func (a *App) Close() {
 			a.agent.Shutdown()
 		}
 		a.models.Close()
+		a.closePreviews()
 		close(a.stop)
 		a.talkMu.Lock()
 		a.talkClosed = true
@@ -1322,6 +1329,7 @@ func (a *App) Register(r Registrar) {
 		return struct{}{}, nil
 	})
 	a.registerChat(r)
+	a.registerPreview(r)
 	a.registerThread(r)
 	a.registerAttachments(r)
 	a.registerLogs(r)

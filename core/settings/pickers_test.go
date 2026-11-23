@@ -6,7 +6,9 @@ package settings
 // shown "(not found)" by the window.
 
 import (
+	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/sihekuang/deskpixie/core/voice/gemini"
@@ -193,5 +195,41 @@ func TestGPTLiveListsMatchTheAdapter(t *testing.T) {
 	}
 	if got := values(Options(FieldByPath("voice.liveBackendModel").Kind.Choices, live)); got[0] != openailive.DefaultBackendModel {
 		t.Fatal(got)
+	}
+}
+
+// The voice picker (#480): voice.voice can be previewed, and each Gemini voice has Google's
+// description; OpenAI's voices have none.
+func TestVoiceChoicesCanBePreviewedAndDescribed(t *testing.T) {
+	voiceC := FieldByPath("voice.voice").Kind.Choices
+	if !voiceC.Preview {
+		t.Fatal("voice.voice isn't previewable")
+	}
+	for _, v := range gemini.Voices {
+		if VoiceDetails[ProviderGemini][v] == "" {
+			t.Fatalf("Gemini voice %s has no description", v)
+		}
+	}
+	if len(VoiceDetails[ProviderGemini]) != len(gemini.Voices) {
+		t.Fatalf("%d Gemini descriptions for %d voices", len(VoiceDetails[ProviderGemini]), len(gemini.Voices))
+	}
+	opts := Options(voiceC, OptionSources{VoiceProvider: ProviderGemini})
+	if opts[3].Value != "Kore" || opts[3].Detail != "Firm" {
+		t.Fatalf("option 4 = %+v, want Kore, Firm", opts[3])
+	}
+	for _, o := range Options(voiceC, OptionSources{VoiceProvider: ProviderOpenAILive}) {
+		if o.Detail != "" {
+			t.Fatalf("%s has a made-up description %q", o.Value, o.Detail)
+		}
+	}
+	env := testEnv(t)
+	svc := NewService(newMemStore(Default()), &recorder{})
+	b, err := json.Marshal(viewAt(svc.Snapshot(env).Fields, "voice.voice").Kind)
+	if err != nil || !strings.Contains(string(b), `"preview":true`) {
+		t.Fatalf("voice.voice kind %s, %v: want preview", b, err)
+	}
+	b, _ = json.Marshal(viewAt(svc.Snapshot(env).Fields, "voice.provider").Kind)
+	if strings.Contains(string(b), "preview") || strings.Contains(string(b), "detail") {
+		t.Fatalf("voice.provider kind %s has preview or detail", b)
 	}
 }

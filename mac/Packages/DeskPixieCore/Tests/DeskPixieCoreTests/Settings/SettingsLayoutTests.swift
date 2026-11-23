@@ -150,8 +150,8 @@ final class SettingsLayoutTests: XCTestCase {
     // selected as "(not found)".
     func test_model_and_voice_pickers_offer_the_providers_choices() {
         guard case .menu(let models, let m) = spec("voice.openaiModel", defaults).control,
-              case .menu(let voices, let v) = spec("voice.voice", defaults).control else {
-            return XCTFail("model and voice are pop-ups")
+              case .voices(let voices, let v) = spec("voice.voice", defaults).control else {
+            return XCTFail("the model is a pop-up, the voice a list with previews (#480)")
         }
         XCTAssertEqual(models.map(\.label), ["GPT Realtime", "GPT Realtime 2", "GPT Realtime 2.1",
                                               "GPT Realtime mini", "GPT Realtime 2.1 mini"])
@@ -217,7 +217,7 @@ final class SettingsLayoutTests: XCTestCase {
         switch (kind, v) {
         case (.bool, .bool), (.int, .int), (.hotkey, .string): return true
         case (.choice(let options), .null): return options.contains { $0.value.isEmpty }
-        case (.choice, .string): return true
+        case (.choice, .string), (.previewChoice, .string): return true
         case (.multiChoice, .array(let a)): return a.allSatisfy { $0.stringValue != nil }
         case (.text(let optional), .null), (.path(_, let optional), .null): return optional
         case (.text, .string(let s)), (.path, .string(let s)): return !s.isEmpty
@@ -242,7 +242,7 @@ final class SettingsLayoutTests: XCTestCase {
             let inputs: [L.Input]
             switch s.control {
             case .switch: inputs = [.switch(true), .switch(false)]
-            case .menu(let items, _): inputs = items.indices.map { .menu($0) }
+            case .menu(let items, _), .voices(let items, _): inputs = items.indices.map { .menu($0) }
             case .stepper: inputs = [.step(5), .text("42")]
             case .checks(let items, _): inputs = items.indices.flatMap { [L.Input.check(index: $0, on: true), .check(index: $0, on: false)] }
             case .text: inputs = [.text("abc"), .text("")]

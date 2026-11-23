@@ -98,6 +98,8 @@ public enum EngineEvent: Sendable, Equatable {
     case notify(title: String, body: String, sound: String?, update: UpdateLine? = nil)
     case canvasOpen(url: String, title: String)
     case settingsChanged
+    /// How a voice preview goes (#480): state is "loading", "playing", "done" or "error".
+    case voicePreview(voice: String, state: String, error: String?)
     /// Pixie's open_settings (#288): show the Settings window, at the setting when there is one.
     case settingsOpen(SettingsHit?)
     case restart
@@ -166,6 +168,7 @@ public enum EngineEvent: Sendable, Equatable {
     private struct ChatNeedsEvent: Decodable { var entries: [ChatEntry] }
     private struct ChatRecipientsEvent: Decodable { var recipients: [ChatRecipient] }
     private struct ClipboardRead: Decodable { var request: String }
+    private struct VoicePreviewEvent: Decodable { var voice: String, state: String, error: String? }
 
     /// Decodes one event JSON object; unknown kinds, malformed JSON and events missing a
     /// required field yield nil.
@@ -191,6 +194,7 @@ public enum EngineEvent: Sendable, Equatable {
             }
         case "tray": return .tray
         case "settings.changed": return .settingsChanged
+        case "voice.preview": return get(VoicePreviewEvent.self).map { .voicePreview(voice: $0.voice, state: $0.state, error: $0.error) }
         case "settings.open": return .settingsOpen(get(SettingsHit.self))
         case "restart": return .restart
         case "pack": return get(PackEvent.self).map { .pack($0) }

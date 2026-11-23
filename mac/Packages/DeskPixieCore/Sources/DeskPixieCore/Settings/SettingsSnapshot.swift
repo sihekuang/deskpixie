@@ -92,11 +92,14 @@ public struct SettingsOption: Codable, Equatable, Sendable {
     public var value: String
     public var label: String
     public var platforms: [SettingsPlatform]?
+    /// What the option is like, under its label (a voice's style, #480); nil when there's none.
+    public var detail: String?
 
-    public init(value: String, label: String, platforms: [SettingsPlatform]? = nil) {
+    public init(value: String, label: String, platforms: [SettingsPlatform]? = nil, detail: String? = nil) {
         self.value = value
         self.label = label
         self.platforms = platforms
+        self.detail = detail
     }
 }
 
@@ -105,12 +108,14 @@ public enum SettingsKind: Equatable, Sendable, Codable {
     case bool
     case int(min: Int64, max: Int64, menu: Bool)
     case choice([SettingsOption])
+    /// A choice whose options can be heard before one is picked (Go `preview`, voice.voice; #480).
+    case previewChoice([SettingsOption])
     case multiChoice([SettingsOption])
     case text(optional: Bool)
     case path(dir: Bool, optional: Bool)
     case hotkey
 
-    private enum Keys: String, CodingKey { case type, min, max, menu, options, optional, dir }
+    private enum Keys: String, CodingKey { case type, min, max, menu, options, optional, dir, preview }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
@@ -120,7 +125,9 @@ public enum SettingsKind: Equatable, Sendable, Codable {
         case "int":
             self = .int(min: try c.decode(Int64.self, forKey: .min), max: try c.decode(Int64.self, forKey: .max),
                         menu: try c.decodeIfPresent(Bool.self, forKey: .menu) ?? false)
-        case "choice": self = .choice(try c.decodeIfPresent([SettingsOption].self, forKey: .options) ?? [])
+        case "choice":
+            let options = try c.decodeIfPresent([SettingsOption].self, forKey: .options) ?? []
+            self = try c.decodeIfPresent(Bool.self, forKey: .preview) == true ? .previewChoice(options) : .choice(options)
         case "multiChoice": self = .multiChoice(try c.decodeIfPresent([SettingsOption].self, forKey: .options) ?? [])
         case "text": self = .text(optional: try c.decodeIfPresent(Bool.self, forKey: .optional) ?? false)
         case "path":
@@ -144,6 +151,10 @@ public enum SettingsKind: Equatable, Sendable, Codable {
         case .choice(let o):
             try c.encode("choice", forKey: .type)
             try c.encode(o, forKey: .options)
+        case .previewChoice(let o):
+            try c.encode("choice", forKey: .type)
+            try c.encode(o, forKey: .options)
+            try c.encode(true, forKey: .preview)
         case .multiChoice(let o):
             try c.encode("multiChoice", forKey: .type)
             try c.encode(o, forKey: .options)
