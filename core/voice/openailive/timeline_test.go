@@ -173,3 +173,24 @@ func TestSpeakOnlyUpdateIsSaid(t *testing.T) {
 	wait("the update to be said", 5*time.Second, said)
 	wait("the conversation to end on its own", 10*time.Second, func() bool { return !rt.IsOpen() })
 }
+
+// Mic frames held up behind a slow write, sent after a fill, count by their length: the timeline
+// stays with the clock and the filler waits until the clock passes the audio sent.
+func TestIdleInputWaitsOutAMicBacklog(t *testing.T) {
+	c := newCodec()
+	c.inputUntil = at(0)
+	if got := silenceMs(t, c.idleInput(at(500))); got != 500 {
+		t.Fatalf("a 500 ms stall: %d ms of silence, want 500", got)
+	}
+	for range 10 { // the 400 ms captured meanwhile, all at once
+		c.encode(voice.Command{Kind: voice.CmdAudio, Audio: tone(960, 100)}, at(510))
+	}
+	for _, ms := range []int{560, 800, 950} {
+		if got := c.idleInput(at(ms)); len(got) != 0 {
+			t.Fatalf("at %d ms, with mic audio sent up to 900 ms: %v, want nothing", ms, got)
+		}
+	}
+	if got := silenceMs(t, c.idleInput(at(1000))); got != 100 {
+		t.Fatalf("at 1000 ms: %d ms of silence, want 100", got)
+	}
+}

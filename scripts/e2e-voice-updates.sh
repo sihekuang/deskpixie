@@ -21,7 +21,7 @@ for v in $(env | sed -n 's/^\(PIX_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; done
 APP=${1:-mac/build/Build/Products/Debug/DeskPixie.app}
 PROVIDER=${2:-openai-live}
 UPDATE_TIMEOUT=${UPDATE_TIMEOUT:-45}
-APP=$(cd "$(dirname "$APP")" && pwd)/$(basename "$APP")
+APP=$(cd "$(dirname "$APP")" 2>/dev/null && pwd)/$(basename "$APP") || { echo "no built app at ${1:-$APP} (make -C mac build)" >&2; exit 2; }
 BIN="$APP/Contents/MacOS/DeskPixie"
 PIX="$APP/Contents/Helpers/pix"
 [ -x "$BIN" ] && [ -x "$PIX" ] || { echo "no built app at $APP (make -C mac build)" >&2; exit 2; }
@@ -129,12 +129,18 @@ for u in "${UPDATES[@]}"; do
   sleep 2
   hook "$name" Stop "$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"Stop","last_assistant_message":sys.argv[1]}))' "$reply")"
   echo "-> $name: $reply"
-  done=""
+  closed() { tail -n +$((from + 1)) "$VOICE" | grep -q "conversation closed"; }
+  state=timeout
   for _ in $(seq 1 $((UPDATE_TIMEOUT * 5))); do
-    if tail -n +$((from + 1)) "$VOICE" | grep -q "conversation closed"; then done=1; break; fi
+    if closed; then state=closed; break; fi
     sleep 0.2
   done
-  results+=("$from|${done:-timeout}")
+  results+=("$from|$state")
+  # A conversation still open would close during the next update and pass for its close.
+  if [ $state = timeout ]; then
+    for _ in $(seq 1 150); do closed && break; sleep 0.2; done
+    closed || { echo "the conversation of update $((${#results[@]})) never closed; stopping" >&2; break; }
+  fi
   sleep 2
 done
 

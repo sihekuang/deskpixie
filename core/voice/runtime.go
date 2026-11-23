@@ -727,7 +727,7 @@ func (r *Runtime) shutdown() {
 		r.session, r.events = nil, nil
 	}
 	r.pb.flush()
-	r.voiceEnd, r.replyTiming = time.Time{}, nil
+	r.voiceEnd, r.replyTiming, r.replyFlow = time.Time{}, nil, replyFlow{}
 }
 
 // input steps the conversation and carries out the effects; inputs raised while applying
@@ -742,15 +742,27 @@ func (r *Runtime) input(in Input) {
 			r.apply(fx)
 		}
 		if after := r.conv.Phase(); after != before {
-			if f := r.replyFlow; before == PhaseSpeaking && f.samples > 0 {
-				r.cfg.Log.Printf("reply audio: %d ms of audio arrived over %d ms, longest wait %d ms",
-					int64(f.samples)*1000/audio.SampleRate, f.last.Sub(f.first).Milliseconds(), f.maxWait.Milliseconds())
-				r.replyFlow = replyFlow{}
+			if before == PhaseSpeaking {
+				r.logReplyFlow()
+			}
+			if after != PhaseThinking && after != PhaseSpeaking {
+				r.voiceEnd = time.Time{} // no reply to that speech: a later one isn't timed from it
 			}
 			r.cfg.Log.Printf("phase %s -> %s", before, after)
 		}
 	}
 	r.resting.Store(r.conv.Phase() == PhaseIdle)
+}
+
+// logReplyFlow writes one line on how a reply's audio arrived, once it has ended (#481).
+func (r *Runtime) logReplyFlow() {
+	f := r.replyFlow
+	r.replyFlow = replyFlow{}
+	if f.samples == 0 {
+		return
+	}
+	r.cfg.Log.Printf("reply audio: %d ms of audio arrived over %d ms, longest wait %d ms",
+		int64(f.samples)*1000/audio.SampleRate, f.last.Sub(f.first).Milliseconds(), f.maxWait.Milliseconds())
 }
 
 // logReplyTiming writes one line per reply once its first sample has played (#481).
@@ -899,6 +911,7 @@ func (r *Runtime) apply(fx Effect) {
 		r.replyFlow.add(len(fx.Audio), time.Now())
 		r.pb.enqueue(fx.Audio)
 	case EfResponseStarted:
+		r.logReplyFlow() // a follow-up reply (after a tool) gets its own line
 		r.responseMark = r.pb.playedSamples()
 		if !r.voiceEnd.IsZero() {
 			r.replyTiming = &replyTiming{voiceEnd: r.voiceEnd, arrived: time.Now(), mark: r.responseMark}
