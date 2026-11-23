@@ -56,6 +56,9 @@ func (s *fakeLive) sent(typ string) []map[string]any {
 	return out
 }
 
+// commentaryLandMs: how much input audio after a commentary the fake waits before saying it.
+const commentaryLandMs = 200
+
 type fakeConn struct {
 	c   *websocket.Conn
 	ctx context.Context
@@ -147,7 +150,10 @@ func (s *fakeLive) serve(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 	f := &fakeConn{c: c, ctx: ctx, srv: s}
-	talking, quiet := false, 0
+	talking := false
+	var quietMs int64  // quiet input audio since the user last spoke, in ms
+	var inputMs int64  // input audio received so far
+	var landAt []int64 // inputMs at which each waiting commentary lands, oldest first
 	for {
 		_, data, err := c.Read(ctx)
 		if err != nil {
@@ -179,8 +185,14 @@ func (s *fakeLive) serve(w http.ResponseWriter, r *http.Request) {
 		case "session.input_audio.append":
 			raw, _ := base64.StdEncoding.DecodeString(m.Audio)
 			pcm, _ := audio.DecodeLE(raw)
+			ms := int64(len(pcm)) * 1000 / audio.SampleRate
+			inputMs += ms
+			for len(landAt) > 0 && inputMs >= landAt[0] {
+				landAt = landAt[1:]
+				f.startReply(confReply{frames: 3}) // the commentary landed: GPT-Live says it
+			}
 			if voice.RMS(pcm) > 0.05 {
-				quiet = 0
+				quietMs = 0
 				s.mu.Lock()
 				delta := "word "
 				if s.client {
@@ -198,14 +210,19 @@ func (s *fakeLive) serve(w http.ResponseWriter, r *http.Request) {
 				}
 				f.mu.Unlock()
 			} else if talking {
-				if quiet++; quiet >= 5 {
-					talking, quiet = false, 0
+				// 200 ms of quiet ends the user's turn, however the audio is cut into messages.
+				if quietMs += ms; quietMs >= 200 {
+					talking, quietMs = false, 0
 					f.startReply(f.nextReply())
 				}
 			}
-		case "response.create", "session.commentary.append":
-			// GPT-Live speaks a commentary (paraphrased), as it does a backend result.
+		case "response.create":
+			// GPT-Live speaks a backend result.
 			f.startReply(confReply{frames: 3})
+		case "session.commentary.append":
+			// GPT-Live speaks a commentary (paraphrased), but as the real one does (#482) only once
+			// its timeline has moved past it: that takes input audio, the mic's or silence.
+			landAt = append(landAt, inputMs+commentaryLandMs)
 		case "session.close":
 			f.mu.Lock()
 			f.write(map[string]any{"type": "session.closed", "reason": "close_requested", "usage": map[string]any{"seconds": 1}})

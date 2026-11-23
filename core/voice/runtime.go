@@ -101,6 +101,33 @@ type micFrame struct {
 	at      time.Time
 }
 
+// replyTiming times one reply (#481): the user's last speech, the reply's first audio from
+// the provider, and its first sample played.
+type replyTiming struct {
+	voiceEnd, arrived time.Time
+	mark              int64 // pb.played when the reply arrived
+}
+
+// replyFlow is how one reply's audio arrived from the provider (#481).
+type replyFlow struct {
+	first, last time.Time
+	samples     int
+	maxWait     time.Duration
+}
+
+func (f *replyFlow) add(n int, now time.Time) {
+	if f.first.IsZero() {
+		f.first = now
+	} else if w := now.Sub(f.last); w > f.maxWait {
+		f.maxWait = w
+	}
+	f.last = now
+	f.samples += n
+}
+
+// voiceRMS is the mic loudness counted as speech when timing a reply.
+const voiceRMS = 0.02
+
 type connectResult struct {
 	gen  uint64
 	sess Session
@@ -246,9 +273,12 @@ type Runtime struct {
 	events        <-chan Event
 	gen           uint64 // incremented on every Connect; results of older attempts are closed
 	connectCancel context.CancelFunc
-	micActive     bool  // the conversation wants the mic
-	micLiveSent   bool  // InMicLive fed for this mic start (on its first frame)
-	responseMark  int64 // pb.played when the current reply started
+	micActive     bool         // the conversation wants the mic
+	micLiveSent   bool         // InMicLive fed for this mic start (on its first frame)
+	responseMark  int64        // pb.played when the current reply started
+	voiceEnd      time.Time    // capture time of the last mic frame with speech in it, this turn
+	replyTiming   *replyTiming // a reply waiting for its first sample to play (#481)
+	replyFlow     replyFlow    // how the current reply's audio arrived (#481)
 	pending       []Input
 	recorder      *MicRecorder
 	take          *MicTake // the current conversation's recording
@@ -633,6 +663,7 @@ func (r *Runtime) run() {
 		case f := <-r.mic:
 			r.onMic(f)
 		case <-ticker.C:
+			r.logReplyTiming(time.Now())
 			r.input(TickInput(r.pb.idle()))
 			r.updateMouth()
 		}
@@ -696,6 +727,7 @@ func (r *Runtime) shutdown() {
 		r.session, r.events = nil, nil
 	}
 	r.pb.flush()
+	r.voiceEnd, r.replyTiming, r.replyFlow = time.Time{}, nil, replyFlow{}
 }
 
 // input steps the conversation and carries out the effects; inputs raised while applying
@@ -710,10 +742,38 @@ func (r *Runtime) input(in Input) {
 			r.apply(fx)
 		}
 		if after := r.conv.Phase(); after != before {
+			if before == PhaseSpeaking {
+				r.logReplyFlow()
+			}
+			if after != PhaseThinking && after != PhaseSpeaking {
+				r.voiceEnd = time.Time{} // no reply to that speech: a later one isn't timed from it
+			}
 			r.cfg.Log.Printf("phase %s -> %s", before, after)
 		}
 	}
 	r.resting.Store(r.conv.Phase() == PhaseIdle)
+}
+
+// logReplyFlow writes one line on how a reply's audio arrived, once it has ended (#481).
+func (r *Runtime) logReplyFlow() {
+	f := r.replyFlow
+	r.replyFlow = replyFlow{}
+	if f.samples == 0 {
+		return
+	}
+	r.cfg.Log.Printf("reply audio: %d ms of audio arrived over %d ms, longest wait %d ms",
+		int64(f.samples)*1000/audio.SampleRate, f.last.Sub(f.first).Milliseconds(), f.maxWait.Milliseconds())
+}
+
+// logReplyTiming writes one line per reply once its first sample has played (#481).
+func (r *Runtime) logReplyTiming(now time.Time) {
+	t := r.replyTiming
+	if t == nil || r.pb.playedSamples() <= t.mark {
+		return
+	}
+	r.replyTiming = nil
+	r.cfg.Log.Printf("reply timing: you stopped -> reply audio %d ms -> playing %d ms",
+		t.arrived.Sub(t.voiceEnd).Milliseconds(), now.Sub(t.voiceEnd).Milliseconds())
 }
 
 func (r *Runtime) onMic(f micFrame) {
@@ -742,6 +802,9 @@ func (r *Runtime) onMic(f micFrame) {
 	}
 	if r.take != nil {
 		r.take.Sent(out)
+	}
+	if p := r.conv.Phase(); (p == PhaseListening || p == PhaseThinking) && audio.RMS(out) >= voiceRMS {
+		r.voiceEnd = f.at
 	}
 	// An error here means the session is going away; its event stream reports it.
 	_ = r.session.Send(Command{Kind: CmdAudio, Audio: out})
@@ -845,9 +908,15 @@ func (r *Runtime) apply(fx Effect) {
 			go func() { _ = s.Close() }() // the close handshake must not stall the loop
 		}
 	case EfPlay:
+		r.replyFlow.add(len(fx.Audio), time.Now())
 		r.pb.enqueue(fx.Audio)
 	case EfResponseStarted:
+		r.logReplyFlow() // a follow-up reply (after a tool) gets its own line
 		r.responseMark = r.pb.playedSamples()
+		if !r.voiceEnd.IsZero() {
+			r.replyTiming = &replyTiming{voiceEnd: r.voiceEnd, arrived: time.Now(), mark: r.responseMark}
+			r.voiceEnd = time.Time{}
+		}
 	case EfInterrupt:
 		heard := max(r.pb.playedSamples()-r.responseMark, 0)
 		r.pb.flush()
