@@ -207,7 +207,6 @@ func makePreview(ctx context.Context, m Model, cfg SessionConfig, key Secret, li
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-settled:
-			t.mark(&t.whole)
 			return pcm, nil
 		case e, ok := <-s.Events():
 			if !ok {
@@ -245,6 +244,7 @@ func makePreview(ctx context.Context, m Model, cfg SessionConfig, key Secret, li
 				}
 			case EvResponseDone:
 				if sent && len(pcm) > 0 {
+					t.whole = t.now().Sub(t.start) // the line's last reply ended (not the settle after it)
 					settled = time.After(settle)
 				} else if sent {
 					if lastErr != "" {

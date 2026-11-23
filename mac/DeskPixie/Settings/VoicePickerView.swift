@@ -52,8 +52,8 @@ struct VoicePickerView: View {
         let name = voice(index)
         let state = previews.state(name)
         let picked = index == selected
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 0) {
                 Button { previews.toggle(name) } label: {
                     Group {
                         switch state {
@@ -65,6 +65,8 @@ struct VoicePickerView: View {
                     .frame(width: 18, height: 18)
                 }
                 .buttonStyle(.borderless)
+                .padding(.leading, 8)
+                .padding(.trailing, 4)
                 .disabled(!item.enabled)
                 .help(state == .playing || state == .loading ? "Stop" : "Hear \(item.label)")
                 .accessibilityLabel(state == .playing || state == .loading ? "Stop \(item.label)" : "Hear \(item.label)")
@@ -84,6 +86,10 @@ struct VoicePickerView: View {
                             Image(systemName: "checkmark").foregroundStyle(Color.accentColor)
                         }
                     }
+                    // The row's margins are inside the button, so a click there picks too.
+                    .padding(.leading, 4)
+                    .padding(.trailing, 8)
+                    .padding(.vertical, 5)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -94,10 +100,10 @@ struct VoicePickerView: View {
             }
             if case .failed(let reason) = state {
                 Text(reason).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 5)
             }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
         .background(picked ? Color.accentColor.opacity(0.12) : Color.clear)
     }
 

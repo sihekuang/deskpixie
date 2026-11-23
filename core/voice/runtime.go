@@ -599,6 +599,11 @@ func (r *Runtime) Close() {
 }
 
 // queuedSamples is how many samples wait in the Go queue (tests).
+// ClipLeft is how much of a clip PlayClip started is still to play (0 when none is).
+func (r *Runtime) ClipLeft() time.Duration {
+	return time.Duration(r.queuedSamples()) * time.Second / audio.SampleRate
+}
+
 func (r *Runtime) queuedSamples() int {
 	r.pb.mu.Lock()
 	defer r.pb.mu.Unlock()

@@ -25,6 +25,9 @@ const (
 	// previewLead is how much of a clip being made is gathered before it starts playing (0.4 s),
 	// so the service sending it barely faster than it plays doesn't make it stutter.
 	previewLead = 2 * audio.SampleRate / 5
+	// previewTail is how long after a clip leaves the queue the row says done: the speaker
+	// takes the queue a little ahead of playing it.
+	previewTail = 300 * time.Millisecond
 )
 
 // previewRefusal is why a preview can't play, in words for the picker to show as they are.
@@ -110,13 +113,9 @@ func (a *App) preview(voiceName string) (map[string]any, error) {
 func (a *App) makeAndPlay(ctx context.Context, gen int, provider, model, voiceName string) {
 	var lead []int16
 	var playing, refused bool
-	var since time.Time
 	start := func(pcm []int16) {
-		if playing = a.startClip(gen, voiceName, pcm); playing {
-			since = time.Now()
-		} else {
-			refused = true
-		}
+		playing = a.startClip(gen, voiceName, pcm)
+		refused = !playing
 	}
 	onAudio := func(piece []int16) {
 		switch {
@@ -129,7 +128,7 @@ func (a *App) makeAndPlay(ctx context.Context, gen int, provider, model, voiceNa
 			}
 		}
 	}
-	pcm, err := a.previews.Get(ctx, provider, model, voiceName, onAudio)
+	_, err := a.previews.Get(ctx, provider, model, voiceName, onAudio)
 	if err == nil && !playing && !refused && len(lead) > 0 {
 		start(lead) // a clip shorter than the lead
 	}
@@ -143,8 +142,7 @@ func (a *App) makeAndPlay(ctx context.Context, gen int, provider, model, voiceNa
 	case !playing:
 		a.previewFailed(gen, voiceName, previewBusy) // nothing if a newer preview took over
 	default:
-		left := time.Duration(len(pcm))*time.Second/audio.SampleRate - time.Since(since)
-		a.finishClip(gen, max(left, 0))
+		a.finishClip(gen)
 	}
 }
 
@@ -171,14 +169,32 @@ func (a *App) appendClip(gen int, pcm []int16) {
 	}
 }
 
-// finishClip ends gen's preview once the rest of its clip, left, has played.
-func (a *App) finishClip(gen int, left time.Duration) {
+// finishClip ends gen's preview once the rest of its clip has played: what is still queued,
+// checked again when that time is up (the last piece may still be on its way to the queue, and
+// the speaker drains the queue a little ahead of playing it).
+func (a *App) finishClip(gen int) {
 	p := &a.previewing
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.gen == gen {
-		p.timer = time.AfterFunc(left+300*time.Millisecond, func() { a.endPreview(gen) })
+	if p.gen != gen {
+		return
 	}
+	var check func()
+	check = func() {
+		p.mu.Lock()
+		if p.gen != gen {
+			p.mu.Unlock()
+			return
+		}
+		if left := a.rt.ClipLeft(); left > 0 {
+			p.timer = time.AfterFunc(left+previewTail, check)
+			p.mu.Unlock()
+			return
+		}
+		p.mu.Unlock()
+		a.endPreview(gen)
+	}
+	p.timer = time.AfterFunc(a.rt.ClipLeft()+previewTail, check)
 }
 
 // takePreview makes voiceName the preview ("" for none), ending the one before it (its clip
@@ -198,8 +214,8 @@ func (a *App) takePreview(voiceName string) (int, context.Context) {
 	p.gen++
 	gen := p.gen
 	p.voice, p.cancel, p.timer = voiceName, cancel, nil
+	a.rt.StopClip() // under p.mu, so it can't land after a newer preview's PlayClip
 	p.mu.Unlock()
-	a.rt.StopClip()
 	if old != "" {
 		a.emit("voice.preview", map[string]any{"voice": old, "state": "done"})
 	}
@@ -219,7 +235,7 @@ func (a *App) playPreview(gen int, voiceName string, pcm []int16) bool {
 		return false
 	}
 	d := time.Duration(len(pcm)) * time.Second / audio.SampleRate
-	p.timer = time.AfterFunc(d+300*time.Millisecond, func() { a.endPreview(gen) })
+	p.timer = time.AfterFunc(d+previewTail, func() { a.endPreview(gen) })
 	a.emit("voice.preview", map[string]any{"voice": voiceName, "state": "playing"})
 	return true
 }
@@ -238,6 +254,8 @@ func (a *App) endPreview(gen int) {
 	a.emit("voice.preview", map[string]any{"voice": voiceName, "state": "done"})
 }
 
+// previewFailed reports gen's preview failed, and stops what of it was already playing (a
+// service that failed partway), so the row's error isn't said over by the voice.
 func (a *App) previewFailed(gen int, voiceName, msg string) {
 	p := &a.previewing
 	p.mu.Lock()
@@ -246,6 +264,7 @@ func (a *App) previewFailed(gen int, voiceName, msg string) {
 		return
 	}
 	p.voice = ""
+	a.rt.StopClip()
 	p.mu.Unlock()
 	a.emit("voice.preview", map[string]any{"voice": voiceName, "state": "error", "error": msg})
 }

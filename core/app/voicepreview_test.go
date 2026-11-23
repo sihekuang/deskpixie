@@ -25,6 +25,7 @@ type sampleModel struct {
 	hold     bool
 	fail     error
 	rest     chan struct{}
+	failRest bool // with rest: fails instead of sending the second half
 }
 
 const sampleSamples = 38400
@@ -67,6 +68,10 @@ func (s *sampleSession) Send(c voice.Command) error {
 		s.events <- voice.Event{Kind: voice.EvAudioDelta, Audio: make([]int16, sampleSamples/2)}
 		go func() {
 			<-s.m.rest
+			if s.m.failRest {
+				s.events <- voice.Event{Kind: voice.EvError, Fatal: true, Message: "server error"}
+				return
+			}
 			s.events <- voice.Event{Kind: voice.EvAudioDelta, Audio: make([]int16, sampleSamples/2)}
 			s.events <- voice.Event{Kind: voice.EvResponseDone}
 		}()
@@ -247,4 +252,36 @@ func TestVoicePreviewPlaysWhileItIsMade(t *testing.T) {
 	if got := previewStates(h, "marin"); len(got) != 3 {
 		t.Fatalf("events %v, want loading, playing, done", got)
 	}
+}
+
+// The service failing partway: the row says so and the part already queued stops, so the voice
+// doesn't talk on under the error.
+func TestVoicePreviewFailingPartwayStopsTheSound(t *testing.T) {
+	m := &sampleModel{rest: make(chan struct{}), failRest: true}
+	h := newHarness(t, withSampleModel(m), withSettings(liveSettings), withKeys(map[string]string{"OPENAI_API_KEY": "sk-test"}))
+	h.call("voice.preview", map[string]string{"voice": "marin"})
+	waitState(t, h, "marin", "playing")
+	waitFor(t, "first half queued", func() bool { return h.app.rt.ClipLeft() > 0 })
+	close(m.rest)
+	waitState(t, h, "marin", "error: Couldn't make the preview: server error")
+	waitFor(t, "the sound stopped", func() bool { return h.app.rt.ClipLeft() == 0 })
+}
+
+// The service sending slower than the clip plays: the row stays playing until the speaker has
+// taken all of it, not for the clip's length from when it started.
+func TestVoicePreviewIsDoneOnlyWhenItHasPlayed(t *testing.T) {
+	m := &sampleModel{rest: make(chan struct{})}
+	h := newHarness(t, withSampleModel(m), withSettings(liveSettings), withKeys(map[string]string{"OPENAI_API_KEY": "sk-test"}))
+	h.call("voice.preview", map[string]string{"voice": "marin"})
+	waitState(t, h, "marin", "playing")
+	played(h) // the first half plays, then the speaker runs dry
+	time.Sleep(900 * time.Millisecond)
+	close(m.rest) // the rest comes late; the speaker hasn't taken it
+	waitFor(t, "second half queued", func() bool { return h.app.rt.ClipLeft() > 0 })
+	time.Sleep(1500 * time.Millisecond) // past the settle and what the clip's length alone allows
+	if got := previewStates(h, "marin"); got[len(got)-1] != "playing" {
+		t.Fatalf("events %v: done before the second half played", got)
+	}
+	played(h)
+	waitState(t, h, "marin", "done")
 }
