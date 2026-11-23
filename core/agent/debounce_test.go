@@ -322,7 +322,7 @@ func TestQuestionsAreNeverHeldByTheDebounceOrTheCap(t *testing.T) {
 		mcp(t, c, workerName, done("Fixed the flaky test"), T0+1_000)
 		fx := askPush(c, 7, T0+2_000)
 		if open {
-			wantContains(t, fx, eInject("Coordinator question: Run git push in coordinator? Say confirm hawk."))
+			wantContains(t, fx, eAsk("Coordinator question: Run git push in coordinator? Say confirm hawk.", 7))
 		} else {
 			wantContains(t, fx, eNotify("Run git push in coordinator? Say confirm hawk."))
 		}

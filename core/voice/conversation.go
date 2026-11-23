@@ -77,6 +77,7 @@ const (
 	InMicLive                // the mic is actually on (the permission prompt may have shown first)
 	InOpen                   // start a conversation if none is under way (unlike InHotkey, never ends one)
 	InHandOffDone            // the hand-off's delegate call finished; Notice (Text "" = nothing to say)
+	InWithdrawAsk            // Question: that request was answered or is gone; its queued notice goes (#490)
 	InWithdrawHeld           // Held, HeldUpTo: that session has its messages up to that number now; their queued "still waits" notices go (#339)
 	InOpenToSpeak            // like InOpen, but only to say what's waiting: no mic, and it ends once said (#433)
 )
@@ -92,6 +93,7 @@ type Input struct {
 	Failure      Failure // InFailed
 	Notice       Notice  // InInject
 	Hold         bool    // InHoldOpen
+	Question     uint64  // InWithdrawAsk
 	Held         string  // InWithdrawHeld
 	HeldUpTo     uint64  // InWithdrawHeld: 0 for all of them
 }
@@ -119,6 +121,12 @@ func OpenInput() Input                  { return Input{Kind: InOpen} }
 // hotkey, or one asks you something and SpeakListens is on: then the mic comes on and it goes
 // on as usual. With SpeakListens off a question is said with the mic off too (#443).
 func OpenToSpeakInput() Input { return Input{Kind: InOpenToSpeak} }
+
+// WithdrawQuestionInput: the request with this id was answered or is gone; a queued notice still
+// to ask it would ask about something done (#490).
+func WithdrawQuestionInput(id uint64) Input {
+	return Input{Kind: InWithdrawAsk, Question: id}
+}
 
 // WithdrawHeldInput: session has its messages numbered up to upTo (0: all of them, a pix too
 // old to number them) that queued notices say still wait (#339); not said yet, they would tell
@@ -449,6 +457,10 @@ func (c *Conversation) step(in Input, now time.Time) []Effect {
 			fx = c.tryInject(now, fx)
 		} else {
 			fx = append(fx, Effect{Kind: EfSignal, Signal: VoiceSignal{Kind: SigClosed, Undelivered: []Notice{in.Notice}}})
+		}
+	case InWithdrawAsk:
+		if in.Question != 0 {
+			c.injects = slices.DeleteFunc(c.injects, func(n Notice) bool { return n.Question == in.Question })
 		}
 	case InWithdrawHeld:
 		if in.Held != "" {

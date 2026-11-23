@@ -31,6 +31,25 @@ func (v *withdrawingVoice) WithdrawHeld(s string, upTo uint64) {
 	v.withdrawn = append(v.withdrawn, fmt.Sprint(s, "≤", upTo))
 }
 
+func (v *withdrawingVoice) WithdrawQuestion(id uint64) {
+	v.withdrawn = append(v.withdrawn, fmt.Sprint("#", id))
+}
+
+// #490: as for a held notice, a question's withdrawal.
+func TestVoiceLinkPassesAQuestionsWithdrawalOn(t *testing.T) {
+	var l VoiceLink
+	l.WithdrawQuestion(7) // nothing attached yet
+	v := &withdrawingVoice{}
+	l.attach(v)
+	l.WithdrawQuestion(7)
+	if len(v.withdrawn) != 1 || v.withdrawn[0] != "#7" {
+		t.Fatalf("%q", v.withdrawn)
+	}
+	var other VoiceLink
+	other.attach(plainVoice{})
+	other.WithdrawQuestion(7)
+}
+
 // #339: the link passes a withdrawal on to a voice loop that can take it; with none attached,
 // or one that can't, it does nothing.
 func TestVoiceLinkPassesAWithdrawalOn(t *testing.T) {

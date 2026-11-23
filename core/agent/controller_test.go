@@ -296,7 +296,7 @@ func TestAPermissionIsSpokenAsAQuestionWithAConfirmWord(t *testing.T) {
 	c := workingOnJob1()
 	openVoice(c)
 	fx := visible(askPush(c, 7, T0))
-	wantEffects(t, fx, eInject("Coordinator question: Run git push in coordinator? Say confirm hawk."))
+	wantEffects(t, fx, eAsk("Coordinator question: Run git push in coordinator? Say confirm hawk.", 7))
 	wantJobStatus(t, c, 1, JobQuestion)
 }
 
@@ -305,7 +305,7 @@ func TestACleanConfirmAllowsAndResumesTheJob(t *testing.T) {
 	openVoice(c)
 	askPush(c, 7, T0)
 	fx := visible(c.Step(userSaid("Confirm hawk."), T0))
-	wantEffects(t, fx, eDecide(7, Allow()), eInject("Coordinator: allowed"))
+	wantEffects(t, fx, eDecide(7, Allow()), eInject("Coordinator: allowed"), eWithdrawAsk(7))
 	wantJobStatus(t, c, 1, JobWorking)
 }
 
@@ -540,7 +540,7 @@ func TestAnUnreadableCommandIsDeniedWithoutATokenOrAStatusChange(t *testing.T) {
 	wantJobStatus(t, c, 1, JobWorking)
 	// No token was allocated: a readable request still gets the first word.
 	fx = visible(askPush(c, 10, T0))
-	wantEffects(t, fx, eInject("Coordinator question: Run git push in coordinator? Say confirm hawk."))
+	wantEffects(t, fx, eAsk("Coordinator question: Run git push in coordinator? Say confirm hawk.", 10))
 	wantJobStatus(t, c, 1, JobQuestion)
 }
 
@@ -574,7 +574,7 @@ func TestWhenAllConfirmWordsAreTakenTheRequestIsDenied(t *testing.T) {
 // ---------- review fixes ----------
 
 func pendingAskNotice() Notice {
-	return Notice{Text: "Coordinator question: Run git push in coordinator? Say confirm hawk."}
+	return Notice{Text: "Coordinator question: Run git push in coordinator? Say confirm hawk.", Question: 7}
 }
 
 func TestRestartForgetsTheCoordinator(t *testing.T) {

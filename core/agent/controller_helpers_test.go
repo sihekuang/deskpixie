@@ -96,7 +96,16 @@ func fmtEffect(e Effect) string {
 }
 
 // Effect builders for assertions.
-func eInject(text string) Effect              { return Effect{Kind: EfInject, Notice: Notice{Text: text}} }
+func eInject(text string) Effect { return Effect{Kind: EfInject, Notice: Notice{Text: text}} }
+
+// eAsk: an inject asking the open request id (#490).
+func eAsk(text string, id RequestID) Effect {
+	return Effect{Kind: EfInject, Notice: Notice{Text: text, Question: uint64(id)}}
+}
+
+// eWithdrawAsk: request id is done, so a notice still waiting to ask it goes (#490).
+func eWithdrawAsk(id RequestID) Effect { return Effect{Kind: EfWithdrawQuestion, ID: id} }
+
 func eNotify(text string) Effect              { return Effect{Kind: EfNotify, Text: text} }
 func eShowPane(j JobID, name string) Effect   { return Effect{Kind: EfShowPane, Job: j, Name: name} }
 func ePrompt(text string) Effect              { return Effect{Kind: EfPrompt, Text: text} }
