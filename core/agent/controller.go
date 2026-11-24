@@ -1180,7 +1180,7 @@ func (c *AgentController) voiceOpened(fx *[]Effect) {
 		*fx = append(*fx, Effect{Kind: EfInject, Notice: n})
 	}
 	for _, l := range held {
-		n := c.remember(Notice{Text: "Coordinator replies while you were away:\n- " + l.Kind.Prefix() + l.Text}, []Line{l})
+		n := c.remember(Notice{Text: updatesHeader + "- " + l.Kind.Prefix() + l.Text}, []Line{l})
 		*fx = append(*fx, Effect{Kind: EfInject, Notice: n})
 	}
 	c.reaskOpened(fx)

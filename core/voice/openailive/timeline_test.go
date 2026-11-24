@@ -161,7 +161,7 @@ func TestSpeakOnlyUpdateIsSaid(t *testing.T) {
 		t.Fatal("refused at rest")
 	}
 	wait("the conversation to open", 5*time.Second, rt.IsOpen)
-	rt.Inject(voice.Notice{Text: "Coordinator replies while you were away:\n- Coordinator reply: The build passed."})
+	rt.Inject(voice.Notice{Text: "Updates:\n- Coordinator reply: The build passed."})
 	said := func() bool {
 		for _, e := range sink.Events() {
 			if e.Kind == "transcript" && e.Role == "assistant" {
