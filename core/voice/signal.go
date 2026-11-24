@@ -12,6 +12,9 @@ type Notice struct {
 	// WithdrawHeld drops the notice if it hasn't been said yet (#339).
 	Held    string
 	HeldSeq uint64
+	// Question: the id of the question this notice asks you (0: none); never said. Once it is
+	// answered or gone, WithdrawQuestion drops the notice if it hasn't been said yet (#490).
+	Question uint64
 }
 
 // SignalKind enumerates what the voice loop tells the rest of the app.

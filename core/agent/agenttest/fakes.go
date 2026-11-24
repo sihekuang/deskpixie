@@ -536,10 +536,11 @@ const (
 	CallOpen
 	CallWithdrawHeld
 	CallOpenToSpeak
+	CallWithdrawQuestion
 )
 
 // VoiceCall is one recorded VoiceLink call: Inject(Text), HoldOpen(On), Open or
-// WithdrawHeld(Text: the session, Seq: up to which).
+// WithdrawHeld(Text: the session, Seq: up to which) or WithdrawQuestion(Seq: the request).
 type VoiceCall struct {
 	Kind VoiceCallKind
 	Text string
@@ -553,6 +554,10 @@ func OpenCall() VoiceCall              { return VoiceCall{Kind: CallOpen} }
 func OpenToSpeakCall() VoiceCall       { return VoiceCall{Kind: CallOpenToSpeak} }
 func WithdrawHeldCall(session string, upTo uint64) VoiceCall {
 	return VoiceCall{Kind: CallWithdrawHeld, Text: session, Seq: upTo}
+}
+
+func WithdrawQuestionCall(id uint64) VoiceCall {
+	return VoiceCall{Kind: CallWithdrawQuestion, Seq: id}
 }
 
 // RecordingVoiceLink records injects, holds and opens; IsOpen answers what SetOpen set; Open
@@ -614,6 +619,12 @@ func (v *RecordingVoiceLink) Inject(n agent.Notice) {
 func (v *RecordingVoiceLink) WithdrawHeld(session string, upTo uint64) {
 	v.mu.Lock()
 	v.calls = append(v.calls, WithdrawHeldCall(session, upTo))
+	v.mu.Unlock()
+}
+
+func (v *RecordingVoiceLink) WithdrawQuestion(id uint64) {
+	v.mu.Lock()
+	v.calls = append(v.calls, WithdrawQuestionCall(id))
 	v.mu.Unlock()
 }
 

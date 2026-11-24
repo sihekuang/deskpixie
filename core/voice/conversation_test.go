@@ -786,6 +786,33 @@ func TestAWithdrawnHeldNoticeIsNeverSaid(t *testing.T) {
 	}
 }
 
+// #490: a question answered while queued is dropped; the other notices stay, in order.
+func TestAWithdrawnQuestionIsNeverSaid(t *testing.T) {
+	now := t0()
+	c := listening(now)
+	c.Step(InjectInput(Notice{Text: "first", Question: 1}), now)
+	c.Step(InjectInput(Notice{Text: "second", Question: 2}), now)
+	c.Step(InjectInput(notice("picked A")), now)
+	c.Step(InjectInput(Notice{Text: "third", Question: 3}), now)
+	empty(t, c.Step(WithdrawQuestionInput(1), now), "already being said")
+	empty(t, c.Step(WithdrawQuestionInput(2), now), "a withdrawal says nothing")
+	empty(t, c.Step(WithdrawQuestionInput(0), now), "no question: nothing to withdraw")
+	var said []string
+	for i := int64(1); i <= 3; i++ {
+		model(c, evResponseCreated, ms(now, i*100))
+		model(c, evResponseDone, ms(now, i*100+10))
+		for _, e := range tick(c, true, ms(now, i*100+20)) {
+			if e.Kind == EfInject {
+				said = append(said, e.Text)
+			}
+		}
+	}
+	if len(said) != 2 || said[0] != "picked A" || said[1] != "third" {
+		t.Fatalf("said %q", said)
+	}
+	empty(t, newConv().Step(WithdrawQuestionInput(2), now), "nothing open")
+}
+
 // Already said, a held notice is past withdrawing; and with no conversation open there is
 // nothing queued to drop.
 func TestWithdrawingAHeldNoticeAlreadySaidOrClosedDoesNothing(t *testing.T) {

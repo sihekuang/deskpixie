@@ -1100,6 +1100,29 @@ func TestCancellingTheJobThatJustAskedAnswersItInstead(t *testing.T) {
 	})
 }
 
+// #490: a permission answered is withdrawn from the voice loop, in case it wasn't said yet.
+func TestAnAnsweredQuestionIsWithdrawnFromTheVoiceLoop(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRig(t)
+		r.voice.SetOpen(true)
+		r.h.Voice(VoiceSignal{Kind: voice.SigOpened})
+		withdrawn := func() bool {
+			return slices.ContainsFunc(r.voice.Calls(), func(v agenttest.VoiceCall) bool { return v.Kind == agenttest.CallWithdrawQuestion && v.Seq != 0 })
+		}
+		rx := permission(r)
+		settle()
+		if withdrawn() {
+			t.Fatal("withdrawn while it waits")
+		}
+		r.h.Voice(VoiceSignal{Kind: voice.SigUserSaid, Text: "Confirm hawk."})
+		settle()
+		<-rx
+		if !withdrawn() {
+			t.Fatal(r.voice.Calls())
+		}
+	})
+}
+
 // #339: once a session has the message a notice said still waits, the voice loop is told to
 // drop that notice if it hasn't said it yet.
 func TestADeliveredSessionWithdrawsItsHeldNoticeFromTheVoiceLoop(t *testing.T) {

@@ -60,7 +60,7 @@ const (
 	EvTranscript
 	EvError
 	// EvUserHeard: the user's words so far in a turn still going on (#251), for the live
-	// caption; its EvTranscript still ends the turn. Nothing else acts on it.
+	// caption; its EvTranscript still ends the turn. Else it only shows you have spoken (#486).
 	EvUserHeard
 	// EvAssistantSaying: Pixie's words so far in a reply still going on (#253), for the caption
 	// while it speaks; its EvTranscript still ends the reply. Nothing else acts on it.

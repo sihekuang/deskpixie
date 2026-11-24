@@ -158,6 +158,7 @@ const (
 	ctlMouthLevels
 	ctlOpen
 	ctlWithdrawHeld
+	ctlWithdrawQuestion
 	ctlOpenToSpeak
 	ctlPlayClip
 	ctlAppendClip
@@ -171,6 +172,7 @@ type control struct {
 	levels int
 	held   string
 	upTo   uint64
+	ask    uint64
 	clip   []int16
 }
 
@@ -512,6 +514,12 @@ func (r *Runtime) WithdrawHeld(session string, upTo uint64) {
 	r.control(control{kind: ctlWithdrawHeld, held: session, upTo: upTo})
 }
 
+// WithdrawQuestion: the question with this id was answered or is gone: a notice still waiting to
+// ask it is dropped (#490).
+func (r *Runtime) WithdrawQuestion(id uint64) {
+	r.control(control{kind: ctlWithdrawQuestion, ask: id})
+}
+
 // SetMouthLevels: the active pack changed; its mouth level count.
 func (r *Runtime) SetMouthLevels(levels int) {
 	r.control(control{kind: ctlMouthLevels, levels: levels})
@@ -725,6 +733,8 @@ func (r *Runtime) onControl(c control) {
 		r.input(OpenToSpeakInput())
 	case ctlWithdrawHeld:
 		r.input(WithdrawHeldInput(c.held, c.upTo))
+	case ctlWithdrawQuestion:
+		r.input(WithdrawQuestionInput(c.ask))
 	case ctlPlayClip:
 		if r.conv.Phase() == PhaseIdle {
 			r.pb.flush()
@@ -984,7 +994,7 @@ func (r *Runtime) apply(fx Effect) {
 	case EfInvokeTool:
 		if fx.Canned != nil {
 			gen, callID, out := r.gen, fx.CallID, fx.Canned
-			log.Printf("voice: a late delegate call in a turn already handed off; not starting a second job")
+			log.Printf("voice: not running a %s call: %s", fx.ToolName, out)
 			go func() {
 				select {
 				case r.toolDone <- toolResult{gen: gen, callID: callID, outcome: ToolOutcome{Output: out}}:
@@ -1170,7 +1180,7 @@ func (r *Runtime) logEffect(fx Effect) {
 		l.Printf("connecting to %s", r.model.Name())
 	case EfInvokeTool:
 		if fx.Canned != nil {
-			l.Printf("tool call %s %s (%s): already handed off, not run", fx.ToolName, fx.CallID, clipLog(string(fx.Args)))
+			l.Printf("tool call %s %s (%s): not run: %s", fx.ToolName, fx.CallID, clipLog(string(fx.Args)), clipLog(string(fx.Canned)))
 			return
 		}
 		l.Printf("tool call %s %s: %s", fx.ToolName, fx.CallID, clipLog(string(fx.Args)))

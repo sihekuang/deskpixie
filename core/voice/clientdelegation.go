@@ -19,6 +19,8 @@ const (
 	ClientDelegationTool = "client_delegation"
 	// AnswerJobTool is the coordinator's answer_job tool.
 	AnswerJobTool = "answer_job"
+	// JobsTool is the coordinator's jobs tool.
+	JobsTool = "jobs"
 	// CheckPrefix marks a delegated fact check (the delegation persona's "Check: ").
 	CheckPrefix = "Check: "
 	// CoordinatorQuestionPrefix leads a notice that asks the user something for a job.

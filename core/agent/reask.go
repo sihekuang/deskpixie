@@ -64,6 +64,7 @@ func (c *AgentController) reaskOpened(fx *[]Effect) {
 	l := c.reask.line
 	n := c.remember(Notice{Text: updatesHeader + "- " + l.Kind.Prefix() + l.Text}, nil)
 	n.Sessions = sessionsOf([]Line{l})
+	n.Question = c.noticedAsk(l)
 	c.reask.said, c.reask.heard = true, false
 	*fx = append(*fx, Effect{Kind: EfInject, Notice: n})
 }
