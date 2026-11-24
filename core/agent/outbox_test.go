@@ -15,7 +15,7 @@ func TestReplayJoinsUndeliveredLinesInOrderAndMarksThem(t *testing.T) {
 	o.Push(reply("First done."), 1)
 	o.Push(NewLine(LineUnsolicited, "Notes tidied."), 2)
 	notice, records := o.Replay(all)
-	if notice == nil || notice.Text != "Coordinator updates:\n- Coordinator reply: First done.\n- Coordinator says: Notes tidied." {
+	if notice == nil || notice.Text != "Updates:\n- Coordinator reply: First done.\n- Coordinator says: Notes tidied." {
 		t.Fatalf("%+v", notice)
 	}
 	if len(records) != 2 || len(o.Undelivered()) != 0 {

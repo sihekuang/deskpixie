@@ -34,7 +34,7 @@ func isCoordinatorQuestion(text string) bool {
 // asksQuestion: the notice relays a "Coordinator question:" that is not a confirm prompt, or a
 // session's turn that ends asking (#161), or a session's menu (#330; not its permission
 // prompts, answered by a confirm word or in the bubble), on its own
-// or as a line of the "Coordinator updates:" replay.
+// or as a line of the "Updates:" replay.
 func asksQuestion(text string) bool {
 	for _, line := range strings.Split(text, "\n") {
 		line = strings.TrimPrefix(strings.TrimSpace(line), "- ")

@@ -12,7 +12,7 @@ import (
 )
 
 // aboutTheUser: Pixie telling you where you are, or that you can't answer (#491).
-var aboutTheUser = regexp.MustCompile(`(?i)\b(you can(?:'|’)t answer|you(?:'|’)re (?:not|away)|you aren(?:'|’)t|not around|unavailable|while you were away|missed|the mic|microphone)\b`)
+var aboutTheUser = regexp.MustCompile(`(?i)\b(you (?:can(?:'|’)t|cannot|can not|aren(?:'|’)t able to|are unable to) (?:answer|respond|reply)|you(?:'|’| a)re (?:not |un|away|busy)|you aren(?:'|’)t|not around|unavailable|you were (?:away|out|gone)|(?:the|your) mic|microphone)\b`)
 
 // #433: a conversation opened only to speak says the notice it is given, sends no mic audio,
 // and ends on its own. #436: it says only the update, with no follow-up nobody can answer.
@@ -24,13 +24,13 @@ func TestLiveSpeakOnly(t *testing.T) {
 		name, notice string
 		check        func(t *testing.T, said string)
 	}{
-		{"update", "Coordinator updates:\n- Coordinator reply: The build passed and all 212 tests are green. It can deploy to staging next if you want.",
+		{"update", "Updates:\n- Coordinator reply: The build passed and all 212 tests are green. It can deploy to staging next if you want.",
 			func(t *testing.T, said string) {
 				if strings.HasSuffix(strings.TrimSpace(said), "?") {
 					t.Errorf("asked a follow-up nobody can answer: %q", said)
 				}
 			}},
-		{"question", "Coordinator updates:\n- Session update: orchard-care-guide is asking: should care.md be sorted alphabetically or by season?",
+		{"question", "Updates:\n- Session update: orchard-care-guide is asking: should care.md be sorted alphabetically or by season?",
 			func(t *testing.T, said string) {
 				if l := strings.ToLower(said); !strings.Contains(l, "alphabetic") || !strings.Contains(l, "season") {
 					t.Errorf("didn't say the question: %q", said)

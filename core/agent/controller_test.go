@@ -266,7 +266,7 @@ func TestClosedLinesReplayOnTheNextConversation(t *testing.T) {
 	c := workingOnJob1()
 	stop(c, `<spoken ref="job_000000000001">Twelve issues.</spoken>`, T0)
 	fx := visible(c.Step(voiceOpened(), T0+5))
-	wantEffects(t, fx, eInject("Coordinator updates:\n- Coordinator reply: Twelve issues."))
+	wantEffects(t, fx, eInject("Updates:\n- Coordinator reply: Twelve issues."))
 	wantNone(t, visible(c.Step(voiceOpened(), T0+6)), "replayed once")
 }
 
@@ -524,7 +524,7 @@ func TestRestoreFailsOpenJobsAndOutboxesALine(t *testing.T) {
 	wantJobStatus(t, c, 1, JobFailed)
 	fx = visible(c.Step(voiceOpened(), T0+20))
 	// Opening the conversation also starts the coordinator (#118).
-	wantEffects(t, fx, eInject("Coordinator updates:\n- Coordinator: a job stopped when the app restarted: summarise the issues"), eStart)
+	wantEffects(t, fx, eInject("Updates:\n- Coordinator: a job stopped when the app restarted: summarise the issues"), eStart)
 }
 
 // ---------- hardening rulings ----------
@@ -813,7 +813,7 @@ func TestABouncedReplayDigestGoesBackToTheOutboxLineByLine(t *testing.T) {
 	wantEffects(t, fx, eChime, eNotify("Halfway."))
 	// Next conversation: both lines come back with their own kinds.
 	fx = visible(c.Step(voiceOpened(), T0+4))
-	wantEffects(t, fx, eInject("Coordinator updates:\n- Coordinator reply: Halfway.\n- Coordinator says: Tidied up."))
+	wantEffects(t, fx, eInject("Updates:\n- Coordinator reply: Halfway.\n- Coordinator says: Tidied up."))
 }
 
 // ---------- final review fixes ----------

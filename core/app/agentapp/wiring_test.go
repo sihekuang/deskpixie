@@ -657,7 +657,7 @@ func TestADoneReplyWhileClosedOpensAConversationThatSaysIt(t *testing.T) {
 		}
 		waitFor(t, "the open", func() bool { return v.Opens() == 1 })
 		v.signals <- voice.VoiceSignal{Kind: voice.SigOpened}
-		want := "Coordinator updates:\n- Coordinator reply: There are twelve open issues."
+		want := "Updates:\n- Coordinator reply: There are twelve open issues."
 		waitFor(t, "the reply said", func() bool { return slices.Contains(v.Injected(), want) })
 		time.Sleep(50 * time.Millisecond)
 		if n := len(v.Injected()); n != 1 || v.Opens() != 1 {

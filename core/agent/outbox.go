@@ -146,7 +146,7 @@ func (o *Outbox) Undelivered() []OutboxLine {
 
 // updatesHeader starts a notice listing lines from the outbox. Not that you were away: you often
 // aren't, and Pixie said so (#491).
-const updatesHeader = "Coordinator updates:\n"
+const updatesHeader = "Updates:\n"
 
 // Replay (on Opened) returns every undelivered line, in order, as one notice; each is marked
 // delivered. Permission questions whose token is no longer pending (decided or expired) are
