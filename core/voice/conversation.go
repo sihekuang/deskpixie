@@ -292,6 +292,9 @@ type Conversation struct {
 	speakListens bool
 	spokeAt      time.Time
 	said         bool
+	// unheard: it was opened to speak and the user hasn't said anything in it yet, so nothing
+	// Pixie calls is theirs, even just after the mic comes on (#486).
+	unheard bool
 }
 
 // SpeakOnlyWait: a conversation opened to speak that has been given nothing to say by then
@@ -422,7 +425,7 @@ func (c *Conversation) step(in Input, now time.Time) []Effect {
 		switch c.phase {
 		case PhaseIdle, PhaseCooldown:
 			c.resetTurn()
-			c.speakOnly = false
+			c.speakOnly, c.unheard = false, false
 			c.phase = PhaseConnecting
 			fx = append(fx, Effect{Kind: EfConnect}, pixieFx(StateThinking))
 		case PhaseConnecting:
@@ -437,6 +440,7 @@ func (c *Conversation) step(in Input, now time.Time) []Effect {
 		if c.phase == PhaseIdle {
 			c.resetTurn()
 			c.speakOnly, c.said = in.Kind == InOpenToSpeak, false
+			c.unheard = c.speakOnly
 			c.phase = PhaseConnecting
 			fx = append(fx, Effect{Kind: EfConnect}, pixieFx(StateThinking))
 		}
@@ -611,6 +615,7 @@ func (c *Conversation) onModel(ev Event, now time.Time, fx []Effect) []Effect {
 				Effect{Kind: EfSignal, Signal: VoiceSignal{Kind: SigOpened}})
 		}
 	case EvSpeechStarted:
+		c.unheard = false
 		c.turn++        // the user's new turn: earlier tool calls no longer belong to it
 		c.asked = false // they are answering
 		c.newHandOffTurn()
@@ -679,8 +684,7 @@ func (c *Conversation) onModel(ev Event, now time.Time, fx []Effect) []Effect {
 		c.pendingTools++
 		c.toolTurns[ev.CallID] = c.turn
 		inv := Effect{Kind: EfInvokeTool, CallID: ev.CallID, ToolName: ev.ToolName, Args: ev.Args}
-		speaksForUser := ev.ToolName == ClientDelegationTool || ev.ToolName == DelegateTool || ev.ToolName == AnswerJobTool
-		if c.speakOnly && speaksForUser {
+		if c.unheard && speaksForUser(ev) {
 			inv.Canned = nobodySpoke
 			if ev.ToolName == ClientDelegationTool {
 				inv.Canned = nobodySpokeClient
@@ -701,8 +705,15 @@ func (c *Conversation) onModel(ev Event, now time.Time, fx []Effect) []Effect {
 			c.checksOpen++
 		}
 		fx = append(fx, inv)
+	case EvUserHeard:
+		if strings.TrimSpace(ev.Text) != "" {
+			c.unheard = false // GPT-Live defers the speech event while Pixie talks
+		}
 	case EvTranscript:
 		if ev.Role == "user" {
+			if strings.TrimSpace(ev.Text) != "" {
+				c.unheard = false
+			}
 			fx = append(fx, Effect{Kind: EfSignal, Signal: VoiceSignal{Kind: SigUserSaid, Text: ev.Text}})
 			if !c.followUpUntil.IsZero() && !IsNoise(ev.Text) {
 				c.followUpUntil = time.Time{} // a real reply: carry on as usual
@@ -1170,12 +1181,26 @@ func (c *Conversation) clientDelegationArgs() json.RawMessage {
 // alreadyHandedOff answers a delegate call in a turn the app already handed off.
 var alreadyHandedOff = json.RawMessage(`{"status":"already handed off","note":"The app already gave this request to the coordinator. Don't hand it off again; just say you'll let the user know."}`)
 
-// nobodySpoke answers a call that would speak for the user in a conversation opened only to
-// speak: the mic is off, so they said nothing (#486).
-var nobodySpoke = json.RawMessage(`{"error":"Nothing was sent. The mic is off and the user hasn't said anything. Only say the update you were given; don't say you passed anything on."}`)
+// speaksForUser: a call that asks, answers or stops something on the user's word.
+func speaksForUser(ev Event) bool {
+	switch ev.ToolName {
+	case ClientDelegationTool, DelegateTool, AnswerJobTool:
+		return true
+	case JobsTool:
+		var args struct {
+			Action string `json:"action"`
+		}
+		return json.Unmarshal(ev.Args, &args) == nil && args.Action == "cancel"
+	}
+	return false
+}
+
+// nobodySpoke answers a call that would speak for the user in a conversation opened to speak in
+// which they have said nothing (#486). Not an error: a failed tool's request is handed off.
+var nobodySpoke = json.RawMessage(`{"status":"not sent","note":"That was an update, not the user's words: there is nothing to pass on. If you haven't said the update yet, say it and nothing else. Don't say you passed anything on."}`)
 
 // nobodySpokeClient is nobodySpoke for a client delegation, whose error GPT-Live would tell you.
-var nobodySpokeClient = json.RawMessage(`{"routed":"none","note":"the mic is off and the user hasn't said anything"}`)
+var nobodySpokeClient = json.RawMessage(`{"routed":"none","note":"that was an update, not the user's words"}`)
 
 func pixieFx(s PixieState) Effect { return Effect{Kind: EfPixie, State: s} }
 

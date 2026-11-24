@@ -420,14 +420,64 @@ func TestSpeakOnlyStillRunsOtherTools(t *testing.T) {
 	}
 }
 
-// Once the hotkey turns the mic on, you can answer and ask as usual.
-func TestSpeakOnlyTurnedOnByTheHotkeyTakesAnswers(t *testing.T) {
-	c := openedToSpeak(t)
-	c.Step(InjectInput(notice("Coordinator question: deploy now or wait?")), ms(t0(), 30))
-	c.Step(HotkeyInput(), ms(t0(), 35))
-	fx := invoked(model(c, toolCall(AnswerJobTool), ms(t0(), 40)))
-	if len(fx) != 1 || fx[0].Canned != nil {
+// Just after the hotkey turns the mic on, or a question does (SpeakListens), a call still comes
+// from the update; from your first words on, it is yours.
+func TestSpeakOnlyTurnedOnTakesCallsOnceYouSpeak(t *testing.T) {
+	q := "Coordinator question: deploy now or wait?"
+	for name, open := range map[string]func() *Conversation{
+		"hotkey": func() *Conversation {
+			c := openedToSpeak(t)
+			c.Step(InjectInput(notice(q)), ms(t0(), 30))
+			c.Step(HotkeyInput(), ms(t0(), 35))
+			return c
+		},
+		"question": func() *Conversation {
+			c := openedToSpeakListening(t)
+			c.Step(InjectInput(notice(q)), ms(t0(), 30))
+			return c
+		},
+	} {
+		c := open()
+		c.Step(MicLiveInput(), ms(t0(), 36))
+		if fx := invoked(model(c, toolCall(AnswerJobTool), ms(t0(), 40))); len(fx) != 1 || string(fx[0].Canned) != string(nobodySpoke) {
+			t.Errorf("%s, before a word: %+v", name, fx)
+		}
+		model(c, Event{Kind: EvSpeechStarted}, ms(t0(), 50))
+		if fx := invoked(model(c, evToolCall("c2", AnswerJobTool), ms(t0(), 60))); len(fx) != 1 || fx[0].Canned != nil {
+			t.Errorf("%s, once you spoke: %+v", name, fx)
+		}
+	}
+}
+
+// Words with no speech event before them count too.
+func TestSpeakOnlyTakesCallsOnceYourWordsCome(t *testing.T) {
+	for _, words := range []Event{{Kind: EvTranscript, Role: "user", Text: "yes, deploy"}, {Kind: EvUserHeard, Text: "yes"}} {
+		c := openedToSpeak(t)
+		c.Step(HotkeyInput(), ms(t0(), 30))
+		model(c, words, ms(t0(), 40))
+		if fx := invoked(model(c, toolCall(AnswerJobTool), ms(t0(), 50))); len(fx) != 1 || fx[0].Canned != nil {
+			t.Errorf("%+v: %+v", words, fx)
+		}
+	}
+}
+
+// A conversation you opened yourself is as before.
+func TestAConversationYouOpenedRefusesNoCall(t *testing.T) {
+	c := listening(t0())
+	if fx := invoked(model(c, toolCall(DelegateTool), ms(t0(), 40))); len(fx) != 1 || fx[0].Canned != nil {
 		t.Fatalf("%+v", fx)
+	}
+}
+
+func TestSpeakOnlyRefusesToCancelAJobButTellsItsStatus(t *testing.T) {
+	for action, refused := range map[string]bool{"cancel": true, "status": false} {
+		c := openedToSpeak(t)
+		c.Step(InjectInput(notice("Coordinator reply: done.")), ms(t0(), 30))
+		fx := invoked(model(c, Event{Kind: EvToolCall, CallID: "c1", ToolName: JobsTool,
+			Args: json.RawMessage(`{"action":"` + action + `"}`)}, ms(t0(), 40)))
+		if len(fx) != 1 || (fx[0].Canned != nil) != refused {
+			t.Errorf("%s: %+v", action, fx)
+		}
 	}
 }
 
