@@ -77,7 +77,7 @@ const (
 	InMicLive                // the mic is actually on (the permission prompt may have shown first)
 	InOpen                   // start a conversation if none is under way (unlike InHotkey, never ends one)
 	InHandOffDone            // the hand-off's delegate call finished; Notice (Text "" = nothing to say)
-	InWithdrawAsk            // Question: that request was answered or is gone; its queued notice goes (#490)
+	InWithdrawAsk            // Question: that question was answered or is gone; its queued notice goes (#490)
 	InWithdrawHeld           // Held, HeldUpTo: that session has its messages up to that number now; their queued "still waits" notices go (#339)
 	InOpenToSpeak            // like InOpen, but only to say what's waiting: no mic, and it ends once said (#433)
 )
@@ -122,7 +122,7 @@ func OpenInput() Input                  { return Input{Kind: InOpen} }
 // on as usual. With SpeakListens off a question is said with the mic off too (#443).
 func OpenToSpeakInput() Input { return Input{Kind: InOpenToSpeak} }
 
-// WithdrawQuestionInput: the request with this id was answered or is gone; a queued notice still
+// WithdrawQuestionInput: the question with this id was answered or is gone; a queued notice still
 // to ask it would ask about something done (#490).
 func WithdrawQuestionInput(id uint64) Input {
 	return Input{Kind: InWithdrawAsk, Question: id}

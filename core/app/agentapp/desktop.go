@@ -288,7 +288,7 @@ func (l *VoiceLink) WithdrawHeld(session string, upTo uint64) {
 	}
 }
 
-// WithdrawQuestion drops a notice not said yet that asks a request since answered or gone (#490).
+// WithdrawQuestion drops a notice not said yet that asks a question since answered or gone (#490).
 func (l *VoiceLink) WithdrawQuestion(id uint64) {
 	if v := l.voice.Load(); v != nil {
 		if w, ok := (*v).(agent.QuestionWithdrawer); ok {

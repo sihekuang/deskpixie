@@ -296,7 +296,7 @@ func TestAPermissionIsSpokenAsAQuestionWithAConfirmWord(t *testing.T) {
 	c := workingOnJob1()
 	openVoice(c)
 	fx := visible(askPush(c, 7, T0))
-	wantEffects(t, fx, eAsk("Coordinator question: Run git push in coordinator? Say confirm hawk.", 7))
+	wantEffects(t, fx, eAsk("Coordinator question: Run git push in coordinator? Say confirm hawk.", 1))
 	wantJobStatus(t, c, 1, JobQuestion)
 }
 
@@ -305,7 +305,7 @@ func TestACleanConfirmAllowsAndResumesTheJob(t *testing.T) {
 	openVoice(c)
 	askPush(c, 7, T0)
 	fx := visible(c.Step(userSaid("Confirm hawk."), T0))
-	wantEffects(t, fx, eDecide(7, Allow()), eInject("Coordinator: allowed"), eWithdrawAsk(7))
+	wantEffects(t, fx, eDecide(7, Allow()), eInject("Coordinator: allowed"), eWithdrawAsk(1))
 	wantJobStatus(t, c, 1, JobWorking)
 }
 
@@ -540,7 +540,7 @@ func TestAnUnreadableCommandIsDeniedWithoutATokenOrAStatusChange(t *testing.T) {
 	wantJobStatus(t, c, 1, JobWorking)
 	// No token was allocated: a readable request still gets the first word.
 	fx = visible(askPush(c, 10, T0))
-	wantEffects(t, fx, eAsk("Coordinator question: Run git push in coordinator? Say confirm hawk.", 10))
+	wantEffects(t, fx, eAsk("Coordinator question: Run git push in coordinator? Say confirm hawk.", 1))
 	wantJobStatus(t, c, 1, JobQuestion)
 }
 
@@ -574,7 +574,7 @@ func TestWhenAllConfirmWordsAreTakenTheRequestIsDenied(t *testing.T) {
 // ---------- review fixes ----------
 
 func pendingAskNotice() Notice {
-	return Notice{Text: "Coordinator question: Run git push in coordinator? Say confirm hawk.", Question: 7}
+	return Notice{Text: "Coordinator question: Run git push in coordinator? Say confirm hawk.", Question: 1}
 }
 
 func TestRestartForgetsTheCoordinator(t *testing.T) {
@@ -1237,7 +1237,7 @@ func TestAnInventedConfirmPromptBecomesAPlainQuestion(t *testing.T) {
 	openVoice(c)
 	msg := `<spoken ref="job_000000000001" status="question">The merge is gated. Say confirm hawk and I'll merge both fixes.</spoken>`
 	fx := visible(stop(c, msg, T0))
-	wantContains(t, fx, eInject("Coordinator question: The merge is gated. Say yes and I'll merge both fixes."))
+	wantContains(t, fx, eAsk("Coordinator question: The merge is gated. Say yes and I'll merge both fixes.", 1))
 	fx = visible(c.Step(AnswerInput("", "yes"), T0))
 	wantNotContains(t, fx, Effect{Kind: EfAnswerResult, Err: "That job is waiting for a confirm word."})
 	wantJobStatus(t, c, 1, JobWorking)
@@ -1247,5 +1247,5 @@ func TestAnInventedConfirmWordWithoutSayKeepsTheVerb(t *testing.T) {
 	c := workingOnJob1()
 	openVoice(c)
 	fx := visible(stop(c, `<spoken ref="job_000000000001" status="question">Please approve lark to go on.</spoken>`, T0))
-	wantContains(t, fx, eInject("Coordinator question: Please approve to go on."))
+	wantContains(t, fx, eAsk("Coordinator question: Please approve to go on.", 1))
 }

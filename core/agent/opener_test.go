@@ -73,7 +73,7 @@ func TestAPermissionQuestionOpensAConversation(t *testing.T) {
 	fx := visible(askPush(c, 7, T0))
 	wantContains(t, fx, eOpen)
 	fx = visible(c.Step(voiceOpened(), T0+500))
-	wantEffects(t, fx, eAsk("Coordinator replies while you were away:\n- Coordinator question: Run git push in coordinator? Say confirm hawk.", 7))
+	wantEffects(t, fx, eAsk("Coordinator replies while you were away:\n- Coordinator question: Run git push in coordinator? Say confirm hawk.", 1))
 }
 
 func TestProgressAndUnsolicitedLinesDoNotOpenAConversation(t *testing.T) {

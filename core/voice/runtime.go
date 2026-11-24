@@ -514,7 +514,7 @@ func (r *Runtime) WithdrawHeld(session string, upTo uint64) {
 	r.control(control{kind: ctlWithdrawHeld, held: session, upTo: upTo})
 }
 
-// WithdrawQuestion: the request with this id was answered or is gone: a notice still waiting to
+// WithdrawQuestion: the question with this id was answered or is gone: a notice still waiting to
 // ask it is dropped (#490).
 func (r *Runtime) WithdrawQuestion(id uint64) {
 	r.control(control{kind: ctlWithdrawQuestion, ask: id})

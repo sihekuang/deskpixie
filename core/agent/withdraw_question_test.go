@@ -11,14 +11,14 @@ import (
 // #490: a question answered (or gone) before Pixie got to say it goes unsaid: queued behind her
 // speech, it asked about something you had already answered.
 
-// askedID: the id of the request the notice in fx asks.
-func askedID(t *testing.T, fx []Effect) RequestID {
+// askedID: the id of the question the notice in fx asks.
+func askedID(t *testing.T, fx []Effect) uint64 {
 	t.Helper()
 	in := effectsOfKind(fx, EfInject)
 	if len(in) != 1 || in[0].Notice.Question == 0 {
 		t.Fatalf("%s", fmtEffects(fx))
 	}
-	return RequestID(in[0].Notice.Question)
+	return in[0].Notice.Question
 }
 
 func TestAPickedMenusNoticeIsWithdrawnOnce(t *testing.T) {
@@ -49,7 +49,7 @@ func TestAGoneQuestionsNoticeIsWithdrawn(t *testing.T) {
 		openVoice(c)
 		id := askedID(t, askSession(c, dbChoice, T0))
 		fx := end(c)
-		if got := effectsOfKind(fx, EfWithdrawQuestion); len(got) != 1 || got[0].ID != id {
+		if got := effectsOfKind(fx, EfWithdrawQuestion); len(got) != 1 || got[0].Seq != id {
 			t.Errorf("%s: %s", name, fmtEffects(fx))
 		}
 		if name == "replaced" && askedID(t, fx) == id {
@@ -80,6 +80,69 @@ func TestAQuestionPixieWasNotHandedWithdrawsNothing(t *testing.T) {
 	}
 }
 
+// Questions with no buttons go too: one announced only, a session's turn that ends asking, a job's.
+func TestAQuestionWithNoButtonsIsWithdrawnOnceAnswered(t *testing.T) {
+	announced := SessionQuestion{ID: "q4", Label: "api", Kind: "menu", Text: "Which files?"}
+	for name, tc := range map[string]struct {
+		ask, wait, end func(c *AgentController) []Effect
+	}{
+		"announced": {
+			ask:  func(c *AgentController) []Effect { return askSession(c, announced, T0) },
+			wait: func(c *AgentController) []Effect { return sessionGone(c, "q9", T0+1) },
+			end:  func(c *AgentController) []Effect { return sessionGone(c, announced.ID, T0+2) },
+		},
+		"session's turn, dismissed": {
+			ask:  func(c *AgentController) []Effect { return sessionAsks(c, "Want me to file that?", T0) },
+			wait: func(c *AgentController) []Effect { return c.Step(PresenceInput(false), T0+1) },
+			end:  func(c *AgentController) []Effect { return c.Step(DismissInput(c.Updates()[0].ID), T0+2) },
+		},
+		"session's turn, closed": {
+			ask:  func(c *AgentController) []Effect { return sessionAsks(c, "Want me to file that?", T0) },
+			wait: func(c *AgentController) []Effect { return c.Step(PresenceInput(false), T0+1) },
+			end: func(c *AgentController) []Effect {
+				return c.Step(PaneInput(PaneEvent{Kind: PaneEventExited, Agent: sessionName}), T0+2)
+			},
+		},
+		"job": {
+			ask:  func(c *AgentController) []Effect { return stop(c, questionStop, T0) },
+			wait: func(c *AgentController) []Effect { return c.Step(PresenceInput(false), T0+1) },
+			end:  func(c *AgentController) []Effect { return c.Step(AnswerInput("", "main"), T0+2) },
+		},
+	} {
+		c := workingOnJob1()
+		openVoice(c)
+		var id uint64
+		for _, e := range effectsOfKind(tc.ask(c), EfInject) {
+			id = max(id, e.Notice.Question)
+		}
+		if id == 0 {
+			t.Errorf("%s: its notice has no id", name)
+			continue
+		}
+		if fx := tc.wait(c); len(effectsOfKind(fx, EfWithdrawQuestion)) != 0 {
+			t.Errorf("%s: withdrawn while it waits: %s", name, fmtEffects(fx))
+		}
+		fx := tc.end(c)
+		if got := effectsOfKind(fx, EfWithdrawQuestion); len(got) != 1 || got[0].Seq != id {
+			t.Errorf("%s: %s", name, fmtEffects(fx))
+		}
+		if len(c.asksNoticed) != 0 {
+			t.Errorf("%s: still kept: %+v", name, c.asksNoticed)
+		}
+	}
+}
+
+// An update that asks nothing has no id.
+func TestAnUpdateIsNotAQuestion(t *testing.T) {
+	c := workingOnJob1()
+	openVoice(c)
+	for _, e := range effectsOfKind(stop(c, `<spoken ref="job_000000000001" status="done">Done.</spoken>`, T0), EfInject) {
+		if e.Notice.Question != 0 {
+			t.Fatalf("%+v", e.Notice)
+		}
+	}
+}
+
 // The run of Nov 24: the questions were answered while Pixie was still speaking.
 func TestAQuestionAnsweredWhilePixieSpeaksIsNeverSaid(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
@@ -105,7 +168,7 @@ func TestAQuestionAnsweredWhilePixieSpeaksIsNeverSaid(t *testing.T) {
 			case EfInject:
 				step(voice.InjectInput(e.Notice))
 			case EfWithdrawQuestion:
-				step(voice.WithdrawQuestionInput(uint64(e.ID)))
+				step(voice.WithdrawQuestionInput(e.Seq))
 			}
 		}
 	}

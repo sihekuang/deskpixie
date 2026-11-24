@@ -142,8 +142,8 @@ type HeldWithdrawer interface {
 	WithdrawHeld(session string, upTo uint64)
 }
 
-// QuestionWithdrawer is a VoiceLink that can drop a notice it hasn't said yet that asks a request
-// since answered or gone, by the request's id (#490).
+// QuestionWithdrawer is a VoiceLink that can drop a notice it hasn't said yet that asks a question
+// since answered or gone, by its Notice.Question (#490).
 type QuestionWithdrawer interface {
 	WithdrawQuestion(id uint64)
 }

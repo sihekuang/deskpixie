@@ -2068,7 +2068,7 @@ func (h *AgentHandle) apply(e Effect) {
 		}
 	case EfWithdrawQuestion:
 		if w, ok := d.Voice.(QuestionWithdrawer); ok {
-			w.WithdrawQuestion(uint64(e.ID))
+			w.WithdrawQuestion(e.Seq)
 		}
 	case EfReply:
 		if d.Replies != nil {

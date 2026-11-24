@@ -445,7 +445,7 @@ const (
 	EfDelivered        // Value ([]uint64): outbox lines you heard or saw, read in the chat thread (#302)
 	EfChatEnded        // Job: a typed job ended with no line to say so (Stop): its live step goes (#302)
 	EfWithdrawHeld     // Name, Seq: that session has its messages up to Seq (0: all) now: Pixie drops any notice still waiting to say they don't (#339)
-	EfWithdrawQuestion // ID: that request was answered or is gone: Pixie drops a notice still waiting to ask it (#490)
+	EfWithdrawQuestion // Seq: that question (Notice.Question) was answered or is gone: Pixie drops its notice if still waiting (#490)
 	EfReadCoordinator  // read the coordinator's screen, waiting at a prompt (answered with InCoordinatorScreen, #459)
 )
 
@@ -617,8 +617,10 @@ type AgentController struct {
 	// typedTo: the typed job last handed to each of your sessions; that session's told turns
 	// go to the text box while it shows that job (#241).
 	typedTo map[string]JobID
-	// asksNoticed: the open requests Pixie was handed a notice of its own to ask (#490).
-	asksNoticed []RequestID
+	// asksNoticed: the open questions Pixie was handed a notice of their own to ask (#490), and
+	// the last number one got.
+	asksNoticed []askedNotice
+	askSeq      uint64
 	// heldNoticed: the sessions Pixie was handed a notice for saying their message still waits,
 	// with the highest such message's number (0: not known), until they have it (#339).
 	heldNoticed map[string]uint64
@@ -2616,32 +2618,70 @@ func (c *AgentController) remember(n Notice, lines []Line) Notice {
 	return n
 }
 
-// noticedAsk: the id of the open request line asks (0 none), kept so its notice goes unsaid once
-// it is answered or gone (#490).
-func (c *AgentController) noticedAsk(line Line) uint64 {
-	if line.Token == nil {
-		return 0
-	}
-	p, ok := c.confirms.PendingOf(*line.Token)
-	if !ok {
-		return 0
-	}
-	if !slices.Contains(c.asksNoticed, p.ID) {
-		c.asksNoticed = append(c.asksNoticed, p.ID)
-	}
-	return uint64(p.ID)
+// askedNotice is a question Pixie was handed in a notice of its own (#490).
+type askedNotice struct {
+	id      uint64 // Notice.Question
+	request RequestID
+	session string // a question its session waits on with no request: line is the outbox line asking it
+	line    uint64
+	job     JobID // a job's question
 }
 
-// withdrawDecided: a request no longer open needs no asking: the notice Pixie was handed to ask
-// it is dropped if it hasn't been said yet (#490).
-func (c *AgentController) withdrawDecided(fx *[]Effect) {
-	c.asksNoticed = slices.DeleteFunc(c.asksNoticed, func(id RequestID) bool {
-		open := slices.ContainsFunc(c.confirms.Pending(), func(p Pending) bool { return p.ID == id })
-		if !open {
-			*fx = append(*fx, Effect{Kind: EfWithdrawQuestion, ID: id})
+// noticedAsk: the id that withdraws the notice asking line (0: it asks nothing that is tracked).
+func (c *AgentController) noticedAsk(line Line) uint64 {
+	a := askedNotice{}
+	l := OutboxLine{Kind: line.Kind, Token: line.Token, Session: line.Session, Asking: line.Asking, Job: line.Job}
+	switch {
+	case line.Token != nil:
+		p, ok := c.confirms.PendingOf(*line.Token)
+		if !ok {
+			return 0
 		}
-		return !open
-	})
+		a.request = p.ID
+	case asksSession(l):
+		a.session = line.Session
+	case line.Kind == LineQuestion && line.Job != "":
+		a.job = line.Job
+	default:
+		return 0
+	}
+	c.askSeq++
+	a.id = c.askSeq
+	c.asksNoticed = append(c.asksNoticed, a)
+	return a.id
+}
+
+// withdrawDecided: a question answered or gone needs no asking: the notice Pixie was handed to
+// ask it is dropped if it hasn't been said yet (#490).
+func (c *AgentController) withdrawDecided(fx *[]Effect) {
+	kept := c.asksNoticed[:0]
+	for _, a := range c.asksNoticed {
+		if a.session != "" && a.line == 0 {
+			// Just handed over: its line went to the outbox after. With none there it isn't
+			// tracked, and is said whatever comes.
+			if a.line = c.asking[a.session]; a.line == 0 {
+				continue
+			}
+		}
+		if c.askOpen(a) {
+			kept = append(kept, a)
+			continue
+		}
+		*fx = append(*fx, Effect{Kind: EfWithdrawQuestion, Seq: a.id})
+	}
+	c.asksNoticed = kept
+}
+
+// askOpen: a's question still waits for you.
+func (c *AgentController) askOpen(a askedNotice) bool {
+	switch {
+	case a.request != 0:
+		return slices.ContainsFunc(c.confirms.Pending(), func(p Pending) bool { return p.ID == a.request })
+	case a.session != "":
+		return c.asking[a.session] == a.line
+	}
+	j, ok := c.jobs.Get(a.job)
+	return ok && j.Status == JobQuestion
 }
 
 // reroute: a notice that did not reach the user: route the lines it carried again, closed,
