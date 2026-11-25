@@ -989,6 +989,8 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 		switch in.Voice.Kind {
 		case voice.SigOpened:
 			c.openerSaw(voice.SigOpened, now, &fx)
+			// With the mic off for a question too, you can't answer one said there (#443).
+			c.reask.mute = in.Voice.MicOff && !c.settings.ListenAfterQuestion
 			c.voiceOpened(&fx)
 			// #118: a request made in this conversation never waits on a cold start.
 			c.ensureCoordinator(&fx)
@@ -999,6 +1001,8 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 				c.reroute(n, now, &fx)
 			}
 			c.reaskClosed()
+		case voice.SigListening:
+			c.reaskListening(&fx)
 		case voice.SigUserSaid:
 			c.onUserSaid(in.Voice.Text, now, &fx)
 		}

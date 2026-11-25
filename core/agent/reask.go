@@ -13,8 +13,9 @@ type reask struct {
 	// something after it there; due: that conversation closed first; again: said again once.
 	said, heard, due, again bool
 	// mute: the conversation open now was opened only to speak, with the mic off even for a
-	// question (agent.listenAfterUpdates "never"), so you can't answer there: saying it again
-	// there doesn't use up the once (#443).
+	// question (agent.listenAfterUpdates "never"), so you can't answer there (#443): it isn't
+	// said again there, and stays due until you turn its mic on or for the next one you can
+	// answer in (#495).
 	mute bool
 }
 
@@ -51,22 +52,30 @@ func (c *AgentController) reaskClosed() {
 	c.reask.said = false
 }
 
-// reaskOpened: a conversation opened; the question it is due goes in again if it still waits.
+// reaskOpened: a conversation opened; the question it is due goes in again if it still waits,
+// and you can answer it there.
 func (c *AgentController) reaskOpened(fx *[]Effect) {
-	if !c.reask.due {
+	if !c.reask.due || c.reask.mute {
 		return
 	}
 	c.reask.due = false
 	if !c.reaskWaiting() {
 		return
 	}
-	c.reask.again = !c.reask.mute
+	c.reask.again = true
 	l := c.reask.line
 	n := c.remember(Notice{Text: updatesHeader + "- " + l.Kind.Prefix() + l.Text}, nil)
 	n.Sessions = sessionsOf([]Line{l})
 	n.Question = c.noticedAsk(l)
 	c.reask.said, c.reask.heard = true, false
 	*fx = append(*fx, Effect{Kind: EfInject, Notice: n})
+}
+
+// reaskListening: you turned on the mic of the conversation opened only to speak: the question
+// it is due goes in now, so your answer gets to whoever asked (#495).
+func (c *AgentController) reaskListening(fx *[]Effect) {
+	c.reask.mute = false
+	c.reaskOpened(fx)
 }
 
 // reaskWaiting: the question to say again is still c.asked's, and still waits for you.

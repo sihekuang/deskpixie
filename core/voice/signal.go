@@ -21,13 +21,16 @@ type Notice struct {
 type SignalKind int
 
 const (
-	// SigOpened: a conversation started (the session is ready and the mic is open).
+	// SigOpened: a conversation started (the session is ready and the mic is open, or MicOff).
 	SigOpened SignalKind = iota
 	// SigClosed: the conversation ended; Undelivered are injected notices never spoken.
 	// Can arrive without a preceding SigOpened (failed connect, inject while idle).
 	SigClosed
 	// SigUserSaid: the user's transcribed words, in Text.
 	SigUserSaid
+	// SigListening: the conversation opened with MicOff turns its mic on: you pressed the hotkey,
+	// or it asked you something (#495).
+	SigListening
 )
 
 // VoiceSignal is a port of voice-core types.rs `VoiceSignal`.
@@ -35,6 +38,7 @@ type VoiceSignal struct {
 	Kind        SignalKind
 	Undelivered []Notice // SigClosed
 	Text        string   // SigUserSaid
+	MicOff      bool     // SigOpened: opened only to speak, so you can't answer in it unless SigListening follows (#433)
 }
 
 // Chime is an earcon (synthesized by ChimeSamples; played when RuntimeConfig.Chimes).

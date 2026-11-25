@@ -154,36 +154,61 @@ func TestAQuestionThatBouncedIsSaidOnceInTheNext(t *testing.T) {
 	}
 }
 
-// #443: with agent.listenAfterUpdates the mic stays off for a question, so a conversation opened
-// only to speak says it again without using up the once: the next one you can answer in still
-// says it, and your answer goes to it.
-func TestAQuestionSaidWithTheMicOffIsStillSaidAgainOnceYouCanAnswer(t *testing.T) {
+// #443, #495: with agent.listenAfterUpdates "never" the mic stays off for a question. A later
+// conversation opened only to speak doesn't say it again, however many there are; the next one
+// you can answer in does, once, and your answer goes to it.
+func TestAQuestionSaidWithTheMicOffIsSaidAgainOnlyOnceYouCanAnswer(t *testing.T) {
 	c := ctlWith(func(s *Settings) { s.OpenConversation, s.SpeakUpdatesOnly = true, true })
 	c.Step(CoordinatorUpInput(PaneIdle), T0)
 	if fx := askSession(c, storiesAsk, T0+1); opens(fx) != 1 {
 		t.Fatalf("the question opened no conversation: %+v", fx)
 	}
-	if fx := c.Step(voiceOpened(), T0+800); !asksAgain(fx) {
+	if fx := c.Step(voiceOpenedToSpeak(), T0+800); !asksAgain(fx) {
 		t.Fatalf("not said: %q", injectsOf(fx))
 	}
 	c.Step(voiceClosed(), T0+5_000) // said with the mic off: nobody could answer
 
-	// A job's done line opens another conversation only to speak: the question goes with it.
-	delegate(c, 1, "summarise the issues")
-	if fx := stop(c, doneStop, T0+70_000); opens(fx) != 1 {
-		t.Fatalf("the done line opened no conversation: %+v", fx)
+	// Later updates open conversations only to speak: the question doesn't go with them.
+	for i := Millis(1); i <= 5; i++ {
+		at := T0 + i*70_000
+		var fx []Effect
+		c.deliverOpening(NewLine(LineReply, "another update"), at, &fx)
+		if opens(fx) != 1 {
+			t.Fatalf("update %d opened no conversation: %+v", i, fx)
+		}
+		said := c.Step(voiceOpenedToSpeak(), at+800)
+		if asksAgain(said) || !strings.Contains(strings.Join(injectsOf(said), "\n"), "another update") {
+			t.Fatalf("update %d: %q", i, injectsOf(said))
+		}
+		c.Step(voiceClosed(), at+5_000)
 	}
-	if fx := c.Step(voiceOpened(), T0+70_800); !asksAgain(fx) {
-		t.Fatalf("not said with the update: %q", injectsOf(fx))
-	}
-	c.Step(voiceClosed(), T0+75_000)
 
-	// You press the hotkey: this one you can answer in, and it still says the question.
-	if fx := c.Step(voiceOpened(), T0+90_000); !asksAgain(fx) {
+	// You press the hotkey: this one you can answer in, and it says the question.
+	if fx := c.Step(voiceOpened(), T0+500_000); !asksAgain(fx) {
 		t.Fatalf("not said where you can answer: %q", injectsOf(fx))
 	}
-	if a := answers(c.Step(AnswerInput("", "create both, assign to me"), T0+91_000)); len(a) != 1 || a[0].Answer != "2" {
+	if a := answers(c.Step(AnswerInput("", "create both, assign to me"), T0+501_000)); len(a) != 1 || a[0].Answer != "2" {
 		t.Fatalf("%+v", a)
+	}
+}
+
+// Answered while only conversations opened to speak came, it isn't said in the next one (#495).
+func TestAQuestionSaidWithTheMicOffThenAnsweredIsNotSaidAgain(t *testing.T) {
+	c := ctlWith(func(s *Settings) { s.OpenConversation, s.SpeakUpdatesOnly = true, true })
+	c.Step(CoordinatorUpInput(PaneIdle), T0)
+	askSession(c, storiesAsk, T0+1)
+	c.Step(voiceOpenedToSpeak(), T0+800)
+	c.Step(voiceClosed(), T0+5_000)
+	var fx []Effect
+	c.deliverOpening(NewLine(LineReply, "another update"), T0+70_000, &fx)
+	if opens(fx) != 1 {
+		t.Fatalf("the update opened no conversation: %+v", fx)
+	}
+	c.Step(voiceOpenedToSpeak(), T0+70_800)
+	c.Step(voiceClosed(), T0+75_000)
+	c.Step(ChooseInput("hawk", 1), T0+80_000)
+	if fx := c.Step(voiceOpened(), T0+90_000); asksAgain(fx) {
+		t.Fatalf("said again: %q", injectsOf(fx))
 	}
 }
 
@@ -192,7 +217,7 @@ func TestAQuestionSaidAgainWithTheMicOnIsSaidOnlyOnce(t *testing.T) {
 	c := ctlWith(func(s *Settings) { s.OpenConversation, s.SpeakUpdatesOnly = true, true })
 	c.Step(CoordinatorUpInput(PaneIdle), T0)
 	askSession(c, storiesAsk, T0+1)
-	c.Step(voiceOpened(), T0+800)
+	c.Step(voiceOpenedToSpeak(), T0+800)
 	c.Step(voiceClosed(), T0+5_000)
 	if fx := c.Step(voiceOpened(), T0+20_000); !asksAgain(fx) { // the hotkey
 		t.Fatalf("not said again: %q", injectsOf(fx))
@@ -209,15 +234,85 @@ func TestAQuestionSaidWhereYouCouldAnswerIsSaidAgainOnlyOnce(t *testing.T) {
 	c := ctlWith(func(s *Settings) { s.OpenConversation, s.SpeakUpdatesOnly, s.ListenAfterQuestion = true, true, true })
 	c.Step(CoordinatorUpInput(PaneIdle), T0)
 	askSession(c, storiesAsk, T0+1)
-	c.Step(voiceOpened(), T0+800)
+	c.Step(voiceOpenedToSpeak(), T0+800)
 	c.Step(voiceClosed(), T0+5_000) // you didn't answer
 	delegate(c, 1, "summarise the issues")
 	stop(c, doneStop, T0+70_000)
-	if fx := c.Step(voiceOpened(), T0+70_800); !asksAgain(fx) { // opened to speak; it listens after it
+	if fx := c.Step(voiceOpenedToSpeak(), T0+70_800); !asksAgain(fx) { // opened to speak; it listens after it
 		t.Fatalf("not said again: %q", injectsOf(fx))
 	}
 	c.Step(voiceClosed(), T0+75_000)
 	if fx := c.Step(voiceOpened(), T0+90_000); asksAgain(fx) {
 		t.Fatalf("said a third time: %q", injectsOf(fx))
+	}
+}
+
+// #495: the hotkey while Pixie says another update turns the mic on: the question is said there,
+// once, and your answer goes to it.
+func TestAQuestionIsSaidAgainWhenYouTurnTheMicOnDuringAnUpdate(t *testing.T) {
+	c := ctlWith(func(s *Settings) { s.OpenConversation, s.SpeakUpdatesOnly = true, true })
+	c.Step(CoordinatorUpInput(PaneIdle), T0)
+	askSession(c, storiesAsk, T0+1)
+	c.Step(voiceOpenedToSpeak(), T0+800)
+	if fx := c.Step(voiceListening(), T0+900); asksAgain(fx) { // it is being said already
+		t.Fatalf("said twice in one conversation: %q", injectsOf(fx))
+	}
+	c.Step(voiceClosed(), T0+5_000)
+	var fx []Effect
+	c.deliverOpening(NewLine(LineReply, "another update"), T0+70_000, &fx)
+	if fx := c.Step(voiceOpenedToSpeak(), T0+70_800); asksAgain(fx) {
+		t.Fatalf("said with the mic off: %q", injectsOf(fx))
+	}
+	if fx := c.Step(voiceListening(), T0+72_000); !asksAgain(fx) {
+		t.Fatalf("not said once you could answer: %q", injectsOf(fx))
+	}
+	c.Step(voiceClosed(), T0+80_000)
+	if fx := c.Step(voiceOpened(), T0+90_000); asksAgain(fx) {
+		t.Fatalf("said a third time: %q", injectsOf(fx))
+	}
+	if a := answers(c.Step(AnswerInput("", "create both, assign to me"), T0+91_000)); len(a) != 1 || a[0].Answer != "2" {
+		t.Fatalf("%+v", a)
+	}
+}
+
+// #495: the hotkey while the conversation asked for only to speak connects: it opens with the mic
+// on, so the question is said there.
+func TestAQuestionIsSaidAgainWhenTheHotkeyBeatsTheOpenToSpeak(t *testing.T) {
+	c := ctlWith(func(s *Settings) { s.OpenConversation, s.SpeakUpdatesOnly = true, true })
+	c.Step(CoordinatorUpInput(PaneIdle), T0)
+	askSession(c, storiesAsk, T0+1)
+	c.Step(voiceOpenedToSpeak(), T0+800)
+	c.Step(voiceClosed(), T0+5_000)
+	var fx []Effect
+	c.deliverOpening(NewLine(LineReply, "another update"), T0+70_000, &fx)
+	if opens(fx) != 1 {
+		t.Fatalf("the update opened no conversation: %+v", fx)
+	}
+	if fx := c.Step(voiceOpened(), T0+70_800); !asksAgain(fx) {
+		t.Fatalf("not said where you can answer: %q", injectsOf(fx))
+	}
+}
+
+// #495 as it happened: a session's turn that ends asking, with updates after it.
+func TestASessionsQuestionSaidWithTheMicOffIsNotRepeated(t *testing.T) {
+	c := ctlWith(func(s *Settings) { s.OpenConversation, s.SpeakUpdatesOnly = true, true })
+	c.Step(CoordinatorUpInput(PaneIdle), T0)
+	asks := func(fx []Effect) bool { return strings.Contains(strings.Join(injectsOf(fx), "\n"), "update the docs") }
+	c.Step(PaneInput(PaneEvent{Kind: PaneEventTurn, Agent: sessionName, Turn: &SessionTurn{Label: "api",
+		Reply: "Should I also update the docs?", FromPixie: true}}), T0+1)
+	if fx := c.Step(voiceOpenedToSpeak(), T0+800); !asks(fx) {
+		t.Fatalf("not said: %q", injectsOf(fx))
+	}
+	c.Step(voiceClosed(), T0+5_000)
+	for i := Millis(1); i <= 3; i++ {
+		var fx []Effect
+		c.deliverOpening(NewLine(LineReply, "another update"), T0+i*70_000, &fx)
+		if fx := c.Step(voiceOpenedToSpeak(), T0+i*70_000+800); asks(fx) {
+			t.Fatalf("update %d: said again: %q", i, injectsOf(fx))
+		}
+		c.Step(voiceClosed(), T0+i*70_000+5_000)
+	}
+	if fx := c.Step(voiceOpened(), T0+400_000); !asks(fx) {
+		t.Fatalf("not said where you can answer: %q", injectsOf(fx))
 	}
 }

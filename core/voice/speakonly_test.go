@@ -14,7 +14,7 @@ func openedToSpeak(t *testing.T) *Conversation {
 	c := newConv()
 	eq(t, c.Step(OpenToSpeakInput(), t0()), ef(EfConnect), pixie(StateThinking))
 	eq(t, model(c, evReady, ms(t0(), 20)),
-		ef(EfStatus), pixie(StateIdle), signalFx(VoiceSignal{Kind: SigOpened}))
+		ef(EfStatus), pixie(StateIdle), signalFx(VoiceSignal{Kind: SigOpened, MicOff: true}))
 	return c
 }
 
@@ -115,7 +115,7 @@ func TestSpeakOnlyHotkeyAfterAQuestionListensForTheAnswer(t *testing.T) {
 	c.Step(InjectInput(notice("Coordinator question: deploy now or wait?")), ms(t0(), 30))
 	model(c, evResponseCreated, ms(t0(), 40))
 	model(c, evAudio(frame()), ms(t0(), 50))
-	eq(t, c.Step(HotkeyInput(), ms(t0(), 60)), ef(EfStartMic))
+	eq(t, c.Step(HotkeyInput(), ms(t0(), 60)), ef(EfStartMic), signalFx(VoiceSignal{Kind: SigListening}))
 	model(c, evResponseDone, ms(t0(), 70))
 	tick(c, true, ms(t0(), 80))
 	c.Step(MicLiveInput(), ms(t0(), 90))
@@ -133,7 +133,7 @@ func TestSpeakOnlyHotkeyTurnsTheMicOn(t *testing.T) {
 	model(c, evResponseCreated, ms(t0(), 40))
 	model(c, evAudio(frame()), ms(t0(), 50))
 	// Mid-sentence: the mic comes on and Pixie keeps talking, with no chime cutting it in two.
-	eq(t, c.Step(HotkeyInput(), ms(t0(), 60)), ef(EfStartMic))
+	eq(t, c.Step(HotkeyInput(), ms(t0(), 60)), ef(EfStartMic), signalFx(VoiceSignal{Kind: SigListening}))
 	phase(t, c, PhaseSpeaking)
 	model(c, evResponseDone, ms(t0(), 70))
 	if fx := tick(c, true, ms(t0(), 80)); !contains(fx, pixie(StateListening)) || hasKind(fx, EfClose) {
@@ -147,7 +147,7 @@ func TestSpeakOnlyHotkeyTurnsTheMicOn(t *testing.T) {
 
 func TestSpeakOnlyHotkeyWhileQuietListensAtOnce(t *testing.T) {
 	c := openedToSpeak(t)
-	eq(t, c.Step(HotkeyInput(), ms(t0(), 30)), chime(ChimeStart), ef(EfStartMic), pixie(StateListening))
+	eq(t, c.Step(HotkeyInput(), ms(t0(), 30)), chime(ChimeStart), ef(EfStartMic), signalFx(VoiceSignal{Kind: SigListening}), pixie(StateListening))
 	if fx := tick(c, true, ms(t0(), 20+int64(SpeakOnlyWait/time.Millisecond))); hasKind(fx, EfClose) {
 		t.Fatalf("ended as speak-only after the hotkey: %+v", fx)
 	}
@@ -158,7 +158,8 @@ func TestSpeakOnlyHotkeyWhileConnectingOpensTheMicWhenReady(t *testing.T) {
 	c.Step(OpenToSpeakInput(), t0())
 	empty(t, c.Step(HotkeyInput(), ms(t0(), 10)), "a press while connecting to speak")
 	phase(t, c, PhaseConnecting)
-	if fx := model(c, evReady, ms(t0(), 20)); !hasKind(fx, EfStartMic) || !contains(fx, chime(ChimeStart)) {
+	if fx := model(c, evReady, ms(t0(), 20)); !hasKind(fx, EfStartMic) || !contains(fx, chime(ChimeStart)) ||
+		!contains(fx, signalFx(VoiceSignal{Kind: SigOpened})) { // not MicOff: you can answer in it (#495)
 		t.Fatalf("ready after the hotkey: %+v", fx)
 	}
 }
@@ -235,7 +236,7 @@ func TestSpeakOnlyWhileHeldRestsDelegatingAndEnds(t *testing.T) {
 	c.Step(HoldOpenInput(true), t0())
 	c.Step(OpenToSpeakInput(), ms(t0(), 1))
 	eq(t, model(c, evReady, ms(t0(), 20)),
-		ef(EfStatus), pixie(StateDelegating), signalFx(VoiceSignal{Kind: SigOpened}))
+		ef(EfStatus), pixie(StateDelegating), signalFx(VoiceSignal{Kind: SigOpened, MicOff: true}))
 	c.Step(InjectInput(notice("Coordinator reply: done.")), ms(t0(), 30))
 	if fx := sayIt(t, c, ms(t0(), 40)); contains(fx, pixie(StateIdle)) || contains(fx, pixie(StateListening)) {
 		t.Fatalf("after its reply: %+v", fx)
@@ -298,14 +299,14 @@ func openedToSpeakListening(t *testing.T) *Conversation {
 	c := NewConversation(ConversationConfig{IdleTimeout: testTimeout, SpeakListens: true})
 	c.Step(OpenToSpeakInput(), t0())
 	eq(t, model(c, evReady, ms(t0(), 20)),
-		ef(EfStatus), pixie(StateIdle), signalFx(VoiceSignal{Kind: SigOpened}))
+		ef(EfStatus), pixie(StateIdle), signalFx(VoiceSignal{Kind: SigOpened, MicOff: true}))
 	return c
 }
 
 func TestSpeakListensAfterAQuestion(t *testing.T) {
 	c := openedToSpeakListening(t)
 	q := "Coordinator question: deploy now or wait?"
-	eq(t, c.Step(InjectInput(notice(q)), ms(t0(), 30)), injectFx(q), pixie(StateThinking), chime(ChimeStart), ef(EfStartMic))
+	eq(t, c.Step(InjectInput(notice(q)), ms(t0(), 30)), injectFx(q), pixie(StateThinking), chime(ChimeStart), ef(EfStartMic), signalFx(VoiceSignal{Kind: SigListening}))
 	sayIt(t, c, ms(t0(), 40))
 	c.Step(MicLiveInput(), ms(t0(), 80))
 	// A usual conversation now: it waits for the answer, then ends on silence with the chime.
