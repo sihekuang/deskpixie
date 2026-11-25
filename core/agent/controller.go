@@ -499,6 +499,7 @@ const (
 type injectedNotice struct {
 	text  string
 	lines []Line
+	reask Millis // the question it says again, by its reask.at (0: none, #496)
 }
 
 type watchdog struct {
@@ -2615,7 +2616,7 @@ func (c *AgentController) remember(n Notice, lines []Line) Notice {
 		n.Question = c.noticedAsk(lines[0])
 	}
 	c.reaskInjected(lines)
-	c.injected = append(c.injected, injectedNotice{n.Text, lines})
+	c.injected = append(c.injected, injectedNotice{text: n.Text, lines: lines})
 	if len(c.injected) > 64 {
 		c.injected = c.injected[1:]
 	}
@@ -2698,6 +2699,7 @@ func (c *AgentController) reroute(n Notice, now Millis, fx *[]Effect) {
 	for k := len(c.injected) - 1; k >= 0; k-- {
 		if c.injected[k].text == n.Text {
 			lines, known = c.injected[k].lines, true
+			c.reaskUnsaid(c.injected[k].reask)
 			c.injected = slices.Delete(c.injected, k, k+1)
 			break
 		}

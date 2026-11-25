@@ -316,3 +316,82 @@ func TestASessionsQuestionSaidWithTheMicOffIsNotRepeated(t *testing.T) {
 		t.Fatalf("not said where you can answer: %q", injectsOf(fx))
 	}
 }
+
+// #496: said again but the conversation closed before Pixie said it (a second press, the mic
+// failing): it isn't used up, whether the notice comes back with the close or after it.
+func TestAQuestionSaidAgainButLeftUnsaidIsStillDue(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		open  []Input
+		close func(Notice) []Input
+	}{
+		{"mic turned on during an update", []Input{voiceOpenedToSpeak(), voiceListening()},
+			func(n Notice) []Input { return []Input{voiceClosed(n)} }},
+		{"a usual conversation", []Input{voiceOpened()},
+			func(n Notice) []Input { return []Input{voiceClosed(n)} }},
+		{"back after the close", []Input{voiceOpened()},
+			func(n Notice) []Input { return []Input{voiceClosed(), voiceClosed(n)} }},
+		{"bounced after the close", []Input{voiceOpened()},
+			func(n Notice) []Input { return []Input{voiceClosed(), {Kind: InInjectBounced, Notice: n}} }},
+	} {
+		c := ctlWith(func(s *Settings) { s.OpenConversation, s.SpeakUpdatesOnly = true, true })
+		c.Step(CoordinatorUpInput(PaneIdle), T0)
+		askSession(c, storiesAsk, T0+1)
+		c.Step(voiceOpenedToSpeak(), T0+800)
+		c.Step(voiceClosed(), T0+5_000)
+		var unsaid Notice
+		for _, in := range tc.open {
+			for _, e := range effectsOfKind(c.Step(in, T0+70_000), EfInject) {
+				if strings.Contains(e.Notice.Text, "Create these 2 stories?") {
+					unsaid = e.Notice
+				}
+			}
+		}
+		if unsaid.Text == "" {
+			t.Fatalf("%s: not said again", tc.name)
+		}
+		for _, in := range tc.close(unsaid) {
+			c.Step(in, T0+75_000)
+		}
+		n := strings.Count(strings.Join(injectsOf(c.Step(voiceOpened(), T0+90_000)), "\n"), "Create these 2 stories?")
+		if n != 1 {
+			t.Errorf("%s: said %d times in the next", tc.name, n)
+		}
+		c.Step(voiceClosed(), T0+95_000)
+		if fx := c.Step(voiceOpened(), T0+120_000); asksAgain(fx) {
+			t.Errorf("%s: said once more after that: %q", tc.name, injectsOf(fx))
+		}
+	}
+}
+
+// #497: its first notice comes back unsaid after the conversation closed: the outbox's replay
+// says it, and it isn't also said again.
+func TestAQuestionThatBouncedAfterTheCloseIsSaidOnceInTheNext(t *testing.T) {
+	c := ctl()
+	c.Step(voiceOpened(), T0)
+	var said Notice
+	for _, e := range effectsOfKind(askSession(c, storiesAsk, T0+1), EfInject) {
+		said = e.Notice
+	}
+	c.Step(voiceClosed(), T0+2)
+	c.Step(voiceClosed(said), T0+3)
+	if n := strings.Count(strings.Join(injectsOf(c.Step(voiceOpened(), T0+20_000)), "\n"), "Create these 2 stories?"); n != 1 {
+		t.Fatalf("said %d times", n)
+	}
+}
+
+// With "questions" a conversation opened to speak listens after a question: turning its mic on
+// doesn't say the question a second time there (#495).
+func TestListeningAfterAQuestionDoesNotSayItAgain(t *testing.T) {
+	c := ctlWith(func(s *Settings) { s.OpenConversation, s.SpeakUpdatesOnly, s.ListenAfterQuestion = true, true, true })
+	c.Step(CoordinatorUpInput(PaneIdle), T0)
+	askSession(c, storiesAsk, T0+1)
+	c.Step(voiceOpenedToSpeak(), T0+800)
+	c.Step(voiceClosed(), T0+5_000)
+	if fx := c.Step(voiceOpenedToSpeak(), T0+70_800); !asksAgain(fx) {
+		t.Fatalf("not said again: %q", injectsOf(fx))
+	}
+	if fx := c.Step(voiceListening(), T0+70_900); asksAgain(fx) {
+		t.Fatalf("said twice: %q", injectsOf(fx))
+	}
+}

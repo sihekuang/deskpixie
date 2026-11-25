@@ -30,10 +30,19 @@ func (c *AgentController) reaskInjected(lines []Line) {
 	}
 }
 
-// reaskBounced: a notice carrying lines came back unsaid.
+// reaskBounced: a notice carrying lines came back unsaid: the outbox's replay says it, so it
+// isn't due, even when the conversation closed first (#497).
 func (c *AgentController) reaskBounced(lines []Line) {
 	if c.reask.in(lines) {
-		c.reask.said = false
+		c.reask.said, c.reask.due = false, false
+	}
+}
+
+// reaskUnsaid: the notice saying the question asked at at again came back unsaid. Its line is in
+// no outbox: it is due as before, not used up (#496).
+func (c *AgentController) reaskUnsaid(at Millis) {
+	if at != 0 && at == c.reask.at {
+		c.reask.said, c.reask.again, c.reask.due = false, false, true
 	}
 }
 
@@ -65,6 +74,7 @@ func (c *AgentController) reaskOpened(fx *[]Effect) {
 	c.reask.again = true
 	l := c.reask.line
 	n := c.remember(Notice{Text: updatesHeader + "- " + l.Kind.Prefix() + l.Text}, nil)
+	c.injected[len(c.injected)-1].reask = c.reask.at
 	n.Sessions = sessionsOf([]Line{l})
 	n.Question = c.noticedAsk(l)
 	c.reask.said, c.reask.heard = true, false
