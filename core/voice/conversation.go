@@ -616,7 +616,7 @@ func (c *Conversation) onModel(ev Event, now time.Time, fx []Effect) []Effect {
 			fx = append(fx,
 				Effect{Kind: EfStatus},
 				pixieFx(c.restState()),
-				Effect{Kind: EfSignal, Signal: VoiceSignal{Kind: SigOpened}})
+				Effect{Kind: EfSignal, Signal: VoiceSignal{Kind: SigOpened, MicOff: true}})
 		} else if c.phase == PhaseConnecting {
 			c.listen(now)
 			c.micAskedAt = now
@@ -869,7 +869,7 @@ func (c *Conversation) startListening(now time.Time, fx []Effect) []Effect {
 		// Mid-sentence the chime would play after what is already queued, cutting it in two.
 		fx = append(fx, Effect{Kind: EfPlayChime, Chime: ChimeStart})
 	}
-	fx = append(fx, Effect{Kind: EfStartMic})
+	fx = append(fx, Effect{Kind: EfStartMic}, Effect{Kind: EfSignal, Signal: VoiceSignal{Kind: SigListening}})
 	if c.listeningArmed() {
 		c.silenceSince = now
 		fx = append(fx, pixieFx(StateListening))

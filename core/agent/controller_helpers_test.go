@@ -269,6 +269,13 @@ func paneExited(agent string) Input {
 
 func voiceOpened() Input { return VoiceInput(VoiceSignal{Kind: voice.SigOpened}) }
 
+// voiceOpenedToSpeak: opened only to speak, the mic off (agent.listenAfterUpdates, #433).
+func voiceOpenedToSpeak() Input {
+	return VoiceInput(VoiceSignal{Kind: voice.SigOpened, MicOff: true})
+}
+
+func voiceListening() Input { return VoiceInput(VoiceSignal{Kind: voice.SigListening}) }
+
 func voiceClosed(undelivered ...Notice) Input {
 	return VoiceInput(VoiceSignal{Kind: voice.SigClosed, Undelivered: undelivered})
 }

@@ -499,6 +499,7 @@ const (
 type injectedNotice struct {
 	text  string
 	lines []Line
+	reask Millis // the question it says again, by its reask.at (0: none, #496)
 }
 
 type watchdog struct {
@@ -989,6 +990,8 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 		switch in.Voice.Kind {
 		case voice.SigOpened:
 			c.openerSaw(voice.SigOpened, now, &fx)
+			// With the mic off for a question too, you can't answer one said there (#443).
+			c.reask.mute = in.Voice.MicOff && !c.settings.ListenAfterQuestion
 			c.voiceOpened(&fx)
 			// #118: a request made in this conversation never waits on a cold start.
 			c.ensureCoordinator(&fx)
@@ -999,6 +1002,8 @@ func (c *AgentController) Step(in Input, now Millis) []Effect {
 				c.reroute(n, now, &fx)
 			}
 			c.reaskClosed()
+		case voice.SigListening:
+			c.reaskListening(&fx)
 		case voice.SigUserSaid:
 			c.onUserSaid(in.Voice.Text, now, &fx)
 		}
@@ -2611,7 +2616,7 @@ func (c *AgentController) remember(n Notice, lines []Line) Notice {
 		n.Question = c.noticedAsk(lines[0])
 	}
 	c.reaskInjected(lines)
-	c.injected = append(c.injected, injectedNotice{n.Text, lines})
+	c.injected = append(c.injected, injectedNotice{text: n.Text, lines: lines})
 	if len(c.injected) > 64 {
 		c.injected = c.injected[1:]
 	}
@@ -2694,6 +2699,7 @@ func (c *AgentController) reroute(n Notice, now Millis, fx *[]Effect) {
 	for k := len(c.injected) - 1; k >= 0; k-- {
 		if c.injected[k].text == n.Text {
 			lines, known = c.injected[k].lines, true
+			c.reaskUnsaid(c.injected[k].reask)
 			c.injected = slices.Delete(c.injected, k, k+1)
 			break
 		}

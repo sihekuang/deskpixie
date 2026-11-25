@@ -36,8 +36,6 @@ type opener struct {
 	waiting optMs
 	// retry: an update is waiting in the outbox for an open that was refused or capped.
 	retry bool
-	// speak: the open waiting was asked for only to speak (agent.listenAfterUpdates, #433).
-	speak bool
 }
 
 func newOpener(perMinute int) *opener { return &opener{perMinute: max(perMinute, 1)} }
@@ -93,8 +91,7 @@ func (c *AgentController) tryOpen(now Millis, fx *[]Effect) {
 	o.opened = append(o.opened, now)
 	o.waiting = someMs(now)
 	o.retry = false
-	o.speak = c.settings.SpeakUpdatesOnly
-	*fx = append(*fx, Effect{Kind: EfOpenConversation, Speak: o.speak})
+	*fx = append(*fx, Effect{Kind: EfOpenConversation, Speak: c.settings.SpeakUpdatesOnly})
 }
 
 // setAway (InPresence): while you're away Pixie doesn't open a conversation or chime (the
@@ -130,9 +127,6 @@ func (c *AgentController) openerSaw(kind voice.SignalKind, now Millis, fx *[]Eff
 	switch {
 	case kind == voice.SigOpened:
 		o.retry = false
-		// The open asked for only to speak, with the mic off for a question too: you can't
-		// answer a question said there (#443).
-		c.reask.mute = o.waiting.set && o.speak && !c.settings.ListenAfterQuestion
 		c.dropHeldCards()
 	case o.waiting.set:
 		o.retry = false
